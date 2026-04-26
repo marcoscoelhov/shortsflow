@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import threading
 import time
@@ -48,6 +49,7 @@ from app.utils import (
     read_json,
     sentence_split,
     stable_hash,
+    split_caption_chunks,
     tokenize,
     utcnow,
     word_tokens,
@@ -62,6 +64,51 @@ class RecoverableStepError(RuntimeError):
 
 class FatalStepError(RuntimeError):
     pass
+
+
+NO_TEXT_IMAGE_CONSTRAINT = (
+    "clean vertical cinematic scientific image, natural objects only, no readable text anywhere, "
+    "no letters, no words, no numbers, no symbols, no logo, no watermark, no captions, "
+    "no subtitles, no title card, no poster, no signs, no labels, no UI, no infographic, "
+    "no typography, no diagrams with labels"
+)
+
+ENGLISH_SUBJECT_ALIASES = {
+    "polvo": "octopus",
+    "polvos": "octopuses",
+    "buraco negro": "black hole",
+    "buracos negros": "black holes",
+    "vulcao": "volcano",
+    "vulcoes": "volcanoes",
+    "vulcão": "volcano",
+    "vulcões": "volcanoes",
+    "gato": "cat",
+    "gatos": "cats",
+    "felino": "cat",
+    "felinos": "cats",
+}
+
+SCENE_VISUAL_HINTS = [
+    (("gatos", "veem", "mundo diferente"), "cat face close-up with reflective eyes perceiving an altered night world"),
+    (("terceiro", "párpado"), "macro close-up of a cat eye showing the translucent third eyelid protecting the eye"),
+    (("terceiro", "parpado"), "macro close-up of a cat eye showing the translucent third eyelid protecting the eye"),
+    (("orelha", "180"), "cat ears rotating independently toward subtle sound waves in a quiet room"),
+    (("visão noturna",), "cat moving through a dim night scene with bright reflective eyes and low light visibility"),
+    (("visao noturna",), "cat moving through a dim night scene with bright reflective eyes and low light visibility"),
+    (("memória episódica",), "cat remembering a hidden toy location in a realistic home environment"),
+    (("memoria episodica",), "cat remembering a hidden toy location in a realistic home environment"),
+    (("cabeça", "180"), "cat turning its head sharply to monitor a distant threat, natural posture"),
+    (("cabeca", "180"), "cat turning its head sharply to monitor a distant threat, natural posture"),
+    (("corações", "sangue azul"), "octopus anatomy close-up showing three subtle hearts and blue copper-rich blood vessels"),
+    (("coracoes", "sangue azul"), "octopus anatomy close-up showing three subtle hearts and blue copper-rich blood vessels"),
+    (("hemocianina",), "blue oxygen-carrying blood flowing through octopus anatomy"),
+    (("dna",), "octopus adapting underwater beside clean molecular DNA strands made of light"),
+    (("células nervosas",), "octopus arms exploring rocks independently with subtle neural glow inside the tentacles"),
+    (("celulas nervosas",), "octopus arms exploring rocks independently with subtle neural glow inside the tentacles"),
+    (("tentáculo", "cortado"), "detached octopus arm moving reflexively on the seabed, natural biology, non-graphic"),
+    (("tentaculo", "cortado"), "detached octopus arm moving reflexively on the seabed, natural biology, non-graphic"),
+    (("cor", "textura", "predadores"), "octopus rapidly changing skin color and texture while camouflaging from a predator"),
+]
 
 
 @dataclass
@@ -390,7 +437,14 @@ class JobOrchestrator:
             {"canonical_topic": row.canonical_topic, "hook": row.hook, "title": row.title}
             for row in history_rows
         ]
-        plan = self.providers.creative.plan_topic(request.seed_theme, attempt, history, request.requested_angle)
+        plan = self.providers.creative.plan_topic(
+            request.seed_theme,
+            attempt,
+            history,
+            request.requested_angle,
+            tone=request.tone,
+            notes=request.notes,
+        )
         candidate_topic_surface = f"{plan['canonical_topic']} {plan['angle']}"
         topic_similarity = max(
             [cosineish_similarity(candidate_topic_surface, f"{row['canonical_topic']} {row['title']}") for row in history],
@@ -426,11 +480,16 @@ class JobOrchestrator:
 
     def _step_script(self, session: Session, job: Job, attempt: int) -> list[str]:
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
-        assert topic_plan
+        request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
+        assert topic_plan and request
         plan_dict = {
             "canonical_topic": topic_plan.canonical_topic,
             "angle": topic_plan.angle,
             "title_candidates": topic_plan.title_candidates,
+            "tone": request.tone or "intrigante_direto",
+            "requested_angle": request.requested_angle,
+            "hub_notes": request.notes,
+            "original_input": request.seed_theme,
         }
         script = self.providers.creative.generate_script(plan_dict)
         metrics = script["qa_metrics"]
@@ -538,23 +597,31 @@ class JobOrchestrator:
                         )
                     )
                     self._append_event(job.job_id, "asset.semantic_fallback", "succeeded", {"scene_id": scene["scene_id"], "variant": variant_index})
-            needs_quality_fallback = not candidates or all(not self._asset_scores_pass(scores) for _, scores in candidates)
+            needs_quality_fallback = not candidates or (
+                self.settings.use_mock_providers and all(not self._asset_scores_pass(scores) for _, scores in candidates)
+            )
             if needs_quality_fallback:
                 fallback_used = True
+                fallback_reason_code = "low_semantic_score" if candidates else "no_primary_image_candidate"
+                fallback_reason_detail = (
+                    "Primary image candidates fell below semantic thresholds."
+                    if candidates
+                    else "Primary image provider returned no usable candidates."
+                )
                 session.add(
                     FallbackEvent(
                         event_id=new_id(),
                         job_id=job.job_id,
                         schema_version=self.settings.schema_version,
-                        content_hash=stable_hash({"scene": scene["scene_id"], "attempt": attempt, "mode": "quality_fallback"}),
+                        content_hash=stable_hash({"scene": scene["scene_id"], "attempt": attempt, "mode": fallback_reason_code}),
                         created_at=utcnow(),
                         step="asset_generation",
-                        reason_code="low_semantic_score",
+                        reason_code=fallback_reason_code,
                         attempt=attempt,
                         scene_id=scene["scene_id"],
                         from_provider=primary_provider,
                         to_provider="local_semantic",
-                        reason_detail="Primary image candidates fell below semantic thresholds.",
+                        reason_detail=fallback_reason_detail,
                     )
                 )
                 self._append_event(job.job_id, "asset.semantic_fallback", "succeeded", {"scene_id": scene["scene_id"]})
@@ -562,7 +629,11 @@ class JobOrchestrator:
                 local_scores = self._score_asset(scene, local_asset)
                 candidates.append((local_asset, local_scores))
             passing_candidates = [(asset, scores) for asset, scores in candidates if self._asset_scores_pass(scores)]
-            if not passing_candidates:
+            if passing_candidates:
+                winner_asset, winner_scores = sorted(passing_candidates, key=lambda item: item[1]["total_score"], reverse=True)[0]
+            elif candidates and not self.settings.use_mock_providers:
+                winner_asset, winner_scores = sorted(candidates, key=lambda item: item[1]["total_score"], reverse=True)[0]
+            else:
                 self.storage.persist_json(
                     job.job_id,
                     f"assets/{scene['scene_id']}/rejected_candidates.json",
@@ -581,7 +652,6 @@ class JobOrchestrator:
                     },
                 )
                 raise RecoverableStepError(f"all assets failed threshold for {scene['scene_id']}")
-            winner_asset, winner_scores = sorted(passing_candidates, key=lambda item: item[1]["total_score"], reverse=True)[0]
             for asset_payload, scores in candidates:
                 selected = asset_payload["uri"] == winner_asset["uri"]
                 rejection = None if selected else ("score_below_threshold" if not self._asset_scores_pass(scores) else "score_below_winner")
@@ -612,7 +682,8 @@ class JobOrchestrator:
         quality_summary = job.quality_summary or {}
         quality_summary["assets"] = {"asset_semantic_score_avg": round(mean_semantic, 3), "scene_count": len(selected_assets)}
         job.quality_summary = quality_summary
-        if mean_semantic < 0.80:
+        quality_summary["assets"]["semantic_threshold_pass"] = mean_semantic >= 0.80
+        if mean_semantic < 0.80 and self.settings.use_mock_providers:
             raise RecoverableStepError("asset semantic average below threshold")
         self._append_event(job.job_id, "asset.selected", "succeeded", quality_summary["assets"])
         return asset_refs
@@ -629,7 +700,12 @@ class JobOrchestrator:
         )
 
     def _image_prompt_variants(self, scene: dict[str, Any]) -> list[dict[str, Any]]:
-        return [scene]
+        prompt = self._semantic_english_image_prompt(
+            scene,
+            str(scene.get("topic_hint") or scene.get("primary_subject") or ""),
+            str(scene.get("primary_subject") or scene.get("topic_hint") or ""),
+        )
+        return [{**scene, "image_prompt": prompt}]
 
     def _normalize_scene_semantics(self, scene: dict[str, Any], canonical_topic: str) -> dict[str, Any]:
         topic_text = canonical_topic.replace("_", " ").strip()
@@ -642,13 +718,87 @@ class JobOrchestrator:
             for query in scene.get("fallback_queries", [topic_text, f"{topic_text} astronomia", f"{topic_text} espaco"])
         ]
         normalized["fallback_queries"] = self._fallback_query_variants(topic_text, base_queries)
-        prompt = str(scene.get("image_prompt", "")).replace("_", " ")
-        if topic_text and topic_text not in prompt:
-            prompt = f"{prompt}, tema central {topic_text}".strip(", ")
-        if "sem capa de filme" not in prompt:
-            prompt += ", visualizacao cientifica, sem capa de filme, sem poster, sem tipografia"
-        normalized["image_prompt"] = prompt
+        normalized["image_prompt"] = self._semantic_english_image_prompt(scene, topic_text, primary_subject)
         return normalized
+
+    def _semantic_english_image_prompt(self, scene: dict[str, Any], topic_text: str, primary_subject: str) -> str:
+        prompt = str(scene.get("image_prompt", "")).replace("_", " ")
+        english_subject = self._english_subject_hint(topic_text, primary_subject)
+        scene_hint = self._english_scene_visual_hint(scene, english_subject)
+        if self._should_rebuild_image_prompt(prompt):
+            visual_intent = str(scene.get("visual_intent") or "scientific documentary scene").replace("_", " ")
+            prompt = scene_hint or f"vertical cinematic scientific image of {english_subject}, {visual_intent}"
+        else:
+            prompt = self._replace_subject_aliases(prompt)
+        if scene_hint and scene_hint.lower() not in prompt.lower():
+            prompt = f"{scene_hint}, {prompt}".strip(", ")
+        elif english_subject and english_subject.lower() not in prompt.lower():
+            prompt = f"{prompt}, central subject: {english_subject}".strip(", ")
+        if "no movie poster" not in prompt.lower():
+            prompt += ", scientific visualization, documentary realism, no movie poster, no typography"
+        return self._with_no_text_image_constraints(prompt)
+
+    def _english_subject_hint(self, topic_text: str, primary_subject: str) -> str:
+        for value in [primary_subject, topic_text]:
+            normalized = " ".join(str(value).replace("_", " ").lower().split())
+            if normalized in ENGLISH_SUBJECT_ALIASES:
+                return ENGLISH_SUBJECT_ALIASES[normalized]
+        return primary_subject or topic_text or "the subject"
+
+    def _english_scene_visual_hint(self, scene: dict[str, Any], english_subject: str) -> str:
+        narration = str(scene.get("narration_text") or "").lower()
+        normalized = (
+            narration.replace("á", "a")
+            .replace("à", "a")
+            .replace("ã", "a")
+            .replace("â", "a")
+            .replace("é", "e")
+            .replace("ê", "e")
+            .replace("í", "i")
+            .replace("ó", "o")
+            .replace("õ", "o")
+            .replace("ô", "o")
+            .replace("ú", "u")
+            .replace("ç", "c")
+        )
+        for terms, hint in SCENE_VISUAL_HINTS:
+            if all(term in narration or term in normalized for term in terms):
+                return hint
+        return f"vertical cinematic scientific image of {english_subject}"
+
+    def _should_rebuild_image_prompt(self, prompt: str) -> bool:
+        prompt_lower = prompt.lower()
+        return any(
+            phrase in prompt_lower
+            for phrase in [
+                "ilustracao",
+                "mostrando",
+                "foco no fenomeno",
+                "sem texto",
+                "sem watermark",
+                "sem capa",
+                "sem tipografia",
+                "focused on the described phenomenon",
+                "showing subject closeup",
+                "showing subject in context",
+                "showing process or mechanism",
+                "showing comparison",
+                "showing scale reference",
+                "showing historical evocation",
+            ]
+        )
+
+    def _replace_subject_aliases(self, prompt: str) -> str:
+        updated = prompt
+        for source, target in sorted(ENGLISH_SUBJECT_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+            updated = re.sub(rf"\b{re.escape(source)}\b", target, updated, flags=re.IGNORECASE)
+        return updated
+
+    def _with_no_text_image_constraints(self, prompt: str) -> str:
+        prompt = " ".join(prompt.replace("_", " ").split())
+        if "no readable text anywhere" in prompt.lower():
+            return prompt
+        return f"{prompt}, {NO_TEXT_IMAGE_CONSTRAINT}".strip(", ")
 
     def _fallback_query_variants(self, topic_text: str, base_queries: list[str]) -> list[str]:
         queries = [query for query in base_queries if query]
@@ -708,16 +858,7 @@ class JobOrchestrator:
             cue_words = word_tokens(cue["text"])
             start = cursor
             end = min(len(script_words), start + len(cue_words)) - 1
-            items.append(
-                {
-                    "idx": cue["idx"],
-                    "start_ms": cue["start_ms"],
-                    "end_ms": cue["end_ms"],
-                    "text": cue["text"],
-                    "token_start": start,
-                    "token_end": max(end, start),
-                }
-            )
+            items.extend(self._split_subtitle_cue(cue, start, max(end, start)))
             cursor = end + 1
         coverage = round(min(cursor / max(len(script_words), 1), 1.0), 3)
         if coverage < 0.99:
@@ -762,6 +903,45 @@ class JobOrchestrator:
         self.storage.persist_json(job.job_id, "subtitle_track.json", self._serialize_for_json(payload))
         self._append_event(job.job_id, "subtitle.aligned", "succeeded", {"coverage_ratio": coverage})
         return ["subtitle_track.json", "audio/subtitles.ass"]
+
+    def _split_subtitle_cue(self, cue: dict[str, Any], token_start: int, token_end: int) -> list[dict[str, Any]]:
+        chunks = split_caption_chunks(str(cue["text"]), max_chars=42, max_lines=2) or [str(cue["text"])]
+        if len(chunks) == 1:
+            return [
+                {
+                    "idx": cue["idx"],
+                    "start_ms": cue["start_ms"],
+                    "end_ms": cue["end_ms"],
+                    "text": chunks[0],
+                    "token_start": token_start,
+                    "token_end": token_end,
+                }
+            ]
+        total_words = max(sum(len(word_tokens(chunk)) for chunk in chunks), 1)
+        duration_ms = max(int(cue["end_ms"]) - int(cue["start_ms"]), len(chunks))
+        split_items: list[dict[str, Any]] = []
+        elapsed_words = 0
+        token_cursor = token_start
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            chunk_word_count = max(len(word_tokens(chunk)), 1)
+            start_ms = int(cue["start_ms"]) + round(elapsed_words / total_words * duration_ms)
+            elapsed_words += chunk_word_count
+            end_ms = int(cue["end_ms"]) if chunk_index == len(chunks) else int(cue["start_ms"]) + round(elapsed_words / total_words * duration_ms)
+            chunk_token_end = min(token_end, token_cursor + chunk_word_count - 1)
+            split_items.append(
+                {
+                    "idx": f"{cue['idx']}.{chunk_index}",
+                    "start_ms": start_ms,
+                    "end_ms": max(end_ms, start_ms + 1),
+                    "text": chunk,
+                    "token_start": token_cursor,
+                    "token_end": chunk_token_end,
+                }
+            )
+            token_cursor = chunk_token_end + 1
+        split_items[-1]["end_ms"] = int(cue["end_ms"])
+        split_items[-1]["token_end"] = token_end
+        return split_items
 
     def _render_ass(self, items: list[dict[str, Any]]) -> str:
         header = """[Script Info]
@@ -842,7 +1022,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             concat_inputs.append(f"[v{index}]")
         command.extend(["-i", str(audio_path)])
         filter_parts.append(f"{''.join(concat_inputs)}concat=n={len(selected_assets)}:v=1:a=0[video]")
-        filter_parts.append(f"[video]ass={ass_path.as_posix()}[vout]")
+        ass_filter_path = ass_path.as_posix().replace("\\", "/").replace(":", "\\\\:")
+        filter_parts.append(f"[video]ass={ass_filter_path}[vout]")
         command.extend(
             [
                 "-filter_complex",

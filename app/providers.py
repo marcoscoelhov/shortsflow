@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import audioop
 import base64
 import colorsys
 import json
@@ -8,16 +9,19 @@ import math
 import shutil
 import subprocess
 import tempfile
+import time
+import wave
 from pathlib import Path
 from typing import Any
 
 import anthropic
 import httpx
+import imageio_ffmpeg
 from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFilter
 
 from app.config import get_settings
-from app.utils import avg_words_per_sentence, max_words_single_sentence, sentence_split, tokenize, word_tokens, wrap_caption
+from app.utils import avg_words_per_sentence, max_words_single_sentence, parse_srt, sentence_split, tokenize, word_tokens, wrap_caption
 
 
 VISUAL_INTENTS = [
@@ -46,13 +50,21 @@ class MockCreativeProvider:
             "a comparacao inesperada que muda a perspectiva",
         ]
 
-    def plan_topic(self, seed_theme: str, attempt: int, history: list[dict[str, Any]], requested_angle: str | None) -> dict[str, Any]:
+    def plan_topic(
+        self,
+        seed_theme: str,
+        attempt: int,
+        history: list[dict[str, Any]],
+        requested_angle: str | None,
+        tone: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
         base_topic = seed_theme.strip().lower()
         angle = requested_angle or self.angle_templates[(attempt - 1) % len(self.angle_templates)]
         title_candidates = [
-            f"O que torna {base_topic} tao estranho por {angle}",
-            f"Por que {base_topic} desafia a intuicao quando entra em {angle}",
-            f"O segredo escondido em {base_topic} e {angle}",
+            f"{base_topic.capitalize()}: o detalhe que quase ninguem percebe",
+            f"Por que {base_topic} parece impossivel quando voce entende {angle}",
+            f"O segredo de {base_topic} que muda tudo em segundos",
         ]
         return {
             "canonical_topic": base_topic,
@@ -65,6 +77,8 @@ class MockCreativeProvider:
                 "attempt": attempt,
                 "history_checked": len(history),
                 "source_provider": "mock",
+                "tone": tone or "intrigante_direto",
+                "notes_applied": bool(notes),
             },
         }
 
@@ -148,9 +162,9 @@ class MockCreativeProvider:
                     "primary_subject": subject,
                     "topic_hint": subject,
                     "image_prompt": (
-                        f"ilustracao vertical cinematografica de {subject}, "
-                        f"mostrando {VISUAL_INTENTS[idx % len(VISUAL_INTENTS)]}, "
-                        "foco no fenomeno descrito, sem pessoas aleatorias, sem texto, sem watermark, sem colagem"
+                        f"vertical cinematic scientific illustration of {subject}, "
+                        f"showing {VISUAL_INTENTS[idx % len(VISUAL_INTENTS)]}, "
+                        "focused on the described phenomenon, no random people, no readable text, no watermark, no collage"
                     ),
                     "fallback_queries": [subject, f"{subject} fenomeno", f"{subject} espaco"],
                 }
@@ -169,14 +183,31 @@ class MinimaxCreativeProvider:
             base_url=settings.minimax_text_base_url,
         )
 
-    def plan_topic(self, seed_theme: str, attempt: int, history: list[dict[str, Any]], requested_angle: str | None) -> dict[str, Any]:
+    def plan_topic(
+        self,
+        seed_theme: str,
+        attempt: int,
+        history: list[dict[str, Any]],
+        requested_angle: str | None,
+        tone: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
         history_text = json.dumps(history[-8:], ensure_ascii=False)
         prompt = f"""
 Você cria pautas de Shorts de curiosidades em pt-BR.
-Tema base: {seed_theme}
+Entrada do usuario: {seed_theme}
+Tom selecionado: {tone or "intrigante_direto"}
 Ângulo solicitado: {requested_angle or "auto"}
+Notas do hub: {notes or "-"}
 Tentativa: {attempt}
 Histórico recente: {history_text}
+
+A entrada pode ser um tema bruto ou um titulo completo.
+Sempre transforme tema/titulo em uma pauta com copywriting viral e SEO otimizado para YouTube.
+Se a entrada for titulo completo: preserve a promessa central, mas melhore clareza, palavra-chave, curiosidade e retenção.
+Se a entrada for tema: crie um recorte especifico e pesquisavel, evitando assunto generico.
+title_candidates devem ser em pt-BR, com 45 a 75 caracteres quando possivel, palavra-chave principal cedo, curiosidade concreta e sem promessa falsa.
+Evite caixa alta exagerada, emojis obrigatorios e clickbait que o roteiro nao consiga cumprir.
 
 Responda JSON estrito com:
 canonical_topic, angle, hook_promise, title_candidates (3 a 5), entities, search_terms, quality_metrics.
@@ -198,6 +229,11 @@ Regras:
 - 25 a 45 segundos
 - primeira frase com no maximo 12 palavras
 - media por frase <= 14
+- title deve ser otimizado para SEO e copywriting viral, com promessa especifica e palavra-chave cedo quando natural
+- hook deve abrir com curiosidade ou tensão imediata, sem introducao generica
+- cada body_beat deve entregar um fato concreto que sustente a promessa do titulo
+- mantenha o tom selecionado na Entrada JSON, sem exagerar sensacionalismo
+- se a Entrada JSON indicar titulo completo do usuario, preserve a promessa central e refine a formulacao
 - sem instruções de camera
 - QA deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass
 """
@@ -215,6 +251,16 @@ Cada item precisa ter:
 scene_id, order, narration_text, token_start, token_end, estimated_duration_sec, visual_intent, primary_subject, image_prompt, fallback_queries
 Visual intents permitidos: {json.dumps(VISUAL_INTENTS)}
 Cobertura total dos tokens.
+
+Regras obrigatorias para image_prompt:
+- image_prompt MUST be written in English only, even when the narration is pt-BR
+- describe only a vertical cinematic visual scene with natural/scientific objects
+- every image_prompt must depict the concrete fact in that scene's narration_text, not just the generic visual_intent
+- do not copy the title, narration phrases, Portuguese words, numbers, written names, or any visible text
+- never request title cards, posters, covers, signs, labels, captions, labeled diagrams, labeled charts, UI, interfaces, or infographics
+- include in every image_prompt: no readable text anywhere, no letters, no words, no numbers, no logo, no watermark
+- Example for narration about blue blood: "octopus anatomy close-up with blue copper-rich blood vessels, cinematic underwater realism, no readable text anywhere"
+- Example for narration about color change: "octopus changing skin color and texture while camouflaging from a predator, cinematic underwater realism, no readable text anywhere"
 """
         payload = self._json_completion(prompt)
         if not isinstance(payload, list):
@@ -279,16 +325,24 @@ class ResilientCreativeProvider:
         self.primary = None if get_settings().use_mock_providers else MinimaxCreativeProvider()
         self.fallback = MockCreativeProvider()
 
-    def plan_topic(self, seed_theme: str, attempt: int, history: list[dict[str, Any]], requested_angle: str | None) -> dict[str, Any]:
+    def plan_topic(
+        self,
+        seed_theme: str,
+        attempt: int,
+        history: list[dict[str, Any]],
+        requested_angle: str | None,
+        tone: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
         if self.primary:
             try:
-                return self.primary.plan_topic(seed_theme, attempt, history, requested_angle)
+                return self.primary.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
             except ProviderFailure as exc:
-                payload = self.fallback.plan_topic(seed_theme, attempt, history, requested_angle)
+                payload = self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
                 payload["quality_metrics"]["fallback_reason"] = str(exc)
                 payload["quality_metrics"]["fallback_used"] = True
                 return payload
-        return self.fallback.plan_topic(seed_theme, attempt, history, requested_angle)
+        return self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
 
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         if self.primary:
@@ -668,18 +722,29 @@ class MinimaxImageProvider:
         self.key = settings.minimax_api_key
 
     def generate(self, scene: dict[str, Any], output_path: Path) -> dict[str, Any]:
-        response = httpx.post(
-            self.url,
-            headers={"Authorization": f"Bearer {self.key}"},
-            json={
-                "model": "image-01",
-                "prompt": scene["image_prompt"],
-                "aspect_ratio": "2:3",
-                "response_format": "base64",
-            },
-            timeout=httpx.Timeout(35.0, connect=10.0),
-        )
-        response.raise_for_status()
+        last_error: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                response = httpx.post(
+                    self.url,
+                    headers={"Authorization": f"Bearer {self.key}"},
+                    json={
+                        "model": "image-01",
+                        "prompt": scene["image_prompt"],
+                        "aspect_ratio": "2:3",
+                        "response_format": "base64",
+                    },
+                    timeout=httpx.Timeout(45.0, connect=15.0),
+                )
+                response.raise_for_status()
+                break
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+                last_error = exc
+                if attempt == 3:
+                    raise ProviderFailure("minimax_image", f"connection failed after {attempt} attempts: {exc}") from exc
+                time.sleep(1.5 * attempt)
+        else:
+            raise ProviderFailure("minimax_image", f"connection failed: {last_error}")
         payload = response.json()
         if payload.get("base_resp", {}).get("status_code", 0) not in (0, None):
             raise ProviderFailure("minimax_image", payload["base_resp"].get("status_msg", "minimax image error"))
@@ -815,19 +880,22 @@ class LocalSpeechFallbackProvider:
 
     def synthesize(self, text: str, audio_path: Path, srt_path: Path) -> dict[str, Any]:
         audio_path.parent.mkdir(parents=True, exist_ok=True)
-        self._write_speech_audio(text, audio_path)
+        mode = self._write_speech_audio(text, audio_path)
         duration_ms = self._measure_audio_ms(audio_path)
         cues = self._build_cues(text, duration_ms)
         srt_path.write_text(self._render_srt(cues), encoding="utf-8")
+        self._normalize_speech_envelope(audio_path, srt_path)
+        duration_ms = self._measure_audio_ms(audio_path)
+        provider = "espeak_ng" if mode == "espeak_ng" else "synthetic_wav"
         return {
-            "provider": "espeak_ng",
+            "provider": provider,
             "voice": self.voice,
             "audio_uri": audio_path.resolve().as_uri(),
             "raw_subtitles_uri": srt_path.resolve().as_uri(),
             "duration_ms": duration_ms,
             "sample_rate_hz": 24000,
             "channels": 1,
-            "provider_metadata": {"mode": "espeak_ng", "cue_count": len(cues), "fallback_used": True},
+            "provider_metadata": {"mode": mode, "cue_count": len(cues), "fallback_used": True},
         }
 
     def _build_cues(self, text: str, duration_ms: int) -> list[dict[str, Any]]:
@@ -854,63 +922,113 @@ class LocalSpeechFallbackProvider:
             start = end
         return cues
 
-    def _write_speech_audio(self, text: str, path: Path) -> None:
+    def _write_speech_audio(self, text: str, path: Path) -> str:
+        if not shutil.which("espeak-ng"):
+            self._write_synthetic_audio(text, path)
+            return "synthetic_wav"
         raw_path = path.with_name(path.stem + ".raw.wav")
-        subprocess.run(
-            [
-                "espeak-ng",
-                "-v",
-                "pt-br",
-                "-s",
-                "160",
-                "-p",
-                "40",
-                "-w",
-                str(raw_path),
-                text,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(raw_path),
-                "-af",
-                "highpass=f=120,lowpass=f=4300,loudnorm=I=-16:LRA=11:TP=-1.5",
-                "-ar",
-                "24000",
-                "-ac",
-                "1",
-                str(path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        raw_path.unlink(missing_ok=True)
+        try:
+            subprocess.run(
+                [
+                    "espeak-ng",
+                    "-v",
+                    "pt-br",
+                    "-s",
+                    "160",
+                    "-p",
+                    "40",
+                    "-w",
+                    str(raw_path),
+                    text,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    imageio_ffmpeg.get_ffmpeg_exe(),
+                    "-y",
+                    "-i",
+                    str(raw_path),
+                    "-af",
+                    "highpass=f=120,lowpass=f=4300,loudnorm=I=-16:LRA=11:TP=-1.5",
+                    "-ar",
+                    "24000",
+                    "-ac",
+                    "1",
+                    str(path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return "espeak_ng"
+        except Exception:
+            self._write_synthetic_audio(text, path)
+            return "synthetic_wav"
+        finally:
+            raw_path.unlink(missing_ok=True)
+
+    def _write_synthetic_audio(self, text: str, path: Path) -> None:
+        sample_rate = 24_000
+        duration_sec = max(25.0, min(45.0, len(word_tokens(text)) / 2.0))
+        frame_count = int(sample_rate * duration_sec)
+        with wave.open(str(path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            frames = bytearray()
+            for idx in range(frame_count):
+                t = idx / sample_rate
+                envelope = 0.35 + 0.65 * (0.5 + 0.5 * math.sin(2 * math.pi * 1.8 * t))
+                sample = int(2600 * envelope * math.sin(2 * math.pi * 185 * t))
+                frames.extend(sample.to_bytes(2, "little", signed=True))
+            wav_file.writeframes(frames)
 
     def _measure_audio_ms(self, path: Path) -> int:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=nokey=1:noprint_wrappers=1",
-                str(path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        seconds = float(result.stdout.strip() or "0")
-        return int(seconds * 1000)
+        with wave.open(str(path), "rb") as wav_file:
+            frames = wav_file.getnframes()
+            sample_rate = wav_file.getframerate()
+        return int(frames / sample_rate * 1000)
+
+    def _normalize_speech_envelope(self, audio_path: Path, srt_path: Path, target_rms_db: float = -20.0) -> None:
+        cues = parse_srt(srt_path.read_text(encoding="utf-8")) if srt_path.exists() else []
+        if not cues:
+            return
+        with wave.open(str(audio_path), "rb") as source:
+            params = source.getparams()
+            frame_rate = source.getframerate()
+            sample_width = source.getsampwidth()
+            channels = source.getnchannels()
+            audio = bytearray(source.readframes(source.getnframes()))
+        if sample_width != 2:
+            return
+        full_scale = float(2 ** (8 * sample_width - 1))
+        target_rms = full_scale * (10 ** (target_rms_db / 20))
+        peak_ceiling = full_scale * (10 ** (-3.0 / 20))
+        frame_size = sample_width * channels
+        for cue in cues:
+            start_frame = max(0, round(int(cue["start_ms"]) * frame_rate / 1000))
+            end_frame = max(start_frame + 1, round(int(cue["end_ms"]) * frame_rate / 1000))
+            start = start_frame * frame_size
+            end = min(len(audio), end_frame * frame_size)
+            segment = bytes(audio[start:end])
+            if not segment:
+                continue
+            rms = audioop.rms(segment, sample_width)
+            peak = audioop.max(segment, sample_width)
+            if rms <= 0 or peak <= 0:
+                continue
+            gain = target_rms / rms
+            gain = min(gain, peak_ceiling / peak)
+            gain = max(0.45, min(gain, 4.0))
+            audio[start:end] = audioop.mul(segment, sample_width, gain)
+        temp_path = audio_path.with_suffix(".leveled.wav")
+        with wave.open(str(temp_path), "wb") as target:
+            target.setparams(params)
+            target.writeframes(bytes(audio))
+        temp_path.replace(audio_path)
 
     def _render_srt(self, cues: list[dict[str, Any]]) -> str:
         blocks = []
@@ -933,7 +1051,9 @@ class EdgeTTSProvider(LocalSpeechFallbackProvider):
 
         communicate = edge_tts.Communicate(text=text, voice=self.voice, connect_timeout=20, receive_timeout=120)
         submaker = edge_tts.SubMaker()
-        temp_audio_path = Path(tempfile.mkstemp(suffix=".mp3")[1])
+        temp_audio = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        temp_audio_path = Path(temp_audio.name)
+        temp_audio.close()
         audio_path.parent.mkdir(parents=True, exist_ok=True)
         with open(temp_audio_path, "wb") as audio_file:
             async for chunk in communicate.stream():
@@ -944,6 +1064,7 @@ class EdgeTTSProvider(LocalSpeechFallbackProvider):
         self._normalize_edge_audio(temp_audio_path, audio_path)
         temp_audio_path.unlink(missing_ok=True)
         srt_path.write_text(submaker.get_srt(), encoding="utf-8")
+        self._normalize_speech_envelope(audio_path, srt_path)
         duration_ms = self._measure_audio_ms(audio_path)
         return {
             "provider": "edge_tts",
@@ -957,17 +1078,23 @@ class EdgeTTSProvider(LocalSpeechFallbackProvider):
         }
 
     def synthesize(self, text: str, audio_path: Path, srt_path: Path) -> dict[str, Any]:
-        try:
-            return asyncio.run(self._run(text, audio_path, srt_path))
-        except Exception as exc:  # noqa: BLE001
-            fallback = super().synthesize(text, audio_path, srt_path)
-            fallback["provider_metadata"]["fallback_reason"] = str(exc)
-            return fallback
+        last_error: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                return asyncio.run(self._run(text, audio_path, srt_path))
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt < 3:
+                    time.sleep(1.5 * attempt)
+                    continue
+        fallback = super().synthesize(text, audio_path, srt_path)
+        fallback["provider_metadata"]["fallback_reason"] = f"edge_tts failed after 3 attempts: {last_error}"
+        return fallback
 
     def _normalize_edge_audio(self, source_path: Path, output_path: Path) -> None:
         subprocess.run(
             [
-                "ffmpeg",
+                imageio_ffmpeg.get_ffmpeg_exe(),
                 "-y",
                 "-i",
                 str(source_path),

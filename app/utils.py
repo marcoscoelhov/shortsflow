@@ -8,6 +8,8 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 
 def utcnow() -> datetime:
@@ -102,7 +104,11 @@ def file_uri(path: Path) -> str:
 
 def path_from_uri(uri: str) -> Path:
     if uri.startswith("file://"):
-        return Path(uri[7:])
+        parsed = urlparse(uri)
+        path = url2pathname(unquote(parsed.path))
+        if parsed.netloc:
+            path = f"//{parsed.netloc}{path}"
+        return Path(path)
     return Path(uri)
 
 
@@ -159,23 +165,47 @@ def parse_srt(content: str) -> list[dict[str, Any]]:
     return items
 
 
-def wrap_caption(text: str, max_chars: int = 42) -> str:
+def _caption_lines(text: str, max_chars: int) -> list[str]:
     words = text.split()
     if not words:
-        return ""
+        return []
     lines: list[str] = []
     current = ""
     for word in words:
         candidate = f"{current} {word}".strip()
-        if len(candidate) <= max_chars and len(lines) < 2:
+        if len(candidate) <= max_chars:
             current = candidate
             continue
-        lines.append(current)
-        current = word
-        if len(lines) == 1 and len(current) > 22:
+        if current:
             lines.append(current)
-            current = ""
-            break
+        current = word
     if current:
         lines.append(current)
-    return "\n".join(lines[:2])
+    return lines
+
+
+def split_caption_chunks(text: str, max_chars: int = 42, max_lines: int = 2) -> list[str]:
+    words = text.split()
+    if not words:
+        return []
+    chunks: list[str] = []
+    current: list[str] = []
+    for word in words:
+        candidate_words = [*current, word]
+        candidate = " ".join(candidate_words)
+        if current and len(_caption_lines(candidate, max_chars)) > max_lines:
+            chunks.append(" ".join(current))
+            current = [word]
+            continue
+        current = candidate_words
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
+
+
+def wrap_caption(text: str, max_chars: int = 42, max_lines: int = 2) -> str:
+    lines = _caption_lines(text, max_chars)
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    chunks = split_caption_chunks(text, max_chars=max_chars, max_lines=max_lines)
+    return "\n".join(_caption_lines(chunks[0], max_chars)) if chunks else ""

@@ -21,6 +21,15 @@ dependencies = [
   "uvicorn==0.35.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["node_modules*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

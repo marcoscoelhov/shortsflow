@@ -1,22 +1,68 @@
 {% extends "base.html" %}
 {% block content %}
+<section class="panel hub-settings-panel">
+  <details class="settings-disclosure">
+    <summary aria-label="Configurar prompt viral">
+      <span class="settings-icon" aria-hidden="true">⚙</span>
+      <span>Prompt viral</span>
+    </summary>
+    <form method="post" action="/hub/prompt" class="prompt-form">
+      <div class="field full">
+        <label for="viral_prompt_template">Template seguro</label>
+        <textarea id="viral_prompt_template" name="viral_prompt_template" rows="13">{{ viral_prompt_template }}</textarea>
+      </div>
+      <div class="button-row prompt-actions">
+        <button type="submit" name="action" value="save">Salvar prompt</button>
+        <button type="submit" name="action" value="reset" class="ghost">Restaurar template</button>
+      </div>
+    </form>
+  </details>
+</section>
+
 <section class="panel create-panel">
   <form method="post" action="/jobs" class="job-form">
+    <input type="hidden" name="niche_id" value="{{ hub_defaults.niche_id }}">
+    <div class="field">
+      <label for="input_mode">Entrada</label>
+      <select id="input_mode" name="input_mode">
+        <option value="theme" selected>Tema</option>
+        <option value="title">Titulo completo</option>
+      </select>
+    </div>
     <div class="field wide">
-      <label for="seed_theme">Tema</label>
-      <input id="seed_theme" name="seed_theme" value="polvos" required>
+      <label for="seed_theme">Tema ou titulo</label>
+      <input id="seed_theme" name="seed_theme" value="{{ hub_defaults.seed_theme }}" placeholder="Ex: polvos ou um titulo completo">
     </div>
     <div class="field">
       <label for="target_duration_sec">Duracao</label>
-      <input id="target_duration_sec" name="target_duration_sec" type="number" min="25" max="45" value="35">
+      <input id="target_duration_sec" name="target_duration_sec" type="number" min="25" max="45" value="{{ hub_defaults.target_duration_sec }}">
     </div>
     <div class="field">
       <label for="tone">Tom</label>
-      <input id="tone" name="tone" value="intrigante_direto">
+      <select id="tone" name="tone">
+        <option value="intrigante_direto" selected>Intrigante direto</option>
+        <option value="surpresa_cientifica">Surpresa cientifica</option>
+        <option value="mito_vs_realidade">Mito vs realidade</option>
+        <option value="urgente_curioso">Urgente curioso</option>
+        <option value="narrativo_misterioso">Narrativo misterioso</option>
+        <option value="lista_viral">Lista viral</option>
+      </select>
     </div>
     <div class="field">
       <label for="requested_angle">Angulo</label>
-      <input id="requested_angle" name="requested_angle" placeholder="opcional">
+      <select id="requested_angle" name="requested_angle">
+        <option value="auto" selected>Auto viral/SEO</option>
+        <option value="habilidade biologica impossivel">Habilidade biologica impossivel</option>
+        <option value="mecanismo oculto">Mecanismo oculto</option>
+        <option value="comparacao inesperada">Comparacao inesperada</option>
+        <option value="mito vs realidade">Mito vs realidade</option>
+        <option value="erro comum">Erro comum</option>
+        <option value="ranking/lista">Ranking/lista</option>
+      </select>
+    </div>
+    <div class="field wide">
+      <label for="custom_angle">Angulo customizado</label>
+      <input id="custom_angle" name="custom_angle" placeholder="opcional; substitui o seletor">
     </div>
     <button type="submit">Criar job</button>
   </form>
