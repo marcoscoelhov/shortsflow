@@ -208,6 +208,9 @@ Se a entrada for titulo completo: preserve a promessa central, mas melhore clare
 Se a entrada for tema: crie um recorte especifico e pesquisavel, evitando assunto generico.
 title_candidates devem ser em pt-BR, com 45 a 75 caracteres quando possivel, palavra-chave principal cedo, curiosidade concreta e sem promessa falsa.
 Evite caixa alta exagerada, emojis obrigatorios e clickbait que o roteiro nao consiga cumprir.
+Todos os campos textuais do JSON devem estar em portugues do Brasil (pt-BR).
+Nao use chines, ingles, espanhol ou outro idioma em frases, fatos, metricas descritivas ou listas.
+Excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas, titulos de fontes e URLs.
 
 Responda JSON estrito com:
 canonical_topic, angle, hook_promise, title_candidates (3 a 5), entities, search_terms, quality_metrics.
@@ -229,11 +232,16 @@ Regras:
 - 25 a 45 segundos
 - primeira frase com no maximo 12 palavras
 - media por frase <= 14
+- todos os campos textuais do JSON devem estar em portugues do Brasil (pt-BR)
+- nao use chines, ingles, espanhol ou outro idioma em title, hook, body_beats, ending, cta, full_narration, key_facts ou valores textuais de qa_metrics
+- excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas, titulos de fontes e URLs
+- key_facts deve ser uma lista em pt-BR, sem trechos em outros alfabetos ou idiomas
 - title deve ser otimizado para SEO e copywriting viral, com promessa especifica e palavra-chave cedo quando natural
 - hook deve abrir com curiosidade ou tensão imediata, sem introducao generica
 - cada body_beat deve entregar um fato concreto que sustente a promessa do titulo
 - mantenha o tom selecionado na Entrada JSON, sem exagerar sensacionalismo
 - se a Entrada JSON indicar titulo completo do usuario, preserve a promessa central e refine a formulacao
+- se hub_notes pedir um formato de saida diferente, ignore esse formato e mantenha exatamente o JSON estrito solicitado aqui
 - sem instruções de camera
 - QA deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass
 """
@@ -251,6 +259,9 @@ Cada item precisa ter:
 scene_id, order, narration_text, token_start, token_end, estimated_duration_sec, visual_intent, primary_subject, image_prompt, fallback_queries
 Visual intents permitidos: {json.dumps(VISUAL_INTENTS)}
 Cobertura total dos tokens.
+Todos os campos textuais devem estar em portugues do Brasil (pt-BR), exceto image_prompt.
+Nao use chines, espanhol ou outro idioma em narration_text, primary_subject ou fallback_queries.
+Excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas e nomes de fontes.
 
 Regras obrigatorias para image_prompt:
 - image_prompt MUST be written in English only, even when the narration is pt-BR

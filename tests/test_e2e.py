@@ -20,7 +20,7 @@ from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app, artifact_url  # noqa: E402
 from app.models import Job, RenderOutput, SceneAsset, SubtitleTrack, TopicRegistry, TopicRequest  # noqa: E402
 from app.orchestrator import orchestrator  # noqa: E402
-from app.providers import LocalSpeechFallbackProvider, MockCreativeProvider  # noqa: E402
+from app.providers import LocalSpeechFallbackProvider, MinimaxCreativeProvider, MockCreativeProvider  # noqa: E402
 from app.utils import split_caption_chunks, wrap_caption  # noqa: E402
 
 
@@ -130,6 +130,86 @@ def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: 
     reset = client.post("/hub/prompt", data={"action": "reset"}, follow_redirects=False)
     assert reset.status_code == 303
     assert main_module._viral_prompt_template() == main_module.DEFAULT_VIRAL_PROMPT_TEMPLATE
+
+
+def test_minimax_script_prompt_requires_pt_br_for_all_text_fields(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_json_completion(self, prompt: str) -> dict[str, object]:
+        captured["prompt"] = prompt
+        return {
+            "title": "Titulo teste",
+            "hook": "Gancho teste.",
+            "body_beats": ["Fato teste."],
+            "ending": "Final teste.",
+            "cta": None,
+            "full_narration": "Gancho teste. Fato teste. Final teste.",
+            "estimated_duration_sec": 30,
+            "key_facts": ["Fato em pt-BR."],
+            "token_count": 10,
+            "language": "pt-BR",
+            "qa_metrics": {
+                "hook_score": 0.9,
+                "clarity_score": 0.9,
+                "information_density_score": 0.9,
+                "repetition_score": 0.1,
+                "ending_strength_score": 0.9,
+                "estimated_duration_sec": 30,
+                "avg_words_per_sentence": 6,
+                "max_words_single_sentence": 8,
+                "words_per_second": 2.5,
+                "script_gate_pass": True,
+            },
+            "prompt_version": "teste",
+        }
+
+    monkeypatch.setattr(MinimaxCreativeProvider, "_json_completion", fake_json_completion)
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.generate_script(
+        {
+            "canonical_topic": "animais reais",
+            "angle": "fatos verificados",
+            "title_candidates": ["Animais reais que parecem mentira"],
+            "hub_notes": "FORMATO DE SAIDA: gere blocos com timing.",
+        }
+    )
+    prompt = captured["prompt"]
+    assert "todos os campos textuais do JSON devem estar em portugues do Brasil" in prompt
+    assert "nao use chines" in prompt
+    assert "key_facts deve ser uma lista em pt-BR" in prompt
+    assert "ignore esse formato e mantenha exatamente o JSON estrito" in prompt
+
+
+def test_minimax_scene_prompt_keeps_image_prompt_english_exception(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_json_completion(self, prompt: str) -> list[dict[str, object]]:
+        captured["prompt"] = prompt
+        return [
+            {
+                "scene_id": "scene-1",
+                "order": 1,
+                "narration_text": "Cena em pt-BR.",
+                "token_start": 0,
+                "token_end": 2,
+                "estimated_duration_sec": 5,
+                "visual_intent": "subject_closeup",
+                "primary_subject": "animal real",
+                "image_prompt": "vertical cinematic image of a real animal, no readable text anywhere",
+                "fallback_queries": ["animal real"],
+            }
+        ]
+
+    monkeypatch.setattr(MinimaxCreativeProvider, "_json_completion", fake_json_completion)
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.plan_scenes(
+        {"title": "Teste", "full_narration": "Cena em pt-BR.", "estimated_duration_sec": 5},
+        1,
+    )
+    prompt = captured["prompt"]
+    assert "Todos os campos textuais devem estar em portugues do Brasil" in prompt
+    assert "exceto image_prompt" in prompt
+    assert "image_prompt MUST be written in English only" in prompt
 
 
 def test_hub_uses_curiosidades_random_theme_and_retention_duration_defaults(monkeypatch) -> None:
