@@ -742,11 +742,9 @@ class JobOrchestrator:
                         )
                     )
                     self._append_event(job.job_id, "asset.semantic_fallback", "succeeded", {"scene_id": scene["scene_id"], "variant": variant_index})
-            needs_quality_fallback = not candidates or (
-                self.settings.use_mock_providers and all(not self._asset_scores_pass(scores) for _, scores in candidates)
-            )
+            needs_quality_fallback = not candidates or all(not self._asset_scores_pass(scores) for _, scores in candidates)
             if not candidates and not self.settings.use_mock_providers:
-                raise RecoverableStepError(f"primary image provider returned no candidate for {scene['scene_id']}")
+                fallback_used = True
             if needs_quality_fallback:
                 fallback_used = True
                 fallback_reason_code = "low_semantic_score" if candidates else "no_primary_image_candidate"

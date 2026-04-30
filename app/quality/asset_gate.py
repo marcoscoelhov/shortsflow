@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.config import get_settings
+
 
 @dataclass(frozen=True)
 class AssetGateResult:
@@ -13,14 +15,17 @@ class AssetGateResult:
 
 class AssetGate:
     def validate_selected(self, selected_assets: list[dict[str, Any]]) -> AssetGateResult:
+        settings = get_settings()
+        semantic_threshold = settings.asset_semantic_threshold
+        total_threshold = settings.asset_total_threshold
         reasons: list[str] = []
         scene_results = []
         for asset in selected_assets:
             scene_id = str(asset.get("scene_id") or "unknown")
             scene_reasons = []
-            if float(asset.get("semantic_match", 0.0)) < 0.80:
+            if float(asset.get("semantic_match", 0.0)) < semantic_threshold:
                 scene_reasons.append("semantic_match_below_threshold")
-            if float(asset.get("total_score", 0.0)) < 0.75:
+            if float(asset.get("total_score", 0.0)) < total_threshold:
                 scene_reasons.append("total_score_below_threshold")
             if float(asset.get("text_or_watermark_penalty", 0.0)) > 0.15:
                 scene_reasons.append("text_or_watermark_penalty_high")
