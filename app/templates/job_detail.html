@@ -181,6 +181,15 @@
         </select>
         <button type="submit" name="action" value="retry_from_step" class="ghost">Criar novo retry job</button>
       </form>
+      {% if job.status == "approved_for_publish" %}
+      <form method="post" action="/jobs/{{ job.job_id }}/publish" class="review-form">
+        <label for="youtube_video_id">YouTube video id</label>
+        <input id="youtube_video_id" name="youtube_video_id" placeholder="opcional no modo manual">
+        <label for="youtube_url">YouTube URL</label>
+        <input id="youtube_url" name="youtube_url" placeholder="https://youtube.com/shorts/...">
+        <button type="submit">Marcar como publicado</button>
+      </form>
+      {% endif %}
       <h3>Artefatos</h3>
       <pre>{{ job.artifact_index or {} }}</pre>
     </section>

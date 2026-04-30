@@ -14,7 +14,7 @@ from sqlalchemy import case, func, or_, select
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.models import FallbackEvent, Job, RenderOutput, SceneAsset, TopicRequest
-from app.orchestrator import orchestrator
+from app.orchestrator import FatalStepError, orchestrator
 from app.schemas import ReviewActionPayload, TopicRequestCreate
 from app.utils import path_from_uri
 
@@ -340,6 +340,21 @@ def review_job(
     new_job_id = orchestrator.review_job(payload.model_dump(), job_id)
     redirect_to = f"/jobs/{new_job_id}" if new_job_id else f"/jobs/{job_id}"
     return RedirectResponse(url=redirect_to, status_code=303)
+
+
+@app.post("/jobs/{job_id}/publish")
+def publish_job(
+    job_id: str,
+    youtube_video_id: str | None = Form(default=None),
+    youtube_url: str | None = Form(default=None),
+):
+    try:
+        orchestrator.publish_job(job_id, youtube_video_id=youtube_video_id, youtube_url=youtube_url)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except FatalStepError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
 
 @app.get("/healthz")

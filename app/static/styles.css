@@ -202,9 +202,20 @@ button.ghost {
 }
 
 .badge.failed,
+.badge.script_quality_failed,
+.badge.scene_plan_quality_failed,
+.badge.asset_quality_failed,
+.badge.subtitle_quality_failed,
+.badge.render_quality_failed,
 .badge.rejected {
   background: rgba(162, 58, 45, 0.15);
   color: var(--danger);
+}
+
+.badge.approved_for_publish,
+.badge.published {
+  background: rgba(47, 125, 75, 0.15);
+  color: var(--success);
 }
 
 .badge.fallback {

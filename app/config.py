@@ -25,6 +25,17 @@ class Settings(BaseSettings):
     scene_target_count: int = 6
 
     use_mock_providers: bool = False
+    llm_primary_provider: str = "minimax"
+    llm_fallback_provider: str = "mock"
+    llm_enable_fallback: bool = True
+    llm_script_repair_attempts: int = 1
+    scene_prompt_gate_enabled: bool = True
+    asset_semantic_threshold: float = 0.80
+    asset_total_threshold: float = 0.75
+    render_min_bitrate: int = 250_000
+    youtube_publish_mode: str = "manual"
+    youtube_api_enabled: bool = False
+    youtube_channel_id: str | None = None
     minimax_api_key: str | None = None
     minimax_text_api_key: str | None = None
     minimax_image_api_key: str | None = None

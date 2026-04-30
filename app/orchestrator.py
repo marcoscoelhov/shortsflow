@@ -34,6 +34,11 @@ from app.models import (
     TopicRequest,
 )
 from app.providers import ProviderRegistry
+from app.quality.asset_gate import AssetGate
+from app.quality.render_gate import RenderGate
+from app.quality.scene_gate import ScenePlanGate
+from app.quality.script_gate import ScriptQualityGate
+from app.quality.subtitle_gate import SubtitleGate
 from app.storage import StorageManager
 from app.utils import (
     avg_words_per_sentence,
@@ -162,6 +167,11 @@ class JobOrchestrator:
         self.settings = get_settings()
         self.storage = StorageManager()
         self.providers = ProviderRegistry()
+        self.script_gate = ScriptQualityGate()
+        self.scene_gate = ScenePlanGate()
+        self.asset_gate = AssetGate()
+        self.subtitle_gate = SubtitleGate()
+        self.render_gate = RenderGate(min_bitrate=self.settings.render_min_bitrate)
         self.worker_id = f"worker-{new_id()[:8]}"
         self.stop_event = threading.Event()
         self.worker_thread: threading.Thread | None = None
@@ -221,7 +231,18 @@ class JobOrchestrator:
             job = session.get(Job, job_id)
             if not job:
                 raise KeyError(job_id)
-            if job.status in {"approved", "failed", "cancelled"}:
+            if job.status in {
+                "approved",
+                "approved_for_publish",
+                "published",
+                "failed",
+                "script_quality_failed",
+                "scene_plan_quality_failed",
+                "asset_quality_failed",
+                "subtitle_quality_failed",
+                "render_quality_failed",
+                "cancelled",
+            }:
                 return job.status
             job.status = "running"
             job.lease_owner = self.worker_id
@@ -291,7 +312,7 @@ class JobOrchestrator:
             )
             session.add(review)
             if payload["action"] == "approve":
-                job.status = "approved"
+                job.status = "approved_for_publish"
                 job.review_state = "approved"
                 self._upsert_topic_registry(session, job_id, approved=True)
                 self._append_event(job_id, "review.approved", "succeeded", payload)
@@ -317,6 +338,29 @@ class JobOrchestrator:
         new_job_id = self.create_job(clone_payload, retry_of_job_id=job_id)
         self._append_event(job_id, "review.retry_requested", "succeeded", {"new_job_id": new_job_id})
         return new_job_id
+
+    def publish_job(self, job_id: str, youtube_video_id: str | None = None, youtube_url: str | None = None) -> None:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            if job.status not in {"approved_for_publish", "published"}:
+                raise FatalStepError("job must be approved_for_publish before publishing")
+            package = self._build_publish_package(session, job)
+            package["youtube"] = {
+                "mode": self.settings.youtube_publish_mode,
+                "api_enabled": self.settings.youtube_api_enabled,
+                "video_id": youtube_video_id,
+                "url": youtube_url,
+                "published_at": iso_now(),
+            }
+            self.storage.persist_json(job.job_id, "publish_result.json", self._serialize_for_json(package))
+            job.status = "published"
+            job.review_state = "published"
+            quality_summary = dict(job.quality_summary or {})
+            quality_summary["youtube"] = package["youtube"]
+            job.quality_summary = quality_summary
+        self._append_event(job_id, "youtube.published", "succeeded", {"video_id": youtube_video_id, "url": youtube_url})
 
     def _steps(self) -> list[StepDefinition]:
         return [
@@ -424,11 +468,22 @@ class JobOrchestrator:
         with session_scope() as session:
             job = session.get(Job, job_id)
             assert job
-            job.status = "failed"
+            job.status = self._failure_status_for_step(step_name, message)
             job.failure_reason = f"{step_name}: {message}"
             job.lease_owner = None
             job.lease_expires_at = None
         self._append_event(job_id, "job.failed", "failed", {"step": step_name, "message": message})
+
+    def _failure_status_for_step(self, step_name: str, message: str) -> str:
+        if "quality gate" in message or "gate failed" in message:
+            return {
+                "script": "script_quality_failed",
+                "scene_plan": "scene_plan_quality_failed",
+                "asset_generation": "asset_quality_failed",
+                "subtitle_alignment": "subtitle_quality_failed",
+                "render": "render_quality_failed",
+            }.get(step_name, "failed")
+        return "failed"
 
     def _build_step_input(self, session: Session, job: Job, step_name: str) -> dict[str, Any]:
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
@@ -531,19 +586,7 @@ class JobOrchestrator:
             "original_input": request.seed_theme,
         }
         script = self.providers.creative.generate_script(plan_dict)
-        metrics = normalize_script_metrics(script["qa_metrics"])
-        script["qa_metrics"] = metrics
-        gate = (
-            metrics["hook_score"] >= 0.80
-            and metrics["avg_words_per_sentence"] <= 14
-            and metrics["max_words_single_sentence"] <= 20
-            and 25 <= script["estimated_duration_sec"] <= 45
-            and metrics["information_density_score"] >= 0.75
-            and metrics["ending_strength_score"] >= 0.75
-            and metrics["repetition_score"] < 0.88
-        )
-        if not gate:
-            raise RecoverableStepError("script gate failed")
+        script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec)
         created_at = utcnow()
         payload = {
             "schema_version": self.settings.schema_version,
@@ -556,11 +599,56 @@ class JobOrchestrator:
         session.execute(delete(Script).where(Script.job_id == job.job_id))
         session.add(Script(**model_payload(Script, payload)))
         self.storage.persist_json(job.job_id, "script.json", self._serialize_for_json(payload))
-        quality_summary = job.quality_summary or {}
+        quality_summary = dict(job.quality_summary or {})
         quality_summary["script"] = metrics
         job.quality_summary = quality_summary
         self._append_event(job.job_id, "script.generated", "succeeded", metrics)
         return ["script.json"]
+
+    def _validate_or_repair_script(
+        self,
+        script: dict[str, Any],
+        plan_dict: dict[str, Any],
+        target_duration_sec: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        script = dict(script)
+        script["qa_metrics"] = normalize_script_metrics(dict(script.get("qa_metrics") or {}))
+        gate_result = self.script_gate.validate(script, target_duration_sec)
+        if gate_result.passed:
+            script["qa_metrics"] = gate_result.metrics
+            return script, gate_result.metrics
+
+        repair_attempts = max(0, self.settings.llm_script_repair_attempts)
+        last_reasons = gate_result.reasons
+        for _ in range(repair_attempts):
+            repaired = self.providers.creative.repair_script(script, last_reasons, plan_dict)
+            repaired["qa_metrics"] = normalize_script_metrics(dict(repaired.get("qa_metrics") or {}))
+            repaired_gate = self.script_gate.validate(repaired, target_duration_sec)
+            if repaired_gate.passed:
+                repaired["qa_metrics"] = {
+                    **repaired_gate.metrics,
+                    "script_repair_used": True,
+                    "script_repair_initial_reasons": gate_result.reasons,
+                }
+                return repaired, repaired["qa_metrics"]
+            script = repaired
+            last_reasons = repaired_gate.reasons
+
+        fallback_repaired = self.providers.creative.repair_script_with_fallback(script, last_reasons, plan_dict)
+        if fallback_repaired is not None:
+            fallback_repaired["qa_metrics"] = normalize_script_metrics(dict(fallback_repaired.get("qa_metrics") or {}))
+            fallback_gate = self.script_gate.validate(fallback_repaired, target_duration_sec)
+            if fallback_gate.passed:
+                fallback_repaired["qa_metrics"] = {
+                    **fallback_gate.metrics,
+                    "script_repair_used": True,
+                    "script_repair_fallback_used": True,
+                    "script_repair_initial_reasons": gate_result.reasons,
+                }
+                return fallback_repaired, fallback_repaired["qa_metrics"]
+            last_reasons = fallback_gate.reasons
+
+        raise RecoverableStepError(f"script quality gate failed: {', '.join(last_reasons)}")
 
     def _step_scene_plan(self, session: Session, job: Job, attempt: int) -> list[str]:
         script = session.scalar(select(Script).where(Script.job_id == job.job_id))
@@ -582,6 +670,20 @@ class JobOrchestrator:
             if not scenes or scenes[0]["token_start"] != 0 or scenes[-1]["token_end"] != len(tokens) - 1:
                 raise RecoverableStepError("scene coverage invalid")
         scenes = [self._normalize_scene_semantics(scene, topic_plan.canonical_topic) for scene in scenes]
+        scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count)
+        if not scene_gate.passed:
+            fallback_planner = getattr(self.providers.creative, "fallback", None)
+            if fallback_planner is not None:
+                scenes = fallback_planner.plan_scenes(script_dict, self.settings.scene_target_count)
+                scenes = [self._normalize_scene_semantics(scene, topic_plan.canonical_topic) for scene in scenes]
+                scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count)
+            if not scene_gate.passed:
+                self.storage.persist_json(
+                    job.job_id,
+                    "scene_plan_rejected.json",
+                    {"reasons": scene_gate.reasons, "metrics": scene_gate.metrics, "scenes": scenes},
+                )
+                raise RecoverableStepError(f"scene plan quality gate failed: {', '.join(scene_gate.reasons[:6])}")
         created_at = utcnow()
         payload = {
             "schema_version": self.settings.schema_version,
@@ -595,7 +697,10 @@ class JobOrchestrator:
         session.execute(delete(ScenePlan).where(ScenePlan.job_id == job.job_id))
         session.add(ScenePlan(**model_payload(ScenePlan, payload)))
         self.storage.persist_json(job.job_id, "scene_plan.json", self._serialize_for_json(payload))
-        self._append_event(job.job_id, "scene_plan.generated", "succeeded", {"scene_count": len(scenes)})
+        quality_summary = dict(job.quality_summary or {})
+        quality_summary["scene_plan"] = {**scene_gate.metrics, "scene_plan_gate_pass": True}
+        job.quality_summary = quality_summary
+        self._append_event(job.job_id, "scene_plan.generated", "succeeded", quality_summary["scene_plan"])
         return ["scene_plan.json"]
 
     def _step_assets(self, session: Session, job: Job, attempt: int) -> list[str]:
@@ -673,8 +778,6 @@ class JobOrchestrator:
             passing_candidates = [(asset, scores) for asset, scores in candidates if self._asset_scores_pass(scores)]
             if passing_candidates:
                 winner_asset, winner_scores = sorted(passing_candidates, key=lambda item: item[1]["total_score"], reverse=True)[0]
-            elif candidates and not self.settings.use_mock_providers:
-                winner_asset, winner_scores = sorted(candidates, key=lambda item: item[1]["total_score"], reverse=True)[0]
             else:
                 self.storage.persist_json(
                     job.job_id,
@@ -693,7 +796,7 @@ class JobOrchestrator:
                         ],
                     },
                 )
-                raise RecoverableStepError(f"all assets failed threshold for {scene['scene_id']}")
+                raise RecoverableStepError(f"asset quality gate failed for {scene['scene_id']}")
             for asset_payload, scores in candidates:
                 selected = asset_payload["uri"] == winner_asset["uri"]
                 rejection = None if selected else ("score_below_threshold" if not self._asset_scores_pass(scores) else "score_below_winner")
@@ -720,13 +823,13 @@ class JobOrchestrator:
                 session.add(asset_row)
             selected_assets.append({"scene_id": scene["scene_id"], "provider": winner_asset["provider"], **winner_scores})
             asset_refs.extend([path_from_uri(asset["uri"]).name for asset, _ in candidates])
-        mean_semantic = sum(item["semantic_match"] for item in selected_assets) / max(len(selected_assets), 1)
-        quality_summary = job.quality_summary or {}
-        quality_summary["assets"] = {"asset_semantic_score_avg": round(mean_semantic, 3), "scene_count": len(selected_assets)}
+        asset_gate = self.asset_gate.validate_selected(selected_assets)
+        if not asset_gate.passed:
+            self.storage.persist_json(job.job_id, "asset_quality_report.json", {"reasons": asset_gate.reasons, "metrics": asset_gate.metrics})
+            raise RecoverableStepError(f"asset quality gate failed: {', '.join(asset_gate.reasons[:6])}")
+        quality_summary = dict(job.quality_summary or {})
+        quality_summary["assets"] = {**asset_gate.metrics, "semantic_threshold_pass": True}
         job.quality_summary = quality_summary
-        quality_summary["assets"]["semantic_threshold_pass"] = mean_semantic >= 0.80
-        if mean_semantic < 0.80 and self.settings.use_mock_providers:
-            raise RecoverableStepError("asset semantic average below threshold")
         self._append_event(job.job_id, "asset.selected", "succeeded", quality_summary["assets"])
         return asset_refs
 
@@ -735,8 +838,8 @@ class JobOrchestrator:
 
     def _asset_scores_pass(self, scores: dict[str, Any]) -> bool:
         return (
-            scores["semantic_match"] >= 0.80
-            and scores["total_score"] >= 0.75
+            scores["semantic_match"] >= self.settings.asset_semantic_threshold
+            and scores["total_score"] >= self.settings.asset_total_threshold
             and scores.get("text_or_watermark_penalty", 0.0) <= 0.15
             and scores.get("artifact_penalty", 0.0) <= 0.30
         )
@@ -928,7 +1031,7 @@ class JobOrchestrator:
         session.execute(delete(NarrationAsset).where(NarrationAsset.job_id == job.job_id))
         session.add(NarrationAsset(**model_payload(NarrationAsset, payload)))
         self.storage.persist_json(job.job_id, "narration_asset.json", self._serialize_for_json(payload))
-        quality_summary = job.quality_summary or {}
+        quality_summary = dict(job.quality_summary or {})
         quality_summary["tts"] = {
             "duration_ms": result["duration_ms"],
             "provider": result["provider"],
@@ -1025,6 +1128,10 @@ class JobOrchestrator:
         coverage = round(min(cursor / max(len(script_words), 1), 1.0), 3)
         if coverage < 0.99:
             raise RecoverableStepError("subtitle coverage below threshold")
+        subtitle_gate = self.subtitle_gate.validate(items, coverage)
+        if not subtitle_gate.passed:
+            self.storage.persist_json(job.job_id, "subtitle_quality_report.json", {"reasons": subtitle_gate.reasons, "metrics": subtitle_gate.metrics})
+            raise RecoverableStepError(f"subtitle quality gate failed: {', '.join(subtitle_gate.reasons[:6])}")
         scene_updates = self._normalize_scene_timings(scene_plan.scenes, narration.duration_ms)
         scene_plan.scenes = scene_updates
         scene_plan.content_hash = stable_hash(scene_updates)
@@ -1063,7 +1170,10 @@ class JobOrchestrator:
         session.execute(delete(SubtitleTrack).where(SubtitleTrack.job_id == job.job_id))
         session.add(SubtitleTrack(**model_payload(SubtitleTrack, payload)))
         self.storage.persist_json(job.job_id, "subtitle_track.json", self._serialize_for_json(payload))
-        self._append_event(job.job_id, "subtitle.aligned", "succeeded", {"coverage_ratio": coverage})
+        quality_summary = dict(job.quality_summary or {})
+        quality_summary["subtitles"] = {**subtitle_gate.metrics, "subtitle_gate_pass": True}
+        job.quality_summary = quality_summary
+        self._append_event(job.job_id, "subtitle.aligned", "succeeded", quality_summary["subtitles"])
         return ["subtitle_track.json", "audio/subtitles.ass"]
 
     def _split_subtitle_cue(self, cue: dict[str, Any], token_start: int, token_end: int) -> list[dict[str, Any]]:
@@ -1200,10 +1310,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 "libx264",
                 "-preset",
                 "veryfast",
+                "-crf",
+                "23",
+                "-b:v",
+                "2500k",
+                "-minrate",
+                "800k",
+                "-maxrate",
+                "4500k",
+                "-bufsize",
+                "9000k",
+                "-x264-params",
+                "nal-hrd=cbr:force-cfr=1",
                 "-pix_fmt",
                 "yuv420p",
                 "-af",
                 "loudnorm=I=-16:LRA=11:TP=-1.5",
+                "-ar",
+                "48000",
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -1216,8 +1340,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ffmpeg_log.write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
         if result.returncode != 0:
             raise RecoverableStepError("ffmpeg render failed")
+        render_gate = self.render_gate.validate(final_video, narration.duration_ms)
+        if not render_gate.passed:
+            self.storage.persist_json(job.job_id, "render_quality_report.json", {"reasons": render_gate.reasons, "metrics": render_gate.metrics})
+            raise RecoverableStepError(f"render quality gate failed: {', '.join(render_gate.reasons[:6])}")
         Image.open(path_from_uri(selected_assets[0].uri)).resize((540, 960)).save(poster, format="JPEG")
-        duration_ms = narration.duration_ms
+        duration_ms = int(render_gate.metrics.get("duration_ms") or narration.duration_ms)
         created_at = utcnow()
         payload = {
             "schema_version": self.settings.schema_version,
@@ -1238,8 +1366,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         session.execute(delete(RenderOutput).where(RenderOutput.job_id == job.job_id))
         session.add(RenderOutput(**model_payload(RenderOutput, payload)))
         self.storage.persist_json(job.job_id, "render_output.json", self._serialize_for_json(payload))
-        quality_summary = job.quality_summary or {}
+        quality_summary = dict(job.quality_summary or {})
         quality_summary["render"] = {
+            **render_gate.metrics,
+            "render_gate_pass": True,
             "duration_ms": duration_ms,
             "resolution": "1080x1920",
             "audio_loudness_target_lufs": -16.0,
@@ -1286,6 +1416,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return normalized
 
     def _step_publish(self, session: Session, job: Job, attempt: int) -> list[str]:
+        publish_package = self._build_publish_package(session, job)
+        self.storage.persist_json(job.job_id, "publish_package.json", self._serialize_for_json(publish_package))
         artifact_index = {
             "request": "request.json",
             "topic_plan": "topic_plan.json",
@@ -1297,6 +1429,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "render": "render/final.mp4",
             "events": "events.jsonl",
             "ffmpeg_log": "render/ffmpeg.log",
+            "publish_package": "publish_package.json",
         }
         job.artifact_index = artifact_index
         self.storage.persist_json(
@@ -1311,13 +1444,56 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 "quality_summary": job.quality_summary or {},
             },
         )
-        return ["job_manifest.json"]
+        return ["job_manifest.json", "publish_package.json"]
+
+    def _build_publish_package(self, session: Session, job: Job) -> dict[str, Any]:
+        request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
+        script = session.scalar(select(Script).where(Script.job_id == job.job_id))
+        render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job.job_id))
+        subtitles = session.scalar(select(SubtitleTrack).where(SubtitleTrack.job_id == job.job_id))
+        topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
+        title = script.title if script else (request.seed_theme if request else job.topic_summary or job.job_id)
+        tags = ["#shorts", "#curiosidades", "#ciencia"]
+        if topic_plan:
+            for token in word_tokens(topic_plan.canonical_topic)[:3]:
+                tags.append(f"#{token.lower()}")
+        description = "\n".join(
+            [
+                script.full_narration if script else title,
+                "",
+                " ".join(dict.fromkeys(tags)),
+            ]
+        )
+        checklist = {
+            "script_gate_pass": bool((job.quality_summary or {}).get("script", {}).get("script_quality_gate_pass")),
+            "scene_plan_gate_pass": bool((job.quality_summary or {}).get("scene_plan", {}).get("scene_plan_gate_pass")),
+            "asset_gate_pass": bool((job.quality_summary or {}).get("assets", {}).get("semantic_threshold_pass")),
+            "subtitle_gate_pass": bool((job.quality_summary or {}).get("subtitles", {}).get("subtitle_gate_pass")),
+            "render_gate_pass": bool((job.quality_summary or {}).get("render", {}).get("render_gate_pass")),
+        }
+        return {
+            "schema_version": self.settings.schema_version,
+            "job_id": job.job_id,
+            "created_at": iso_now(),
+            "status": "ready_for_publish" if all(checklist.values()) else "needs_review",
+            "title": title[:100],
+            "description": description[:4900],
+            "hashtags": list(dict.fromkeys(tags)),
+            "category": "Education",
+            "language": job.language,
+            "video_uri": render.video_uri if render else None,
+            "poster_uri": render.poster_uri if render else None,
+            "subtitle_uri": subtitles.ass_uri if subtitles else None,
+            "checklist": checklist,
+            "quality_summary": job.quality_summary or {},
+        }
 
     def _append_event(self, job_id: str, event_name: str, status: str, payload: dict[str, Any]) -> None:
         job_dir = self.storage.job_dir(job_id)
         event_path = job_dir / "events.jsonl"
         line = json.dumps(
             {
+                "event_id": new_id(),
                 "timestamp": iso_now(),
                 "level": "info" if status == "succeeded" else "error",
                 "job_id": job_id,

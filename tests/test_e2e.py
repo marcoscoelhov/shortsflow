@@ -21,7 +21,12 @@ from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app, artifact_url  # noqa: E402
 from app.models import Job, RenderOutput, SceneAsset, SubtitleTrack, TopicRegistry, TopicRequest  # noqa: E402
 from app.orchestrator import normalize_script_metrics, orchestrator  # noqa: E402
-from app.providers import LocalSpeechFallbackProvider, MinimaxCreativeProvider, MinimaxImageProvider, MockCreativeProvider  # noqa: E402
+from app.providers import LLMProviderRegistry, LocalSpeechFallbackProvider, MinimaxCreativeProvider, MinimaxImageProvider, MockCreativeProvider  # noqa: E402
+from app.quality.asset_gate import AssetGate  # noqa: E402
+from app.quality.render_gate import RenderGate  # noqa: E402
+from app.quality.scene_gate import ScenePlanGate  # noqa: E402
+from app.quality.script_gate import ScriptQualityGate  # noqa: E402
+from app.quality.subtitle_gate import SubtitleGate  # noqa: E402
 from app.utils import parse_srt, split_caption_chunks, wrap_caption  # noqa: E402
 
 
@@ -60,6 +65,7 @@ def test_full_pipeline_reaches_waiting_review() -> None:
     job_id = response.headers["location"].split("/")[-1]
     wait_for_status(job_id, "waiting_review")
     with SessionLocal() as session:
+        job = session.get(Job, job_id)
         render = session.query(RenderOutput).filter_by(job_id=job_id).one()
         subtitles = session.query(SubtitleTrack).filter_by(job_id=job_id).one()
         selected_assets = session.query(SceneAsset).filter_by(job_id=job_id, selected=True).all()
@@ -67,6 +73,8 @@ def test_full_pipeline_reaches_waiting_review() -> None:
         assert 25_000 <= render.duration_ms <= 45_000
         assert subtitles.coverage_ratio >= 0.99
         assert len(selected_assets) >= 5
+        assert job and job.quality_summary["render"]["render_gate_pass"] is True
+        assert job.artifact_index["publish_package"] == "publish_package.json"
     detail = client.get(f"/jobs/{job_id}")
     assert detail.status_code == 200
     assert "Render" in detail.text
@@ -179,6 +187,94 @@ def test_minimax_script_prompt_requires_pt_br_for_all_text_fields(monkeypatch) -
     assert "nao use chines" in prompt
     assert "key_facts deve ser uma lista em pt-BR" in prompt
     assert "ignore esse formato e mantenha exatamente o JSON estrito" in prompt
+
+
+def test_script_quality_gate_blocks_mixed_language_markup_and_glued_words() -> None:
+    script = {
+        "title": "Polvo pensa com os braços",
+        "hook": "Cada braço do polvo é ummini-cérebro independiente.",
+        "body_beats": ["Sim, você ouviu right.", "Isso muda tudo.</prosody"],
+        "ending": "Comenta se isso te surpreendeu.",
+        "cta": None,
+        "full_narration": (
+            "Cada braço do polvo é ummini-cérebro independiente. "
+            "Sim, você ouviu right. Isso muda tudo.</prosody"
+        ),
+        "estimated_duration_sec": 30,
+        "key_facts": ["Dois terços dos neurônios ficam nos braços."],
+        "token_count": 20,
+        "language": "pt-BR",
+        "qa_metrics": {
+            "hook_score": 0.9,
+            "clarity_score": 0.9,
+            "information_density_score": 0.8,
+            "repetition_score": 0.1,
+            "ending_strength_score": 0.8,
+        },
+    }
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert not result.passed
+    assert "foreign_language_detected" in result.reasons
+    assert "markup_or_ssml_leaked" in result.reasons
+    assert "suspicious_glued_words" in result.reasons
+
+
+def test_llm_registry_uses_mock_when_mock_providers_enabled() -> None:
+    registry = LLMProviderRegistry()
+    assert registry.primary_provider().provider_name == "mock"
+    assert registry.fallback_provider().provider_name == "mock"
+
+
+def test_scene_plan_gate_rejects_generic_prompt_without_no_text_constraint() -> None:
+    result = ScenePlanGate().validate(
+        [
+            {
+                "scene_id": "scene-1",
+                "order": 1,
+                "narration_text": "O polvo usa os braços para explorar o ambiente.",
+                "token_start": 0,
+                "token_end": 8,
+                "primary_subject": "polvo",
+                "image_prompt": "vertical cinematic scientific image",
+            }
+        ],
+        expected_scene_count=1,
+    )
+    assert not result.passed
+    assert any("missing_no_text_constraint" in reason for reason in result.reasons)
+
+
+def test_asset_gate_rejects_low_semantic_scene_asset() -> None:
+    result = AssetGate().validate_selected(
+        [
+            {
+                "scene_id": "scene-1",
+                "semantic_match": 0.45,
+                "total_score": 0.5,
+                "text_or_watermark_penalty": 0.0,
+                "artifact_penalty": 0.0,
+            }
+        ]
+    )
+    assert not result.passed
+    assert "scene-1:semantic_match_below_threshold" in result.reasons
+
+
+def test_subtitle_gate_blocks_markup_leakage() -> None:
+    result = SubtitleGate().validate(
+        [{"idx": 1, "start_ms": 0, "end_ms": 1000, "text": "Texto bom </prosody"}],
+        coverage_ratio=1.0,
+    )
+    assert not result.passed
+    assert "1:markup_or_ssml_leaked" in result.reasons
+
+
+def test_render_gate_rejects_missing_file(tmp_path: Path) -> None:
+    result = RenderGate().validate(tmp_path / "missing.mp4", expected_duration_ms=30_000)
+    assert not result.passed
+    assert "missing_render_file" in result.reasons
 
 
 def test_minimax_scene_prompt_keeps_image_prompt_english_exception(monkeypatch) -> None:
