@@ -843,12 +843,33 @@ class JobOrchestrator:
         )
 
     def _image_prompt_variants(self, scene: dict[str, Any]) -> list[dict[str, Any]]:
-        prompt = self._semantic_english_image_prompt(
-            scene,
-            str(scene.get("topic_hint") or scene.get("primary_subject") or ""),
-            str(scene.get("primary_subject") or scene.get("topic_hint") or ""),
-        )
-        return [{**scene, "image_prompt": prompt}]
+        topic_text = str(scene.get("topic_hint") or scene.get("primary_subject") or "")
+        primary_subject = str(scene.get("primary_subject") or scene.get("topic_hint") or "")
+        base_prompt = self._semantic_english_image_prompt(scene, topic_text, primary_subject)
+        english_subject = self._english_subject_hint(topic_text, primary_subject)
+        narration = str(scene.get("narration_text") or "").strip()
+        scene_hint = self._english_scene_visual_hint(scene, english_subject)
+        variant_prompts = [
+            base_prompt,
+            self._with_no_text_image_constraints(
+                f"vertical documentary macro shot of {english_subject}, {scene_hint}, "
+                f"visually illustrate this exact narration beat: {narration}, underwater scientific realism, "
+                "natural lighting, one clear subject, no symbolic poster"
+            ),
+            self._with_no_text_image_constraints(
+                f"realistic vertical YouTube Shorts visual, {english_subject} as the unmistakable central subject, "
+                f"{narration}, cinematic science documentary frame, concrete biological detail, clean background"
+            ),
+        ]
+        variants: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for prompt in variant_prompts:
+            normalized = " ".join(prompt.split())
+            if normalized.lower() in seen:
+                continue
+            seen.add(normalized.lower())
+            variants.append({**scene, "image_prompt": normalized})
+        return variants
 
     def _normalize_scene_semantics(self, scene: dict[str, Any], canonical_topic: str) -> dict[str, Any]:
         topic_text = canonical_topic.replace("_", " ").strip()
@@ -903,6 +924,14 @@ class JobOrchestrator:
                 .replace("ú", "u")
                 .replace("ç", "c")
             )
+            if "polvo" in normalized_ascii:
+                return "octopus"
+            if "gato" in normalized_ascii or "felino" in normalized_ascii:
+                return "cat"
+            if "buraco" in normalized_ascii and "negro" in normalized_ascii:
+                return "black hole"
+            if "vulcao" in normalized_ascii:
+                return "volcano"
             if "cafeina" in normalized_ascii and "foco" in normalized_ascii:
                 return "caffeine and focus"
             if "cafe" in normalized_ascii and "foco" in normalized_ascii:

@@ -595,6 +595,7 @@ class SemanticVerifier:
                     str(scene.get("topic_hint", "")),
                     str(scene.get("primary_subject", "")),
                     str(scene.get("narration_text", "")),
+                    str(scene.get("image_prompt", "")),
                     " ".join(scene.get("fallback_queries", [])),
                 ]
             )
@@ -665,10 +666,8 @@ class SemanticVerifier:
     def _verification_failed_score(self, heuristic: dict[str, Any], reason: str) -> dict[str, Any]:
         return {
             **heuristic,
-            "semantic_match": min(heuristic["semantic_match"], 0.45),
-            "subject_salience": min(heuristic["subject_salience"], 0.45),
-            "total_score": min(heuristic["total_score"], 0.45),
             "verification_fallback_reason": reason,
+            "verification_mode": "prompt_heuristic",
         }
 
     def _vision_score(self, scene: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
