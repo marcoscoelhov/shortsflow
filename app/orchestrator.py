@@ -1176,6 +1176,7 @@ class JobOrchestrator:
 
     def _split_subtitle_cue(self, cue: dict[str, Any], token_start: int, token_end: int) -> list[dict[str, Any]]:
         chunks = split_caption_chunks(str(cue["text"]), max_chars=42, max_lines=2) or [str(cue["text"])]
+        chunks = self._avoid_weak_subtitle_endings(chunks)
         if len(chunks) == 1:
             return [
                 {
@@ -1212,6 +1213,23 @@ class JobOrchestrator:
         split_items[-1]["end_ms"] = int(cue["end_ms"])
         split_items[-1]["token_end"] = token_end
         return split_items
+
+    def _avoid_weak_subtitle_endings(self, chunks: list[str]) -> list[str]:
+        bad_endings = {"de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas", "por", "para", "que", "e"}
+        repaired = [chunk for chunk in chunks if chunk.strip()]
+        for index in range(len(repaired) - 1):
+            words = repaired[index].split()
+            next_words = repaired[index + 1].split()
+            if not words or len(next_words) <= 1:
+                continue
+            ending_tokens = word_tokens(words[-1])
+            ending = ending_tokens[0] if ending_tokens else ""
+            if ending in bad_endings:
+                candidate = " ".join([*words, next_words[0]])
+                if len(wrap_caption(candidate, max_chars=42, max_lines=2).splitlines()) <= 2:
+                    repaired[index] = candidate
+                    repaired[index + 1] = " ".join(next_words[1:])
+        return [chunk for chunk in repaired if chunk.strip()]
 
     def _render_ass(self, items: list[dict[str, Any]]) -> str:
         header = """[Script Info]
@@ -1323,7 +1341,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 "-pix_fmt",
                 "yuv420p",
                 "-af",
-                "loudnorm=I=-16:LRA=11:TP=-1.5",
+                "aresample=async=1:first_pts=0",
                 "-ar",
                 "48000",
                 "-c:a",

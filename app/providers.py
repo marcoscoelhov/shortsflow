@@ -1285,8 +1285,6 @@ class EdgeTTSProvider(LocalSpeechFallbackProvider):
         self._normalize_edge_audio(temp_audio_path, audio_path)
         temp_audio_path.unlink(missing_ok=True)
         srt_path.write_text(submaker.get_srt(), encoding="utf-8")
-        self._normalize_speech_envelope(audio_path, srt_path)
-        self._apply_final_loudness_normalization(audio_path)
         duration_ms = self._measure_audio_ms(audio_path)
         return {
             "provider": "edge_tts",
@@ -1303,6 +1301,8 @@ class EdgeTTSProvider(LocalSpeechFallbackProvider):
                 "loudness_normalized": True,
                 "loudness_target_lufs": -16.0,
                 "true_peak_limit_db": -1.5,
+                "envelope_normalized": False,
+                "denoise_applied": True,
             },
         }
 
@@ -1328,7 +1328,7 @@ class EdgeTTSProvider(LocalSpeechFallbackProvider):
                 "-i",
                 str(source_path),
                 "-af",
-                "highpass=f=80,lowpass=f=12000,loudnorm=I=-16:LRA=11:TP=-1.5",
+                "highpass=f=70,lowpass=f=9500,afftdn=nf=-25,loudnorm=I=-16:LRA=11:TP=-1.5",
                 "-ar",
                 "24000",
                 "-ac",
