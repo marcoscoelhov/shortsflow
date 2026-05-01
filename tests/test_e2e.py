@@ -698,3 +698,73 @@ def test_mock_scene_planner_uses_canonical_topic_as_subject() -> None:
     assert scenes[0]["primary_subject"] == "buracos negros"
     assert scenes[0]["topic_hint"] == "buracos negros"
     assert scenes[0]["fallback_queries"][0] == "buracos negros"
+
+
+def test_script_gate_rejects_overconfident_or_unsupported_pisa_claims() -> None:
+    script = {
+        "title": "Torre de Pisa não cai: o segredo revelado",
+        "hook": "Ela deveria ter tombado há séculos.",
+        "body_beats": [
+            "Uma engenharia ridiculamente simples: sapatas de concreto compensaram a inclinação.",
+            "Um túnel sob a base permitiu corrigir apenas 4 centímetros.",
+        ],
+        "ending": "A Torre de Pisa não cai porque a inclinação a sustenta.",
+        "cta": None,
+        "full_narration": (
+            "Ela deveria ter tombado há séculos. Mas a Torre de Pisa não cai. "
+            "Uma engenharia ridiculamente simples: sapatas de concreto compensaram a inclinação. "
+            "Um túnel sob a base permitiu corrigir apenas 4 centímetros. "
+            "A física prova: inclinação não é queda. A Torre de Pisa não cai porque a inclinação a sustenta."
+        ),
+        "estimated_duration_sec": 30,
+        "key_facts": ["Sapatas de concreto compensaram a inclinação."],
+        "token_count": 58,
+        "language": "pt-BR",
+        "qa_metrics": {
+            "hook_score": 0.95,
+            "clarity_score": 0.95,
+            "information_density_score": 0.9,
+            "repetition_score": 0.1,
+            "ending_strength_score": 0.9,
+        },
+    }
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert not result.passed
+    assert "overconfident_or_unsupported_factual_claim" in result.reasons
+
+
+def test_asset_extension_is_normalized_to_actual_file_format(tmp_path: Path) -> None:
+    wrong_path = tmp_path / "ai.png"
+    from PIL import Image
+
+    Image.new("RGB", (32, 48), "white").save(wrong_path, format="JPEG")
+    asset = {"uri": wrong_path.resolve().as_uri(), "provider": "test", "prompt_snapshot": "prompt"}
+
+    normalized = orchestrator._normalize_asset_uri_extension(asset)
+
+    normalized_path = Path(normalized["uri"].replace("file://", ""))
+    assert normalized_path.suffix == ".jpg"
+    assert normalized_path.exists()
+    assert not wrong_path.exists()
+    assert normalized["file_format"] == "jpeg"
+    assert normalized["extension_normalized"] is True
+
+
+def test_publish_package_skips_stopword_hashtags() -> None:
+    tags = ["#shorts", "#curiosidades", "#ciencia"]
+    tag_stopwords = {"por", "que", "qual", "como", "porque", "para", "com", "uma", "um", "de", "do", "da", "dos", "das", "a", "o", "as", "os", "e"}
+    added = 0
+    for token in ["Por", "que", "a", "Torre", "de", "Pisa", "não", "cai"]:
+        normalized = token.lower()
+        if len(normalized) < 3 or normalized in tag_stopwords:
+            continue
+        tags.append(f"#{normalized}")
+        added += 1
+        if added >= 3:
+            break
+
+    assert tags == ["#shorts", "#curiosidades", "#ciencia", "#torre", "#pisa", "#não"]
+    assert "#por" not in tags
+    assert "#que" not in tags

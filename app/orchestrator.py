@@ -119,9 +119,22 @@ ENGLISH_SUBJECT_ALIASES = {
     "cafeína": "caffeine",
     "cafeina e foco": "caffeine and focus",
     "café e foco": "coffee and focus",
+    "torre de pisa": "Leaning Tower of Pisa",
+    "torre inclinada de pisa": "Leaning Tower of Pisa",
+    "por que a torre de pisa não cai?": "Leaning Tower of Pisa",
+    "por que a torre de pisa nao cai?": "Leaning Tower of Pisa",
 }
 
 SCENE_VISUAL_HINTS = [
+    (("torre", "pisa", "séculos"), "the Leaning Tower of Pisa in Piazza dei Miracoli at golden hour, visibly tilted but stable, documentary realism"),
+    (("torre", "pisa", "seculos"), "the Leaning Tower of Pisa in Piazza dei Miracoli at golden hour, visibly tilted but stable, documentary realism"),
+    (("solo", "argiloso"), "cutaway view of the Leaning Tower of Pisa foundation resting on soft clay soil layers, unlabeled scientific visualization"),
+    (("solo", "mole"), "cutaway view of the Leaning Tower of Pisa foundation resting on soft clay soil layers, unlabeled scientific visualization"),
+    (("fundação",), "close vertical cutaway of a shallow medieval tower foundation settling into soft ground, documentary engineering realism"),
+    (("fundacao",), "close vertical cutaway of a shallow medieval tower foundation settling into soft ground, documentary engineering realism"),
+    (("centro", "massa"), "unlabeled visual metaphor of the Leaning Tower of Pisa balancing with its mass still over the base, no diagrams or text"),
+    (("inclinação", "reduz"), "engineers stabilizing the base of the Leaning Tower of Pisa with careful soil extraction, documentary realism"),
+    (("inclinacao", "reduz"), "engineers stabilizing the base of the Leaning Tower of Pisa with careful soil extraction, documentary realism"),
     (("cafeina", "foco"), "caffeine molecules near alert neurons in warm morning light, a plain unbranded coffee cup nearby"),
     (("cafeína", "foco"), "caffeine molecules near alert neurons in warm morning light, a plain unbranded coffee cup nearby"),
     (("cafe", "foco"), "plain unbranded coffee cup beside a focused morning workspace, subtle neural energy glow"),
@@ -694,6 +707,7 @@ class JobOrchestrator:
         raise RecoverableStepError(f"script quality gate failed: {', '.join(last_reasons)}")
 
     def _step_scene_plan(self, session: Session, job: Job, attempt: int) -> list[str]:
+        self._remove_stale_quality_report(job.job_id, "scene_plan_rejected.json")
         script = session.scalar(select(Script).where(Script.job_id == job.job_id))
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         assert script and topic_plan
@@ -756,6 +770,7 @@ class JobOrchestrator:
         return ["scene_plan.json"]
 
     def _step_assets(self, session: Session, job: Job, attempt: int) -> list[str]:
+        self._remove_stale_quality_report(job.job_id, "asset_quality_report.json")
         scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job.job_id))
         assert scene_plan
         session.execute(delete(SceneAsset).where(SceneAsset.job_id == job.job_id))
@@ -770,6 +785,7 @@ class JobOrchestrator:
                 ai_path = scene_dir / ("ai.png" if variant_index == 1 else f"ai-{variant_index}.png")
                 try:
                     ai_asset = self.providers.image.generate(variant_scene, ai_path)
+                    ai_asset = self._normalize_asset_uri_extension(ai_asset)
                     ai_scores = self._score_asset(variant_scene, ai_asset)
                     candidates.append((ai_asset, ai_scores))
                     primary_provider = ai_asset["provider"]
@@ -823,6 +839,7 @@ class JobOrchestrator:
                 )
                 self._append_event(job.job_id, "asset.semantic_fallback", "succeeded", {"scene_id": scene["scene_id"]})
                 local_asset = self.providers.local_image.generate(scene, scene_dir / "local-semantic.png")
+                local_asset = self._normalize_asset_uri_extension(local_asset)
                 local_scores = self._score_asset(scene, local_asset)
                 candidates.append((local_asset, local_scores))
             passing_candidates = [(asset, scores) for asset, scores in candidates if self._asset_scores_pass(scores)]
@@ -883,6 +900,34 @@ class JobOrchestrator:
         self._append_event(job.job_id, "asset.selected", "succeeded", quality_summary["assets"])
         return asset_refs
 
+    def _normalize_asset_uri_extension(self, asset: dict[str, Any]) -> dict[str, Any]:
+        uri = str(asset.get("uri") or "")
+        if not uri.startswith("file://"):
+            return asset
+        path = path_from_uri(uri)
+        if not path.exists():
+            return asset
+        try:
+            with Image.open(path) as image:
+                fmt = (image.format or "").upper()
+        except Exception:  # noqa: BLE001
+            return asset
+        suffix_by_format = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+        expected_suffix = suffix_by_format.get(fmt)
+        if not expected_suffix or path.suffix.lower() == expected_suffix:
+            return asset
+        target = path.with_suffix(expected_suffix)
+        counter = 2
+        while target.exists() and target.resolve() != path.resolve():
+            target = path.with_name(f"{path.stem}-{counter}{expected_suffix}")
+            counter += 1
+        path.rename(target)
+        updated = dict(asset)
+        updated["uri"] = target.resolve().as_uri()
+        updated["file_format"] = fmt.lower()
+        updated["extension_normalized"] = True
+        return updated
+
     def _score_asset(self, scene: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
         return self.providers.semantic.score(scene, asset)
 
@@ -904,13 +949,13 @@ class JobOrchestrator:
         variant_prompts = [
             base_prompt,
             self._with_no_text_image_constraints(
-                f"vertical documentary macro shot of {english_subject}, {scene_hint}, "
-                f"visually illustrate this exact narration beat: {narration}, underwater scientific realism, "
-                "natural lighting, one clear subject, no symbolic poster"
+                f"vertical documentary close shot of {english_subject}, {scene_hint}, "
+                f"visually illustrate this exact narration beat: {narration}, scientific documentary realism, "
+                "natural lighting, one clear subject, no symbolic poster, no irrelevant props"
             ),
             self._with_no_text_image_constraints(
                 f"realistic vertical YouTube Shorts visual, {english_subject} as the unmistakable central subject, "
-                f"{narration}, cinematic science documentary frame, concrete biological detail, clean background"
+                f"{narration}, cinematic science documentary frame, concrete factual detail, clean relevant background"
             ),
         ]
         variants: list[dict[str, Any]] = []
@@ -1065,6 +1110,8 @@ class JobOrchestrator:
             "no text on cups, no text on packages, no text on screens",
             "no labels or lettering on any object surface",
             "avoid screens, documents, books, newspapers, signs, dashboards, graphs, labels, and branded packaging",
+            "no floating spheres, no random packages, no irrelevant lab props, no generic sci-fi objects",
+            "the main subject must be unmistakable and relevant to the narration beat",
         ]
         if "no readable text anywhere" not in prompt_lower:
             prompt = f"{prompt}, {constraints[0]}".strip(", ")
@@ -1189,6 +1236,7 @@ class JobOrchestrator:
             return int(wav_file.getnframes() / wav_file.getframerate() * 1000)
 
     def _step_subtitles(self, session: Session, job: Job, attempt: int) -> list[str]:
+        self._remove_stale_quality_report(job.job_id, "subtitle_quality_report.json")
         script = session.scalar(select(Script).where(Script.job_id == job.job_id))
         narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job.job_id))
         scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job.job_id))
@@ -1332,6 +1380,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             text = wrap_caption(item["text"]).replace("\n", "\\N")
             lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
         return "\n".join(lines) + "\n"
+
+    def _remove_stale_quality_report(self, job_id: str, relative_path: str) -> None:
+        try:
+            (self.storage.job_dir(job_id) / relative_path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def _ms_to_ass(self, ms: int) -> str:
         hours, rem = divmod(ms, 3_600_000)
@@ -1551,9 +1605,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         title = script.title if script else (request.seed_theme if request else job.topic_summary or job.job_id)
         tags = ["#shorts", "#curiosidades", "#ciencia"]
+        tag_stopwords = {"por", "que", "qual", "como", "porque", "para", "com", "uma", "um", "de", "do", "da", "dos", "das", "a", "o", "as", "os", "e"}
         if topic_plan:
-            for token in word_tokens(topic_plan.canonical_topic)[:3]:
-                tags.append(f"#{token.lower()}")
+            added = 0
+            for token in word_tokens(topic_plan.canonical_topic):
+                normalized = token.lower()
+                if len(normalized) < 3 or normalized in tag_stopwords:
+                    continue
+                tags.append(f"#{normalized}")
+                added += 1
+                if added >= 3:
+                    break
         description = "\n".join(
             [
                 script.full_narration if script else title,

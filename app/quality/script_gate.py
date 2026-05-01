@@ -40,6 +40,31 @@ GENERIC_HOOK_OPENING_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+OVERCONFIDENT_FACT_MARKERS = {
+    "a torre está garantida",
+    "a torre esta garantida",
+    "a física prova",
+    "a fisica prova",
+    "domina a física",
+    "domina a fisica",
+    "desafia a física",
+    "desafia a fisica",
+    "ridiculamente simples",
+}
+
+SUSPICIOUS_PRECISION_PATTERN = re.compile(
+    r"\b(?:apenas|s[oó]|somente)\s+\d+(?:[,.]\d+)?\s*(?:centímetros|centimetros|cm|milímetros|milimetros|mm)\b",
+    re.IGNORECASE,
+)
+
+PISA_UNSUPPORTED_CLAIM_MARKERS = {
+    "sapatas de concreto",
+    "plano americano de congelar o solo",
+    "congelar o solo foi recusado",
+    "a inclinação a sustenta",
+    "a inclinacao a sustenta",
+}
+
 
 @dataclass(frozen=True)
 class ScriptGateResult:
@@ -68,6 +93,8 @@ class ScriptQualityGate:
             reasons.append("suspicious_glued_words")
         if GENERIC_HOOK_OPENING_PATTERN.search(str(script.get("hook") or "")) or GENERIC_HOOK_OPENING_PATTERN.search(full_narration):
             reasons.append("generic_hook_opening")
+        if self._has_overconfident_or_unsupported_factual_claims(combined_text):
+            reasons.append("overconfident_or_unsupported_factual_claim")
 
         word_count = len(word_tokens(full_narration))
         estimated_duration = float(script.get("estimated_duration_sec") or max(0, word_count / 2.55))
@@ -147,6 +174,16 @@ class ScriptQualityGate:
         for phrase in FOREIGN_LANGUAGE_MARKERS:
             if " " in phrase and phrase in normalized:
                 return True
+        return False
+
+    def _has_overconfident_or_unsupported_factual_claims(self, text: str) -> bool:
+        normalized = self._normalize(text)
+        if any(marker in normalized for marker in {self._normalize(item) for item in OVERCONFIDENT_FACT_MARKERS}):
+            return True
+        if SUSPICIOUS_PRECISION_PATTERN.search(text):
+            return True
+        if "pisa" in normalized and any(marker in normalized for marker in {self._normalize(item) for item in PISA_UNSUPPORTED_CLAIM_MARKERS}):
+            return True
         return False
 
     def _normalize(self, text: str) -> str:
