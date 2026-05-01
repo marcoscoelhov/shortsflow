@@ -587,7 +587,7 @@ class JobOrchestrator:
             "original_input": request.seed_theme,
         }
         script = self.providers.creative.generate_script(plan_dict)
-        script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec)
+        script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec, request.cta_style or "none")
         script = self._attach_editorial_source(script, plan_dict)
         metrics = {**metrics, "editorial_source": "hub_viral_prompt", "downstream_source_of_truth": "script_full_narration"}
         created_at = utcnow()
@@ -607,6 +607,27 @@ class JobOrchestrator:
         job.quality_summary = quality_summary
         self._append_event(job.job_id, "script.generated", "succeeded", metrics)
         return ["script.json"]
+
+    def _apply_cta_policy(self, script: dict[str, Any], cta_style: str) -> dict[str, Any]:
+        if cta_style != "none":
+            return script
+        cleaned = dict(script)
+        cta = str(cleaned.get("cta") or "").strip()
+        narration = str(cleaned.get("full_narration") or "")
+        if cta and narration.rstrip().endswith(cta):
+            narration = narration.rstrip()[: -len(cta)].rstrip()
+        cta_patterns = [
+            r"\s*Se inscrev[ae][^.?!]*[.?!]?$",
+            r"\s*Curte[^.?!]*[.?!]?$",
+            r"\s*Comenta[^.?!]*[.?!]?$",
+            r"\s*Compartilha[^.?!]*[.?!]?$",
+            r"\s*Ativa o sininho[^.?!]*[.?!]?$",
+        ]
+        for pattern in cta_patterns:
+            narration = re.sub(pattern, "", narration, flags=re.IGNORECASE).rstrip()
+        cleaned["cta"] = None
+        cleaned["full_narration"] = narration
+        return cleaned
 
     def _attach_editorial_source(self, script: dict[str, Any], plan_dict: dict[str, Any]) -> dict[str, Any]:
         enriched = dict(script)
@@ -629,8 +650,9 @@ class JobOrchestrator:
         script: dict[str, Any],
         plan_dict: dict[str, Any],
         target_duration_sec: int,
+        cta_style: str = "none",
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        script = dict(script)
+        script = self._apply_cta_policy(dict(script), cta_style)
         script["qa_metrics"] = normalize_script_metrics(dict(script.get("qa_metrics") or {}))
         gate_result = self.script_gate.validate(script, target_duration_sec)
         if gate_result.passed:
@@ -641,6 +663,7 @@ class JobOrchestrator:
         last_reasons = gate_result.reasons
         for _ in range(repair_attempts):
             repaired = self.providers.creative.repair_script(script, last_reasons, plan_dict)
+            repaired = self._apply_cta_policy(repaired, cta_style)
             repaired["qa_metrics"] = normalize_script_metrics(dict(repaired.get("qa_metrics") or {}))
             repaired_gate = self.script_gate.validate(repaired, target_duration_sec)
             if repaired_gate.passed:
@@ -655,6 +678,7 @@ class JobOrchestrator:
 
         fallback_repaired = self.providers.creative.repair_script_with_fallback(script, last_reasons, plan_dict)
         if fallback_repaired is not None:
+            fallback_repaired = self._apply_cta_policy(fallback_repaired, cta_style)
             fallback_repaired["qa_metrics"] = normalize_script_metrics(dict(fallback_repaired.get("qa_metrics") or {}))
             fallback_gate = self.script_gate.validate(fallback_repaired, target_duration_sec)
             if fallback_gate.passed:

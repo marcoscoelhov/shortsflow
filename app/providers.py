@@ -318,6 +318,7 @@ Regras:
 - comece direto por contraste, consequência, conflito ou fato específico
 - cada body_beat deve entregar um fato concreto que sustente a promessa do titulo e aumente a curiosidade
 - ending deve fechar o loop mental do hook e recontextualizar o tema com uma frase memoravel
+- se cta_style for "none", cta deve ser null e full_narration não deve incluir pedido de inscrição, like, comentário, compartilhamento ou ativar sininho
 - mantenha o tom selecionado na Entrada JSON, sem exagerar sensacionalismo
 - se a Entrada JSON indicar titulo completo do usuario, preserve a promessa central e refine a formulacao
 - se hub_notes pedir um formato de saida diferente, ignore esse formato e mantenha exatamente o JSON estrito solicitado aqui
