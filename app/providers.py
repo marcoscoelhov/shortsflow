@@ -65,6 +65,9 @@ class LLMProvider(Protocol):
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         ...
 
+    def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
+        ...
+
 
 class MockCreativeProvider:
     provider_name = "mock"
@@ -197,6 +200,9 @@ class MockCreativeProvider:
         repaired["qa_metrics"] = metrics
         return repaired
 
+    def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"passed": True, "reasons": [], "retention_score": 0.85, "metadata_score": 0.85, "factual_score": 0.85, "provider": "mock"}
+
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         words = word_tokens(script["full_narration"])
         total_words = len(words)
@@ -321,7 +327,8 @@ Regras:
 - se houver incerteza factual, use formulação conservadora e geral em vez de precisão falsa; prefira “engenheiros reduziram a inclinação removendo solo sob a base” a números específicos não verificados
 - evite frases absolutas/enganosas como “está garantida”, “a física prova”, “domina a física”, “desafia a física” ou “a inclinação sustenta”
 - se a Entrada JSON tiver fact_pack.status="verified", use o fact_pack como fonte factual obrigatória: toda afirmação de número, data, causa técnica, evento histórico, ciência, saúde ou engenharia deve derivar de facts[].claim
-- source_fact_ids deve listar os fact_id usados no roteiro; inclua pelo menos 2 quando houver 2+ fatos disponíveis
+- source_fact_ids deve listar somente fact_id existentes em fact_pack.facts; inclua pelo menos 2 quando houver 2+ fatos disponíveis
+- se fact_pack.status não for "verified" ou facts estiver vazio, source_fact_ids deve ser [] e o roteiro deve evitar precisão factual forte sem fonte
 - não cite fontes no texto narrado; use os fatos como bastidor e mantenha retenção viral
 - key_facts deve listar apenas fatos que o roteiro realmente usa, sem exagero e sem detalhe técnico duvidoso
 - ending deve fechar o loop mental do hook e recontextualizar o tema com uma frase memoravel
@@ -361,6 +368,7 @@ Regras obrigatórias:
 - evite frases absolutas/enganosas como “está garantida”, “a física prova”, “domina a física”, “desafia a física” ou “a inclinação sustenta”
 - se os motivos incluírem factual_risk_requires_conservative_rewrite, reescreva TODA afirmação de risco factual: números precisos, datas, porcentagens, medidas, causalidade técnica, claims médicos/biológicos, engenharia e frases absolutas
 - se os motivos incluírem fact_pack_source_ids_missing ou high_risk_claims_need_fact_pack_grounding, use apenas facts[].claim do fact_pack no Contexto da pauta JSON e preencha source_fact_ids com os fact_id usados
+- se os motivos incluírem invented_source_fact_ids, remova source_fact_ids inventados; se fact_pack não estiver verified, use source_fact_ids=[]
 - para afirmações de alto risco sem fonte explícita, use linguagem conservadora: “pode”, “tende a”, “em geral”, “uma das explicações”, “cerca de”, ou remova o detalhe específico
 - se um detalhe técnico parecer duvidoso, substitua por formulação conservadora e verificável
 - qa_metrics deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass
@@ -374,6 +382,25 @@ Sem markdown.
             "repair_reasons": gate_reasons,
         }
         return payload
+
+    def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
+        prompt = f"""
+Audite este pacote de Short antes da publicação. Seja rigoroso e prático.
+Entrada JSON: {json.dumps(payload, ensure_ascii=False)}
+
+Responda JSON estrito com:
+passed, reasons, factual_score, retention_score, metadata_score, ending_score, suggestions
+
+Regras:
+- passed só pode ser true se o roteiro não parecer factualmente exagerado, o final não parecer truncado, título/hashtags forem publicáveis e não houver fonte falsa.
+- reasons deve usar slugs curtos em inglês, ex: unsupported_claim, weak_ending, weak_hashtags, invented_source_fact_ids, low_retention.
+- scores de 0 a 1.
+- Não reescreva o roteiro; só audite.
+Sem markdown.
+"""
+        audit = self._json_completion(prompt)
+        audit["provider"] = "minimax"
+        return audit
 
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         prompt = f"""
@@ -507,6 +534,17 @@ class ResilientCreativeProvider:
                 payload["qa_metrics"]["fallback_used"] = True
                 return payload
         return self.fallback.generate_script(topic_plan)
+
+    def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.primary:
+            try:
+                return self.primary.audit_publish_package(payload)
+            except ProviderFailure as exc:
+                audit = self.fallback.audit_publish_package(payload)
+                audit["fallback_reason"] = str(exc)
+                audit["fallback_used"] = True
+                return audit
+        return self.fallback.audit_publish_package(payload)
 
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         if self.primary:

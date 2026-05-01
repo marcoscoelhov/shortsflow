@@ -850,3 +850,78 @@ def test_fact_pack_consistency_accepts_grounded_source_fact_ids() -> None:
     script["source_fact_ids"] = ["F1", "F2"]
 
     assert orchestrator._fact_pack_consistency_reasons(script, fact_pack) == []
+
+
+def test_fact_pack_consistency_rejects_source_ids_when_fact_pack_limited() -> None:
+    script = _base_script("Flamingos ficam rosas por pigmentos na alimentação.")
+    script["source_fact_ids"] = ["fact_1"]
+
+    reasons = orchestrator._fact_pack_consistency_reasons(script, {"status": "limited", "facts": []})
+
+    assert "invented_source_fact_ids" in reasons
+
+
+def test_fact_pack_query_generation_extracts_entity_and_concepts() -> None:
+    request = SimpleNamespace(seed_theme="Por que flamingos ficam cor-de-rosa?")
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que flamingos ficam cor-de-rosa",
+        angle="A cor vem de pigmentos na alimentação",
+        title_candidates=["A comida que pinta flamingos"],
+    )
+
+    queries = orchestrator._fact_pack_queries(request, topic_plan)
+    normalized = [query.lower() for query in queries]
+
+    assert any(query == "flamingos" for query in normalized)
+    assert any("flamingos carotenoides" == query for query in normalized)
+
+
+def test_publish_hashtags_use_entities_not_weak_words() -> None:
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que flamingos ficam cor-de-rosa",
+        angle="A cor vem da cadeia alimentar invisível",
+    )
+    script = SimpleNamespace(
+        title="A comida que pinta flamingos de rosa",
+        key_facts=["Flamingos recebem pigmentos pela alimentação."],
+    )
+
+    tags = orchestrator._build_publish_hashtags(topic_plan, script)
+
+    assert "#flamingos" in tags
+    assert "#animais" in tags
+    assert "#natureza" in tags
+    assert "#biologia" in tags
+    assert "#ficam" not in tags
+    assert "#cor" not in tags
+
+
+def test_publish_readiness_blocks_limited_fact_pack_with_invented_source_ids() -> None:
+    script_artifact = {
+        **_base_script(
+            "Flamingos ficam rosas por pigmentos na alimentação. "
+            "Essa cor pode sinalizar saúde para parceiros."
+        ),
+        "source_fact_ids": ["fact_1"],
+    }
+    topic_plan = SimpleNamespace(canonical_topic="Por que flamingos ficam cor-de-rosa", angle="biologia animal")
+    checklist = {
+        "script_gate_pass": True,
+        "scene_plan_gate_pass": True,
+        "asset_gate_pass": True,
+        "subtitle_gate_pass": True,
+        "render_gate_pass": True,
+    }
+
+    readiness = orchestrator._publish_readiness_report(
+        None,
+        topic_plan,
+        {"status": "limited", "facts": []},
+        ["#shorts", "#curiosidades", "#ciencia", "#flamingos", "#animais"],
+        checklist,
+        script_artifact,
+    )
+
+    assert readiness["passed"] is False
+    assert "invented_source_fact_ids" in readiness["reasons"]
+    assert "manual_review_required" in readiness["reasons"]

@@ -5,6 +5,7 @@ import re
 import subprocess
 import threading
 import time
+import unicodedata
 import httpx
 from dataclasses import dataclass
 from datetime import timedelta
@@ -634,7 +635,7 @@ class JobOrchestrator:
                 "sources": [],
                 "editorial_rule": "Mock-provider test mode: no external fact retrieval.",
             }
-        queries = [request.seed_theme, topic_plan.canonical_topic, *(topic_plan.title_candidates or [])]
+        queries = self._fact_pack_queries(request, topic_plan)
         seen: set[str] = set()
         cleaned_queries = []
         for query in queries:
@@ -642,7 +643,7 @@ class JobOrchestrator:
             if normalized and normalized.lower() not in seen:
                 cleaned_queries.append(normalized)
                 seen.add(normalized.lower())
-        for query in cleaned_queries[:4]:
+        for query in cleaned_queries[:8]:
             pack = self._wikipedia_fact_pack(query)
             if pack.get("facts"):
                 pack["query_used"] = query
@@ -655,6 +656,48 @@ class JobOrchestrator:
             "sources": [],
             "editorial_rule": "No source facts were retrieved. Script must avoid precise numbers, dates, medical/scientific/engineering causality, and absolute claims unless already present in the user input.",
         }
+
+
+    def _fact_pack_queries(self, request: TopicRequest, topic_plan: TopicPlan) -> list[str]:
+        raw_queries = [request.seed_theme, topic_plan.canonical_topic, topic_plan.angle, *(topic_plan.title_candidates or [])]
+        queries: list[str] = []
+        for query in raw_queries:
+            cleaned = self._clean_fact_query(str(query or ""))
+            if cleaned:
+                queries.append(cleaned)
+                entity = self._extract_fact_entity(cleaned)
+                if entity and entity != cleaned:
+                    queries.append(entity)
+                    for concept in self._fact_query_concepts(cleaned):
+                        queries.append(f"{entity} {concept}")
+        return queries
+
+    def _clean_fact_query(self, query: str) -> str:
+        query = unicodedata.normalize("NFKC", query).strip()
+        query = re.sub(r"[?!¿¡]+", " ", query)
+        query = re.sub(r"\s+", " ", query)
+        query = re.sub(r"^(?:por que|porque|como|qual|quais|o que|quem|quando|onde)\s+", "", query, flags=re.IGNORECASE)
+        query = re.sub(r"\b(?:fica|ficam|ficou|são|sao|é|e|era|foram|tem|têm)\b", " ", query, flags=re.IGNORECASE)
+        return re.sub(r"\s+", " ", query).strip(" -–—:;,." )
+
+    def _extract_fact_entity(self, query: str) -> str:
+        stopwords = {
+            "por", "que", "porque", "como", "qual", "quais", "para", "com", "uma", "um", "de", "do", "da", "dos", "das", "a", "o", "as", "os", "e",
+            "fica", "ficam", "cor", "rosa", "cor-de-rosa", "não", "nao", "cai", "acontece", "segredo", "invisível", "invisivel", "parece", "artificial",
+        }
+        tokens = [token for token in word_tokens(query) if len(token) >= 3 and token.lower() not in stopwords]
+        if not tokens:
+            return query
+        return " ".join(tokens[:3])
+
+    def _fact_query_concepts(self, query: str) -> list[str]:
+        normalized = query.lower()
+        concepts: list[str] = []
+        if any(term in normalized for term in ["rosa", "cor", "color", "pink"]):
+            concepts.extend(["carotenoides", "pigmentos", "diet"])
+        if any(term in normalized for term in ["cai", "inclina", "torre"]):
+            concepts.extend(["inclinação", "engenharia", "solo"])
+        return concepts[:3]
 
     def _wikipedia_fact_pack(self, query: str) -> dict[str, Any]:
         for language in ["pt", "en"]:
@@ -708,15 +751,15 @@ class JobOrchestrator:
 
 
     def _fact_pack_consistency_reasons(self, script: dict[str, Any], fact_pack: Any) -> list[str]:
+        source_ids = script.get("source_fact_ids") or script.get("qa_metrics", {}).get("source_fact_ids") or []
+        if isinstance(source_ids, str):
+            source_ids = [source_ids]
         if not isinstance(fact_pack, dict) or fact_pack.get("status") != "verified":
-            return []
+            return ["invented_source_fact_ids"] if source_ids else []
         facts = fact_pack.get("facts") or []
         valid_ids = {str(fact.get("fact_id")) for fact in facts if fact.get("fact_id")}
         if not valid_ids:
             return []
-        source_ids = script.get("source_fact_ids") or script.get("qa_metrics", {}).get("source_fact_ids") or []
-        if isinstance(source_ids, str):
-            source_ids = [source_ids]
         used_ids = {str(item) for item in source_ids if str(item) in valid_ids}
         minimum = min(2, len(valid_ids))
         reasons: list[str] = []
@@ -1715,18 +1758,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         subtitles = session.scalar(select(SubtitleTrack).where(SubtitleTrack.job_id == job.job_id))
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         title = script.title if script else (request.seed_theme if request else job.topic_summary or job.job_id)
-        tags = ["#shorts", "#curiosidades", "#ciencia"]
-        tag_stopwords = {"por", "que", "qual", "como", "porque", "para", "com", "uma", "um", "de", "do", "da", "dos", "das", "a", "o", "as", "os", "e"}
-        if topic_plan:
-            added = 0
-            for token in word_tokens(topic_plan.canonical_topic):
-                normalized = token.lower()
-                if len(normalized) < 3 or normalized in tag_stopwords:
-                    continue
-                tags.append(f"#{normalized}")
-                added += 1
-                if added >= 3:
-                    break
+        fact_pack = self._read_job_json(job.job_id, "fact_pack.json")
+        script_artifact = self._read_job_json(job.job_id, "script.json")
+        tags = self._build_publish_hashtags(topic_plan, script)
         description = "\n".join(
             [
                 script.full_narration if script else title,
@@ -1741,11 +1775,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "subtitle_gate_pass": bool((job.quality_summary or {}).get("subtitles", {}).get("subtitle_gate_pass")),
             "render_gate_pass": bool((job.quality_summary or {}).get("render", {}).get("render_gate_pass")),
         }
+        minimax_audit = self._provider_publish_audit(script_artifact, fact_pack, tags)
+        readiness = self._publish_readiness_report(script, topic_plan, fact_pack, tags, checklist, script_artifact, minimax_audit)
         return {
             "schema_version": self.settings.schema_version,
             "job_id": job.job_id,
             "created_at": iso_now(),
-            "status": "ready_for_publish" if all(checklist.values()) else "needs_review",
+            "status": "ready_for_publish" if readiness["passed"] else "needs_manual_review",
             "title": title[:100],
             "description": description[:4900],
             "hashtags": list(dict.fromkeys(tags)),
@@ -1755,7 +1791,143 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "poster_uri": render.poster_uri if render else None,
             "subtitle_uri": subtitles.ass_uri if subtitles else None,
             "checklist": checklist,
+            "publish_readiness": readiness,
+            "minimax_publish_audit": minimax_audit,
             "quality_summary": job.quality_summary or {},
+        }
+
+    def _provider_publish_audit(self, script_artifact: dict[str, Any], fact_pack: dict[str, Any], tags: list[str]) -> dict[str, Any]:
+        auditor = getattr(self.providers.creative, "audit_publish_package", None)
+        if auditor is None:
+            return {"passed": True, "reasons": [], "provider": "none", "skipped": True}
+        payload = {
+            "script": {
+                "title": script_artifact.get("title"),
+                "hook": script_artifact.get("hook"),
+                "ending": script_artifact.get("ending"),
+                "full_narration": script_artifact.get("full_narration"),
+                "key_facts": script_artifact.get("key_facts"),
+                "source_fact_ids": script_artifact.get("source_fact_ids"),
+            },
+            "fact_pack": fact_pack,
+            "hashtags": tags,
+        }
+        try:
+            audit = auditor(payload)
+        except Exception as exc:  # noqa: BLE001
+            return {"passed": False, "reasons": ["minimax_audit_failed"], "error": str(exc), "provider": "minimax"}
+        return audit if isinstance(audit, dict) else {"passed": False, "reasons": ["minimax_audit_invalid"], "provider": "minimax"}
+
+    def _read_job_json(self, job_id: str, relative_path: str) -> dict[str, Any]:
+        path = self.storage.job_dir(job_id) / relative_path
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _build_publish_hashtags(self, topic_plan: TopicPlan | None, script: Script | None) -> list[str]:
+        tags = ["#shorts", "#curiosidades", "#ciencia"]
+        weak = self._weak_hashtag_terms()
+        text = " ".join(
+            str(part or "")
+            for part in [
+                topic_plan.canonical_topic if topic_plan else "",
+                topic_plan.angle if topic_plan else "",
+                script.title if script else "",
+                " ".join(script.key_facts or []) if script else "",
+            ]
+        )
+        niche_map = {
+            "flamingo": ["#flamingos", "#animais", "#natureza", "#biologia"],
+            "flamingos": ["#flamingos", "#animais", "#natureza", "#biologia"],
+            "torre": ["#torredepisa", "#engenharia", "#historia", "#curiosidades"],
+            "pisa": ["#torredepisa", "#engenharia", "#historia", "#curiosidades"],
+        }
+        normalized_text = self._normalize_hashtag_text(text)
+        for key, mapped_tags in niche_map.items():
+            if key in normalized_text:
+                tags.extend(mapped_tags)
+        for token in word_tokens(text):
+            normalized = self._normalize_hashtag_text(token)
+            if len(normalized) < 4 or normalized in weak or normalized.isdigit():
+                continue
+            tags.append(f"#{normalized}")
+            if len(dict.fromkeys(tags)) >= 8:
+                break
+        return list(dict.fromkeys(tags))[:8]
+
+    def _weak_hashtag_terms(self) -> set[str]:
+        return {
+            "por", "que", "qual", "como", "porque", "para", "com", "uma", "uns", "umas", "tem", "têm", "fica", "ficam", "ficou", "ser", "sao", "são", "era",
+            "foram", "esta", "está", "esse", "essa", "isso", "aquele", "aquela", "de", "do", "da", "dos", "das", "a", "o", "as", "os", "e", "cor", "cores",
+            "video", "short", "shorts", "curiosidade", "curiosidades",
+        }
+
+    def _normalize_hashtag_text(self, text: str) -> str:
+        normalized = unicodedata.normalize("NFKD", text.lower())
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        return re.sub(r"[^a-z0-9]+", "", normalized)
+
+    def _publish_readiness_report(
+        self,
+        script: Script | None,
+        topic_plan: TopicPlan | None,
+        fact_pack: dict[str, Any],
+        tags: list[str],
+        checklist: dict[str, bool],
+        script_artifact: dict[str, Any] | None = None,
+        minimax_audit: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        reasons: list[str] = []
+        if not all(checklist.values()):
+            reasons.append("quality_checklist_failed")
+        script_dict = {**(self._script_to_dict(script) if script else {}), **(script_artifact or {})}
+        source_ids = script_dict.get("source_fact_ids") or script_dict.get("qa_metrics", {}).get("source_fact_ids") or []
+        if isinstance(source_ids, str):
+            source_ids = [source_ids]
+        if fact_pack.get("status") != "verified" and source_ids:
+            reasons.append("invented_source_fact_ids")
+        fact_risk = self.script_gate._fact_risk_report(script_dict) if script_dict else {"blocked": False, "claim_count": 0}  # noqa: SLF001
+        factual_topic = bool(topic_plan and re.search(r"(?:por que|porque|como|ci[eê]ncia|f[ií]sica|biologia|engenharia|hist[oó]ria|sa[uú]de|m[eé]dico|animal|animais|flamingo|torre)", f"{topic_plan.canonical_topic} {topic_plan.angle}", re.IGNORECASE))
+        if factual_topic and fact_pack.get("status") != "verified" and (fact_risk.get("claim_count", 0) > 0 or len(word_tokens(script_dict.get("full_narration", ""))) >= 45):
+            reasons.append("fact_pack_missing_for_factual_topic")
+        weak_tags = [tag for tag in tags if tag.lstrip("#") in self._weak_hashtag_terms() or len(tag.lstrip("#")) < 4]
+        if weak_tags or len(tags) < 5:
+            reasons.append("weak_hashtags")
+        ending = str(script_dict.get("ending") or "").strip()
+        narration = str(script_dict.get("full_narration") or "").strip()
+        last_sentence = re.split(r"(?<=[.!?])\s+", narration)[-1] if narration else ""
+        if len(word_tokens(ending or last_sentence)) < 6 or re.search(r"(?:que|de|da|do|para|com|e)$", (ending or last_sentence).lower().strip(" .!?")):
+            reasons.append("weak_ending")
+        if minimax_audit and minimax_audit.get("passed") is False:
+            reasons.extend(str(reason) for reason in minimax_audit.get("reasons") or ["minimax_audit_failed"])
+        if fact_pack.get("status") != "verified":
+            reasons.append("manual_review_required")
+        return {
+            "passed": not reasons,
+            "reasons": list(dict.fromkeys(reasons)),
+            "fact_pack_status": fact_pack.get("status") or "missing",
+            "hashtag_count": len(tags),
+            "weak_hashtags": weak_tags,
+            "fact_risk": fact_risk,
+            "minimax_audit": minimax_audit or {"skipped": True},
+        }
+
+    def _script_to_dict(self, script: Script) -> dict[str, Any]:
+        return {
+            "title": script.title,
+            "hook": script.hook,
+            "body_beats": script.body_beats,
+            "ending": script.ending,
+            "cta": script.cta,
+            "full_narration": script.full_narration,
+            "estimated_duration_sec": script.estimated_duration_sec,
+            "key_facts": script.key_facts,
+            "language": script.language,
+            "qa_metrics": script.qa_metrics or {},
+            "source_fact_ids": (script.qa_metrics or {}).get("source_fact_ids", []),
         }
 
     def _append_event(self, job_id: str, event_name: str, status: str, payload: dict[str, Any]) -> None:
