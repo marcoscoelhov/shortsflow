@@ -948,3 +948,31 @@ def test_trend_researcher_filters_wikipedia_candidates() -> None:
     assert researcher._is_curiosity_candidate("Flamingo") is True
     assert researcher._is_curiosity_candidate("Main_Page") is False
     assert researcher._is_curiosity_candidate("Lista de episódios") is False
+
+
+def test_google_trends_candidates_prioritize_familiar_topics(monkeypatch) -> None:
+    from app.trends import TrendResearcher
+
+    rss = """<?xml version='1.0' encoding='UTF-8'?>
+    <rss xmlns:ht='https://trends.google.com/trending/rss' version='2.0'><channel>
+      <item><title>Nahui Ollin</title><ht:approx_traffic>200K+</ht:approx_traffic></item>
+      <item><title>chuva</title><ht:approx_traffic>50K+</ht:approx_traffic></item>
+      <item><title>celular</title><ht:approx_traffic>20K+</ht:approx_traffic></item>
+    </channel></rss>"""
+
+    class FakeResponse:
+        text = rss
+        def raise_for_status(self) -> None: pass
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+        def get(self, url): return FakeResponse()
+
+    monkeypatch.setattr("app.trends.httpx.Client", FakeClient)
+    candidates = TrendResearcher()._google_trends_candidates()
+
+    assert candidates
+    assert max(candidates, key=lambda candidate: candidate.score).raw_title == "chuva"
+    assert all(candidate.source == "google_trends_br" for candidate in candidates)
