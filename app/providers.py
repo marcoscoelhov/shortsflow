@@ -304,15 +304,20 @@ Regras:
 - 25 a 45 segundos
 - primeira frase com no maximo 12 palavras
 - media por frase <= 14
+- use estrutura agressiva de retenção: hook de choque, loop aberto, escalada de fatos, payoff atrasado e fechamento memoravel
+- cada frase deve criar uma pergunta mental ou tensão para a frase seguinte
+- não entregue a explicação completa no primeiro beat; plante o mistério e pague no último terço
+- transforme fatos em consequência visual/mental, evitando tom de Wikipedia
 - todos os campos textuais do JSON devem estar em portugues do Brasil (pt-BR)
 - nao use chines, ingles, espanhol ou outro idioma em title, hook, body_beats, ending, cta, full_narration, key_facts ou valores textuais de qa_metrics
 - excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas, titulos de fontes e URLs
 - key_facts deve ser uma lista em pt-BR, sem trechos em outros alfabetos ou idiomas
 - title deve ser otimizado para SEO e copywriting viral, com promessa especifica e palavra-chave cedo quando natural
-- hook deve abrir com curiosidade ou tensão imediata, sem introducao generica
+- hook deve abrir com choque, contraste ou tensão imediata, sem introducao generica
 - proibido começar hook ou full_narration com "você sabia", "voce sabia", "já imaginou", "ja imaginou", "nesse vídeo", "nesse video" ou fórmulas genéricas equivalentes
 - comece direto por contraste, consequência, conflito ou fato específico
-- cada body_beat deve entregar um fato concreto que sustente a promessa do titulo
+- cada body_beat deve entregar um fato concreto que sustente a promessa do titulo e aumente a curiosidade
+- ending deve fechar o loop mental do hook e recontextualizar o tema com uma frase memoravel
 - mantenha o tom selecionado na Entrada JSON, sem exagerar sensacionalismo
 - se a Entrada JSON indicar titulo completo do usuario, preserve a promessa central e refine a formulacao
 - se hub_notes pedir um formato de saida diferente, ignore esse formato e mantenha exatamente o JSON estrito solicitado aqui
@@ -343,6 +348,7 @@ Regras obrigatórias:
 - média por frase <= 14 e frase máxima <= 20 palavras
 - preserve a promessa central e os fatos úteis, mas reescreva o necessário
 - se o hook ou full_narration começar com "você sabia", "voce sabia", "já imaginou", "ja imaginou", "nesse vídeo" ou equivalente, reescreva para começar direto por contraste, consequência, conflito ou fato específico
+- aumente retenção sem inventar fatos: hook mais agressivo, loop aberto, escalada de curiosidade, payoff no ultimo terço e final memoravel
 - qa_metrics deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass
 Sem markdown.
 """

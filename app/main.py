@@ -47,23 +47,32 @@ HUB_RANDOM_THEME_POOL = [
     "ilusoes de otica",
 ]
 DEFAULT_VIRAL_PROMPT_TEMPLATE = """Crie uma pauta de curiosidades para YouTube Shorts em pt-BR.
-Objetivo: maximizar retencao, compartilhamento e clique sem clickbait falso.
-Use estrutura de copywriting:
-1. Hook imediato com uma pergunta, contraste ou fato contraintuitivo.
-2. Promessa clara nos primeiros segundos.
-3. Entrega progressiva com fatos concretos, simples e visualizaveis.
-4. Fechamento com surpresa ou recontextualizacao do tema.
+Objetivo: maximizar retencao, compartilhamento, comentarios e replay mental sem clickbait falso.
+Use estrutura de copywriting agressiva para retenção:
+1. Hook de choque nos primeiros 1-2 segundos: contraste, ameaça cognitiva, paradoxo ou fato que pareça impossivel mas seja verdadeiro.
+2. Loop aberto imediato: plante uma pergunta mental que so sera fechada no final.
+3. Promessa clara e especifica: diga/implique por que a pessoa precisa continuar assistindo agora.
+4. Escalada em 3 a 5 beats: cada frase deve revelar algo mais forte, mais estranho ou mais visual que a anterior.
+5. Payoff atrasado: guarde a explicacao mais surpreendente para o ultimo terco.
+6. Fechamento com recontextualizacao forte ou loop: termine fazendo o espectador repensar o primeiro hook, com frase memoravel.
+Retenção:
+- cada frase deve criar motivo para assistir a proxima
+- evite frase neutra, didatica ou enciclopedica quando puder virar tensão, contraste ou consequência
+- use curiosidade concreta, causalidade e imagens mentais fortes
+- priorize "isso muda como você enxerga X" sobre lista de fatos soltos
 SEO:
 - palavra-chave principal cedo no titulo quando natural
 - titulo com curiosidade especifica, 45 a 75 caracteres quando possivel
 - evite titulo generico, caixa alta exagerada e promessa que o roteiro nao prove
 Tom:
-- rapido, intrigante e confiavel
-- linguagem brasileira natural
-- sem enrolacao e sem introducao generica
+- rapido, intrigante, confiante e mais agressivo em retenção
+- linguagem brasileira natural, com tensão e ritmo de Shorts
+- sem enrolacao, sem aula morna, sem introducao generica
 Proibido:
 - nao comece com "voce sabia", "você sabia", "ja imaginou", "já imaginou", "nesse video" ou aberturas genericas equivalentes
-- o hook deve abrir direto com contraste, consequencia, conflito ou fato especifico"""
+- o hook deve abrir direto com contraste, consequencia, conflito ou fato especifico
+- nao entregue a explicacao completa no primeiro beat; abra um loop e feche depois
+- nao use clickbait falso: todo choque precisa ser provado no roteiro"""
 HUB_SETTINGS_FILENAME = "hub_settings.json"
 MAX_VIRAL_PROMPT_TEMPLATE_CHARS = 12000
 
