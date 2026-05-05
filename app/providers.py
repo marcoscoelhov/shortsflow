@@ -7,11 +7,13 @@ import colorsys
 import concurrent.futures
 import json
 import math
+import re
 import shutil
 import subprocess
 import tempfile
 import time
 import wave
+import binascii
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -37,9 +39,10 @@ VISUAL_INTENTS = [
 
 
 class ProviderFailure(RuntimeError):
-    def __init__(self, provider: str, message: str) -> None:
+    def __init__(self, provider: str, message: str, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.provider = provider
+        self.details = details or {}
 
 
 class LLMProvider(Protocol):
@@ -115,15 +118,35 @@ class MockCreativeProvider:
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         subject = topic_plan["canonical_topic"]
         angle = topic_plan["angle"]
-        hook = f"O detalhe menos intuitivo de {subject} muda toda a leitura."
-        body = [
-            f"{subject.capitalize()} parece vago so ate aparecer o efeito ao redor.",
-            f"O ponto central entra em {angle} e muda a escala do tema.",
-            f"Em vez do objeto isolado, o entorno entrega a pista principal.",
-            f"Esse recorte deixa {subject} mais concreto para quem assiste.",
-            f"Assim cada cena sustenta a ideia sem inventar elemento aleatorio.",
-        ]
-        ending = f"Por isso {subject} deixa de ser so um nome e vira um fenomeno legivel."
+        fact_pack = topic_plan.get("fact_pack") if isinstance(topic_plan.get("fact_pack"), dict) else {}
+        verified_facts = fact_pack.get("facts") or [] if fact_pack.get("status") == "verified" else []
+        grounded_claims = [str(fact.get("claim") or "").strip() for fact in verified_facts if str(fact.get("claim") or "").strip()]
+        source_fact_ids = [str(fact.get("fact_id")) for fact in verified_facts if fact.get("fact_id")][:2]
+        hook = f"{subject.capitalize()} escondem um detalhe biologico quase absurdo."
+        if grounded_claims:
+            body = [
+                grounded_claims[0],
+                grounded_claims[1] if len(grounded_claims) > 1 else f"Esse recorte explica {angle} sem forcar precisao falsa.",
+                grounded_claims[2] if len(grounded_claims) > 2 else f"Isso deixa {subject} mais concreto para quem assiste.",
+                f"Quando esses fatos entram na mesma sequencia, {subject} parece ainda mais estranho.",
+                f"Esse encadeamento sustenta a promessa sem inventar detalhe tecnico extra.",
+            ]
+            key_facts = grounded_claims[:3]
+        else:
+            body = [
+                f"{subject.capitalize()} parece vago so ate aparecer o efeito ao redor.",
+                f"O ponto central entra em {angle} e muda a escala do tema.",
+                f"Em vez do objeto isolado, o entorno entrega a pista principal.",
+                f"Esse recorte deixa {subject} mais concreto para quem assiste.",
+                f"Assim cada cena sustenta a ideia sem inventar elemento aleatorio.",
+            ]
+            key_facts = [
+                f"{subject.capitalize()} reage ao ambiente antes da maioria notar.",
+                f"O tema fica mais claro quando se observa o contexto e a funcao.",
+                f"O comportamento do sujeito economiza energia enquanto reduz risco.",
+            ]
+            source_fact_ids = []
+        ending = f"No fim, {subject} deixa de ser so um nome e vira um fenomeno legivel."
         narration_parts = [hook, *body, ending]
         full_narration = " ".join(narration_parts)
         token_count = len(tokenize(full_narration))
@@ -149,11 +172,8 @@ class MockCreativeProvider:
             "cta": None,
             "full_narration": full_narration,
             "estimated_duration_sec": estimated_duration_sec,
-            "key_facts": [
-                f"{subject.capitalize()} reage ao ambiente antes da maioria notar.",
-                f"O tema fica mais claro quando se observa o contexto e a funcao.",
-                f"O comportamento do sujeito economiza energia enquanto reduz risco.",
-            ],
+            "key_facts": key_facts,
+            "source_fact_ids": source_fact_ids,
             "token_count": token_count,
             "language": "pt-BR",
             "qa_metrics": qa_metrics,
@@ -162,6 +182,9 @@ class MockCreativeProvider:
 
     def repair_script(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any]:
         repaired = dict(script)
+        fact_pack = topic_plan.get("fact_pack") if isinstance(topic_plan.get("fact_pack"), dict) else {}
+        verified_facts = fact_pack.get("facts") or [] if fact_pack.get("status") == "verified" else []
+        grounded_claims = [str(fact.get("claim") or "").strip() for fact in verified_facts if str(fact.get("claim") or "").strip()]
         narration = str(repaired.get("full_narration") or "")
         replacements = {
             "</prosody": "",
@@ -176,6 +199,25 @@ class MockCreativeProvider:
         for source, target in replacements.items():
             narration = narration.replace(source, target)
         narration = " ".join(narration.split())
+        if "fact_pack_source_ids_missing" in gate_reasons or "high_risk_claims_need_fact_pack_grounding" in gate_reasons:
+            lines = [f"{repaired.get('hook') or repaired.get('title') or 'O tema fica mais claro quando voce olha o mecanismo.'}".strip()]
+            lines.extend(claim for claim in grounded_claims[:3] if claim)
+            lines.append(f"No fim, {topic_plan.get('canonical_topic') or 'o tema'} faz sentido sem exagero.")
+            narration = " ".join(line.rstrip(".!?") + "." for line in lines if line).strip()
+            repaired["body_beats"] = grounded_claims[:3]
+            repaired["key_facts"] = grounded_claims[:3]
+            repaired["source_fact_ids"] = [str(fact.get("fact_id")) for fact in verified_facts if fact.get("fact_id")][: max(2, min(3, len(verified_facts)))]
+        if "avg_sentence_too_long" in gate_reasons or "sentence_too_long" in gate_reasons:
+            shortened_sentences = []
+            for sentence in sentence_split(narration):
+                words = word_tokens(sentence)
+                if len(words) <= 14:
+                    shortened_sentences.append(" ".join(words).strip())
+                    continue
+                midpoint = max(6, min(12, len(words) // 2))
+                shortened_sentences.append(" ".join(words[:midpoint]).strip())
+                shortened_sentences.append(" ".join(words[midpoint:]).strip())
+            narration = " ".join(f"{sentence.rstrip('.!?')}." for sentence in shortened_sentences if sentence).strip()
         repaired["full_narration"] = narration
         repaired["language"] = "pt-BR"
         repaired["estimated_duration_sec"] = round(max(25.0, min(42.0, len(word_tokens(narration)) / 2.55)), 2)
@@ -295,8 +337,74 @@ canonical_topic, angle, hook_promise, title_candidates (3 a 5), entities, search
 Sem markdown.
 """
         payload = self._json_completion(prompt)
+        if not isinstance(payload, dict):
+            raise ProviderFailure("minimax_text", "topic planner returned non-object json")
+        payload = self._normalize_topic_payload(payload, seed_theme)
         payload["quality_metrics"] = {**payload.get("quality_metrics", {}), "source_provider": "minimax"}
         return payload
+
+    def _normalize_topic_payload(self, payload: dict[str, Any], seed_theme: str) -> dict[str, Any]:
+        aliases = {
+            "canonical_topic": [
+                "canonical_topic",
+                "tema_canonico",
+                "tópico_canônico",
+                "topico_canonico",
+                "tema_principal",
+                "topico_principal",
+                "topic",
+                "tema",
+            ],
+            "angle": ["angle", "angulo", "ângulo", "recorte", "abordagem"],
+            "hook_promise": ["hook_promise", "promessa_hook", "promessa_do_hook", "gancho", "hook"],
+            "title_candidates": ["title_candidates", "titulos", "títulos", "candidatos_titulo", "candidatos_de_titulo"],
+            "entities": ["entities", "entidades", "elementos", "assuntos"],
+            "search_terms": ["search_terms", "termos_busca", "termos_de_busca", "palavras_chave", "keywords"],
+            "quality_metrics": ["quality_metrics", "metricas_qualidade", "métricas_qualidade", "metricas"],
+        }
+        normalized: dict[str, Any] = {}
+        for target, names in aliases.items():
+            for name in names:
+                if name in payload and payload[name] not in (None, "", []):
+                    normalized[target] = payload[name]
+                    break
+
+        canonical_topic = str(normalized.get("canonical_topic") or seed_theme).strip()
+        angle = str(normalized.get("angle") or f"o detalhe mais contraintuitivo de {canonical_topic}").strip()
+        hook_promise = str(normalized.get("hook_promise") or f"por que {canonical_topic} muda quando voce entende o mecanismo").strip()
+
+        title_candidates = normalized.get("title_candidates")
+        if isinstance(title_candidates, str):
+            title_candidates = [title_candidates]
+        if not isinstance(title_candidates, list) or not title_candidates:
+            title_candidates = [f"{canonical_topic.capitalize()}: o detalhe que quase ninguem percebe"]
+
+        entities = normalized.get("entities")
+        if isinstance(entities, str):
+            entities = [entities]
+        if not isinstance(entities, list) or not entities:
+            entities = [canonical_topic]
+
+        search_terms = normalized.get("search_terms")
+        if isinstance(search_terms, str):
+            search_terms = [search_terms]
+        if not isinstance(search_terms, list) or not search_terms:
+            search_terms = [canonical_topic, f"{canonical_topic} curiosidades", f"{canonical_topic} explicacao"]
+
+        quality_metrics = normalized.get("quality_metrics")
+        if not isinstance(quality_metrics, dict):
+            quality_metrics = {}
+
+        return {
+            **payload,
+            "canonical_topic": canonical_topic,
+            "angle": angle,
+            "hook_promise": hook_promise,
+            "title_candidates": [str(title).strip() for title in title_candidates if str(title).strip()][:5],
+            "entities": [str(entity).strip() for entity in entities if str(entity).strip()],
+            "search_terms": [str(term).strip() for term in search_terms if str(term).strip()],
+            "quality_metrics": quality_metrics,
+        }
 
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         prompt = f"""
@@ -504,6 +612,7 @@ class ResilientCreativeProvider:
         self.registry = LLMProviderRegistry()
         self.primary = self.registry.primary_provider()
         self.fallback = self.registry.fallback_provider()
+        self.strict_minimax_validation = self.settings.strict_minimax_validation
 
     def plan_topic(
         self,
@@ -518,21 +627,42 @@ class ResilientCreativeProvider:
             try:
                 return self.primary.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
             except ProviderFailure as exc:
+                if self.strict_minimax_validation:
+                    raise
                 payload = self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
                 payload["quality_metrics"]["fallback_reason"] = str(exc)
                 payload["quality_metrics"]["fallback_used"] = True
                 return payload
+        if self.strict_minimax_validation:
+            raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
         return self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
 
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         if self.primary:
             try:
-                return self.primary.generate_script(topic_plan)
+                return self._run_primary_with_timeout(
+                    lambda: self.primary.generate_script(topic_plan),
+                    timeout_sec=self.settings.minimax_script_timeout_sec,
+                )
+            except concurrent.futures.TimeoutError as exc:
+                if self.strict_minimax_validation:
+                    raise ProviderFailure("minimax_text", f"script generation timed out after {self.settings.minimax_script_timeout_sec}s") from exc
+                payload = self.fallback.generate_script(topic_plan)
+                payload["qa_metrics"]["fallback_reason"] = (
+                    f"minimax_text script generator timed out after {self.settings.minimax_script_timeout_sec}s"
+                )
+                payload["qa_metrics"]["fallback_used"] = True
+                payload["qa_metrics"]["fallback_stage"] = "script_generation_timeout"
+                return payload
             except ProviderFailure as exc:
+                if self.strict_minimax_validation:
+                    raise
                 payload = self.fallback.generate_script(topic_plan)
                 payload["qa_metrics"]["fallback_reason"] = str(exc)
                 payload["qa_metrics"]["fallback_used"] = True
                 return payload
+        if self.strict_minimax_validation:
+            raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
         return self.fallback.generate_script(topic_plan)
 
     def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -540,20 +670,26 @@ class ResilientCreativeProvider:
             try:
                 return self.primary.audit_publish_package(payload)
             except ProviderFailure as exc:
+                if self.strict_minimax_validation:
+                    raise
                 audit = self.fallback.audit_publish_package(payload)
                 audit["fallback_reason"] = str(exc)
                 audit["fallback_used"] = True
                 return audit
+        if self.strict_minimax_validation:
+            raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
         return self.fallback.audit_publish_package(payload)
 
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         if self.primary:
-            executor: concurrent.futures.ThreadPoolExecutor | None = None
             try:
-                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                future = executor.submit(self.primary.plan_scenes, script, target_scene_count)
-                return future.result(timeout=self.settings.minimax_scene_plan_timeout_sec)
+                return self._run_primary_with_timeout(
+                    lambda: self.primary.plan_scenes(script, target_scene_count),
+                    timeout_sec=self.settings.minimax_scene_plan_timeout_sec,
+                )
             except concurrent.futures.TimeoutError:
+                if self.strict_minimax_validation:
+                    raise ProviderFailure("minimax_text", f"scene planner timed out after {self.settings.minimax_scene_plan_timeout_sec}s")
                 scenes = self.fallback.plan_scenes(script, target_scene_count)
                 for scene in scenes:
                     scene["provider_fallback_reason"] = (
@@ -561,35 +697,67 @@ class ResilientCreativeProvider:
                     )
                 return scenes
             except ProviderFailure as exc:
+                if self.strict_minimax_validation:
+                    raise
                 scenes = self.fallback.plan_scenes(script, target_scene_count)
                 for scene in scenes:
                     scene["provider_fallback_reason"] = str(exc)
                 return scenes
-            finally:
-                if executor is not None:
-                    executor.shutdown(wait=False, cancel_futures=True)
+        if self.strict_minimax_validation:
+            raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
         return self.fallback.plan_scenes(script, target_scene_count)
 
     def repair_script(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any]:
         if self.primary:
             try:
-                return self.primary.repair_script(script, gate_reasons, topic_plan)
+                return self._run_primary_with_timeout(
+                    lambda: self.primary.repair_script(script, gate_reasons, topic_plan),
+                    timeout_sec=self.settings.minimax_script_timeout_sec,
+                )
+            except concurrent.futures.TimeoutError as exc:
+                if self.strict_minimax_validation:
+                    raise ProviderFailure("minimax_text", f"script repair timed out after {self.settings.minimax_script_timeout_sec}s") from exc
+                if self.settings.llm_enable_fallback and self.fallback:
+                    payload = self.fallback.repair_script(script, [*gate_reasons, str(exc)], topic_plan)
+                    payload.setdefault("qa_metrics", {})["fallback_used"] = True
+                    payload["qa_metrics"]["fallback_reason"] = (
+                        f"minimax_text script repair timed out after {self.settings.minimax_script_timeout_sec}s"
+                    )
+                    payload["qa_metrics"]["fallback_stage"] = "script_repair_timeout"
+                    return payload
+                raise
             except ProviderFailure as exc:
+                if self.strict_minimax_validation:
+                    raise
                 if self.settings.llm_enable_fallback and self.fallback:
                     payload = self.fallback.repair_script(script, [*gate_reasons, str(exc)], topic_plan)
                     payload.setdefault("qa_metrics", {})["fallback_used"] = True
                     payload["qa_metrics"]["fallback_reason"] = str(exc)
                     return payload
                 raise
+        if self.strict_minimax_validation:
+            raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
         return self.fallback.repair_script(script, gate_reasons, topic_plan)
 
     def repair_script_with_fallback(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any] | None:
+        if self.strict_minimax_validation:
+            return None
         if not self.settings.llm_enable_fallback or not self.fallback:
             return None
         payload = self.fallback.repair_script(script, gate_reasons, topic_plan)
         payload.setdefault("qa_metrics", {})["fallback_used"] = True
         payload["qa_metrics"]["fallback_stage"] = "script_quality_gate"
         return payload
+
+    def _run_primary_with_timeout(self, fn: Callable[[], Any], timeout_sec: float) -> Any:
+        executor: concurrent.futures.ThreadPoolExecutor | None = None
+        try:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(fn)
+            return future.result(timeout=timeout_sec)
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=False, cancel_futures=True)
 
 
 class LLMProviderRegistry:
@@ -1129,6 +1297,322 @@ class ResilientStockProvider:
         return []
 
 
+class MockBackgroundMusicProvider:
+    provider_name = "mock_music"
+
+    def select_track(self, topic_plan: dict[str, Any], script: dict[str, Any], output_path: Path, target_duration_ms: int) -> dict[str, Any]:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        mood = self._infer_mood(topic_plan, script)
+        query = self._query_hint(topic_plan, script, mood)
+        self._write_mock_music(output_path, target_duration_ms, mood, query)
+        return {
+            "provider": self.provider_name,
+            "query": query,
+            "mood": mood,
+            "source_url": None,
+            "attribution": "Mock background bed generated locally for tests.",
+            "license_note": "local_mock_background_music",
+            "audio_uri": output_path.resolve().as_uri(),
+            "duration_ms": target_duration_ms,
+            "provider_metadata": {
+                "fallback_used": True,
+                "selection_mode": "generated",
+            },
+        }
+
+    def _infer_mood(self, topic_plan: dict[str, Any], script: dict[str, Any]) -> str:
+        surface = " ".join(
+            [
+                str(topic_plan.get("canonical_topic") or ""),
+                str(topic_plan.get("angle") or ""),
+                str(script.get("title") or ""),
+                str(script.get("hook") or ""),
+            ]
+        ).lower()
+        if any(term in surface for term in ["mist", "crime", "suspense", "mistério", "misterio", "segredo", "sombr"]):
+            return "suspense"
+        if any(term in surface for term in ["espaço", "espaco", "universo", "buraco negro", "tecnologia", "cafeína", "cafeina"]):
+            return "technology"
+        if any(term in surface for term in ["animal", "gato", "polvo", "oceano", "natureza", "flamingo"]):
+            return "documentary"
+        return "cinematic"
+
+    def _query_hint(self, topic_plan: dict[str, Any], script: dict[str, Any], mood: str) -> str:
+        topic = str(topic_plan.get("canonical_topic") or script.get("title") or "curiosidades").strip()
+        return f"{topic} {mood}".strip()
+
+    def _write_mock_music(self, output_path: Path, target_duration_ms: int, mood: str, seed_text: str) -> None:
+        sample_rate = 24_000
+        frame_count = max(1, round(sample_rate * target_duration_ms / 1000))
+        base_freq = {
+            "suspense": 92.5,
+            "technology": 110.0,
+            "documentary": 146.8,
+            "cinematic": 130.8,
+        }.get(mood, 123.5)
+        phase_offset = (sum(ord(char) for char in seed_text) % 360) * math.pi / 180
+        with wave.open(str(output_path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            frames = bytearray()
+            for idx in range(frame_count):
+                t = idx / sample_rate
+                bed = (
+                    0.55 * math.sin(2 * math.pi * base_freq * t + phase_offset)
+                    + 0.28 * math.sin(2 * math.pi * (base_freq * 1.5) * t)
+                    + 0.17 * math.sin(2 * math.pi * (base_freq * 2.0) * t + phase_offset / 2)
+                )
+                pulse = 0.65 + 0.35 * math.sin(2 * math.pi * 0.22 * t)
+                fade_in = min(1.0, t / 1.5)
+                fade_out = min(1.0, max(0.0, (frame_count / sample_rate - t) / 1.2))
+                envelope = pulse * fade_in * fade_out
+                sample = int(1400 * envelope * bed)
+                frames.extend(sample.to_bytes(2, "little", signed=True))
+            wav_file.writeframes(frames)
+
+
+class MiniMaxBackgroundMusicProvider:
+    provider_name = "minimax_music"
+
+    def __init__(self) -> None:
+        settings = get_settings()
+        api_key = settings.resolved_minimax_music_api_key
+        if not api_key:
+            raise ProviderFailure("minimax_music", "missing minimax music api key")
+        self.settings = settings
+        self.api_key = api_key
+        self.url = f"{settings.minimax_music_base_url.rstrip('/')}/music_generation"
+        self.timeout = httpx.Timeout(settings.minimax_music_timeout_sec, connect=15.0)
+        self.headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+
+    def select_track(self, topic_plan: dict[str, Any], script: dict[str, Any], output_path: Path, target_duration_ms: int) -> dict[str, Any]:
+        mood = self._infer_mood(topic_plan, script)
+        query = self._query_hint(topic_plan, script, mood)
+        prompt = self._build_prompt(topic_plan, script, mood, target_duration_ms)
+        payload = {
+            "model": "music-2.6",
+            "prompt": prompt,
+            "lyrics": "",
+            "is_instrumental": True,
+            "lyrics_optimizer": False,
+            "output_format": "url",
+            "audio_setting": {
+                "sample_rate": 44100,
+                "bitrate": 256000,
+                "format": "mp3",
+            },
+        }
+        debug_payload = {
+            "provider": self.provider_name,
+            "url": self.url,
+            "query": query,
+            "mood": mood,
+            "target_duration_ms": target_duration_ms,
+            "timeout_sec": self.settings.minimax_music_timeout_sec,
+            "request_payload": payload,
+        }
+        try:
+            response = httpx.post(self.url, json=payload, headers=self.headers, timeout=self.timeout)
+            response.raise_for_status()
+            body = response.json()
+        except httpx.TimeoutException as exc:
+            raise ProviderFailure(
+                "minimax_music",
+                f"minimax music request timed out after {self.settings.minimax_music_timeout_sec}s",
+                details={**debug_payload, "error_type": type(exc).__name__},
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            response_text = exc.response.text[:500] if exc.response is not None else None
+            raise ProviderFailure(
+                "minimax_music",
+                f"minimax music http {exc.response.status_code}: {response_text or exc}",
+                details={
+                    **debug_payload,
+                    "error_type": type(exc).__name__,
+                    "status_code": exc.response.status_code if exc.response is not None else None,
+                    "response_text": response_text,
+                },
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderFailure(
+                "minimax_music",
+                str(exc),
+                details={**debug_payload, "error_type": type(exc).__name__},
+            ) from exc
+        data = body.get("data", {}) if isinstance(body.get("data"), dict) else {}
+        audio_payload = str(data.get("audio") or "")
+        if not audio_payload:
+            raise ProviderFailure(
+                "minimax_music",
+                "missing audio payload from minimax music generation",
+                details={
+                    **debug_payload,
+                    "response_trace_id": body.get("trace_id"),
+                    "provider_status": data.get("status"),
+                    "response_keys": sorted(body.keys()),
+                },
+            )
+        source_url = audio_payload if self._looks_like_url(audio_payload) else None
+        if source_url:
+            self._download_audio_to_wav(source_url, output_path)
+        else:
+            self._decode_audio_to_wav(audio_payload, output_path)
+        extra_info = body.get("extra_info", {}) if isinstance(body.get("extra_info"), dict) else {}
+        return {
+            "provider": self.provider_name,
+            "query": query,
+            "mood": mood,
+            "source_url": source_url,
+            "attribution": "AI-generated instrumental background music via MiniMax.",
+            "license_note": "Generated with MiniMax music_generation API.",
+            "audio_uri": output_path.resolve().as_uri(),
+            "duration_ms": target_duration_ms,
+            "provider_metadata": {
+                "selection_mode": "generated",
+                "model": "music-2.6",
+                "instrumental": True,
+                "output_format": "url",
+                "prompt": prompt,
+                "trace_id": body.get("trace_id"),
+                "provider_status": data.get("status"),
+                "requested_duration_ms": target_duration_ms,
+                "returned_duration_ms": extra_info.get("music_duration"),
+                "returned_sample_rate": extra_info.get("music_sample_rate"),
+                "returned_channels": extra_info.get("music_channel"),
+                "returned_bitrate": extra_info.get("bitrate"),
+            },
+        }
+
+    def _infer_mood(self, topic_plan: dict[str, Any], script: dict[str, Any]) -> str:
+        surface = " ".join(
+            [
+                str(topic_plan.get("canonical_topic") or ""),
+                str(topic_plan.get("angle") or ""),
+                str(script.get("title") or ""),
+                str(script.get("hook") or ""),
+            ]
+        ).lower()
+        if any(term in surface for term in ["mistério", "misterio", "segredo", "sombra", "buraco negro", "crime"]):
+            return "suspense"
+        if any(term in surface for term in ["cafeína", "cafeina", "neuro", "tecnologia", "universo", "espaço", "espaco"]):
+            return "technology"
+        if any(term in surface for term in ["polvo", "gato", "animal", "oceano", "natureza", "história", "historia"]):
+            return "documentary"
+        return "cinematic"
+
+    def _query_hint(self, topic_plan: dict[str, Any], script: dict[str, Any], mood: str) -> str:
+        topic = str(topic_plan.get("canonical_topic") or "").strip()
+        angle = str(topic_plan.get("angle") or "").strip()
+        title = str(script.get("title") or "").strip()
+        parts = [topic, angle, title, mood]
+        return " ".join(part for part in parts if part).strip()
+
+    def _build_prompt(self, topic_plan: dict[str, Any], script: dict[str, Any], mood: str, target_duration_ms: int) -> str:
+        duration_sec = max(8, round(target_duration_ms / 1000))
+        topic = str(topic_plan.get("canonical_topic") or "").strip()
+        angle = str(topic_plan.get("angle") or "").strip()
+        title = str(script.get("title") or "").strip()
+        hook = str(script.get("hook") or "").strip()
+        mood_map = {
+            "suspense": "tense documentary underscore, restrained, mysterious, no jump scares, no vocals",
+            "technology": "modern science documentary underscore, pulsing but controlled, curious, precise, no vocals",
+            "documentary": "curiosity-driven documentary underscore, warm and intelligent, organic percussion, no vocals",
+            "cinematic": "cinematic short-form background score, engaging and polished, no vocals",
+        }
+        brief_context = ". ".join(part for part in [title, hook] if part)
+        if len(brief_context) > 120:
+            brief_context = brief_context[:117].rstrip(" ,.;:") + "..."
+        prompt = (
+            f"Instrumental only. {mood_map.get(mood, mood_map['cinematic'])}. "
+            f"Designed as background music for a vertical educational short about {topic or 'a curiosity topic'}. "
+            f"Angle: {angle or 'counterintuitive reveal'}. "
+            f"Target duration exactly {duration_sec} seconds, matching the narration length as closely as possible. "
+            "End naturally at that runtime, no long tail, intro, or outro. "
+            "Fast hook in the first 2 seconds, steady mid-section, clean ending for narration ducking. "
+            "No vocals, spoken words, lyrics, or stingers that overpower voice-over. "
+            "Avoid pop-song structure; this should feel like underscore, not a standalone single. "
+            f"Video context: {brief_context or topic or 'scientific curiosity short'}"
+        )
+        return " ".join(prompt.split())
+
+    def _looks_like_url(self, audio_payload: str) -> bool:
+        return audio_payload.startswith("http://") or audio_payload.startswith("https://")
+
+    def _download_audio_to_wav(self, audio_url: str, output_path: Path) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = output_path.with_suffix(".minimax.mp3")
+        try:
+            response = httpx.get(audio_url, timeout=self.timeout, follow_redirects=True)
+            response.raise_for_status()
+            temp_path.write_bytes(response.content)
+            self._convert_audio_file_to_wav(temp_path, output_path)
+        except httpx.TimeoutException as exc:
+            raise ProviderFailure(
+                "minimax_music",
+                f"minimax music download timed out after {self.settings.minimax_music_timeout_sec}s",
+            ) from exc
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    def _decode_audio_to_wav(self, audio_hex: str, output_path: Path) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = output_path.with_suffix(".minimax.mp3")
+        try:
+            temp_path.write_bytes(binascii.unhexlify(audio_hex))
+            self._convert_audio_file_to_wav(temp_path, output_path)
+        except (binascii.Error, ValueError) as exc:
+            raise ProviderFailure("minimax_music", f"invalid audio payload from minimax: {exc}") from exc
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    def _convert_audio_file_to_wav(self, input_path: Path, output_path: Path) -> None:
+        subprocess.run(
+            [
+                imageio_ffmpeg.get_ffmpeg_exe(),
+                "-y",
+                "-i",
+                str(input_path),
+                "-ar",
+                "24000",
+                "-ac",
+                "1",
+                str(output_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+
+class ResilientMusicProvider:
+    def __init__(self) -> None:
+        settings = get_settings()
+        self.providers: list[Any] = []
+        if not settings.use_mock_providers and settings.resolved_minimax_music_api_key:
+            self.providers.append(MiniMaxBackgroundMusicProvider())
+        if not settings.strict_minimax_validation:
+            self.providers.append(MockBackgroundMusicProvider())
+
+    def select_track(self, topic_plan: dict[str, Any], script: dict[str, Any], output_path: Path, target_duration_ms: int) -> dict[str, Any]:
+        last_error = "music selection failed"
+        last_details: dict[str, Any] = {}
+        for provider in self.providers:
+            try:
+                return provider.select_track(topic_plan, script, output_path, target_duration_ms)
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+                if isinstance(exc, ProviderFailure):
+                    last_details = dict(exc.details or {})
+        if get_settings().strict_minimax_validation:
+            raise ProviderFailure(
+                "background_music",
+                f"strict minimax validation requires minimax music success: {last_error}",
+                details=last_details,
+            )
+        raise ProviderFailure("background_music", last_error, details=last_details)
+
+
 class LocalSpeechFallbackProvider:
     voice = "pt-BR-FranciscaNeural"
 
@@ -1422,5 +1906,6 @@ class ProviderRegistry:
         self.image = MockImageProvider() if settings.use_mock_providers else MinimaxImageProvider()
         self.stock = ResilientStockProvider()
         self.tts = LocalSpeechFallbackProvider() if settings.use_mock_providers else EdgeTTSProvider()
+        self.music = ResilientMusicProvider()
         self.semantic = SemanticVerifier()
         self.local_image = LocalSemanticImageProvider()

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import audioop
+import json
 import math
 import os
 import shutil
+import threading
 import time
 import wave
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 
 os.environ.setdefault("YTS_DATA_DIR", str(Path("data-test").resolve()))
@@ -19,15 +24,15 @@ os.environ.setdefault("YTS_USE_MOCK_PROVIDERS", "true")
 import app.main as main_module  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app, artifact_url  # noqa: E402
-from app.models import Job, RenderOutput, SceneAsset, SubtitleTrack, TopicRegistry, TopicRequest  # noqa: E402
-from app.orchestrator import normalize_script_metrics, orchestrator  # noqa: E402
-from app.providers import LLMProviderRegistry, LocalSpeechFallbackProvider, MinimaxCreativeProvider, MinimaxImageProvider, MockCreativeProvider  # noqa: E402
+from app.models import BackgroundMusicAsset, Job, NarrationAsset, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest  # noqa: E402
+from app.orchestrator import JobOrchestrator, RecoverableStepError, StepDefinition, normalize_script_metrics, orchestrator  # noqa: E402
+from app.providers import LLMProviderRegistry, LocalSpeechFallbackProvider, MiniMaxBackgroundMusicProvider, MinimaxCreativeProvider, MinimaxImageProvider, MockCreativeProvider, ProviderFailure, ResilientCreativeProvider, ResilientMusicProvider  # noqa: E402
 from app.quality.asset_gate import AssetGate  # noqa: E402
 from app.quality.render_gate import RenderGate  # noqa: E402
 from app.quality.scene_gate import ScenePlanGate  # noqa: E402
 from app.quality.script_gate import ScriptQualityGate  # noqa: E402
 from app.quality.subtitle_gate import SubtitleGate  # noqa: E402
-from app.utils import parse_srt, split_caption_chunks, wrap_caption  # noqa: E402
+from app.utils import parse_srt, split_caption_chunks, utcnow, word_tokens, wrap_caption  # noqa: E402
 
 
 def wait_for_status(job_id: str, expected: str, timeout: float = 90.0) -> None:
@@ -43,6 +48,19 @@ def wait_for_status(job_id: str, expected: str, timeout: float = 90.0) -> None:
     raise AssertionError(f"job {job_id} did not reach {expected}")
 
 
+def wait_for_any_status(job_id: str, expected: set[str], timeout: float = 90.0) -> str:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with SessionLocal() as session:
+            job = session.get(Job, job_id)
+            if job and job.status in expected:
+                return job.status
+            if job and job.status == "failed":
+                raise AssertionError(job.failure_reason)
+        time.sleep(0.5)
+    raise AssertionError(f"job {job_id} did not reach any of {sorted(expected)}")
+
+
 def setup_module() -> None:
     shutil.rmtree(Path(os.environ["YTS_DATA_DIR"]), ignore_errors=True)
     Path(os.environ["YTS_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
@@ -54,7 +72,7 @@ def teardown_module() -> None:
     orchestrator.stop_worker()
 
 
-def test_full_pipeline_reaches_waiting_review() -> None:
+def test_full_pipeline_reaches_monetization_review() -> None:
     client = TestClient(app)
     response = client.post(
         "/jobs",
@@ -63,18 +81,27 @@ def test_full_pipeline_reaches_waiting_review() -> None:
     )
     assert response.status_code == 303
     job_id = response.headers["location"].split("/")[-1]
-    wait_for_status(job_id, "waiting_review")
+    wait_for_status(job_id, "monetization_review")
     with SessionLocal() as session:
         job = session.get(Job, job_id)
         render = session.query(RenderOutput).filter_by(job_id=job_id).one()
         subtitles = session.query(SubtitleTrack).filter_by(job_id=job_id).one()
+        background_music = session.query(BackgroundMusicAsset).filter_by(job_id=job_id).one()
         selected_assets = session.query(SceneAsset).filter_by(job_id=job_id, selected=True).all()
         assert render.resolution == "1080x1920"
         assert 25_000 <= render.duration_ms <= 45_000
         assert subtitles.coverage_ratio >= 0.99
+        assert background_music.gain_db == -15.0
+        assert Path(background_music.audio_uri.removeprefix("file://")).exists()
+        assert Path(background_music.mixed_audio_uri.removeprefix("file://")).exists()
         assert len(selected_assets) >= 5
         assert job and job.quality_summary["render"]["render_gate_pass"] is True
+        assert job.quality_summary["background_music"]["enabled"] is True
+        assert job.quality_summary["monetization"]["final_status"] == "monetization_review"
         assert job.artifact_index["publish_package"] == "publish_package.json"
+        assert job.artifact_index["monetization_report"] == "monetization_report.json"
+        assert job.artifact_index["background_music"] == "audio/background_source.wav"
+        assert job.artifact_index["mixed_audio"] == "audio/mixed.wav"
     detail = client.get(f"/jobs/{job_id}")
     assert detail.status_code == 200
     assert "Render" in detail.text
@@ -139,6 +166,40 @@ def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: 
     reset = client.post("/hub/prompt", data={"action": "reset"}, follow_redirects=False)
     assert reset.status_code == 303
     assert main_module._viral_prompt_template() == main_module.DEFAULT_VIRAL_PROMPT_TEMPLATE
+
+
+def test_create_job_rejects_unsupported_niche() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/jobs",
+        data={"seed_theme": "polvos", "niche_id": "esportes", "target_duration_sec": 35},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert any("unsupported niche_id" in item["msg"] for item in detail)
+
+
+def test_orchestrator_create_job_rejects_unsupported_niche() -> None:
+    try:
+        orchestrator.create_job(
+            {
+                "seed_theme": "polvos",
+                "niche_id": "esportes",
+                "language": "pt-BR",
+                "target_duration_sec": 35,
+                "tone": "intrigante_direto",
+                "cta_style": "none",
+                "notes": None,
+                "requested_angle": None,
+            }
+        )
+    except ValidationError as exc:
+        assert "unsupported niche_id" in str(exc)
+    else:
+        raise AssertionError("expected ValidationError")
 
 
 def test_minimax_script_prompt_requires_pt_br_for_all_text_fields(monkeypatch) -> None:
@@ -379,6 +440,168 @@ def test_script_metrics_normalize_zero_to_ten_provider_scores() -> None:
     assert metrics["avg_words_per_sentence"] == 12.5
 
 
+def test_resilient_creative_provider_repair_script_falls_back_on_timeout() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(minimax_script_timeout_sec=0.01, llm_enable_fallback=True)
+    provider.strict_minimax_validation = False
+
+    class SlowPrimary:
+        def repair_script(self, script, gate_reasons, topic_plan):
+            time.sleep(0.05)
+            return {"title": "nao deveria retornar"}
+
+    class Fallback:
+        def repair_script(self, script, gate_reasons, topic_plan):
+            return {
+                "title": "Roteiro conservador",
+                "hook": "Polvos mudam de cor para confundir ameaças.",
+                "body_beats": ["Eles usam camuflagem e tinta como defesa."],
+                "ending": "Isso explica por que parecem alienígenas do mar.",
+                "cta": None,
+                "full_narration": "Polvos mudam de cor para confundir ameaças. Eles usam camuflagem e tinta como defesa. Isso explica por que parecem alienígenas do mar.",
+                "estimated_duration_sec": 28,
+                "key_facts": ["Polvos usam camuflagem e tinta como defesa."],
+                "language": "pt-BR",
+                "qa_metrics": {},
+            }
+
+    provider.primary = SlowPrimary()
+    provider.fallback = Fallback()
+
+    repaired = provider.repair_script({"title": "original"}, ["factual_risk_requires_conservative_rewrite"], {"canonical_topic": "polvos"})
+
+    assert repaired["title"] == "Roteiro conservador"
+    assert repaired["qa_metrics"]["fallback_used"] is True
+    assert repaired["qa_metrics"]["fallback_stage"] == "script_repair_timeout"
+    assert "timed out after 0.01s" in repaired["qa_metrics"]["fallback_reason"]
+
+
+def test_resilient_creative_provider_disables_repair_fallback_in_strict_minimax_mode() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(minimax_script_timeout_sec=0.01, llm_enable_fallback=True, strict_minimax_validation=True)
+    provider.strict_minimax_validation = True
+    provider.primary = None
+    provider.fallback = MockCreativeProvider()
+
+    assert provider.repair_script_with_fallback({"title": "x"}, ["fact_pack_source_ids_missing"], {"canonical_topic": "polvos"}) is None
+
+
+def test_resilient_music_provider_requires_minimax_success_in_strict_mode(monkeypatch) -> None:
+    settings = SimpleNamespace(use_mock_providers=False, resolved_minimax_music_api_key="music-key", strict_minimax_validation=True)
+
+    class FailingMusicProvider:
+        def select_track(self, *args, **kwargs):
+            raise RuntimeError("minimax music unavailable")
+
+    monkeypatch.setattr("app.providers.get_settings", lambda: settings)
+    monkeypatch.setattr("app.providers.MiniMaxBackgroundMusicProvider", lambda: FailingMusicProvider())
+
+    provider = ResilientMusicProvider()
+
+    try:
+        provider.select_track({}, {}, Path("/tmp/out.wav"), 30_000)
+    except ProviderFailure as exc:
+        assert "strict minimax validation requires minimax music success" in str(exc)
+    else:
+        raise AssertionError("expected ProviderFailure")
+
+
+def test_mock_generate_script_grounds_source_fact_ids_when_fact_pack_is_verified() -> None:
+    provider = MockCreativeProvider()
+
+    script = provider.generate_script(
+        {
+            "canonical_topic": "polvos",
+            "angle": "neuroanatomia real",
+            "title_candidates": ["Polvos e seus cérebros distribuídos"],
+            "fact_pack": {
+                "status": "verified",
+                "facts": [
+                    {"fact_id": "F1", "claim": "Os polvos são moluscos marinhos da classe Cephalopoda.", "source_id": "S1"},
+                    {"fact_id": "F2", "claim": "O polvo possui oito braços fortes com ventosas.", "source_id": "S1"},
+                    {"fact_id": "F3", "claim": "O polvo pode mudar de cor e largar tinta como defesa.", "source_id": "S1"},
+                ],
+            },
+        }
+    )
+
+    assert script["source_fact_ids"] == ["F1", "F2"]
+    assert script["key_facts"][:2] == [
+        "Os polvos são moluscos marinhos da classe Cephalopoda.",
+        "O polvo possui oito braços fortes com ventosas.",
+    ]
+
+
+def test_mock_repair_script_uses_fact_pack_and_shortens_long_sentences() -> None:
+    provider = MockCreativeProvider()
+    repaired = provider.repair_script(
+        {
+            "title": "Polvos e seus cérebros",
+            "hook": "Polvos escondem um detalhe biologico quase absurdo.",
+            "full_narration": "Os polvos possuem uma organização neural muito distribuída e isso aparece de forma bem clara quando cada braço responde ao ambiente sem esperar uma ordem central.",
+            "qa_metrics": {},
+        },
+        ["fact_pack_source_ids_missing", "avg_sentence_too_long", "sentence_too_long"],
+        {
+            "canonical_topic": "polvos",
+            "fact_pack": {
+                "status": "verified",
+                "facts": [
+                    {"fact_id": "F1", "claim": "Os polvos são moluscos marinhos da classe Cephalopoda.", "source_id": "S1"},
+                    {"fact_id": "F2", "claim": "O polvo possui oito braços fortes com ventosas.", "source_id": "S1"},
+                    {"fact_id": "F3", "claim": "O polvo pode mudar de cor e largar tinta como defesa.", "source_id": "S1"},
+                ],
+            },
+        },
+    )
+
+    assert repaired["source_fact_ids"] == ["F1", "F2", "F3"]
+    assert repaired["key_facts"] == [
+        "Os polvos são moluscos marinhos da classe Cephalopoda.",
+        "O polvo possui oito braços fortes com ventosas.",
+        "O polvo pode mudar de cor e largar tinta como defesa.",
+    ]
+    assert max(len(word_tokens(sentence)) for sentence in repaired["full_narration"].split(". ") if sentence.strip()) <= 14
+
+
+def test_run_step_cancels_job_when_shutdown_is_requested_during_retry(monkeypatch) -> None:
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "polvos",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 32,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste",
+            "requested_angle": None,
+        }
+    )
+    trigger = threading.Event()
+
+    def failing_step(session, job, attempt):
+        if attempt == 1:
+            orchestrator.stop_event.set()
+            trigger.set()
+        raise RecoverableStepError("falha recuperavel")
+
+    step = StepDefinition("script", 2, failing_step)
+    monkeypatch.setattr(orchestrator, "_build_step_input", lambda session, job, step_name: {"job_id": job.job_id, "step": step_name, "attempt_marker": time.time_ns()})
+
+    try:
+        result = orchestrator._run_step(job_id, step)
+    finally:
+        orchestrator.stop_event.clear()
+
+    assert trigger.is_set()
+    assert result is False
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == "cancelled"
+        assert job.failure_reason == "script: worker shutdown requested during recoverable retry"
+
+
 def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -436,34 +659,323 @@ def test_default_seed_theme_avoids_recent_curiosidades_topics(monkeypatch) -> No
     assert main_module._default_seed_theme() == main_module.HUB_RANDOM_THEME_POOL[3]
 
 
-def test_repetition_guard_generates_distinct_approved_topic() -> None:
-    client = TestClient(app)
-    first = client.post("/jobs", data={"seed_theme": "polvos", "target_duration_sec": 35}, follow_redirects=False)
-    first_job_id = first.headers["location"].split("/")[-1]
-    wait_for_status(first_job_id, "waiting_review")
-    client.post(f"/jobs/{first_job_id}/review", data={"action": "approve", "reason_codes": ""}, follow_redirects=False)
-    second = client.post("/jobs", data={"seed_theme": "polvos", "target_duration_sec": 35}, follow_redirects=False)
-    second_job_id = second.headers["location"].split("/")[-1]
-    wait_for_status(second_job_id, "waiting_review")
+def test_channel_repetition_report_flags_similar_recent_jobs() -> None:
     with SessionLocal() as session:
-        rows = session.query(TopicRegistry).filter(TopicRegistry.job_id.in_([first_job_id, second_job_id])).all()
-        assert len(rows) == 2
-        assert rows[0].hook != rows[1].hook or rows[0].canonical_topic == rows[1].canonical_topic
+        previous = Job(
+            job_id="job-repetition-previous",
+            schema_version="1.0.0",
+            content_hash="prev",
+            status="approved_for_publish",
+            niche_id="curiosidades",
+            language="pt-BR",
+            target_duration_sec=35,
+            topic_request_id="topic-request-previous",
+            topic_summary="Polvos e inteligência distribuída | surpresa científica",
+        )
+        current = Job(
+            job_id="job-repetition-current",
+            schema_version="1.0.0",
+            content_hash="current",
+            status="running",
+            niche_id="curiosidades",
+            language="pt-BR",
+            target_duration_sec=35,
+            topic_request_id="topic-request-current",
+            topic_summary="Polvos e inteligência distribuída | surpresa científica",
+        )
+        session.add_all([previous, current])
+        session.add(
+            Script(
+                script_id="script-repetition-previous",
+                job_id=previous.job_id,
+                schema_version="1.0.0",
+                content_hash="script-prev",
+                title="Polvos pensam com os braços",
+                hook="O polvo não pensa só com a cabeça.",
+                body_beats=[],
+                ending="Isso muda como você olha para o animal.",
+                cta=None,
+                full_narration="O polvo não pensa só com a cabeça. Seus braços processam sinais.",
+                estimated_duration_sec=30,
+                key_facts=[],
+                token_count=30,
+                language="pt-BR",
+                qa_metrics={},
+            )
+        )
+        topic_plan = TopicPlan(
+            topic_id="topic-repetition-current",
+            job_id=current.job_id,
+            schema_version="1.0.0",
+            content_hash="topic-current",
+            canonical_topic="Polvos e inteligência distribuída",
+            angle="surpresa científica",
+            hook_promise="o polvo não pensa só com a cabeça",
+            entities=["polvo"],
+            search_terms=["polvo inteligência"],
+            title_candidates=["Polvos pensam com os braços"],
+            quality_metrics={},
+        )
+        script = Script(
+            script_id="script-repetition-current",
+            job_id=current.job_id,
+            schema_version="1.0.0",
+            content_hash="script-current",
+            title="Polvos pensam com os braços",
+            hook="O polvo não pensa só com a cabeça.",
+            body_beats=[],
+            ending="Isso muda como você olha para o animal.",
+            cta=None,
+            full_narration="O polvo não pensa só com a cabeça. Seus braços processam sinais.",
+            estimated_duration_sec=30,
+            key_facts=[],
+            token_count=30,
+            language="pt-BR",
+            qa_metrics={},
+        )
+        session.add_all([topic_plan, script])
+        session.commit()
+
+    with SessionLocal() as session:
+        current = session.get(Job, "job-repetition-current")
+        topic_plan = session.query(TopicPlan).filter_by(job_id=current.job_id).one()
+        script = session.query(Script).filter_by(job_id=current.job_id).one()
+        report = orchestrator._build_channel_repetition_report(session, current, topic_plan, script)
+
+    assert report["repetition_risk"] in {"medium", "high"}
+    assert report["matches"]
 
 
 def test_retry_action_creates_new_job() -> None:
     client = TestClient(app)
     response = client.post("/jobs", data={"seed_theme": "vulcoes", "target_duration_sec": 35}, follow_redirects=False)
     job_id = response.headers["location"].split("/")[-1]
-    wait_for_status(job_id, "waiting_review")
+    wait_for_any_status(job_id, {"monetization_review", "blocked_for_monetization"})
     retry = client.post(
         f"/jobs/{job_id}/review",
-        data={"action": "retry_from_step", "retry_step": "render", "reason_codes": "render_issue"},
+        data={"action": "retry", "reason_codes": "render_issue"},
         follow_redirects=False,
     )
     assert retry.status_code == 303
     new_job_id = retry.headers["location"].split("/")[-1]
     assert new_job_id != job_id
+
+
+def test_review_page_no_longer_promises_partial_retry() -> None:
+    client = TestClient(app)
+    response = client.post("/jobs", data={"seed_theme": "polvos", "target_duration_sec": 35}, follow_redirects=False)
+    job_id = response.headers["location"].split("/")[-1]
+    detail = client.get(f"/jobs/{job_id}")
+
+    assert detail.status_code == 200
+    assert 'name="retry_step"' not in detail.text
+    assert 'value="retry_from_step"' not in detail.text
+    assert 'value="retry"' in detail.text
+    assert "Criar novo job completo" in detail.text
+
+
+def test_claim_next_job_is_atomic_under_concurrency() -> None:
+    orchestrator.stop_worker()
+    claim_orchestrator = JobOrchestrator()
+    job_ids = [f"job-claim-{index}" for index in range(2)]
+    topic_request_ids = [f"topic-claim-{index}" for index in range(2)]
+    with SessionLocal() as session:
+        base_created_at = utcnow() - timedelta(days=365)
+        for index, (job_id, topic_request_id) in enumerate(zip(job_ids, topic_request_ids, strict=True)):
+            session.add(
+                Job(
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash=job_id,
+                    created_at=base_created_at + timedelta(seconds=index),
+                    status="queued",
+                    niche_id="curiosidades",
+                    language="pt-BR",
+                    target_duration_sec=35,
+                    topic_request_id=topic_request_id,
+                    artifact_index={},
+                )
+            )
+        session.commit()
+
+    barrier = threading.Barrier(2)
+    claimed: list[str | None] = []
+    errors: list[BaseException] = []
+
+    def claimant() -> None:
+        try:
+            with SessionLocal() as session:
+                barrier.wait(timeout=1.0)
+                claimed.append(claim_orchestrator._claim_next_job(session))
+                session.commit()
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=claimant) for _ in range(2)]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=2.0)
+
+        assert not errors
+        assert sorted(claimed) == job_ids
+        with SessionLocal() as session:
+            jobs = session.query(Job).filter(Job.job_id.in_(job_ids)).order_by(Job.job_id).all()
+            assert [job.status for job in jobs] == ["running", "running"]
+            assert {job.lease_owner for job in jobs} == {claim_orchestrator.worker_id}
+    finally:
+        with SessionLocal() as session:
+            jobs = session.query(Job).filter(Job.job_id.in_(job_ids)).all()
+            for job in jobs:
+                session.delete(job)
+            session.commit()
+        orchestrator.start_worker()
+
+
+def test_worker_can_restart_after_stop(monkeypatch) -> None:
+    test_orchestrator = JobOrchestrator()
+    loop_entered = threading.Event()
+    loop_runs: list[float] = []
+
+    def fake_worker_loop() -> None:
+        loop_runs.append(time.time())
+        loop_entered.set()
+        while not test_orchestrator.stop_event.is_set():
+            time.sleep(0.01)
+
+    monkeypatch.setattr(test_orchestrator, "_worker_loop", fake_worker_loop)
+
+    test_orchestrator.start_worker()
+    assert loop_entered.wait(timeout=1.0)
+    first_thread = test_orchestrator.worker_thread
+    assert first_thread is not None
+    test_orchestrator.stop_worker()
+    assert not first_thread.is_alive()
+    assert test_orchestrator.worker_thread is None
+
+    loop_entered.clear()
+    test_orchestrator.start_worker()
+    assert loop_entered.wait(timeout=1.0)
+    second_thread = test_orchestrator.worker_thread
+    assert second_thread is not None
+    assert second_thread is not first_thread
+    test_orchestrator.stop_worker()
+    assert len(loop_runs) == 2
+
+
+def test_process_job_returns_persisted_cancelled_status_after_step_abort(monkeypatch) -> None:
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "polvos",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 32,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste",
+            "requested_angle": None,
+        }
+    )
+
+    def fake_steps() -> list[StepDefinition]:
+        return [StepDefinition("script", 0, lambda session, job, attempt: (_ for _ in ()).throw(RecoverableStepError("gate failed")))]
+
+    monkeypatch.setattr(orchestrator, "_steps", fake_steps)
+    monkeypatch.setattr(orchestrator, "_build_step_input", lambda session, job, step_name: {"job_id": job.job_id, "step": step_name, "attempt_marker": time.time_ns()})
+
+    status = orchestrator.process_job(job_id)
+
+    assert status == "script_quality_failed"
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == "script_quality_failed"
+
+
+def test_process_job_returns_persisted_cancelled_status_after_shutdown(monkeypatch) -> None:
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "polvos",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 32,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste",
+            "requested_angle": None,
+        }
+    )
+
+    def stopping_step(session, job, attempt):
+        if attempt == 1:
+            orchestrator.stop_event.set()
+        raise RecoverableStepError("falha recuperavel")
+
+    monkeypatch.setattr(orchestrator, "_steps", lambda: [StepDefinition("script", 1, stopping_step)])
+    monkeypatch.setattr(orchestrator, "_build_step_input", lambda session, job, step_name: {"job_id": job.job_id, "step": step_name, "attempt_marker": time.time_ns()})
+
+    try:
+        status = orchestrator.process_job(job_id)
+    finally:
+        orchestrator.stop_event.clear()
+
+    assert status == "cancelled"
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == "cancelled"
+
+
+def test_process_job_fails_explicitly_for_legacy_invalid_niche() -> None:
+    job_id = "job-invalid-niche"
+    topic_request_id = "topic-invalid-niche"
+    with SessionLocal() as session:
+        existing_job = session.get(Job, job_id)
+        if existing_job is not None:
+            session.delete(existing_job)
+        existing_request = session.query(TopicRequest).filter_by(job_id=job_id).one_or_none()
+        if existing_request is not None:
+            session.delete(existing_request)
+        session.add(
+            Job(
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="invalid-niche",
+                status="queued",
+                niche_id="esportes",
+                language="pt-BR",
+                target_duration_sec=35,
+                topic_request_id=topic_request_id,
+                artifact_index={},
+            )
+        )
+        session.add(
+            TopicRequest(
+                topic_request_id=topic_request_id,
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="invalid-niche-request",
+                niche_id="esportes",
+                seed_theme="polvos",
+                language="pt-BR",
+                target_duration_sec=35,
+                tone="intrigante_direto",
+                cta_style="none",
+                notes=None,
+                requested_angle=None,
+            )
+        )
+        session.commit()
+
+    status = orchestrator.process_job(job_id)
+
+    assert status == "failed"
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == "failed"
+        assert job.failure_reason == "input_gate: unsupported niche_id: esportes"
 
 
 def test_scene_timings_fall_back_to_token_boundaries() -> None:
@@ -475,6 +987,20 @@ def test_scene_timings_fall_back_to_token_boundaries() -> None:
     normalized = orchestrator._normalize_scene_timings(scenes, 30_000)
     assert [scene["actual_start_ms"] for scene in normalized] == [0, 10_000, 20_000]
     assert [scene["actual_end_ms"] for scene in normalized] == [10_000, 20_000, 30_000]
+
+
+def test_scene_token_coverage_normalizes_numeric_scene_ids_to_strings() -> None:
+    narration = "polvos tem tres coracoes e sangue azul no oceano profundo"
+    scenes = [
+        {"scene_id": 1, "order": 1, "narration_text": "polvos tem tres coracoes"},
+        {"scene_id": 2, "order": 2, "narration_text": "e sangue azul no oceano profundo"},
+    ]
+
+    normalized = orchestrator._normalize_scene_token_coverage(scenes, narration)
+
+    assert [scene["scene_id"] for scene in normalized] == ["1", "2"]
+    assert normalized[0]["token_start"] == 0
+    assert normalized[-1]["token_end"] == len(word_tokens(narration)) - 1
 
 
 def test_subtitle_chunks_fit_two_lines_without_losing_words() -> None:
@@ -501,6 +1027,92 @@ def test_subtitle_cue_split_preserves_timing_and_token_coverage() -> None:
     assert " ".join(item["text"] for item in items) == cue["text"]
     for item in items:
         assert len(wrap_caption(item["text"], max_chars=42).splitlines()) <= 2
+
+
+def test_topic_plan_normalization_fills_missing_required_fields() -> None:
+    request = SimpleNamespace(seed_theme="buracos negros", requested_angle=None)
+    plan = {
+        "tema": "Buracos Negros",
+        "gancho": "o limite que muda tudo",
+        "titulos": ["Buracos negros: o limite que muda tudo"],
+    }
+
+    normalized = orchestrator._normalize_topic_plan_payload(plan, request)
+
+    assert normalized["canonical_topic"] == "Buracos Negros"
+    assert normalized["angle"]
+    assert normalized["hook_promise"] == "o limite que muda tudo"
+    assert normalized["entities"] == ["Buracos Negros"]
+    assert normalized["search_terms"]
+    assert normalized["quality_metrics"]["topic_repair_used"] is True
+
+
+def test_extract_fact_entity_prefers_subject_before_colon() -> None:
+    entity = orchestrator._extract_fact_entity(
+        "Polvos: curiosidades científicas sobre o cefalópode mais inteligente do oceano"
+    )
+
+    assert entity.lower() == "polvos"
+
+
+def test_subtitle_split_enforces_word_limit_for_long_cues() -> None:
+    cue = {
+        "idx": 5,
+        "start_ms": 1000,
+        "end_ms": 5000,
+        "text": "Mesmo assim, o buraco negro age como um corpo negro ideal, absorvendo toda a luz.",
+    }
+
+    items = orchestrator._split_subtitle_cue(cue, token_start=0, token_end=14)
+
+    assert len(items) > 1
+    assert " ".join(item["text"] for item in items) == cue["text"]
+    for item in items:
+        assert len(word_tokens(item["text"])) <= 14
+        assert len(wrap_caption(item["text"], max_chars=42).splitlines()) <= 2
+
+
+def test_subtitle_boundary_repair_moves_words_across_cues() -> None:
+    items = [
+        {"idx": 9, "start_ms": 20_000, "end_ms": 22_500, "text": "deixa oceanos profundos mais concreto para", "token_start": 40, "token_end": 45},
+        {"idx": 10, "start_ms": 22_500, "end_ms": 25_000, "text": "quem assiste. Assim cada cena sustenta a", "token_start": 46, "token_end": 52},
+        {"idx": 11, "start_ms": 25_000, "end_ms": 27_500, "text": "ideia sem inventar elemento aleatorio. Por", "token_start": 53, "token_end": 58},
+        {"idx": 12, "start_ms": 27_500, "end_ms": 30_000, "text": "isso oceanos profundos deixa de ser so", "token_start": 59, "token_end": 65},
+    ]
+
+    repaired = orchestrator._repair_subtitle_item_boundaries(items)
+
+    assert repaired[0]["text"].endswith("para quem")
+    assert repaired[1]["text"].startswith("assiste.")
+    assert repaired[2]["text"].endswith("Por isso")
+    assert repaired[3]["text"].startswith("oceanos")
+    assert SubtitleGate().validate(repaired, 1.0).passed
+
+
+def test_subtitle_boundary_repair_can_push_weak_ending_into_next_chunk() -> None:
+    items = [
+        {"idx": "4.1", "start_ms": 8_002, "end_ms": 10_139, "text": "Isso significa que ele passa por qualquer fresta, se contorcendo ao máximo para", "token_start": 24, "token_end": 36},
+        {"idx": "4.2", "start_ms": 10_139, "end_ms": 12_276, "text": "caber.", "token_start": 37, "token_end": 37},
+    ]
+
+    repaired = orchestrator._repair_subtitle_item_boundaries(items)
+
+    assert repaired[0]["text"].endswith("máximo")
+    assert repaired[1]["text"] == "para caber."
+    assert SubtitleGate().validate(repaired, 1.0).passed
+
+
+def test_subtitle_boundary_repair_can_pull_words_from_next_chunk() -> None:
+    items = [
+        {"idx": "6.2", "start_ms": 19_000, "end_ms": 20_500, "text": "predadores e muda de cor em", "token_start": 60, "token_end": 65},
+        {"idx": "6.3", "start_ms": 20_500, "end_ms": 22_142, "text": "segundos.", "token_start": 66, "token_end": 66},
+    ]
+
+    repaired = orchestrator._repair_subtitle_item_boundaries(items)
+
+    assert repaired[0]["text"] == "predadores e muda de cor em segundos."
+    assert len(repaired) == 1
+    assert SubtitleGate().validate(repaired, 1.0).passed
 
 
 def test_speech_envelope_normalization_levels_caption_cues(tmp_path: Path) -> None:
@@ -873,6 +1485,292 @@ def test_fact_pack_consistency_rejects_source_ids_when_fact_pack_limited() -> No
     assert "invented_source_fact_ids" in reasons
 
 
+def test_scene_token_coverage_normalization_rebuilds_contiguous_spans() -> None:
+    scenes = [
+        {
+            "scene_id": "scene-2",
+            "order": 2,
+            "narration_text": "muda de cor para fugir",
+            "token_start": 99,
+            "token_end": 120,
+            "image_prompt": "ok no readable text anywhere",
+        },
+        {
+            "scene_id": "scene-1",
+            "order": 1,
+            "narration_text": "polvos parecem alienigenas",
+            "token_start": 5,
+            "token_end": 7,
+            "image_prompt": "ok no readable text anywhere",
+        },
+    ]
+
+    normalized = orchestrator._normalize_scene_token_coverage(
+        scenes,
+        "Polvos parecem alienigenas e mudam de cor para fugir de predadores",
+    )
+
+    assert normalized[0]["order"] == 1
+    assert normalized[0]["token_start"] == 0
+    assert normalized[0]["token_end"] < normalized[1]["token_start"]
+    assert normalized[1]["token_end"] == len(word_tokens("Polvos parecem alienigenas e mudam de cor para fugir de predadores")) - 1
+    assert normalized[0]["narration_text"].startswith("polvos parecem alienigenas")
+
+
+def test_step_script_persists_generation_debug_on_provider_failure(monkeypatch) -> None:
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "polvos",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 35,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste",
+            "requested_angle": None,
+        }
+    )
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic",
+                canonical_topic="polvos",
+                angle="curiosidades_inacreditaveis",
+                hook_promise="fatos sobre polvos",
+                entities=["polvos"],
+                search_terms=["polvos curiosidades"],
+                title_candidates=["Polvos parecem alienígenas reais"],
+                quality_metrics={},
+            )
+        )
+        session.commit()
+
+    def fake_generate_script(_plan_dict):
+        raise ProviderFailure("minimax_text", "script generation timed out after 90.0s")
+
+    monkeypatch.setattr(orchestrator.providers.creative, "generate_script", fake_generate_script)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        try:
+            orchestrator._step_script(session, job, 1)
+        except ProviderFailure:
+            pass
+        else:
+            raise AssertionError("expected ProviderFailure")
+
+    debug_path = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "script_generation_debug.json"
+    debug = json.loads(debug_path.read_text(encoding="utf-8"))
+
+    assert debug["phase"] == "generation"
+    assert debug["error_type"] == "ProviderFailure"
+    assert debug["error_message"] == "script generation timed out after 90.0s"
+    assert debug["canonical_topic"] == "polvos"
+    assert debug["fact_pack_status"] in {"limited", "verified"}
+
+
+def test_step_background_music_persists_debug_on_provider_failure(monkeypatch) -> None:
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "polvos",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 35,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste",
+            "requested_angle": None,
+        }
+    )
+    audio_dir = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    narration_path = audio_dir / "narration.wav"
+    narration_path.write_bytes(b"RIFFtest")
+
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-music-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic-music",
+                canonical_topic="polvos",
+                angle="curiosidades_inacreditaveis",
+                hook_promise="fatos sobre polvos",
+                entities=["polvos"],
+                search_terms=["polvos curiosidades"],
+                title_candidates=["Polvos parecem alienígenas reais"],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"script-music-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="script-music",
+                title="Polvos parecem alienígenas",
+                hook="Cada braço do polvo parece pensar sozinho.",
+                body_beats=[],
+                ending="Isso muda como você olha para o oceano.",
+                cta=None,
+                full_narration="Cada braço do polvo parece pensar sozinho.",
+                estimated_duration_sec=30,
+                key_facts=[],
+                token_count=12,
+                language="pt-BR",
+                qa_metrics={},
+            )
+        )
+        session.add(
+            NarrationAsset(
+                narration_id=f"narration-music-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="narration-music",
+                provider="edge_tts",
+                voice="pt-BR-FranciscaNeural",
+                audio_uri=narration_path.resolve().as_uri(),
+                normalized_audio_uri=None,
+                raw_subtitles_uri=None,
+                duration_ms=32000,
+                sample_rate_hz=24000,
+                channels=1,
+                loudness_lufs=-16.0,
+                provider_metadata={},
+            )
+        )
+        session.commit()
+
+    def fake_select_track(_topic_dict, _script_dict, _output_path, _target_duration_ms):
+        raise ProviderFailure(
+            "background_music",
+            "strict minimax validation requires minimax music success: minimax music request timed out after 120.0s",
+            details={
+                "provider": "minimax_music",
+                "query": "polvos documentary",
+                "mood": "documentary",
+                "timeout_sec": 120.0,
+                "request_payload": {"model": "music-2.6"},
+            },
+        )
+
+    monkeypatch.setattr(orchestrator.providers.music, "select_track", fake_select_track)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        try:
+            orchestrator._step_background_music(session, job, 1)
+        except ProviderFailure:
+            pass
+        else:
+            raise AssertionError("expected ProviderFailure")
+
+    debug_path = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "background_music_debug.json"
+    debug = json.loads(debug_path.read_text(encoding="utf-8"))
+
+    assert debug["phase"] == "provider_failure"
+    assert debug["error_type"] == "ProviderFailure"
+    assert "minimax music request timed out" in debug["error_message"]
+    assert debug["canonical_topic"] == "polvos"
+    assert debug["provider_details"]["request_payload"]["model"] == "music-2.6"
+    assert debug["provider_details"]["query"] == "polvos documentary"
+
+
+def test_minimax_background_music_provider_uses_output_url(monkeypatch, tmp_path: Path) -> None:
+    provider = MiniMaxBackgroundMusicProvider()
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+            self.status_code = 200
+            self.text = json.dumps(payload)
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    captured: dict[str, object] = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["payload"] = json
+        return FakeResponse(
+            {
+                "data": {
+                    "audio": "https://example.com/music.mp3",
+                    "status": 2,
+                },
+                "trace_id": "trace-music",
+                "extra_info": {
+                    "music_duration": 31876,
+                    "music_sample_rate": 44100,
+                    "music_channel": 2,
+                    "bitrate": 256000,
+                },
+            }
+        )
+
+    class FakeDownloadResponse:
+        def __init__(self, content: bytes) -> None:
+            self.content = content
+
+        def raise_for_status(self) -> None:
+            return None
+
+    def fake_get(url, timeout=None, follow_redirects=None):
+        assert url == "https://example.com/music.mp3"
+        return FakeDownloadResponse(b"fake-mp3")
+
+    def fake_convert(input_path: Path, output_path: Path) -> None:
+        assert input_path.exists()
+        output_path.write_bytes(b"RIFFfake")
+
+    monkeypatch.setattr("app.providers.httpx.post", fake_post)
+    monkeypatch.setattr("app.providers.httpx.get", fake_get)
+    monkeypatch.setattr(provider, "_convert_audio_file_to_wav", fake_convert)
+
+    result = provider.select_track(
+        {"canonical_topic": "polvos", "angle": "inteligencia distribuida"},
+        {"title": "Polvos parecem alienígenas", "hook": "Cada braço parece pensar sozinho.", "full_narration": "Texto curto."},
+        tmp_path / "background.wav",
+        32000,
+    )
+
+    assert captured["payload"]["output_format"] == "url"
+    assert "exactly 32 seconds" in result["provider_metadata"]["prompt"]
+    assert result["source_url"] == "https://example.com/music.mp3"
+    assert result["provider_metadata"]["returned_duration_ms"] == 31876
+    assert Path(result["audio_uri"].removeprefix("file://")).exists()
+
+
+def test_minimax_background_music_prompt_is_compact_and_duration_aware() -> None:
+    provider = MiniMaxBackgroundMusicProvider()
+
+    prompt = provider._build_prompt(
+        {"canonical_topic": "Polvos - curiosidades científicas sobre o cefalópode mais inteligente do oceano", "angle": "fatos_científicos_absurdos"},
+        {
+            "title": "O animal com 3 corações e sangue azul que impressiona até cientistas",
+            "hook": "Este bicho marinho tem 3 corações e sangue azul.",
+            "full_narration": "Texto longo que não deveria ser despejado inteiro no prompt de música.",
+        },
+        "documentary",
+        25_476,
+    )
+
+    assert "exactly 25 seconds" in prompt
+    assert "Video context:" in prompt
+    assert "full_narration" not in prompt
+    assert len(prompt) < 900
+
+
 def test_fact_pack_query_generation_extracts_entity_and_concepts() -> None:
     request = SimpleNamespace(seed_theme="Por que flamingos ficam cor-de-rosa?")
     topic_plan = SimpleNamespace(
@@ -886,6 +1784,24 @@ def test_fact_pack_query_generation_extracts_entity_and_concepts() -> None:
 
     assert any(query == "flamingos" for query in normalized)
     assert any("flamingos carotenoides" == query for query in normalized)
+
+
+def test_fact_query_priority_prefers_short_entity_before_long_phrase() -> None:
+    queries = [
+        "Polvos: curiosidades científicas sobre o cefalópode mais inteligente do oceano",
+        "polvos",
+        "polvo corações pigmentos",
+    ]
+
+    ordered = sorted(queries, key=orchestrator._fact_query_priority)
+
+    assert ordered[0] == "polvos"
+    assert ordered.index("polvo corações pigmentos") > 0
+
+
+def test_weak_fact_query_filters_generic_single_word_angle() -> None:
+    assert orchestrator._is_weak_fact_query("auto") is True
+    assert orchestrator._is_weak_fact_query("polvos") is False
 
 
 def test_publish_hashtags_use_entities_not_weak_words() -> None:
@@ -902,7 +1818,6 @@ def test_publish_hashtags_use_entities_not_weak_words() -> None:
 
     assert "#flamingos" in tags
     assert "#animais" in tags
-    assert "#natureza" in tags
     assert "#biologia" in tags
     assert "#ficam" not in tags
     assert "#cor" not in tags

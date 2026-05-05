@@ -7,7 +7,10 @@
 {% set scene_plan = details.scene_plan %}
 {% set narration = details.narration %}
 {% set subtitles = details.subtitles %}
+{% set background_music = details.background_music %}
 {% set render = details.render %}
+{% set monetization = details.monetization_report or {} %}
+{% set repair = details.repair_telemetry or {} %}
 <section class="detail-grid" {% if job.status in ["queued", "running"] %}hx-get="/jobs/{{ job.job_id }}" hx-trigger="every 2s" hx-select=".detail-grid" hx-swap="outerHTML"{% endif %}>
   <div class="main-column">
     <section class="panel">
@@ -25,6 +28,8 @@
         <a href="#assets">Assets</a>
         <a href="#audio">Audio &amp; Subtitles</a>
         <a href="#render">Render</a>
+        <a href="#monetization">Monetization</a>
+        <a href="#self-healing">Self-Healing</a>
         <a href="#logs">Logs</a>
       </div>
     </section>
@@ -65,6 +70,34 @@
         <div><strong>Resumo</strong><span>{{ job.topic_summary or "-" }}</span></div>
       </div>
       <pre>{{ job.quality_summary or {} }}</pre>
+    </section>
+
+    <section id="monetization" class="panel">
+      <h3>Monetization</h3>
+      {% if monetization %}
+      <div class="stats-grid">
+        <div><strong>Status</strong><span>{{ monetization.final_status }}</span></div>
+        <div><strong>Passou</strong><span>{{ monetization.passed }}</span></div>
+        <div><strong>Bloqueios</strong><span>{{ monetization.hard_blockers|length }}</span></div>
+        <div><strong>Revisão manual</strong><span>{{ monetization.manual_required|length }}</span></div>
+      </div>
+      <h4>Bloqueios</h4>
+      <pre>{{ monetization.hard_blockers }}</pre>
+      <h4>Confirmações pendentes</h4>
+      <pre>{{ monetization.manual_required }}</pre>
+      <h4>Disclosure IA</h4>
+      <pre>{{ monetization.ai_disclosure }}</pre>
+      <h4>Direitos</h4>
+      <pre>{{ monetization.rights_registry }}</pre>
+      <h4>Factualidade</h4>
+      <pre>{{ monetization.fact_claims_report }}</pre>
+      <h4>Metadata</h4>
+      <pre>{{ monetization.metadata_review }}</pre>
+      <h4>Repetição de canal</h4>
+      <pre>{{ monetization.channel_repetition_report }}</pre>
+      {% else %}
+      <p>Aguardando gate de monetização.</p>
+      {% endif %}
     </section>
 
     <section id="script" class="panel">
@@ -129,6 +162,14 @@
       <audio controls src="{{ artifact_url(narration.audio_uri) }}"></audio>
       <p><strong>Voice:</strong> {{ narration.voice }} · {{ (narration.duration_ms / 1000)|round(1) }} s</p>
       {% endif %}
+      {% if background_music %}
+      <audio controls src="{{ artifact_url(background_music.audio_uri) }}"></audio>
+      <p><strong>Music:</strong> {{ background_music.provider }} · mood {{ background_music.mood }} · {{ background_music.gain_db }} dB</p>
+      {% if background_music.mixed_audio_uri %}
+      <audio controls src="{{ artifact_url(background_music.mixed_audio_uri) }}"></audio>
+      <p><strong>Mixed master:</strong> narração + trilha pronta para render.</p>
+      {% endif %}
+      {% endif %}
       {% if subtitles %}
       <pre>{{ subtitles.items }}</pre>
       <a href="{{ artifact_url(subtitles.ass_uri) }}">Download ASS</a>
@@ -143,6 +184,22 @@
       <a href="{{ artifact_url(render.ffmpeg_log_uri) }}">FFmpeg log</a>
       {% else %}
       <p>Aguardando render.</p>
+      {% endif %}
+    </section>
+
+    <section id="self-healing" class="panel">
+      <h3>Self-Healing</h3>
+      {% if repair.topic_plan or repair.script or repair.background_music or repair.render %}
+      <h4>Topic Plan</h4>
+      <pre>{{ repair.topic_plan or {} }}</pre>
+      <h4>Script</h4>
+      <pre>{{ repair.script or {} }}</pre>
+      <h4>Background Music</h4>
+      <pre>{{ repair.background_music or {} }}</pre>
+      <h4>Render</h4>
+      <pre>{{ repair.render or {} }}</pre>
+      {% else %}
+      <p>Nenhuma telemetria de repair persistida ainda.</p>
       {% endif %}
     </section>
 
@@ -166,20 +223,20 @@
         <input type="hidden" name="reviewer_identity" value="tailscale:local-reviewer">
         <label for="reason_codes">Reason codes</label>
         <input id="reason_codes" name="reason_codes" placeholder="weak_hook,visual_incoherence">
+        <div class="review-checklist">
+          <label><input type="checkbox" name="rights_confirmed" value="true"> Direitos comerciais confirmados</label>
+          <label><input type="checkbox" name="ai_disclosure_confirmed" value="true"> Disclosure de IA marcado no YouTube</label>
+          <label><input type="checkbox" name="fact_review_confirmed" value="true"> Fontes/fatos revisados</label>
+          <label><input type="checkbox" name="metadata_confirmed" value="true"> Título, descrição e hashtags revisados</label>
+          <label><input type="checkbox" name="originality_confirmed" value="true"> Originalidade vs canal confirmada</label>
+        </div>
         <label for="notes">Notes</label>
         <textarea id="notes" name="notes" rows="4"></textarea>
         <div class="button-row">
           <button type="submit" name="action" value="approve">Approve</button>
           <button type="submit" name="action" value="reject" class="secondary">Reject</button>
         </div>
-        <label for="retry_step">Retry from step</label>
-        <select id="retry_step" name="retry_step">
-          <option value="">pipeline completo</option>
-          {% for step in ["topic_plan","script","scene_plan","asset_generation","tts","subtitle_alignment","render"] %}
-          <option value="{{ step }}">{{ step }}</option>
-          {% endfor %}
-        </select>
-        <button type="submit" name="action" value="retry_from_step" class="ghost">Criar novo retry job</button>
+        <button type="submit" name="action" value="retry" class="ghost">Criar novo job completo</button>
       </form>
       {% if job.status == "approved_for_publish" %}
       <form method="post" action="/jobs/{{ job.job_id }}/publish" class="review-form">

@@ -25,23 +25,36 @@ class Settings(BaseSettings):
     scene_target_count: int = 6
 
     use_mock_providers: bool = False
+    strict_minimax_validation: bool = False
     llm_primary_provider: str = "minimax"
     llm_fallback_provider: str = "mock"
     llm_enable_fallback: bool = True
     llm_script_repair_attempts: int = 1
+    llm_topic_repair_attempts: int = 2
+    minimax_script_timeout_sec: float = 90.0
     scene_prompt_gate_enabled: bool = True
     asset_semantic_threshold: float = 0.80
     asset_total_threshold: float = 0.75
     render_min_bitrate: int = 250_000
+    asset_generation_timeout_sec: float = 75.0
+    asset_generation_regeneration_rounds: int = 2
+    background_music_enabled: bool = True
+    background_music_gain_db: float = -20.0
     youtube_publish_mode: str = "manual"
     youtube_api_enabled: bool = False
     youtube_channel_id: str | None = None
+    minimax_commercial_rights_confirmed: bool = False
+    edge_tts_commercial_rights_confirmed: bool = False
+    allow_synthetic_visuals_for_monetization: bool = True
     minimax_api_key: str | None = None
     minimax_text_api_key: str | None = None
     minimax_image_api_key: str | None = None
+    minimax_music_api_key: str | None = None
     minimax_text_base_url: str = "https://api.minimax.io/v1"
     minimax_image_base_url: str = "https://api.minimax.io/v1/image_generation"
+    minimax_music_base_url: str = "https://api.minimax.io/v1"
     minimax_text_timeout_sec: float = 120.0
+    minimax_music_timeout_sec: float = 240.0
     minimax_scene_plan_timeout_sec: float = 90.0
     pexels_api_key: str | None = None
     pixabay_api_key: str | None = None
@@ -73,6 +86,10 @@ class Settings(BaseSettings):
     @property
     def resolved_minimax_image_api_key(self) -> str | None:
         return self.minimax_image_api_key or self.minimax_api_key
+
+    @property
+    def resolved_minimax_music_api_key(self) -> str | None:
+        return self.minimax_music_api_key or self.resolved_minimax_text_api_key
 
     @property
     def artifacts_dir(self) -> Path:

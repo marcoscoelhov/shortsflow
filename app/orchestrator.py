@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
 import threading
 import time
 import unicodedata
+import concurrent.futures
 import httpx
 from dataclasses import dataclass
 from datetime import timedelta
@@ -14,12 +16,13 @@ from typing import Any, Callable
 
 import imageio_ffmpeg
 from PIL import Image
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import SessionLocal, session_scope
 from app.models import (
+    BackgroundMusicAsset,
     ErrorLog,
     FallbackEvent,
     Job,
@@ -40,7 +43,8 @@ from app.quality.asset_gate import AssetGate
 from app.quality.render_gate import RenderGate
 from app.quality.scene_gate import ScenePlanGate
 from app.quality.script_gate import ScriptQualityGate
-from app.quality.subtitle_gate import SubtitleGate
+from app.quality.subtitle_gate import BAD_ENDINGS, SubtitleGate
+from app.schemas import SUPPORTED_NICHES, TopicRequestCreate
 from app.storage import StorageManager
 from app.utils import (
     avg_words_per_sentence,
@@ -194,6 +198,7 @@ class JobOrchestrator:
     def start_worker(self) -> None:
         if self.worker_thread and self.worker_thread.is_alive():
             return
+        self.stop_event = threading.Event()
         self.worker_thread = threading.Thread(target=self._worker_loop, name="yts-worker", daemon=True)
         self.worker_thread.start()
 
@@ -201,8 +206,16 @@ class JobOrchestrator:
         self.stop_event.set()
         if self.worker_thread and self.worker_thread.is_alive():
             self.worker_thread.join(timeout=2)
+        if self.worker_thread and not self.worker_thread.is_alive():
+            self.worker_thread = None
+
+    def _persist_repair_telemetry(self, job_id: str, stage: str, payload: dict[str, Any]) -> str:
+        filename = f"{stage}_repair_telemetry.json"
+        self.storage.persist_json(job_id, filename, self._serialize_for_json(payload))
+        return filename
 
     def create_job(self, payload: dict[str, Any], retry_of_job_id: str | None = None) -> str:
+        payload = TopicRequestCreate.model_validate(payload).model_dump()
         now = utcnow()
         job_id = new_id()
         topic_request_id = new_id()
@@ -249,6 +262,9 @@ class JobOrchestrator:
             if job.status in {
                 "approved",
                 "approved_for_publish",
+                "ready_for_upload",
+                "monetization_review",
+                "blocked_for_monetization",
                 "published",
                 "failed",
                 "script_quality_failed",
@@ -265,17 +281,22 @@ class JobOrchestrator:
         for step in self._steps():
             ok = self._run_step(job_id, step)
             if not ok:
-                return "failed"
+                with session_scope() as session:
+                    job = session.get(Job, job_id)
+                    if not job:
+                        raise KeyError(job_id)
+                    return job.status
         with session_scope() as session:
             job = session.get(Job, job_id)
             assert job
-            job.status = "waiting_review"
+            monetization = (job.quality_summary or {}).get("monetization", {})
+            job.status = str(monetization.get("final_status") or "monetization_review")
             job.current_step = "publish_to_review_hub"
             job.lease_owner = None
             job.lease_expires_at = None
             self._upsert_topic_registry(session, job_id, approved=False)
-        self._append_event(job_id, "render.completed", "succeeded", {"status": "waiting_review"})
-        return "waiting_review"
+        self._append_event(job_id, "render.completed", "succeeded", {"status": job.status})
+        return job.status
 
     def get_job_details(self, session: Session, job_id: str) -> dict[str, Any]:
         job = session.get(Job, job_id)
@@ -287,11 +308,18 @@ class JobOrchestrator:
         scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job_id))
         narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job_id))
         subtitles = session.scalar(select(SubtitleTrack).where(SubtitleTrack.job_id == job_id))
+        background_music = session.scalar(select(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job_id))
         render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job_id))
         assets = session.scalars(select(SceneAsset).where(SceneAsset.job_id == job_id).order_by(SceneAsset.scene_id, SceneAsset.provider)).all()
         fallbacks = session.scalars(select(FallbackEvent).where(FallbackEvent.job_id == job_id).order_by(FallbackEvent.created_at)).all()
         errors = session.scalars(select(ErrorLog).where(ErrorLog.job_id == job_id).order_by(ErrorLog.created_at)).all()
         reviews = session.scalars(select(ReviewRecord).where(ReviewRecord.job_id == job_id).order_by(ReviewRecord.created_at)).all()
+        repair_telemetry = {
+            "topic_plan": self._read_job_json(job_id, "topic_plan_repair_telemetry.json"),
+            "script": self._read_job_json(job_id, "script_repair_telemetry.json"),
+            "background_music": self._read_job_json(job_id, "background_music_repair_telemetry.json"),
+            "render": self._read_job_json(job_id, "render_repair_telemetry.json"),
+        }
         return {
             "job": job,
             "topic_request": topic_request,
@@ -301,11 +329,14 @@ class JobOrchestrator:
             "assets": assets,
             "narration": narration,
             "subtitles": subtitles,
+            "background_music": background_music,
             "render": render,
             "fallbacks": fallbacks,
             "errors": errors,
             "reviews": reviews,
+            "repair_telemetry": repair_telemetry,
             "events": self._read_events(job_id),
+            "monetization_report": self._read_job_json(job_id, "monetization_report.json"),
         }
 
     def review_job(self, payload: dict[str, Any], job_id: str) -> str | None:
@@ -323,10 +354,36 @@ class JobOrchestrator:
                 action=payload["action"],
                 reason_codes=payload.get("reason_codes", []),
                 notes=payload.get("notes"),
-                retry_step=payload.get("retry_step"),
+                retry_step=None,
             )
             session.add(review)
             if payload["action"] == "approve":
+                report = self._build_monetization_report(session, job, set(payload.get("reason_codes") or []))
+                if not report["passed"]:
+                    self.storage.persist_json(job.job_id, "monetization_report.json", self._serialize_for_json(report))
+                    quality_summary = dict(job.quality_summary or {})
+                    quality_summary["monetization"] = {
+                        "passed": report["passed"],
+                        "final_status": report["final_status"],
+                        "hard_blockers": report["hard_blockers"],
+                        "manual_required": report["manual_required"],
+                        "warnings": report["warnings"],
+                        "content_hash": stable_hash(report),
+                    }
+                    job.quality_summary = quality_summary
+                    job.status = report["final_status"]
+                    raise FatalStepError(f"monetization readiness incomplete: {', '.join(report['hard_blockers'] + report['manual_required'])}")
+                self.storage.persist_json(job.job_id, "monetization_report.json", self._serialize_for_json(report))
+                quality_summary = dict(job.quality_summary or {})
+                quality_summary["monetization"] = {
+                    "passed": report["passed"],
+                    "final_status": report["final_status"],
+                    "hard_blockers": report["hard_blockers"],
+                    "manual_required": report["manual_required"],
+                    "warnings": report["warnings"],
+                    "content_hash": stable_hash(report),
+                }
+                job.quality_summary = quality_summary
                 job.status = "approved_for_publish"
                 job.review_state = "approved"
                 self._upsert_topic_registry(session, job_id, approved=True)
@@ -351,7 +408,12 @@ class JobOrchestrator:
                 "requested_angle": request.requested_angle,
             }
         new_job_id = self.create_job(clone_payload, retry_of_job_id=job_id)
-        self._append_event(job_id, "review.retry_requested", "succeeded", {"new_job_id": new_job_id})
+        self._append_event(
+            job_id,
+            "review.retry_requested",
+            "succeeded",
+            {"new_job_id": new_job_id, "retry_mode": "full_clone"},
+        )
         return new_job_id
 
     def publish_job(self, job_id: str, youtube_video_id: str | None = None, youtube_url: str | None = None) -> None:
@@ -361,6 +423,9 @@ class JobOrchestrator:
                 raise KeyError(job_id)
             if job.status not in {"approved_for_publish", "published"}:
                 raise FatalStepError("job must be approved_for_publish before publishing")
+            monetization_report = self._read_job_json(job.job_id, "monetization_report.json")
+            if monetization_report and not monetization_report.get("passed"):
+                raise FatalStepError("job has not passed monetization readiness gate")
             package = self._build_publish_package(session, job)
             package["youtube"] = {
                 "mode": self.settings.youtube_publish_mode,
@@ -386,12 +451,17 @@ class JobOrchestrator:
             StepDefinition("asset_generation", 2, self._step_assets),
             StepDefinition("tts", 2, self._step_tts),
             StepDefinition("subtitle_alignment", 1, self._step_subtitles),
+            StepDefinition("background_music", 1, self._step_background_music),
             StepDefinition("render", 1, self._step_render),
+            StepDefinition("monetization_readiness_gate", 0, self._step_monetization_readiness),
             StepDefinition("publish_to_review_hub", 0, self._step_publish),
         ]
 
     def _run_step(self, job_id: str, step: StepDefinition) -> bool:
         for attempt in range(1, step.retries + 2):
+            if self.stop_event.is_set():
+                self._cancel_job(job_id, step.name, "worker shutdown requested before retry")
+                return False
             with session_scope() as session:
                 job = session.get(Job, job_id)
                 assert job
@@ -441,6 +511,9 @@ class JobOrchestrator:
             except RecoverableStepError as exc:
                 self._record_step_failure(job_id, step.name, attempt, str(exc), recoverable=True)
                 if attempt <= step.retries:
+                    if self.stop_event.is_set():
+                        self._cancel_job(job_id, step.name, "worker shutdown requested during recoverable retry")
+                        return False
                     continue
                 self._fail_job(job_id, step.name, str(exc))
                 return False
@@ -489,6 +562,16 @@ class JobOrchestrator:
             job.lease_expires_at = None
         self._append_event(job_id, "job.failed", "failed", {"step": step_name, "message": message})
 
+    def _cancel_job(self, job_id: str, step_name: str, message: str) -> None:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            assert job
+            job.status = "cancelled"
+            job.failure_reason = f"{step_name}: {message}"
+            job.lease_owner = None
+            job.lease_expires_at = None
+        self._append_event(job_id, "job.cancelled", "cancelled", {"step": step_name, "message": message})
+
     def _failure_status_for_step(self, step_name: str, message: str) -> str:
         if "quality gate" in message or "gate failed" in message:
             return {
@@ -507,6 +590,8 @@ class JobOrchestrator:
         scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job.job_id))
         narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job.job_id))
         subtitles = session.scalar(select(SubtitleTrack).where(SubtitleTrack.job_id == job.job_id))
+        background_music = session.scalar(select(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job.job_id))
+        render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job.job_id))
         return {
             "step": step_name,
             "job_id": job.job_id,
@@ -517,17 +602,22 @@ class JobOrchestrator:
             "scene_plan": scene_plan.content_hash if scene_plan else None,
             "narration": narration.content_hash if narration else None,
             "subtitles": subtitles.content_hash if subtitles else None,
+            "background_music": background_music.content_hash if background_music else None,
+            "render": render.content_hash if render else None,
+            "monetization": (job.quality_summary or {}).get("monetization", {}).get("content_hash"),
         }
 
     def _step_input_gate(self, session: Session, job: Job, attempt: int) -> list[str]:
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
         assert request
+        if request.niche_id not in SUPPORTED_NICHES:
+            raise FatalStepError(f"unsupported niche_id: {request.niche_id}")
         blocked = any(term in request.seed_theme.lower() for term in ["odio", "terrorismo", "explosivo"])
         if blocked:
             raise FatalStepError("input blocked by moderation")
         quality = {
             "schema_valid": True,
-            "niche_supported": request.niche_id == "curiosidades",
+            "niche_supported": True,
             "language": request.language,
             "moderation_ok": True,
         }
@@ -547,25 +637,11 @@ class JobOrchestrator:
             {"canonical_topic": row.canonical_topic, "hook": row.hook, "title": row.title}
             for row in history_rows
         ]
-        plan = self.providers.creative.plan_topic(
-            request.seed_theme,
-            attempt,
-            history,
-            request.requested_angle,
-            tone=request.tone,
-            notes=request.notes,
+        plan, topic_metrics = self._generate_topic_plan_with_repair(
+            request=request,
+            history=history,
+            attempt=attempt,
         )
-        candidate_topic_surface = f"{plan['canonical_topic']} {plan['angle']}"
-        topic_similarity = max(
-            [cosineish_similarity(candidate_topic_surface, f"{row['canonical_topic']} {row['title']}") for row in history],
-            default=0.0,
-        )
-        hook_similarity = max(
-            [jaccard_bigrams(plan["hook_promise"], row["hook"]) for row in history],
-            default=0.0,
-        )
-        if topic_similarity >= 0.82 or hook_similarity >= 0.88:
-            raise RecoverableStepError("topic too similar to approved history")
         created_at = utcnow()
         payload = {
             "schema_version": self.settings.schema_version,
@@ -576,19 +652,167 @@ class JobOrchestrator:
             **plan,
             "quality_metrics": {
                 **plan["quality_metrics"],
-                "topic_uniqueness_pass": True,
-                "topic_similarity_max": round(topic_similarity, 3),
-                "hook_similarity_max": round(hook_similarity, 3),
+                **topic_metrics,
             },
         }
         session.execute(delete(TopicPlan).where(TopicPlan.job_id == job.job_id))
         session.add(TopicPlan(**model_payload(TopicPlan, payload)))
         self.storage.persist_json(job.job_id, "topic_plan.json", self._serialize_for_json(payload))
+        topic_telemetry_file = self._persist_repair_telemetry(
+            job.job_id,
+            "topic_plan",
+            {
+                "job_id": job.job_id,
+                "attempt": attempt,
+                "final_passed": payload["quality_metrics"].get("topic_uniqueness_pass", False),
+                "repair_attempts": payload["quality_metrics"].get("topic_repair_loop_attempt", 1),
+                "attempts": payload["quality_metrics"].get("topic_repair_attempts_log", []),
+            },
+        )
         job.topic_summary = f"{plan['canonical_topic']} | {plan['angle']}"
         self._append_event(job.job_id, "topic.generated", "succeeded", payload["quality_metrics"])
-        return ["topic_plan.json"]
+        return ["topic_plan.json", topic_telemetry_file]
+
+    def _generate_topic_plan_with_repair(
+        self,
+        request: TopicRequest,
+        history: list[dict[str, Any]],
+        attempt: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        topic_attempts = max(1, self.settings.llm_topic_repair_attempts + 1)
+        notes_suffix = ""
+        last_metrics: dict[str, Any] | None = None
+        last_plan: dict[str, Any] | None = None
+        attempts_log: list[dict[str, Any]] = []
+        for repair_attempt in range(1, topic_attempts + 1):
+            plan = self.providers.creative.plan_topic(
+                request.seed_theme,
+                attempt,
+                history,
+                request.requested_angle,
+                tone=request.tone,
+                notes="\n\n".join(part for part in [request.notes, notes_suffix] if part),
+            )
+            plan = self._normalize_topic_plan_payload(plan, request)
+            last_plan = plan
+            candidate_topic_surface = f"{plan['canonical_topic']} {plan['angle']}"
+            topic_similarity = max(
+                [cosineish_similarity(candidate_topic_surface, f"{row['canonical_topic']} {row['title']}") for row in history],
+                default=0.0,
+            )
+            hook_similarity = max(
+                [jaccard_bigrams(plan["hook_promise"], row["hook"]) for row in history],
+                default=0.0,
+            )
+            last_metrics = {
+                "topic_uniqueness_pass": topic_similarity < 0.82 and hook_similarity < 0.88,
+                "topic_similarity_max": round(topic_similarity, 3),
+                "hook_similarity_max": round(hook_similarity, 3),
+                "topic_repair_loop_attempt": repair_attempt,
+            }
+            attempts_log.append(
+                {
+                    "repair_attempt": repair_attempt,
+                    "canonical_topic": plan["canonical_topic"],
+                    "angle": plan["angle"],
+                    "hook_promise": plan["hook_promise"],
+                    "topic_similarity_max": round(topic_similarity, 3),
+                    "hook_similarity_max": round(hook_similarity, 3),
+                    "passed": last_metrics["topic_uniqueness_pass"],
+                    "reason_codes": [] if last_metrics["topic_uniqueness_pass"] else ["topic_too_similar_to_history"],
+                }
+            )
+            if last_metrics["topic_uniqueness_pass"]:
+                if repair_attempt > 1:
+                    last_metrics["topic_repair_used"] = True
+                last_metrics["topic_repair_attempts_log"] = attempts_log
+                return plan, last_metrics
+            notes_suffix = (
+                "REPAIR TOPIC FOR UNIQUENESS:\n"
+                f"- previous canonical_topic: {plan['canonical_topic']}\n"
+                f"- previous angle: {plan['angle']}\n"
+                f"- previous hook_promise: {plan['hook_promise']}\n"
+                f"- similarity thresholds exceeded: topic={topic_similarity:.3f}, hook={hook_similarity:.3f}\n"
+                "- choose a distinctly different angle, hook promise and title set while preserving the seed theme.\n"
+                "- avoid repeating recently approved topic surfaces or hooks."
+            )
+        assert last_plan is not None and last_metrics is not None
+        last_metrics["topic_repair_attempts_log"] = attempts_log
+        raise RecoverableStepError(
+            f"topic too similar to approved history (topic_similarity={last_metrics['topic_similarity_max']}, hook_similarity={last_metrics['hook_similarity_max']})"
+        )
+
+    def _normalize_topic_plan_payload(self, plan: dict[str, Any], request: TopicRequest) -> dict[str, Any]:
+        aliases = {
+            "canonical_topic": ("canonical_topic", "tema_canonico", "topico_canonico", "tema_principal", "topico_principal", "topic", "tema", "title"),
+            "angle": ("angle", "angulo", "recorte", "abordagem", "requested_angle"),
+            "hook_promise": ("hook_promise", "promessa_hook", "promessa_do_hook", "gancho", "hook"),
+            "title_candidates": ("title_candidates", "titulos", "candidatos_titulo", "candidatos_de_titulo"),
+            "entities": ("entities", "entidades", "elementos", "assuntos"),
+            "search_terms": ("search_terms", "termos_busca", "termos_de_busca", "palavras_chave", "keywords"),
+            "quality_metrics": ("quality_metrics", "metricas_qualidade", "metricas"),
+        }
+        normalized: dict[str, Any] = {}
+        for target, names in aliases.items():
+            for name in names:
+                value = plan.get(name)
+                if value not in (None, "", []):
+                    normalized[target] = value
+                    break
+
+        canonical_topic = str(normalized.get("canonical_topic") or request.seed_theme).strip() or request.seed_theme
+        angle = str(
+            normalized.get("angle")
+            or request.requested_angle
+            or f"o detalhe mais contraintuitivo de {canonical_topic}"
+        ).strip()
+        hook_promise = str(
+            normalized.get("hook_promise")
+            or f"por que {canonical_topic} muda quando voce entende o mecanismo"
+        ).strip()
+
+        title_candidates = normalized.get("title_candidates")
+        if isinstance(title_candidates, str):
+            title_candidates = [title_candidates]
+        if not isinstance(title_candidates, list) or not title_candidates:
+            title_candidates = [f"{canonical_topic.capitalize()}: o detalhe que quase ninguem percebe"]
+
+        entities = normalized.get("entities")
+        if isinstance(entities, str):
+            entities = [entities]
+        if not isinstance(entities, list) or not entities:
+            entities = [canonical_topic]
+
+        search_terms = normalized.get("search_terms")
+        if isinstance(search_terms, str):
+            search_terms = [search_terms]
+        if not isinstance(search_terms, list) or not search_terms:
+            search_terms = [canonical_topic, f"{canonical_topic} curiosidades", f"{canonical_topic} explicacao"]
+
+        quality_metrics = normalized.get("quality_metrics")
+        if not isinstance(quality_metrics, dict):
+            quality_metrics = {}
+        if "topic_repair_used" not in quality_metrics:
+            required = {"canonical_topic", "angle", "hook_promise", "title_candidates", "entities", "search_terms", "quality_metrics"}
+            quality_metrics = {
+                **quality_metrics,
+                "topic_repair_used": any(key not in plan or plan.get(key) in (None, "", []) for key in required),
+            }
+
+        return {
+            **plan,
+            "canonical_topic": canonical_topic,
+            "angle": angle,
+            "hook_promise": hook_promise,
+            "title_candidates": [str(title).strip() for title in title_candidates if str(title).strip()][:5],
+            "entities": [str(entity).strip() for entity in entities if str(entity).strip()],
+            "search_terms": [str(term).strip() for term in search_terms if str(term).strip()],
+            "quality_metrics": quality_metrics,
+        }
 
     def _step_script(self, session: Session, job: Job, attempt: int) -> list[str]:
+        self._remove_stale_quality_report(job.job_id, "script_rejected.json")
+        self._remove_stale_quality_report(job.job_id, "script_generation_debug.json")
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
         assert topic_plan and request
@@ -604,8 +828,45 @@ class JobOrchestrator:
         fact_pack = self._build_fact_pack(topic_plan, request)
         plan_dict["fact_pack"] = fact_pack
         self.storage.persist_json(job.job_id, "fact_pack.json", self._serialize_for_json(fact_pack))
-        script = self.providers.creative.generate_script(plan_dict)
-        script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec, request.cta_style or "none")
+        generation_started = time.monotonic()
+        try:
+            script = self.providers.creative.generate_script(plan_dict)
+        except Exception as exc:  # noqa: BLE001
+            self._persist_script_generation_debug(
+                job_id=job.job_id,
+                attempt=attempt,
+                plan_dict=plan_dict,
+                fact_pack=fact_pack,
+                phase="generation",
+                elapsed_ms=round((time.monotonic() - generation_started) * 1000, 1),
+                error=exc,
+            )
+            raise
+        generation_elapsed_ms = round((time.monotonic() - generation_started) * 1000, 1)
+        try:
+            script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec, request.cta_style or "none", job.job_id)
+        except Exception as exc:  # noqa: BLE001
+            self._persist_script_generation_debug(
+                job_id=job.job_id,
+                attempt=attempt,
+                plan_dict=plan_dict,
+                fact_pack=fact_pack,
+                phase="validation",
+                elapsed_ms=generation_elapsed_ms,
+                script=script,
+                error=exc,
+            )
+            raise
+        self._persist_script_generation_debug(
+            job_id=job.job_id,
+            attempt=attempt,
+            plan_dict=plan_dict,
+            fact_pack=fact_pack,
+            phase="completed",
+            elapsed_ms=generation_elapsed_ms,
+            script=script,
+            metrics=metrics,
+        )
         script = self._attach_editorial_source(script, plan_dict)
         metrics = {**metrics, "editorial_source": "hub_viral_prompt", "downstream_source_of_truth": "script_full_narration"}
         created_at = utcnow()
@@ -620,11 +881,59 @@ class JobOrchestrator:
         session.execute(delete(Script).where(Script.job_id == job.job_id))
         session.add(Script(**model_payload(Script, payload)))
         self.storage.persist_json(job.job_id, "script.json", self._serialize_for_json(payload))
+        script_telemetry_file = self._persist_repair_telemetry(
+            job.job_id,
+            "script",
+            {
+                "job_id": job.job_id,
+                "attempt": attempt,
+                "final_passed": metrics.get("script_quality_gate_pass", False) and metrics.get("fact_pack_consistency_pass", False),
+                "attempts": metrics.get("script_repair_attempts_log", []),
+            },
+        )
         quality_summary = dict(job.quality_summary or {})
         quality_summary["script"] = metrics
         job.quality_summary = quality_summary
         self._append_event(job.job_id, "script.generated", "succeeded", metrics)
-        return ["fact_pack.json", "script.json"]
+        return ["fact_pack.json", "script.json", "script_generation_debug.json", script_telemetry_file]
+
+    def _persist_script_generation_debug(
+        self,
+        job_id: str,
+        attempt: int,
+        plan_dict: dict[str, Any],
+        fact_pack: dict[str, Any],
+        phase: str,
+        elapsed_ms: float,
+        script: dict[str, Any] | None = None,
+        metrics: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        payload = {
+            "job_id": job_id,
+            "attempt": attempt,
+            "phase": phase,
+            "elapsed_ms": elapsed_ms,
+            "strict_minimax_validation": self.settings.strict_minimax_validation,
+            "llm_primary_provider": self.settings.llm_primary_provider,
+            "llm_fallback_provider": self.settings.llm_fallback_provider,
+            "llm_enable_fallback": self.settings.llm_enable_fallback,
+            "minimax_script_timeout_sec": self.settings.minimax_script_timeout_sec,
+            "fact_pack_status": fact_pack.get("status"),
+            "fact_count": len(fact_pack.get("facts") or []),
+            "canonical_topic": plan_dict.get("canonical_topic"),
+            "angle": plan_dict.get("angle"),
+            "requested_angle": plan_dict.get("requested_angle"),
+            "source_fact_ids": list((script or {}).get("source_fact_ids") or []),
+            "script_title": (script or {}).get("title"),
+            "script_hook": (script or {}).get("hook"),
+            "script_language": (script or {}).get("language"),
+            "script_estimated_duration_sec": (script or {}).get("estimated_duration_sec"),
+            "qa_metrics": self._serialize_for_json(metrics or {}),
+            "error_type": type(error).__name__ if error else None,
+            "error_message": str(error) if error else None,
+        }
+        self.storage.persist_json(job_id, "script_generation_debug.json", self._serialize_for_json(payload))
 
     def _build_fact_pack(self, topic_plan: TopicPlan, request: TopicRequest) -> dict[str, Any]:
         if self.settings.use_mock_providers:
@@ -640,9 +949,10 @@ class JobOrchestrator:
         cleaned_queries = []
         for query in queries:
             normalized = " ".join(str(query or "").split())
-            if normalized and normalized.lower() not in seen:
+            if normalized and normalized.lower() not in seen and not self._is_weak_fact_query(normalized):
                 cleaned_queries.append(normalized)
                 seen.add(normalized.lower())
+        cleaned_queries.sort(key=self._fact_query_priority)
         for query in cleaned_queries[:8]:
             pack = self._wikipedia_fact_pack(query)
             if pack.get("facts"):
@@ -656,6 +966,40 @@ class JobOrchestrator:
             "sources": [],
             "editorial_rule": "No source facts were retrieved. Script must avoid precise numbers, dates, medical/scientific/engineering causality, and absolute claims unless already present in the user input.",
         }
+
+    def _fact_query_priority(self, query: str) -> tuple[int, int, int, int]:
+        normalized = query.lower()
+        token_count = len(word_tokens(query))
+        is_short_entity = token_count <= 3 and ":" not in query and "?" not in query
+        has_concept_suffix = any(term in normalized for term in ["carotenoides", "pigmentos", "diet", "inclinação", "engenharia", "solo"])
+        return (
+            0 if is_short_entity else 1,
+            1 if has_concept_suffix else 0,
+            token_count,
+            len(query),
+        )
+
+    def _is_weak_fact_query(self, query: str) -> bool:
+        tokens = [token.lower() for token in word_tokens(query) if token]
+        if not tokens:
+            return True
+        weak_single_terms = {
+            "auto",
+            "manual",
+            "segredo",
+            "mecanismo",
+            "processo",
+            "fato",
+            "fatos",
+            "curiosidade",
+            "curiosidades",
+            "biologia",
+            "ciencia",
+            "ciência",
+            "inteligencia",
+            "inteligência",
+        }
+        return len(tokens) == 1 and tokens[0] in weak_single_terms
 
 
     def _fact_pack_queries(self, request: TopicRequest, topic_plan: TopicPlan) -> list[str]:
@@ -684,11 +1028,33 @@ class JobOrchestrator:
         stopwords = {
             "por", "que", "porque", "como", "qual", "quais", "para", "com", "uma", "um", "de", "do", "da", "dos", "das", "a", "o", "as", "os", "e",
             "fica", "ficam", "cor", "rosa", "cor-de-rosa", "não", "nao", "cai", "acontece", "segredo", "invisível", "invisivel", "parece", "artificial",
+            "curiosidades", "curiosidade", "cientificas", "científicas", "cientifica", "científica", "sobre", "mais", "inteligente", "oceano",
+            "animal", "explica", "explicacao", "explicação", "fatos", "fato",
         }
-        tokens = [token for token in word_tokens(query) if len(token) >= 3 and token.lower() not in stopwords]
+        colon_head = query.split(":", 1)[0].strip(" -–—:;,.") if ":" in query else ""
+        if colon_head:
+            colon_tokens = [token for token in word_tokens(colon_head) if token]
+            if 1 <= len(colon_tokens) <= 4:
+                return " ".join(colon_tokens)
+        plain_tokens = [token for token in word_tokens(query) if token]
+        if plain_tokens:
+            trailing_tokens = plain_tokens[1:]
+            if trailing_tokens and all(len(token) < 3 or token.lower() in stopwords for token in trailing_tokens):
+                return plain_tokens[0]
+        filtered_tokens = [token for token in word_tokens(query) if len(token) >= 3 and token.lower() not in stopwords]
+        if 1 <= len(filtered_tokens) <= 2:
+            return " ".join(filtered_tokens)
+        preposition_head = re.split(r"\b(?:sobre|com|contra|versus|vs\.?|em)\b", query, maxsplit=1, flags=re.IGNORECASE)[0].strip(" -–—:;,.")
+        if preposition_head:
+            head_tokens = [token for token in word_tokens(preposition_head) if token]
+            if 1 <= len(head_tokens) <= 4:
+                return " ".join(head_tokens)
+        tokens = filtered_tokens
         if not tokens:
             return query
-        return " ".join(tokens[:3])
+        if len(tokens) == 1:
+            return tokens[0]
+        return " ".join(tokens[:2])
 
     def _fact_query_concepts(self, query: str) -> list[str]:
         normalized = query.lower()
@@ -813,31 +1179,51 @@ class JobOrchestrator:
         plan_dict: dict[str, Any],
         target_duration_sec: int,
         cta_style: str = "none",
+        job_id: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         script = self._apply_cta_policy(dict(script), cta_style)
         script["qa_metrics"] = normalize_script_metrics(dict(script.get("qa_metrics") or {}))
         gate_result = self.script_gate.validate(script, target_duration_sec)
         consistency_reasons = self._fact_pack_consistency_reasons(script, plan_dict.get("fact_pack"))
+        attempts_log: list[dict[str, Any]] = [
+            {
+                "repair_attempt": 0,
+                "reason_codes": [*gate_result.reasons, *consistency_reasons],
+                "passed": gate_result.passed and not consistency_reasons,
+                "used_fallback": False,
+            }
+        ]
         if gate_result.passed and not consistency_reasons:
-            script["qa_metrics"] = {**gate_result.metrics, "fact_pack_consistency_pass": True}
+            script["qa_metrics"] = {**gate_result.metrics, "fact_pack_consistency_pass": True, "script_repair_attempts_log": attempts_log}
             return script, script["qa_metrics"]
 
         repair_attempts = max(0, self.settings.llm_script_repair_attempts)
         last_reasons = [*gate_result.reasons, *consistency_reasons]
-        for _ in range(repair_attempts):
+        self._persist_script_rejection(job_id, script, gate_result.metrics, consistency_reasons)
+        for repair_attempt in range(1, repair_attempts + 1):
             repaired = self.providers.creative.repair_script(script, last_reasons, plan_dict)
             repaired = self._apply_cta_policy(repaired, cta_style)
             repaired["qa_metrics"] = normalize_script_metrics(dict(repaired.get("qa_metrics") or {}))
             repaired_gate = self.script_gate.validate(repaired, target_duration_sec)
             repaired_consistency_reasons = self._fact_pack_consistency_reasons(repaired, plan_dict.get("fact_pack"))
+            attempts_log.append(
+                {
+                    "repair_attempt": repair_attempt,
+                    "reason_codes": [*repaired_gate.reasons, *repaired_consistency_reasons],
+                    "passed": repaired_gate.passed and not repaired_consistency_reasons,
+                    "used_fallback": False,
+                }
+            )
             if repaired_gate.passed and not repaired_consistency_reasons:
                 repaired["qa_metrics"] = {
                     **repaired_gate.metrics,
                     "fact_pack_consistency_pass": True,
                     "script_repair_used": True,
                     "script_repair_initial_reasons": [*gate_result.reasons, *consistency_reasons],
+                    "script_repair_attempts_log": attempts_log,
                 }
                 return repaired, repaired["qa_metrics"]
+            self._persist_script_rejection(job_id, repaired, repaired_gate.metrics, repaired_consistency_reasons)
             script = repaired
             last_reasons = [*repaired_gate.reasons, *repaired_consistency_reasons]
 
@@ -847,6 +1233,14 @@ class JobOrchestrator:
             fallback_repaired["qa_metrics"] = normalize_script_metrics(dict(fallback_repaired.get("qa_metrics") or {}))
             fallback_gate = self.script_gate.validate(fallback_repaired, target_duration_sec)
             fallback_consistency_reasons = self._fact_pack_consistency_reasons(fallback_repaired, plan_dict.get("fact_pack"))
+            attempts_log.append(
+                {
+                    "repair_attempt": repair_attempts + 1,
+                    "reason_codes": [*fallback_gate.reasons, *fallback_consistency_reasons],
+                    "passed": fallback_gate.passed and not fallback_consistency_reasons,
+                    "used_fallback": True,
+                }
+            )
             if fallback_gate.passed and not fallback_consistency_reasons:
                 fallback_repaired["qa_metrics"] = {
                     **fallback_gate.metrics,
@@ -854,14 +1248,30 @@ class JobOrchestrator:
                     "script_repair_used": True,
                     "script_repair_fallback_used": True,
                     "script_repair_initial_reasons": [*gate_result.reasons, *consistency_reasons],
+                    "script_repair_attempts_log": attempts_log,
                 }
                 return fallback_repaired, fallback_repaired["qa_metrics"]
+            self._persist_script_rejection(job_id, fallback_repaired, fallback_gate.metrics, fallback_consistency_reasons)
             last_reasons = [*fallback_gate.reasons, *fallback_consistency_reasons]
 
         raise RecoverableStepError(f"script quality gate failed: {', '.join(last_reasons)}")
 
+    def _persist_script_rejection(self, job_id: str | None, script: dict[str, Any], gate_metrics: dict[str, Any], consistency_reasons: list[str]) -> None:
+        if not job_id:
+            return
+        self.storage.persist_json(
+            job_id,
+            "script_rejected.json",
+            {
+                "script": self._serialize_for_json(script),
+                "gate_metrics": self._serialize_for_json(gate_metrics),
+                "consistency_reasons": consistency_reasons,
+            },
+        )
+
     def _step_scene_plan(self, session: Session, job: Job, attempt: int) -> list[str]:
         self._remove_stale_quality_report(job.job_id, "scene_plan_rejected.json")
+        self._remove_stale_quality_report(job.job_id, "scene_plan_raw.json")
         script = session.scalar(select(Script).where(Script.job_id == job.job_id))
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         assert script and topic_plan
@@ -882,19 +1292,25 @@ class JobOrchestrator:
             "downstream_rule": "Scenes, images, subtitles and TTS must derive from full_narration. Do not invent new beats or split tiny punchlines into standalone render scenes.",
         }
         scenes = self.providers.creative.plan_scenes(script_dict, self.settings.scene_target_count)
+        self.storage.persist_json(job.job_id, "scene_plan_raw.json", self._serialize_for_json({"scenes": scenes}))
         tokens = word_tokens(script.full_narration)
+        scenes = self._normalize_scene_token_coverage(scenes, script.full_narration)
         if not scenes or scenes[0]["token_start"] != 0 or scenes[-1]["token_end"] != len(tokens) - 1:
-            fallback_planner = getattr(self.providers.creative, "fallback", None)
+            fallback_planner = None if self.settings.strict_minimax_validation else getattr(self.providers.creative, "fallback", None)
             if fallback_planner is not None:
                 scenes = fallback_planner.plan_scenes(script_dict, self.settings.scene_target_count)
+                self.storage.persist_json(job.job_id, "scene_plan_raw.json", self._serialize_for_json({"scenes": scenes}))
+                scenes = self._normalize_scene_token_coverage(scenes, script.full_narration)
             if not scenes or scenes[0]["token_start"] != 0 or scenes[-1]["token_end"] != len(tokens) - 1:
                 raise RecoverableStepError("scene coverage invalid")
         scenes = [self._normalize_scene_semantics(scene, topic_plan.canonical_topic) for scene in scenes]
         scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count)
         if not scene_gate.passed:
-            fallback_planner = getattr(self.providers.creative, "fallback", None)
+            fallback_planner = None if self.settings.strict_minimax_validation else getattr(self.providers.creative, "fallback", None)
             if fallback_planner is not None:
                 scenes = fallback_planner.plan_scenes(script_dict, self.settings.scene_target_count)
+                self.storage.persist_json(job.job_id, "scene_plan_raw.json", self._serialize_for_json({"scenes": scenes}))
+                scenes = self._normalize_scene_token_coverage(scenes, script.full_narration)
                 scenes = [self._normalize_scene_semantics(scene, topic_plan.canonical_topic) for scene in scenes]
                 scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count)
             if not scene_gate.passed:
@@ -923,6 +1339,50 @@ class JobOrchestrator:
         self._append_event(job.job_id, "scene_plan.generated", "succeeded", quality_summary["scene_plan"])
         return ["scene_plan.json"]
 
+    def _normalize_scene_token_coverage(self, scenes: list[dict[str, Any]], full_narration: str) -> list[dict[str, Any]]:
+        if not scenes:
+            return scenes
+        tokens = word_tokens(full_narration)
+        total_tokens = len(tokens)
+        if total_tokens <= 0:
+            return scenes
+        ordered = [dict(scene) for scene in sorted(scenes, key=lambda scene: int(scene.get("order", 0) or 0))]
+        weights = [max(1, len(word_tokens(str(scene.get("narration_text") or "")))) for scene in ordered]
+        remaining_tokens = total_tokens
+        remaining_weight = sum(weights)
+        cursor = 0
+        normalized: list[dict[str, Any]] = []
+        for index, scene in enumerate(ordered):
+            scene_id = str(scene.get("scene_id") or f"scene-{index + 1}")
+            scenes_left = len(ordered) - index
+            weight = weights[index]
+            if index == len(ordered) - 1:
+                count = remaining_tokens
+            else:
+                proportional = round(remaining_tokens * (weight / max(remaining_weight, 1)))
+                count = max(1, min(proportional, remaining_tokens - (scenes_left - 1)))
+            start = cursor
+            end = start + count - 1
+            exact_text = " ".join(tokens[start : end + 1]).strip()
+            normalized.append(
+                {
+                    **scene,
+                    "scene_id": scene_id,
+                    "order": index + 1,
+                    "token_start": start,
+                    "token_end": end,
+                    "narration_text": exact_text or str(scene.get("narration_text") or "").strip(),
+                }
+            )
+            cursor = end + 1
+            remaining_tokens -= count
+            remaining_weight -= weight
+        if normalized:
+            normalized[0]["token_start"] = 0
+            normalized[-1]["token_end"] = total_tokens - 1
+            normalized[-1]["narration_text"] = " ".join(tokens[normalized[-1]["token_start"] : total_tokens]).strip()
+        return normalized
+
     def _step_assets(self, session: Session, job: Job, attempt: int) -> list[str]:
         self._remove_stale_quality_report(job.job_id, "asset_quality_report.json")
         scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job.job_id))
@@ -935,39 +1395,80 @@ class JobOrchestrator:
             candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
             fallback_used = False
             primary_provider = "minimax"
-            for variant_index, variant_scene in enumerate(self._image_prompt_variants(scene), start=1):
-                ai_path = scene_dir / ("ai.png" if variant_index == 1 else f"ai-{variant_index}.png")
-                try:
-                    ai_asset = self.providers.image.generate(variant_scene, ai_path)
-                    ai_asset = self._normalize_asset_uri_extension(ai_asset)
-                    ai_scores = self._score_asset(variant_scene, ai_asset)
-                    candidates.append((ai_asset, ai_scores))
-                    primary_provider = ai_asset["provider"]
-                    if self._asset_scores_pass(ai_scores):
-                        break
-                except Exception as exc:  # noqa: BLE001
-                    fallback_used = True
-                    session.add(
-                        FallbackEvent(
-                            event_id=new_id(),
-                            job_id=job.job_id,
-                            schema_version=self.settings.schema_version,
-                            content_hash=stable_hash({"scene": scene["scene_id"], "attempt": attempt, "mode": f"provider_error_{variant_index}"}),
-                            created_at=utcnow(),
-                            step="asset_generation",
-                            reason_code="ai_provider_error",
-                            attempt=attempt,
-                            scene_id=scene["scene_id"],
-                            from_provider="minimax",
-                            to_provider="local_semantic",
-                            reason_detail=str(exc),
+            variant_cursor = 0
+            for regeneration_round in range(1, max(1, self.settings.asset_generation_regeneration_rounds) + 1):
+                for variant_index, variant_scene in enumerate(self._image_prompt_variants(scene, regeneration_round), start=1):
+                    variant_cursor += 1
+                    ai_path = scene_dir / ("ai.png" if variant_cursor == 1 else f"ai-{variant_cursor}.png")
+                    try:
+                        ai_asset = self._generate_primary_asset(variant_scene, ai_path)
+                        ai_asset = self._normalize_asset_uri_extension(ai_asset)
+                        ai_scores = self._score_asset(variant_scene, ai_asset)
+                        candidates.append((ai_asset, ai_scores))
+                        primary_provider = ai_asset["provider"]
+                        self._append_event(
+                            job.job_id,
+                            "asset.primary_candidate_scored",
+                            "succeeded",
+                            {
+                                "scene_id": scene["scene_id"],
+                                "variant": variant_cursor,
+                                "regeneration_round": regeneration_round,
+                                "provider": ai_asset["provider"],
+                                "semantic_match": ai_scores["semantic_match"],
+                                "total_score": ai_scores["total_score"],
+                            },
                         )
-                    )
-                    self._append_event(job.job_id, "asset.semantic_fallback", "succeeded", {"scene_id": scene["scene_id"], "variant": variant_index})
+                        if self._asset_scores_pass(ai_scores):
+                            break
+                    except Exception as exc:  # noqa: BLE001
+                        fallback_used = True
+                        reason_code = "ai_provider_timeout" if "timed out" in str(exc).lower() else "ai_provider_error"
+                        if not self.settings.strict_minimax_validation:
+                            session.add(
+                                FallbackEvent(
+                                    event_id=new_id(),
+                                    job_id=job.job_id,
+                                    schema_version=self.settings.schema_version,
+                                    content_hash=stable_hash({"scene": scene["scene_id"], "attempt": attempt, "mode": f"{reason_code}_{variant_cursor}"}),
+                                    created_at=utcnow(),
+                                    step="asset_generation",
+                                    reason_code=reason_code,
+                                    attempt=attempt,
+                                    scene_id=scene["scene_id"],
+                                    from_provider="minimax",
+                                    to_provider="local_semantic",
+                                    reason_detail=str(exc),
+                                )
+                            )
+                        self._append_event(
+                            job.job_id,
+                            "asset.primary_candidate_failed",
+                            "failed",
+                            {
+                                "scene_id": scene["scene_id"],
+                                "variant": variant_cursor,
+                                "regeneration_round": regeneration_round,
+                                "reason": str(exc),
+                            },
+                        )
+                if any(self._asset_scores_pass(scores) for _, scores in candidates):
+                    break
+                self._append_event(
+                    job.job_id,
+                    "asset.regeneration_round_completed",
+                    "succeeded",
+                    {
+                        "scene_id": scene["scene_id"],
+                        "regeneration_round": regeneration_round,
+                        "candidate_count": len(candidates),
+                        "passing_candidate_count": sum(1 for _, scores in candidates if self._asset_scores_pass(scores)),
+                    },
+                )
             needs_quality_fallback = not candidates or all(not self._asset_scores_pass(scores) for _, scores in candidates)
             if not candidates and not self.settings.use_mock_providers:
                 fallback_used = True
-            if needs_quality_fallback:
+            if needs_quality_fallback and not self.settings.strict_minimax_validation:
                 fallback_used = True
                 fallback_reason_code = "low_semantic_score" if candidates else "no_primary_image_candidate"
                 fallback_reason_detail = (
@@ -1054,6 +1555,20 @@ class JobOrchestrator:
         self._append_event(job.job_id, "asset.selected", "succeeded", quality_summary["assets"])
         return asset_refs
 
+    def _generate_primary_asset(self, scene: dict[str, Any], output_path: Path) -> dict[str, Any]:
+        executor: concurrent.futures.ThreadPoolExecutor | None = None
+        try:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(self.providers.image.generate, scene, output_path)
+            return future.result(timeout=self.settings.asset_generation_timeout_sec)
+        except concurrent.futures.TimeoutError as exc:
+            raise RecoverableStepError(
+                f"asset primary generation timed out after {self.settings.asset_generation_timeout_sec}s"
+            ) from exc
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=False, cancel_futures=True)
+
     def _normalize_asset_uri_extension(self, asset: dict[str, Any]) -> dict[str, Any]:
         uri = str(asset.get("uri") or "")
         if not uri.startswith("file://"):
@@ -1093,7 +1608,7 @@ class JobOrchestrator:
             and scores.get("artifact_penalty", 0.0) <= 0.30
         )
 
-    def _image_prompt_variants(self, scene: dict[str, Any]) -> list[dict[str, Any]]:
+    def _image_prompt_variants(self, scene: dict[str, Any], regeneration_round: int = 1) -> list[dict[str, Any]]:
         topic_text = str(scene.get("topic_hint") or scene.get("primary_subject") or "")
         primary_subject = str(scene.get("primary_subject") or scene.get("topic_hint") or "")
         base_prompt = self._semantic_english_image_prompt(scene, topic_text, primary_subject)
@@ -1116,15 +1631,21 @@ class JobOrchestrator:
         seen: set[str] = set()
         for prompt in variant_prompts:
             normalized = " ".join(prompt.split())
+            if regeneration_round > 1:
+                normalized = (
+                    f"{normalized}, alternate composition, new camera framing, different background geometry, "
+                    "keep the same factual subject and no text constraints"
+                )
             if normalized.lower() in seen:
                 continue
             seen.add(normalized.lower())
-            variants.append({**scene, "image_prompt": normalized})
+            variants.append({**scene, "image_prompt": normalized, "regeneration_round": regeneration_round})
         return variants
 
     def _normalize_scene_semantics(self, scene: dict[str, Any], canonical_topic: str) -> dict[str, Any]:
         topic_text = canonical_topic.replace("_", " ").strip()
         normalized = dict(scene)
+        normalized["scene_id"] = str(scene.get("scene_id") or normalized.get("scene_id") or "scene-1")
         primary_subject = str(scene.get("primary_subject") or topic_text).replace("_", " ").strip()
         normalized["primary_subject"] = primary_subject or topic_text
         normalized["topic_hint"] = str(scene.get("topic_hint") or topic_text).replace("_", " ").strip() or topic_text
@@ -1406,6 +1927,7 @@ class JobOrchestrator:
             end = min(len(script_words), start + len(cue_words)) - 1
             items.extend(self._split_subtitle_cue(cue, start, max(end, start)))
             cursor = end + 1
+        items = self._repair_subtitle_item_boundaries(items)
         coverage = round(min(cursor / max(len(script_words), 1), 1.0), 3)
         if coverage < 0.99:
             raise RecoverableStepError("subtitle coverage below threshold")
@@ -1457,8 +1979,261 @@ class JobOrchestrator:
         self._append_event(job.job_id, "subtitle.aligned", "succeeded", quality_summary["subtitles"])
         return ["subtitle_track.json", "audio/subtitles.ass"]
 
+    def _step_background_music(self, session: Session, job: Job, attempt: int) -> list[str]:
+        script = session.scalar(select(Script).where(Script.job_id == job.job_id))
+        topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
+        narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job.job_id))
+        assert script and topic_plan and narration
+        self._remove_stale_quality_report(job.job_id, "background_music_debug.json")
+        if not self.settings.background_music_enabled:
+            quality_summary = dict(job.quality_summary or {})
+            quality_summary["background_music"] = {"enabled": False, "skipped": True}
+            job.quality_summary = quality_summary
+            session.execute(delete(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job.job_id))
+            return []
+
+        music_dir = self.storage.job_dir(job.job_id) / "audio"
+        raw_music_path = music_dir / "background_source.wav"
+        mixed_audio_path = music_dir / "mixed.wav"
+        topic_dict = {
+            "canonical_topic": topic_plan.canonical_topic,
+            "angle": topic_plan.angle,
+            "title_candidates": topic_plan.title_candidates,
+        }
+        script_dict = {
+            "title": script.title,
+            "hook": script.hook,
+            "ending": script.ending,
+            "full_narration": script.full_narration,
+        }
+        music_started_at = time.perf_counter()
+        try:
+            result = self.providers.music.select_track(topic_dict, script_dict, raw_music_path, narration.duration_ms)
+        except Exception as exc:
+            self._persist_background_music_debug(
+                job.job_id,
+                attempt=attempt,
+                topic_dict=topic_dict,
+                script_dict=script_dict,
+                target_duration_ms=narration.duration_ms,
+                phase="provider_failure",
+                elapsed_ms=(time.perf_counter() - music_started_at) * 1000,
+                error=exc,
+            )
+            raise
+        self._persist_background_music_debug(
+            job.job_id,
+            attempt=attempt,
+            topic_dict=topic_dict,
+            script_dict=script_dict,
+            target_duration_ms=narration.duration_ms,
+            phase="provider_completed",
+            elapsed_ms=(time.perf_counter() - music_started_at) * 1000,
+            result=result,
+        )
+        mixed_result = self._mix_background_music_with_repair(
+            narration_path=path_from_uri(narration.audio_uri),
+            music_path=raw_music_path,
+            output_path=mixed_audio_path,
+            target_duration_ms=narration.duration_ms,
+            gain_db=self.settings.background_music_gain_db,
+        )
+        created_at = utcnow()
+        payload = {
+            "schema_version": self.settings.schema_version,
+            "music_id": new_id(),
+            "job_id": job.job_id,
+            "created_at": created_at,
+            "content_hash": stable_hash({**result, **mixed_result}),
+            "provider": result["provider"],
+            "query": result.get("query"),
+            "mood": result.get("mood"),
+            "source_url": result.get("source_url"),
+            "attribution": result.get("attribution"),
+            "license_note": result.get("license_note"),
+            "audio_uri": result["audio_uri"],
+            "mixed_audio_uri": file_uri(mixed_audio_path),
+            "duration_ms": narration.duration_ms,
+            "gain_db": self.settings.background_music_gain_db,
+            "provider_metadata": {
+                **dict(result.get("provider_metadata") or {}),
+                **mixed_result,
+            },
+        }
+        session.execute(delete(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job.job_id))
+        session.add(BackgroundMusicAsset(**model_payload(BackgroundMusicAsset, payload)))
+        self.storage.persist_json(job.job_id, "background_music.json", self._serialize_for_json(payload))
+        music_telemetry_file = self._persist_repair_telemetry(
+            job.job_id,
+            "background_music",
+            {
+                "job_id": job.job_id,
+                "attempt": attempt,
+                "final_passed": True,
+                "attempts": mixed_result.get("mix_attempts_log", []),
+            },
+        )
+        quality_summary = dict(job.quality_summary or {})
+        quality_summary["background_music"] = {
+            "enabled": True,
+            "provider": result["provider"],
+            "query": result.get("query"),
+            "mood": result.get("mood"),
+            "gain_db": self.settings.background_music_gain_db,
+            "mixed_audio": "audio/mixed.wav",
+            "fallback_used": bool((result.get("provider_metadata") or {}).get("fallback_used")),
+            "mix_repair_used": bool(mixed_result.get("mix_repair_used")),
+        }
+        job.quality_summary = quality_summary
+        self._append_event(job.job_id, "background_music.mixed", "succeeded", quality_summary["background_music"])
+        return ["audio/background_source.wav", "audio/mixed.wav", "background_music.json", music_telemetry_file]
+
+    def _persist_background_music_debug(
+        self,
+        job_id: str,
+        attempt: int,
+        topic_dict: dict[str, Any],
+        script_dict: dict[str, Any],
+        target_duration_ms: int,
+        phase: str,
+        elapsed_ms: float,
+        result: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        provider_details = dict(getattr(error, "details", {}) or {})
+        provider_metadata = dict((result or {}).get("provider_metadata") or {})
+        payload = {
+            "job_id": job_id,
+            "attempt": attempt,
+            "phase": phase,
+            "elapsed_ms": elapsed_ms,
+            "strict_minimax_validation": self.settings.strict_minimax_validation,
+            "background_music_enabled": self.settings.background_music_enabled,
+            "background_music_gain_db": self.settings.background_music_gain_db,
+            "minimax_music_timeout_sec": self.settings.minimax_music_timeout_sec,
+            "canonical_topic": topic_dict.get("canonical_topic"),
+            "angle": topic_dict.get("angle"),
+            "script_title": script_dict.get("title"),
+            "script_hook": script_dict.get("hook"),
+            "target_duration_ms": target_duration_ms,
+            "provider": (result or {}).get("provider") or getattr(error, "provider", None),
+            "query": (result or {}).get("query") or provider_details.get("query"),
+            "mood": (result or {}).get("mood") or provider_details.get("mood"),
+            "provider_metadata": self._serialize_for_json(provider_metadata),
+            "provider_details": self._serialize_for_json(provider_details),
+            "error_type": type(error).__name__ if error else None,
+            "error_message": str(error) if error else None,
+        }
+        self.storage.persist_json(job_id, "background_music_debug.json", self._serialize_for_json(payload))
+
+    def _mix_background_music_with_repair(
+        self,
+        narration_path: Path,
+        music_path: Path,
+        output_path: Path,
+        target_duration_ms: int,
+        gain_db: float,
+    ) -> dict[str, Any]:
+        strategies = ["sidechaincompress+amix+loudnorm", "simple_amix+loudnorm"]
+        last_error: str | None = None
+        attempts_log: list[dict[str, Any]] = []
+        for strategy in strategies:
+            try:
+                result = self._mix_background_music(
+                    narration_path=narration_path,
+                    music_path=music_path,
+                    output_path=output_path,
+                    target_duration_ms=target_duration_ms,
+                    gain_db=gain_db,
+                    strategy=strategy,
+                )
+                attempts_log.append({"repair_attempt": len(attempts_log) + 1, "strategy": strategy, "passed": True, "reason_codes": []})
+                if strategy != strategies[0]:
+                    result["mix_repair_used"] = True
+                result["mix_attempts_log"] = attempts_log
+                return result
+            except RecoverableStepError as exc:
+                last_error = str(exc)
+                attempts_log.append(
+                    {
+                        "repair_attempt": len(attempts_log) + 1,
+                        "strategy": strategy,
+                        "passed": False,
+                        "reason_codes": [str(exc)],
+                    }
+                )
+        raise RecoverableStepError(last_error or "background music mix failed")
+
+    def _mix_background_music(
+        self,
+        narration_path: Path,
+        music_path: Path,
+        output_path: Path,
+        target_duration_ms: int,
+        gain_db: float,
+        strategy: str = "sidechaincompress+amix+loudnorm",
+    ) -> dict[str, Any]:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        duration_sec = max(target_duration_ms / 1000, 1.0)
+        fade_out_start = max(duration_sec - 1.2, 0.0)
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        temp_output = output_path.with_suffix(".tmp.wav")
+        if strategy == "sidechaincompress+amix+loudnorm":
+            filter_graph = (
+                f"[0:a]aresample=24000,volume={gain_db}dB,atrim=0:{duration_sec:.3f},"
+                f"afade=t=out:st={fade_out_start:.3f}:d=1.2[bg];"
+                "[bg][1:a]sidechaincompress=threshold=0.025:ratio=10:attack=15:release=300[duck];"
+                "[1:a][duck]amix=inputs=2:weights='1 0.8':normalize=0,"
+                "loudnorm=I=-16:LRA=11:TP=-1.5[out]"
+            )
+        else:
+            filter_graph = (
+                f"[0:a]aresample=24000,volume={gain_db}dB,atrim=0:{duration_sec:.3f},"
+                f"afade=t=out:st={fade_out_start:.3f}:d=1.2[bg];"
+                "[1:a]aresample=24000[voc];"
+                "[voc][bg]amix=inputs=2:weights='1 0.55':normalize=0,"
+                "alimiter=limit=0.93,loudnorm=I=-16:LRA=11:TP=-1.5[out]"
+            )
+        try:
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-stream_loop",
+                    "-1",
+                    "-i",
+                    str(music_path),
+                    "-i",
+                    str(narration_path),
+                    "-filter_complex",
+                    filter_graph,
+                    "-map",
+                    "[out]",
+                    "-t",
+                    f"{duration_sec:.3f}",
+                    "-ar",
+                    "24000",
+                    "-ac",
+                    "1",
+                    str(temp_output),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RecoverableStepError(f"background music mix failed ({strategy})")
+            temp_output.replace(output_path)
+        finally:
+            temp_output.unlink(missing_ok=True)
+        return {
+            "mix_filter": strategy,
+            "mix_target_lufs": -16.0,
+            "mix_true_peak_limit_db": -1.5,
+        }
+
     def _split_subtitle_cue(self, cue: dict[str, Any], token_start: int, token_end: int) -> list[dict[str, Any]]:
-        chunks = split_caption_chunks(str(cue["text"]), max_chars=42, max_lines=2) or [str(cue["text"])]
+        chunks = self._split_caption_by_subtitle_limits(str(cue["text"])) or [str(cue["text"])]
         chunks = self._avoid_weak_subtitle_endings(chunks)
         if len(chunks) == 1:
             return [
@@ -1497,22 +2272,118 @@ class JobOrchestrator:
         split_items[-1]["token_end"] = token_end
         return split_items
 
+    def _split_caption_by_subtitle_limits(self, text: str, max_words: int = 14, max_chars: int = 42, max_lines: int = 2) -> list[str]:
+        initial_chunks = split_caption_chunks(text, max_chars=max_chars, max_lines=max_lines)
+        chunks: list[str] = []
+        for chunk in initial_chunks:
+            words = chunk.split()
+            if len(word_tokens(chunk)) <= max_words:
+                chunks.append(chunk)
+                continue
+            group_count = math.ceil(len(words) / max_words)
+            group_size = math.ceil(len(words) / group_count)
+            for start in range(0, len(words), group_size):
+                candidate = " ".join(words[start : start + group_size])
+                if len(word_tokens(candidate)) <= max_words and self._subtitle_chunk_fits(candidate, max_chars=max_chars, max_lines=max_lines):
+                    chunks.append(candidate)
+                    continue
+                chunks.extend(split_caption_chunks(candidate, max_chars=max_chars, max_lines=max_lines))
+        return chunks
+
     def _avoid_weak_subtitle_endings(self, chunks: list[str]) -> list[str]:
-        bad_endings = {"de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas", "por", "para", "que", "e"}
         repaired = [chunk for chunk in chunks if chunk.strip()]
         for index in range(len(repaired) - 1):
-            words = repaired[index].split()
-            next_words = repaired[index + 1].split()
-            if not words or len(next_words) <= 1:
-                continue
-            ending_tokens = word_tokens(words[-1])
-            ending = ending_tokens[0] if ending_tokens else ""
-            if ending in bad_endings:
-                candidate = " ".join([*words, next_words[0]])
-                if len(wrap_caption(candidate, max_chars=42, max_lines=2).splitlines()) <= 2:
-                    repaired[index] = candidate
-                    repaired[index + 1] = " ".join(next_words[1:])
+            current_text, next_text, _ = self._rebalance_subtitle_boundary(repaired[index], repaired[index + 1])
+            if current_text:
+                repaired[index] = current_text
+            if next_text:
+                repaired[index + 1] = next_text
+            else:
+                repaired[index + 1] = ""
         return [chunk for chunk in repaired if chunk.strip()]
+
+    def _subtitle_chunk_fits(self, text: str, max_chars: int = 42, max_lines: int = 2, max_words: int = 14) -> bool:
+        normalized = str(text).strip()
+        if not normalized:
+            return False
+        if len(word_tokens(normalized)) > max_words:
+            return False
+        return len(split_caption_chunks(normalized, max_chars=max_chars, max_lines=max_lines)) == 1
+
+    def _rebalance_subtitle_boundary(
+        self,
+        current_text: str,
+        next_text: str,
+        max_chars: int = 42,
+        max_lines: int = 2,
+        max_words: int = 14,
+    ) -> tuple[str, str, int]:
+        current_words = str(current_text).split()
+        next_words = str(next_text).split()
+        if not current_words or not next_words:
+            return str(current_text).strip(), str(next_text).strip(), 0
+        ending_tokens = word_tokens(current_words[-1])
+        ending = ending_tokens[0] if ending_tokens else ""
+        if ending not in BAD_ENDINGS:
+            return " ".join(current_words), " ".join(next_words), 0
+
+        for moved_count in range(1, len(next_words) + 1):
+            candidate_current = " ".join([*current_words, *next_words[:moved_count]])
+            candidate_next = " ".join(next_words[moved_count:])
+            candidate_tokens = word_tokens(candidate_current)
+            candidate_ending = candidate_tokens[-1] if candidate_tokens else ""
+            if candidate_ending in BAD_ENDINGS:
+                continue
+            if not self._subtitle_chunk_fits(candidate_current, max_chars=max_chars, max_lines=max_lines, max_words=max_words):
+                continue
+            if candidate_next and not self._subtitle_chunk_fits(candidate_next, max_chars=max_chars, max_lines=max_lines, max_words=max_words):
+                continue
+            return candidate_current, candidate_next, moved_count
+
+        for moved_count in range(1, len(current_words)):
+            candidate_current = " ".join(current_words[:-moved_count])
+            candidate_next = " ".join([*current_words[-moved_count:], *next_words])
+            if not candidate_current:
+                continue
+            candidate_tokens = word_tokens(candidate_current)
+            candidate_ending = candidate_tokens[-1] if candidate_tokens else ""
+            if candidate_ending in BAD_ENDINGS:
+                continue
+            if not self._subtitle_chunk_fits(candidate_current, max_chars=max_chars, max_lines=max_lines, max_words=max_words):
+                continue
+            if not self._subtitle_chunk_fits(candidate_next, max_chars=max_chars, max_lines=max_lines, max_words=max_words):
+                continue
+            return candidate_current, candidate_next, -moved_count
+
+        return " ".join(current_words), " ".join(next_words), 0
+
+    def _repair_subtitle_item_boundaries(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        repaired = [dict(item) for item in items if str(item.get("text") or "").strip()]
+        for index in range(len(repaired) - 1):
+            current = repaired[index]
+            following = repaired[index + 1]
+            original_current_word_count = len(word_tokens(str(current["text"])))
+            original_following_word_count = len(word_tokens(str(following["text"])))
+            if not original_current_word_count or not original_following_word_count:
+                continue
+            current_text, next_text, delta = self._rebalance_subtitle_boundary(str(current["text"]), str(following["text"]))
+            if delta == 0:
+                continue
+            current["text"] = current_text
+            following["text"] = next_text
+            current["token_end"] = int(current.get("token_end", current.get("token_start", 0))) + delta
+            following["token_start"] = int(following.get("token_start", following.get("token_end", 0))) + delta
+            pair_start_ms = int(current["start_ms"])
+            pair_end_ms = int(following["end_ms"])
+            pair_duration_ms = max(pair_end_ms - pair_start_ms, 2)
+            new_current_word_count = len(word_tokens(current_text))
+            new_following_word_count = len(word_tokens(next_text))
+            total_words = max(new_current_word_count + new_following_word_count, 1)
+            boundary_ms = pair_start_ms + round(new_current_word_count / total_words * pair_duration_ms)
+            boundary_ms = max(pair_start_ms + 1, min(pair_end_ms - 1, boundary_ms))
+            current["end_ms"] = boundary_ms
+            following["start_ms"] = boundary_ms
+        return [item for item in repaired if str(item.get("text") or "").strip()]
 
     def _render_ass(self, items: list[dict[str, Any]]) -> str:
         header = """[Script Info]
@@ -1552,6 +2423,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job.job_id))
         narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job.job_id))
         subtitles = session.scalar(select(SubtitleTrack).where(SubtitleTrack.job_id == job.job_id))
+        background_music = session.scalar(select(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job.job_id))
         selected_assets = session.scalars(
             select(SceneAsset).where(SceneAsset.job_id == job.job_id, SceneAsset.selected.is_(True)).order_by(SceneAsset.scene_id)
         ).all()
@@ -1561,7 +2433,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ffmpeg_log = self.storage.job_dir(job.job_id) / "render" / "ffmpeg.log"
         ensure_dir(final_video.parent)
         total_duration = narration.duration_ms / 1000
-        audio_path = path_from_uri(narration.audio_uri)
+        audio_path = path_from_uri(background_music.mixed_audio_uri) if background_music and background_music.mixed_audio_uri else path_from_uri(narration.audio_uri)
         ass_path = path_from_uri(subtitles.ass_uri or "")
         ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
         command = [ffmpeg, "-y"]
@@ -1641,14 +2513,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 str(final_video),
             ]
         )
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        ffmpeg_log.write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
-        if result.returncode != 0:
-            raise RecoverableStepError("ffmpeg render failed")
-        render_gate = self.render_gate.validate(final_video, narration.duration_ms)
-        if not render_gate.passed:
-            self.storage.persist_json(job.job_id, "render_quality_report.json", {"reasons": render_gate.reasons, "metrics": render_gate.metrics})
-            raise RecoverableStepError(f"render quality gate failed: {', '.join(render_gate.reasons[:6])}")
+        render_gate, render_log = self._render_with_repair(job.job_id, command, final_video, ffmpeg_log, narration.duration_ms)
+        ffmpeg_log.write_text(render_log, encoding="utf-8")
         Image.open(path_from_uri(selected_assets[0].uri)).resize((540, 960)).save(poster, format="JPEG")
         duration_ms = int(render_gate.metrics.get("duration_ms") or narration.duration_ms)
         created_at = utcnow()
@@ -1671,6 +2537,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         session.execute(delete(RenderOutput).where(RenderOutput.job_id == job.job_id))
         session.add(RenderOutput(**model_payload(RenderOutput, payload)))
         self.storage.persist_json(job.job_id, "render_output.json", self._serialize_for_json(payload))
+        render_telemetry_file = self._persist_repair_telemetry(
+            job.job_id,
+            "render",
+            {
+                "job_id": job.job_id,
+                "attempt": attempt,
+                "final_passed": True,
+                "attempts": render_gate.metrics.get("render_attempts_log", []),
+            },
+        )
         quality_summary = dict(job.quality_summary or {})
         quality_summary["render"] = {
             **render_gate.metrics,
@@ -1679,9 +2555,85 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "resolution": "1080x1920",
             "audio_loudness_target_lufs": -16.0,
             "audio_true_peak_limit_db": -1.5,
+            "background_music_mixed": bool(background_music and background_music.mixed_audio_uri),
+            "render_repair_used": len(render_gate.metrics.get("render_attempts_log", [])) > 1,
         }
         job.quality_summary = quality_summary
-        return ["render/final.mp4", "render/poster.jpg", "render/ffmpeg.log", "render_output.json"]
+        return ["render/final.mp4", "render/poster.jpg", "render/ffmpeg.log", "render_output.json", render_telemetry_file]
+
+    def _render_with_repair(
+        self,
+        job_id: str,
+        base_command: list[str],
+        final_video: Path,
+        ffmpeg_log: Path,
+        expected_duration_ms: int,
+    ) -> tuple[Any, str]:
+        attempts: list[list[str]] = [
+            list(base_command),
+            self._mutate_render_command_for_repair(base_command, repair_mode="quality_safe"),
+        ]
+        collected_logs: list[str] = []
+        last_gate = None
+        attempts_log: list[dict[str, Any]] = []
+        for index, command in enumerate(attempts, start=1):
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            collected_logs.append(f"=== render attempt {index} ===\n{result.stdout}\n{result.stderr}")
+            if result.returncode != 0:
+                attempts_log.append(
+                    {
+                        "repair_attempt": index,
+                        "strategy": "base" if index == 1 else "quality_safe",
+                        "passed": False,
+                        "reason_codes": ["ffmpeg_render_failed"],
+                    }
+                )
+                continue
+            render_gate = self.render_gate.validate(final_video, expected_duration_ms)
+            last_gate = render_gate
+            attempts_log.append(
+                {
+                    "repair_attempt": index,
+                    "strategy": "base" if index == 1 else "quality_safe",
+                    "passed": render_gate.passed,
+                    "reason_codes": render_gate.reasons,
+                }
+            )
+            if render_gate.passed:
+                render_gate.metrics["render_attempts_log"] = attempts_log
+                return render_gate, "\n".join(collected_logs)
+            if index < len(attempts):
+                continue
+        if last_gate is not None:
+            last_gate.metrics["render_attempts_log"] = attempts_log
+            self.storage.persist_json(
+                job_id,
+                "render_quality_report.json",
+                {"reasons": last_gate.reasons, "metrics": last_gate.metrics},
+            )
+            raise RecoverableStepError(f"render quality gate failed: {', '.join(last_gate.reasons[:6])}")
+        raise RecoverableStepError("ffmpeg render failed")
+
+    def _mutate_render_command_for_repair(self, command: list[str], repair_mode: str) -> list[str]:
+        mutated = list(command)
+        if repair_mode != "quality_safe":
+            return mutated
+        replacements = {
+            "-preset": "faster",
+            "-crf": "21",
+            "-b:v": "3200k",
+            "-minrate": "1200k",
+            "-maxrate": "5200k",
+            "-bufsize": "10400k",
+            "-af": "aresample=async=1:first_pts=0,alimiter=limit=0.95",
+            "-ar": "48000",
+        }
+        for flag, value in replacements.items():
+            if flag in mutated:
+                idx = mutated.index(flag)
+                if idx + 1 < len(mutated):
+                    mutated[idx + 1] = value
+        return mutated
 
     def _normalize_scene_timings(self, scenes: list[dict[str, Any]], total_duration_ms: int) -> list[dict[str, Any]]:
         if not scenes:
@@ -1720,6 +2672,334 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         normalized[-1]["actual_end_ms"] = total_duration_ms
         return normalized
 
+    def _step_monetization_readiness(self, session: Session, job: Job, attempt: int) -> list[str]:
+        report = self._build_monetization_report(session, job)
+        self.storage.persist_json(job.job_id, "rights_registry.json", self._serialize_for_json(report["rights_registry"]))
+        self.storage.persist_json(job.job_id, "ai_disclosure.json", self._serialize_for_json(report["ai_disclosure"]))
+        self.storage.persist_json(job.job_id, "fact_claims_report.json", self._serialize_for_json(report["fact_claims_report"]))
+        self.storage.persist_json(job.job_id, "channel_repetition_report.json", self._serialize_for_json(report["channel_repetition_report"]))
+        self.storage.persist_json(job.job_id, "metadata_review.json", self._serialize_for_json(report["metadata_review"]))
+        self.storage.persist_json(job.job_id, "monetization_report.json", self._serialize_for_json(report))
+        quality_summary = dict(job.quality_summary or {})
+        quality_summary["monetization"] = {
+            "passed": report["passed"],
+            "final_status": report["final_status"],
+            "hard_blockers": report["hard_blockers"],
+            "manual_required": report["manual_required"],
+            "warnings": report["warnings"],
+            "content_hash": stable_hash(report),
+        }
+        job.quality_summary = quality_summary
+        self._append_event(
+            job.job_id,
+            "monetization.checked",
+            "succeeded",
+            {
+                "passed": report["passed"],
+                "final_status": report["final_status"],
+                "hard_blockers": report["hard_blockers"],
+                "manual_required": report["manual_required"],
+            },
+        )
+        return [
+            "rights_registry.json",
+            "ai_disclosure.json",
+            "fact_claims_report.json",
+            "channel_repetition_report.json",
+            "metadata_review.json",
+            "monetization_report.json",
+        ]
+
+    def _build_monetization_report(self, session: Session, job: Job, extra_confirmations: set[str] | None = None) -> dict[str, Any]:
+        topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
+        script = session.scalar(select(Script).where(Script.job_id == job.job_id))
+        narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job.job_id))
+        background_music = session.scalar(select(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job.job_id))
+        render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job.job_id))
+        assets = session.scalars(select(SceneAsset).where(SceneAsset.job_id == job.job_id, SceneAsset.selected.is_(True)).order_by(SceneAsset.scene_id)).all()
+        fact_pack = self._read_job_json(job.job_id, "fact_pack.json")
+        script_artifact = self._read_job_json(job.job_id, "script.json")
+        tags = self._build_publish_hashtags(topic_plan, script)
+        checklist = {
+            "script_gate_pass": bool((job.quality_summary or {}).get("script", {}).get("script_quality_gate_pass")),
+            "scene_plan_gate_pass": bool((job.quality_summary or {}).get("scene_plan", {}).get("scene_plan_gate_pass")),
+            "asset_gate_pass": bool((job.quality_summary or {}).get("assets", {}).get("semantic_threshold_pass")),
+            "subtitle_gate_pass": bool((job.quality_summary or {}).get("subtitles", {}).get("subtitle_gate_pass")),
+            "render_gate_pass": bool((job.quality_summary or {}).get("render", {}).get("render_gate_pass")),
+        }
+        confirmations = self._manual_monetization_confirmations(session, job.job_id)
+        confirmations.update(extra_confirmations or set())
+
+        rights_registry = self._build_rights_registry(job, assets, narration, background_music)
+        ai_disclosure = self._build_ai_disclosure_report(assets)
+        fact_claims_report = self._build_fact_claims_report(script, topic_plan, fact_pack, script_artifact)
+        channel_repetition_report = self._build_channel_repetition_report(session, job, topic_plan, script)
+        metadata_review = self._build_metadata_review(topic_plan, script, tags)
+        publish_readiness = self._publish_readiness_report(
+            script,
+            topic_plan,
+            fact_pack,
+            tags,
+            checklist,
+            script_artifact,
+            self._provider_publish_audit(script_artifact, fact_pack, tags),
+        )
+
+        hard_blockers: list[str] = []
+        manual_required: list[str] = []
+        warnings: list[str] = []
+        if not all(checklist.values()):
+            hard_blockers.append("quality_gate_not_passed")
+        if not rights_registry["all_commercial_rights_confirmed"]:
+            manual_required.append("rights_confirmation_required")
+        if ai_disclosure["youtube_disclosure_required"] and "ai_disclosure_confirmed" not in confirmations:
+            manual_required.append("youtube_ai_disclosure_toggle_required")
+        if fact_claims_report["requires_fact_review"] and "fact_review_confirmed" not in confirmations:
+            manual_required.append("fact_review_required")
+        if metadata_review["requires_metadata_review"] and "metadata_confirmed" not in confirmations:
+            manual_required.append("metadata_review_required")
+        if channel_repetition_report["repetition_risk"] != "low" and "originality_confirmed" not in confirmations:
+            manual_required.append("originality_review_required")
+        if "rights_confirmed" in confirmations:
+            manual_required = [item for item in manual_required if item != "rights_confirmation_required"]
+        warnings.extend(publish_readiness["reasons"])
+        if not self.settings.allow_synthetic_visuals_for_monetization and ai_disclosure["contains_synthetic_visuals"]:
+            hard_blockers.append("synthetic_visuals_disabled_by_policy")
+        if render and render.duration_ms > 60_000:
+            hard_blockers.append("shorts_duration_over_60s")
+        if channel_repetition_report["repetition_risk"] == "high" and "originality_confirmed" not in confirmations:
+            hard_blockers.append("channel_repetition_high")
+
+        hard_blockers = list(dict.fromkeys(hard_blockers))
+        manual_required = list(dict.fromkeys(manual_required))
+        warnings = list(dict.fromkeys(warnings))
+        passed = not hard_blockers and not manual_required
+        final_status = "ready_for_upload" if passed else ("blocked_for_monetization" if hard_blockers else "monetization_review")
+        return {
+            "schema_version": self.settings.schema_version,
+            "job_id": job.job_id,
+            "created_at": iso_now(),
+            "passed": passed,
+            "final_status": final_status,
+            "hard_blockers": hard_blockers,
+            "manual_required": manual_required,
+            "warnings": warnings,
+            "manual_confirmations": sorted(confirmations),
+            "quality_checklist": checklist,
+            "rights_registry": rights_registry,
+            "ai_disclosure": ai_disclosure,
+            "fact_claims_report": fact_claims_report,
+            "channel_repetition_report": channel_repetition_report,
+            "metadata_review": metadata_review,
+            "publish_readiness": publish_readiness,
+        }
+
+    def _build_rights_registry(
+        self,
+        job: Job,
+        assets: list[SceneAsset],
+        narration: NarrationAsset | None,
+        background_music: BackgroundMusicAsset | None,
+    ) -> dict[str, Any]:
+        entries: list[dict[str, Any]] = []
+        for asset in assets:
+            provider = asset.provider.lower()
+            confirmed = bool(self.settings.minimax_commercial_rights_confirmed) if provider == "minimax" else bool(asset.license_note)
+            entries.append(
+                {
+                    "asset_type": asset.kind,
+                    "scene_id": asset.scene_id,
+                    "provider": asset.provider,
+                    "uri": asset.uri,
+                    "commercial_use_allowed": confirmed,
+                    "license_source": asset.license_note or ("YTS_MINIMAX_COMMERCIAL_RIGHTS_CONFIRMED" if provider == "minimax" else None),
+                    "requires_attribution": bool(asset.attribution),
+                    "attribution": asset.attribution,
+                    "terms_checked_at": iso_now() if confirmed else None,
+                    "review_required": not confirmed,
+                }
+            )
+        if narration:
+            provider = narration.provider.lower()
+            confirmed = bool(self.settings.edge_tts_commercial_rights_confirmed) if provider == "edge_tts" else provider == "synthetic_wav"
+            entries.append(
+                {
+                    "asset_type": "voice",
+                    "provider": narration.provider,
+                    "voice": narration.voice,
+                    "uri": narration.audio_uri,
+                    "commercial_use_allowed": confirmed,
+                    "license_source": "YTS_EDGE_TTS_COMMERCIAL_RIGHTS_CONFIRMED" if provider == "edge_tts" else "local_synthetic_test_audio",
+                    "requires_attribution": False,
+                    "terms_checked_at": iso_now() if confirmed else None,
+                    "review_required": not confirmed,
+                }
+            )
+        if background_music:
+            provider = background_music.provider.lower()
+            license_source = background_music.license_note or ("local_mock_background_music" if provider == "mock_music" else None)
+            entries.append(
+                {
+                    "asset_type": "music",
+                    "provider": background_music.provider,
+                    "uri": background_music.audio_uri,
+                    "commercial_use_allowed": bool(license_source),
+                    "license_source": license_source,
+                    "requires_attribution": bool(background_music.attribution),
+                    "attribution": background_music.attribution,
+                    "terms_checked_at": iso_now() if license_source else None,
+                    "review_required": not bool(license_source),
+                }
+            )
+        else:
+            entries.append(
+                {
+                    "asset_type": "music",
+                    "provider": "none",
+                    "commercial_use_allowed": True,
+                    "license_source": "no_music_used",
+                    "requires_attribution": False,
+                    "terms_checked_at": iso_now(),
+                    "review_required": False,
+                }
+            )
+        return {
+            "entries": entries,
+            "all_commercial_rights_confirmed": all(entry["commercial_use_allowed"] for entry in entries),
+            "review_required_count": sum(1 for entry in entries if entry["review_required"]),
+        }
+
+    def _build_ai_disclosure_report(self, assets: list[SceneAsset]) -> dict[str, Any]:
+        synthetic_assets = [asset for asset in assets if asset.provider.lower() in {"minimax", "mock"}]
+        realistic_terms = re.compile(r"\b(?:human|person|face|eyes|brain|body|portrait|realistic|documentary|cinematic|figure)\b", re.IGNORECASE)
+        realistic_assets = [
+            {
+                "scene_id": asset.scene_id,
+                "provider": asset.provider,
+                "prompt_snapshot": (asset.prompt_snapshot or "")[:260],
+            }
+            for asset in synthetic_assets
+            if realistic_terms.search(asset.prompt_snapshot or "")
+        ]
+        contains_synthetic = bool(synthetic_assets)
+        disclosure_required = contains_synthetic and bool(realistic_assets)
+        return {
+            "contains_synthetic_visuals": contains_synthetic,
+            "youtube_disclosure_required": disclosure_required,
+            "description_notice": "Imagens ilustrativas geradas por IA." if contains_synthetic else None,
+            "reason": "Realistic AI-generated illustrative visuals." if disclosure_required else "No realistic synthetic disclosure trigger detected.",
+            "synthetic_asset_count": len(synthetic_assets),
+            "realistic_synthetic_assets": realistic_assets,
+        }
+
+    def _build_fact_claims_report(
+        self,
+        script: Script | None,
+        topic_plan: TopicPlan | None,
+        fact_pack: dict[str, Any],
+        script_artifact: dict[str, Any],
+    ) -> dict[str, Any]:
+        script_dict = {**(self._script_to_dict(script) if script else {}), **(script_artifact or {})}
+        fact_risk = self.script_gate._fact_risk_report(script_dict) if script_dict else {"claims": [], "claim_count": 0, "blocked": False}  # noqa: SLF001
+        source_ids = script_dict.get("source_fact_ids") or script_dict.get("qa_metrics", {}).get("source_fact_ids") or []
+        if isinstance(source_ids, str):
+            source_ids = [source_ids]
+        facts = fact_pack.get("facts") or []
+        sources = fact_pack.get("sources") or []
+        valid_fact_ids = {str(fact.get("fact_id")) for fact in facts if fact.get("fact_id")}
+        grounded_ids = [str(item) for item in source_ids if str(item) in valid_fact_ids]
+        factual_topic = bool(
+            topic_plan
+            and re.search(
+                r"\b(?:por que|porque|como|ci[eê]ncia|f[ií]sica|biologia|engenharia|hist[oó]ria|sa[uú]de|m[eé]dico|animal|animais|flamingo|torre|c[eé]rebro|neuro|estat[ií]stica)\b",
+                f"{topic_plan.canonical_topic} {topic_plan.angle}",
+                re.IGNORECASE,
+            )
+        )
+        requires_review = (
+            fact_pack.get("status") != "verified"
+            and (factual_topic or fact_risk.get("claim_count", 0) > 0 or len(word_tokens(script_dict.get("full_narration", ""))) >= 45)
+        )
+        claim_sources = [
+            {
+                "claim": fact.get("claim"),
+                "fact_id": fact.get("fact_id"),
+                "source_id": fact.get("source_id"),
+                "source_url": next((source.get("url") for source in sources if source.get("source_id") == fact.get("source_id")), None),
+            }
+            for fact in facts
+        ]
+        return {
+            "fact_pack_status": fact_pack.get("status") or "missing",
+            "requires_fact_review": requires_review,
+            "source_fact_ids": list(source_ids),
+            "grounded_source_fact_ids": grounded_ids,
+            "claim_sources": claim_sources,
+            "risk_report": fact_risk,
+            "editorial_rule": fact_pack.get("editorial_rule"),
+        }
+
+    def _build_channel_repetition_report(self, session: Session, job: Job, topic_plan: TopicPlan | None, script: Script | None) -> dict[str, Any]:
+        if not topic_plan or not script:
+            return {"repetition_risk": "unknown", "max_similarity": 0.0, "matches": []}
+        current_surface = f"{topic_plan.canonical_topic} {topic_plan.angle} {script.hook} {script.title}"
+        rows = session.execute(
+            select(Job.job_id, Job.topic_summary, Script.title, Script.hook)
+            .join(Script, Script.job_id == Job.job_id)
+            .where(Job.job_id != job.job_id)
+            .order_by(Job.created_at.desc())
+            .limit(30)
+        ).all()
+        matches = []
+        for other_job_id, topic_summary, title, hook in rows:
+            surface = f"{topic_summary or ''} {title or ''} {hook or ''}"
+            similarity = max(cosineish_similarity(current_surface, surface), jaccard_bigrams(current_surface, surface))
+            if similarity >= 0.45:
+                matches.append({"job_id": other_job_id, "similarity": round(similarity, 3), "title": title})
+        max_similarity = max((match["similarity"] for match in matches), default=0.0)
+        risk = "high" if max_similarity >= 0.72 else ("medium" if max_similarity >= 0.55 or len(matches) >= 3 else "low")
+        return {
+            "repetition_risk": risk,
+            "max_similarity": max_similarity,
+            "matches": matches[:5],
+            "profile": {
+                "hook_opening": " ".join(word_tokens(script.hook)[:5]),
+                "duration_bucket": f"{round(job.target_duration_sec / 5) * 5}s",
+                "visual_style": "ai_science_short",
+            },
+        }
+
+    def _build_metadata_review(self, topic_plan: TopicPlan | None, script: Script | None, tags: list[str]) -> dict[str, Any]:
+        weak_tags = [tag for tag in tags if tag.lower() not in {"#shorts"} and (tag.lstrip("#") in self._weak_hashtag_terms() or len(tag.lstrip("#")) < 4)]
+        title = script.title if script else ""
+        title_words = len(word_tokens(title))
+        reasons = []
+        if weak_tags:
+            reasons.append("weak_hashtags")
+        if not 5 <= title_words <= 14:
+            reasons.append("title_length_outside_short_window")
+        if len(tags) > 5:
+            reasons.append("too_many_hashtags")
+        suggested_tags = [tag for tag in tags if tag not in weak_tags][:5]
+        if "#shorts" not in [tag.lower() for tag in suggested_tags]:
+            suggested_tags.insert(0, "#shorts")
+        return {
+            "requires_metadata_review": bool(reasons),
+            "reasons": reasons,
+            "title": title[:100],
+            "hashtag_count": len(tags),
+            "weak_hashtags": weak_tags,
+            "suggested_hashtags": list(dict.fromkeys(suggested_tags))[:5],
+            "topic_keywords": word_tokens(f"{topic_plan.canonical_topic} {topic_plan.angle}")[:8] if topic_plan else [],
+        }
+
+    def _manual_monetization_confirmations(self, session: Session, job_id: str) -> set[str]:
+        reviews = session.scalars(select(ReviewRecord).where(ReviewRecord.job_id == job_id).order_by(ReviewRecord.created_at)).all()
+        confirmations: set[str] = set()
+        for review in reviews:
+            confirmations.update(str(item) for item in (review.reason_codes or []) if str(item).endswith("_confirmed"))
+        return confirmations
+
     def _step_publish(self, session: Session, job: Job, attempt: int) -> list[str]:
         publish_package = self._build_publish_package(session, job)
         self.storage.persist_json(job.job_id, "publish_package.json", self._serialize_for_json(publish_package))
@@ -1729,11 +3009,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "script": "script.json",
             "scene_plan": "scene_plan.json",
             "audio": "audio/narration.wav",
+            "background_music": "audio/background_source.wav",
+            "mixed_audio": "audio/mixed.wav",
             "raw_subtitles": "audio/raw.srt",
             "subtitles": "audio/subtitles.ass",
             "render": "render/final.mp4",
             "events": "events.jsonl",
             "ffmpeg_log": "render/ffmpeg.log",
+            "rights_registry": "rights_registry.json",
+            "ai_disclosure": "ai_disclosure.json",
+            "fact_claims_report": "fact_claims_report.json",
+            "channel_repetition_report": "channel_repetition_report.json",
+            "metadata_review": "metadata_review.json",
+            "monetization_report": "monetization_report.json",
             "publish_package": "publish_package.json",
         }
         job.artifact_index = artifact_index
@@ -1756,17 +3044,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         script = session.scalar(select(Script).where(Script.job_id == job.job_id))
         render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job.job_id))
         subtitles = session.scalar(select(SubtitleTrack).where(SubtitleTrack.job_id == job.job_id))
+        background_music = session.scalar(select(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job.job_id))
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         title = script.title if script else (request.seed_theme if request else job.topic_summary or job.job_id)
         fact_pack = self._read_job_json(job.job_id, "fact_pack.json")
         script_artifact = self._read_job_json(job.job_id, "script.json")
+        monetization_report = self._read_job_json(job.job_id, "monetization_report.json")
         tags = self._build_publish_hashtags(topic_plan, script)
+        if monetization_report.get("metadata_review", {}).get("suggested_hashtags"):
+            tags = list(monetization_report["metadata_review"]["suggested_hashtags"])
+        ai_notice = monetization_report.get("ai_disclosure", {}).get("description_notice")
         description = "\n".join(
-            [
-                script.full_narration if script else title,
-                "",
-                " ".join(dict.fromkeys(tags)),
-            ]
+            [part for part in [script.full_narration if script else title, ai_notice, "", " ".join(dict.fromkeys(tags))] if part is not None]
         )
         checklist = {
             "script_gate_pass": bool((job.quality_summary or {}).get("script", {}).get("script_quality_gate_pass")),
@@ -1777,6 +3066,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         }
         minimax_audit = self._provider_publish_audit(script_artifact, fact_pack, tags)
         readiness = self._publish_readiness_report(script, topic_plan, fact_pack, tags, checklist, script_artifact, minimax_audit)
+        if monetization_report:
+            readiness = {
+                **readiness,
+                "monetization_gate_pass": bool(monetization_report.get("passed")),
+                "monetization_final_status": monetization_report.get("final_status"),
+                "monetization_hard_blockers": monetization_report.get("hard_blockers", []),
+                "monetization_manual_required": monetization_report.get("manual_required", []),
+            }
         return {
             "schema_version": self.settings.schema_version,
             "job_id": job.job_id,
@@ -1790,8 +3087,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "video_uri": render.video_uri if render else None,
             "poster_uri": render.poster_uri if render else None,
             "subtitle_uri": subtitles.ass_uri if subtitles else None,
+            "background_music_uri": background_music.audio_uri if background_music else None,
+            "mixed_audio_uri": background_music.mixed_audio_uri if background_music else None,
             "checklist": checklist,
             "publish_readiness": readiness,
+            "monetization_report": monetization_report,
+            "altered_or_synthetic": bool(monetization_report.get("ai_disclosure", {}).get("youtube_disclosure_required")) if monetization_report else False,
+            "ai_disclosure_reason": monetization_report.get("ai_disclosure", {}).get("reason") if monetization_report else None,
             "minimax_publish_audit": minimax_audit,
             "quality_summary": job.quality_summary or {},
         }
@@ -1828,7 +3130,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             return {}
 
     def _build_publish_hashtags(self, topic_plan: TopicPlan | None, script: Script | None) -> list[str]:
-        tags = ["#shorts", "#curiosidades", "#ciencia"]
+        tags = ["#shorts", "#ciencia"]
         weak = self._weak_hashtag_terms()
         text = " ".join(
             str(part or "")
@@ -1840,10 +3142,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             ]
         )
         niche_map = {
-            "flamingo": ["#flamingos", "#animais", "#natureza", "#biologia"],
-            "flamingos": ["#flamingos", "#animais", "#natureza", "#biologia"],
-            "torre": ["#torredepisa", "#engenharia", "#historia", "#curiosidades"],
-            "pisa": ["#torredepisa", "#engenharia", "#historia", "#curiosidades"],
+            "flamingo": ["#flamingos", "#animais", "#biologia"],
+            "flamingos": ["#flamingos", "#animais", "#biologia"],
+            "torre": ["#torredepisa", "#engenharia", "#historia"],
+            "pisa": ["#torredepisa", "#engenharia", "#historia"],
+            "cerebro": ["#cerebro", "#neurociencia", "#percepcao"],
+            "cérebro": ["#cerebro", "#neurociencia", "#percepcao"],
+            "neuro": ["#neurociencia", "#cerebro", "#percepcao"],
+            "polvo": ["#polvo", "#biologia", "#animais"],
+            "polvos": ["#polvo", "#biologia", "#animais"],
         }
         normalized_text = self._normalize_hashtag_text(text)
         for key, mapped_tags in niche_map.items():
@@ -1854,9 +3161,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if len(normalized) < 4 or normalized in weak or normalized.isdigit():
                 continue
             tags.append(f"#{normalized}")
-            if len(dict.fromkeys(tags)) >= 8:
+            if len(dict.fromkeys(tags)) >= 5:
                 break
-        return list(dict.fromkeys(tags))[:8]
+        return list(dict.fromkeys(tags))[:5]
 
     def _weak_hashtag_terms(self) -> set[str]:
         return {
@@ -1890,16 +3197,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if fact_pack.get("status") != "verified" and source_ids:
             reasons.append("invented_source_fact_ids")
         fact_risk = self.script_gate._fact_risk_report(script_dict) if script_dict else {"blocked": False, "claim_count": 0}  # noqa: SLF001
-        factual_topic = bool(topic_plan and re.search(r"(?:por que|porque|como|ci[eê]ncia|f[ií]sica|biologia|engenharia|hist[oó]ria|sa[uú]de|m[eé]dico|animal|animais|flamingo|torre)", f"{topic_plan.canonical_topic} {topic_plan.angle}", re.IGNORECASE))
+        factual_topic = bool(topic_plan and re.search(r"\b(?:por que|porque|como|ci[eê]ncia|f[ií]sica|biologia|engenharia|hist[oó]ria|sa[uú]de|m[eé]dico|animal|animais|flamingo|torre|c[eé]rebro|neuro)\b", f"{topic_plan.canonical_topic} {topic_plan.angle}", re.IGNORECASE))
         if factual_topic and fact_pack.get("status") != "verified" and (fact_risk.get("claim_count", 0) > 0 or len(word_tokens(script_dict.get("full_narration", ""))) >= 45):
             reasons.append("fact_pack_missing_for_factual_topic")
-        weak_tags = [tag for tag in tags if tag.lstrip("#") in self._weak_hashtag_terms() or len(tag.lstrip("#")) < 4]
-        if weak_tags or len(tags) < 5:
+        weak_tags = [tag for tag in tags if tag.lower() != "#shorts" and (tag.lstrip("#") in self._weak_hashtag_terms() or len(tag.lstrip("#")) < 4)]
+        if weak_tags or len(tags) < 3:
             reasons.append("weak_hashtags")
         ending = str(script_dict.get("ending") or "").strip()
         narration = str(script_dict.get("full_narration") or "").strip()
         last_sentence = re.split(r"(?<=[.!?])\s+", narration)[-1] if narration else ""
-        if len(word_tokens(ending or last_sentence)) < 6 or re.search(r"(?:que|de|da|do|para|com|e)$", (ending or last_sentence).lower().strip(" .!?")):
+        if len(word_tokens(ending or last_sentence)) < 6 or re.search(r"\b(?:que|de|da|do|para|com|e)$", (ending or last_sentence).lower().strip(" .!?")):
             reasons.append("weak_ending")
         if minimax_audit and minimax_audit.get("passed") is False:
             reasons.extend(str(reason) for reason in minimax_audit.get("reasons") or ["minimax_audit_failed"])
@@ -1990,29 +3297,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def _worker_loop(self) -> None:
         while not self.stop_event.is_set():
-            claimed_job_id = None
             with session_scope() as session:
-                now = utcnow()
-                job = session.scalar(
-                    select(Job)
-                    .where(
-                        or_(
-                            Job.status == "queued",
-                            (Job.status == "running") & (Job.lease_expires_at.is_(None) | (Job.lease_expires_at < now)),
-                        )
-                    )
-                    .order_by(Job.created_at)
-                    .limit(1)
-                )
-                if job:
-                    claimed_job_id = job.job_id
-                    job.status = "running"
-                    job.lease_owner = self.worker_id
-                    job.lease_expires_at = now + timedelta(seconds=self.settings.job_lease_seconds)
+                claimed_job_id = self._claim_next_job(session)
             if claimed_job_id:
                 self.process_job(claimed_job_id)
             else:
                 time.sleep(self.settings.worker_poll_seconds)
+
+    def _claim_next_job(self, session: Session) -> str | None:
+        now = utcnow()
+        lease_expires_at = now + timedelta(seconds=self.settings.job_lease_seconds)
+        claimable_job_id = (
+            select(Job.job_id)
+            .where(
+                or_(
+                    Job.status == "queued",
+                    (Job.status == "running") & (Job.lease_expires_at.is_(None) | (Job.lease_expires_at < now)),
+                )
+            )
+            .order_by(Job.created_at)
+            .limit(1)
+            .scalar_subquery()
+        )
+        claim = (
+            update(Job)
+            .where(Job.job_id == claimable_job_id)
+            .values(
+                status="running",
+                lease_owner=self.worker_id,
+                lease_expires_at=lease_expires_at,
+            )
+            .returning(Job.job_id)
+        )
+        return session.execute(claim).scalar_one_or_none()
 
 
 orchestrator = JobOrchestrator()

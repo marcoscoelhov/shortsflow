@@ -15,6 +15,8 @@ from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.models import FallbackEvent, Job, RenderOutput, SceneAsset, TopicRequest
 from app.orchestrator import FatalStepError, orchestrator
+from pydantic import ValidationError
+
 from app.schemas import ReviewActionPayload, TopicRequestCreate
 from app.trends import TrendResearcher
 from app.utils import path_from_uri
@@ -304,17 +306,30 @@ def create_job(
         selected_seed_theme, trend_angle, trend_notes = _trend_seed_theme(selected_niche)
         selected_angle = selected_angle or trend_angle or ""
     combined_notes = "\n\n".join(part for part in [trend_notes, notes] if part)
-    payload = TopicRequestCreate(
-        seed_theme=selected_seed_theme,
-        niche_id=selected_niche,
-        language=language,
-        target_duration_sec=target_duration_sec,
-        tone=tone,
-        cta_style=cta_style,
-        notes=_compose_hub_notes(input_mode, combined_notes),
-        requested_angle=selected_angle or None,
-    )
-    job_id = orchestrator.create_job(payload.model_dump())
+    try:
+        payload = TopicRequestCreate(
+            seed_theme=selected_seed_theme,
+            niche_id=selected_niche,
+            language=language,
+            target_duration_sec=target_duration_sec,
+            tone=tone,
+            cta_style=cta_style,
+            notes=_compose_hub_notes(input_mode, combined_notes),
+            requested_angle=selected_angle or None,
+        )
+        job_id = orchestrator.create_job(payload.model_dump())
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=[
+                {
+                    "loc": error["loc"],
+                    "msg": error["msg"],
+                    "type": error["type"],
+                }
+                for error in exc.errors()
+            ],
+        ) from exc
     return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
 
@@ -355,17 +370,33 @@ def review_job(
     reviewer_identity: str = Form(default="tailscale:local-reviewer"),
     action: str = Form(...),
     reason_codes: str = Form(default=""),
+    rights_confirmed: bool = Form(default=False),
+    ai_disclosure_confirmed: bool = Form(default=False),
+    fact_review_confirmed: bool = Form(default=False),
+    metadata_confirmed: bool = Form(default=False),
+    originality_confirmed: bool = Form(default=False),
     notes: str | None = Form(default=None),
-    retry_step: str | None = Form(default=None),
 ):
+    parsed_reason_codes = [item.strip() for item in reason_codes.split(",") if item.strip()]
+    for enabled, code in [
+        (rights_confirmed, "rights_confirmed"),
+        (ai_disclosure_confirmed, "ai_disclosure_confirmed"),
+        (fact_review_confirmed, "fact_review_confirmed"),
+        (metadata_confirmed, "metadata_confirmed"),
+        (originality_confirmed, "originality_confirmed"),
+    ]:
+        if enabled and code not in parsed_reason_codes:
+            parsed_reason_codes.append(code)
     payload = ReviewActionPayload(
         reviewer_identity=reviewer_identity,
         action=action,
-        reason_codes=[item.strip() for item in reason_codes.split(",") if item.strip()],
+        reason_codes=parsed_reason_codes,
         notes=notes,
-        retry_step=retry_step,
     )
-    new_job_id = orchestrator.review_job(payload.model_dump(), job_id)
+    try:
+        new_job_id = orchestrator.review_job(payload.model_dump(), job_id)
+    except FatalStepError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     redirect_to = f"/jobs/{new_job_id}" if new_job_id else f"/jobs/{job_id}"
     return RedirectResponse(url=redirect_to, status_code=303)
 
