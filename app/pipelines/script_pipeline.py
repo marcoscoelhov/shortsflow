@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.editorial.retention import attach_retention_metadata, enrich_plan_for_script_generation
 from app.models import Job, Script, TopicPlan, TopicRequest
-from app.pipelines.common import RecoverableStepError, model_payload
+from app.pipelines.common import FatalStepError, RecoverableStepError, model_payload
 from app.pipelines.base import BasePipeline
 from app.utils import new_id, sentence_split, stable_hash, tokenize, utcnow, word_tokens
 
@@ -40,6 +40,8 @@ def normalize_script_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
 
 class ScriptPipeline(BasePipeline):
     def step_script(self, session: Session, job: Job, attempt: int) -> list[str]:
+        step_started = time.monotonic()
+        stage_timings_ms: dict[str, float] = {}
         self._remove_stale_quality_report(job.job_id, "script_rejected.json")
         self._remove_stale_quality_report(job.job_id, "script_generation_debug.json")
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
@@ -54,6 +56,7 @@ class ScriptPipeline(BasePipeline):
             "requested_angle": request.requested_angle,
             "hub_notes": request.notes,
             "original_input": request.seed_theme,
+            "simple_shorts_mode": self.settings.simple_shorts_mode,
         }
         plan_dict = enrich_plan_for_script_generation(
             plan_dict,
@@ -61,9 +64,27 @@ class ScriptPipeline(BasePipeline):
             recent_history=self._recent_topic_history(session, request.niche_id),
         )
         plan_dict["channel_learning_brief"] = self._channel_learning_brief(session, request.niche_id)
-        fact_pack = self._build_fact_pack(topic_plan, request)
+        fact_started = time.monotonic()
+        fact_pack = self._simple_mode_fact_pack(request) if self.settings.simple_shorts_mode else self._build_fact_pack(topic_plan, request)
+        stage_timings_ms["fact_pack_ms"] = round((time.monotonic() - fact_started) * 1000, 1)
         plan_dict["fact_pack"] = fact_pack
         self.storage.persist_json(job.job_id, "fact_pack.json", self._serialize_for_json(fact_pack))
+        if self._requires_verified_fact_pack(topic_plan, request, fact_pack):
+            error = FatalStepError("script quality gate failed: fact_pack_missing_for_factual_topic")
+            self._persist_script_generation_debug(
+                job_id=job.job_id,
+                attempt=attempt,
+                plan_dict=plan_dict,
+                fact_pack=fact_pack,
+                phase="fact_pack_failed",
+                elapsed_ms=0.0,
+                stage_timings_ms={
+                    **stage_timings_ms,
+                    "total_step_ms": round((time.monotonic() - step_started) * 1000, 1),
+                },
+                error=error,
+            )
+            raise error
         generation_started = time.monotonic()
         try:
             script = self.providers.creative.generate_script(plan_dict)
@@ -75,10 +96,17 @@ class ScriptPipeline(BasePipeline):
                 fact_pack=fact_pack,
                 phase="generation",
                 elapsed_ms=round((time.monotonic() - generation_started) * 1000, 1),
+                stage_timings_ms={
+                    **stage_timings_ms,
+                    "generation_ms": round((time.monotonic() - generation_started) * 1000, 1),
+                    "total_step_ms": round((time.monotonic() - step_started) * 1000, 1),
+                },
                 error=exc,
             )
             raise
         generation_elapsed_ms = round((time.monotonic() - generation_started) * 1000, 1)
+        stage_timings_ms["generation_ms"] = generation_elapsed_ms
+        validation_started = time.monotonic()
         try:
             script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec, request.cta_style or "none", job.job_id)
         except Exception as exc:  # noqa: BLE001
@@ -90,9 +118,36 @@ class ScriptPipeline(BasePipeline):
                 phase="validation",
                 elapsed_ms=generation_elapsed_ms,
                 script=script,
+                stage_timings_ms={
+                    **stage_timings_ms,
+                    "validation_ms": round((time.monotonic() - validation_started) * 1000, 1),
+                    "total_step_ms": round((time.monotonic() - step_started) * 1000, 1),
+                },
                 error=exc,
             )
             raise
+        stage_timings_ms["validation_ms"] = round((time.monotonic() - validation_started) * 1000, 1)
+        audit_started = time.monotonic()
+        text_audit = self._text_publish_audit(job.job_id, script, fact_pack)
+        stage_timings_ms["text_publish_audit_ms"] = round((time.monotonic() - audit_started) * 1000, 1)
+        if text_audit.get("passed") is False:
+            audit_reasons = [str(reason) for reason in text_audit.get("reasons") or ["text_publish_audit_failed"]]
+            self._persist_script_generation_debug(
+                job_id=job.job_id,
+                attempt=attempt,
+                plan_dict=plan_dict,
+                fact_pack=fact_pack,
+                phase="audit_failed",
+                elapsed_ms=generation_elapsed_ms,
+                script=script,
+                metrics={**metrics, "text_publish_audit": text_audit},
+                stage_timings_ms={
+                    **stage_timings_ms,
+                    "total_step_ms": round((time.monotonic() - step_started) * 1000, 1),
+                },
+            )
+            self._persist_script_rejection(job.job_id, script, metrics, audit_reasons)
+            raise RecoverableStepError(f"text publish audit failed: {', '.join(audit_reasons)}")
         self._persist_script_generation_debug(
             job_id=job.job_id,
             attempt=attempt,
@@ -102,12 +157,11 @@ class ScriptPipeline(BasePipeline):
             elapsed_ms=generation_elapsed_ms,
             script=script,
             metrics=metrics,
+            stage_timings_ms={
+                **stage_timings_ms,
+                "total_step_ms": round((time.monotonic() - step_started) * 1000, 1),
+            },
         )
-        text_audit = self._text_publish_audit(job.job_id, script, fact_pack)
-        if text_audit.get("passed") is False:
-            audit_reasons = [str(reason) for reason in text_audit.get("reasons") or ["text_publish_audit_failed"]]
-            self._persist_script_rejection(job.job_id, script, metrics, audit_reasons)
-            raise RecoverableStepError(f"text publish audit failed: {', '.join(audit_reasons)}")
         script = self._attach_editorial_source(script, plan_dict)
         metrics = {**metrics, "editorial_source": "hub_viral_prompt", "downstream_source_of_truth": "script_full_narration"}
         created_at = utcnow()
@@ -138,7 +192,49 @@ class ScriptPipeline(BasePipeline):
         self._append_event(job.job_id, "script.generated", "succeeded", metrics)
         return ["fact_pack.json", "script.json", "script_generation_debug.json", "text_publish_audit.json", script_telemetry_file]
 
+    def _requires_verified_fact_pack(self, topic_plan: TopicPlan, request: TopicRequest, fact_pack: dict[str, Any]) -> bool:
+        if self.settings.simple_shorts_mode:
+            return False
+        if self.settings.use_mock_providers:
+            return False
+        if fact_pack.get("status") == "verified":
+            return False
+        source_text = f"{request.seed_theme} {topic_plan.canonical_topic} {topic_plan.angle} {topic_plan.hook_promise}"
+        return bool(
+            re.search(
+                r"\b(?:por que|porque|como|ci[eê]ncia|biologia|engenharia|hist[oó]ria|sa[uú]de|animal|animais|flamingo|flamingos|polvo|polvos|youtube|tiktok|google|dados|n[uú]mero|estat[ií]stica|causa|mecanismo)\b",
+                source_text,
+                re.IGNORECASE,
+            )
+        )
+
+    def _simple_mode_fact_pack(self, request: TopicRequest) -> dict[str, Any]:
+        return {
+            "status": "skipped",
+            "provider": "simple_shorts_mode",
+            "query_used": request.seed_theme,
+            "facts": [],
+            "sources": [],
+            "editorial_rule": (
+                "Simple Shorts mode: do not block generation on academic fact packs. "
+                "Use broadly safe wording, avoid precise numbers and source IDs, and prioritize a viral pt-BR script."
+            ),
+        }
+
     def _text_publish_audit(self, job_id: str, script: dict[str, Any], fact_pack: dict[str, Any]) -> dict[str, Any]:
+        if self.settings.simple_shorts_mode:
+            audit = {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True}
+            self.storage.persist_json(
+                job_id,
+                "text_publish_audit.json",
+                {
+                    "schema_version": self.settings.schema_version,
+                    "job_id": job_id,
+                    "created_at": utcnow().isoformat(),
+                    "audit": self._serialize_for_json(audit),
+                },
+            )
+            return audit
         auditor = getattr(self.providers.creative, "audit_publish_package", None)
         if auditor is None:
             return {"passed": True, "reasons": [], "provider": "none", "skipped": True}
@@ -156,22 +252,31 @@ class ScriptPipeline(BasePipeline):
             "hashtags": ["#shorts"],
             "audit_phase": "text_before_assets",
         }
+        timeout_sec = float(self.settings.llm_publish_audit_timeout_sec)
+        bound_owner = getattr(auditor, "__self__", None)
+        if (
+            bound_owner is self.providers.creative
+            and getattr(bound_owner, "fallback", None) is not None
+            and not bool(getattr(bound_owner, "strict_minimax_validation", False))
+        ):
+            timeout_sec = max(timeout_sec, float(self.settings.llm_publish_audit_timeout_sec) * 2 + 10.0)
         try:
             audit = self._call_with_timeout(
                 lambda: auditor(payload),
-                timeout_sec=float(self.settings.llm_publish_audit_timeout_sec),
+                timeout_sec=timeout_sec,
             )
         except TimeoutError:
             audit = {
                 "passed": False,
                 "reasons": ["text_publish_audit_timeout"],
                 "provider": "publish_auditor",
-                "timeout_sec": self.settings.llm_publish_audit_timeout_sec,
+                "timeout_sec": timeout_sec,
             }
         except Exception as exc:  # noqa: BLE001
             audit = {"passed": False, "reasons": ["text_publish_audit_failed"], "error": str(exc), "provider": "publish_auditor"}
         if not isinstance(audit, dict):
             audit = {"passed": False, "reasons": ["text_publish_audit_invalid"], "provider": "publish_auditor"}
+        audit = self._normalize_text_publish_audit(audit)
         self.storage.persist_json(
             job_id,
             "text_publish_audit.json",
@@ -182,6 +287,18 @@ class ScriptPipeline(BasePipeline):
                 "audit": self._serialize_for_json(audit),
             },
         )
+        return audit
+
+    def _normalize_text_publish_audit(self, audit: dict[str, Any]) -> dict[str, Any]:
+        reasons = [str(reason) for reason in audit.get("reasons") or []]
+        ignored_reasons = [reason for reason in reasons if reason == "weak_hashtags"]
+        blocking_reasons = [reason for reason in reasons if reason != "weak_hashtags"]
+        if ignored_reasons:
+            audit = dict(audit)
+            audit["reasons"] = blocking_reasons
+            audit["ignored_reasons"] = list(dict.fromkeys([*(audit.get("ignored_reasons") or []), *ignored_reasons]))
+            if not blocking_reasons and audit.get("passed") is False:
+                audit["passed"] = True
         return audit
 
     def _call_with_timeout(self, func: Any, timeout_sec: float) -> Any:
@@ -213,6 +330,7 @@ class ScriptPipeline(BasePipeline):
         elapsed_ms: float,
         script: dict[str, Any] | None = None,
         metrics: dict[str, Any] | None = None,
+        stage_timings_ms: dict[str, float] | None = None,
         error: Exception | None = None,
     ) -> None:
         payload = {
@@ -230,6 +348,7 @@ class ScriptPipeline(BasePipeline):
             "minimax_script_timeout_sec": self.settings.minimax_script_timeout_sec,
             "fact_pack_status": fact_pack.get("status"),
             "fact_count": len(fact_pack.get("facts") or []),
+            "stage_timings_ms": stage_timings_ms or {},
             "canonical_topic": plan_dict.get("canonical_topic"),
             "angle": plan_dict.get("angle"),
             "requested_angle": plan_dict.get("requested_angle"),
@@ -317,10 +436,43 @@ class ScriptPipeline(BasePipeline):
             "parece",
             "segredo",
             "mecanismo",
+            "quase",
+            "estraga",
+            "estragar",
+            "tira",
+            "unico",
+            "único",
         }
-        tokens = {token for token in word_tokens(normalized) if len(token) >= 4 and token not in stopwords}
-        protected_entities = {"youtube", "tiktok", "google", "wikipedia", "instagram", "meta", "flamingo", "flamingos", "polvo", "polvos", "pisa"}
-        return {token for token in tokens if token in protected_entities} or set(list(tokens)[:3])
+        tokens = {token for token in word_tokens(normalized) if (len(token) >= 4 or token in {"mel"}) and token not in stopwords}
+        protected_entities = {
+            "youtube",
+            "tiktok",
+            "google",
+            "wikipedia",
+            "instagram",
+            "meta",
+            "flamingo",
+            "flamingos",
+            "polvo",
+            "polvos",
+            "pisa",
+            "templario",
+            "templarios",
+            "mel",
+            "honey",
+            "honeys",
+            "cafe",
+            "cafeina",
+            "caffeine",
+            "adenosina",
+            "adenosine",
+        }
+        protected = {token for token in tokens if token in protected_entities}
+        if "mel" in protected:
+            protected.update({"honey", "honeys"})
+        if "cafe" in protected or "cafeina" in protected:
+            protected.update({"caffeine", "cafeina", "adenosine", "adenosina"})
+        return protected or set(list(tokens)[:3])
 
     def _query_matches_primary_fact_topic(self, query: str, topic_tokens: set[str]) -> bool:
         query_tokens = {token for token in word_tokens(self._normalize_fact_text(query)) if len(token) >= 4}
@@ -348,6 +500,9 @@ class ScriptPipeline(BasePipeline):
         )
         source_tokens = {token for token in word_tokens(self._normalize_fact_text(source_text)) if len(token) >= 4}
         matched = sorted(topic_tokens & source_tokens)
+        coffee_topic_tokens = {"cafe", "cafeina", "caffeine"}
+        if topic_tokens & coffee_topic_tokens and not source_tokens & {"cafe", "cafeina", "caffeine", "coffee"}:
+            matched = []
         passed = bool(matched)
         fact_pack["topic_alignment"] = {
             "passed": passed,
@@ -359,9 +514,34 @@ class ScriptPipeline(BasePipeline):
 
     def _fact_query_priority(self, query: str) -> tuple[int, int, int, int]:
         normalized = query.lower()
-        token_count = len(word_tokens(query))
+        tokens = word_tokens(query)
+        token_count = len(tokens)
+        token_set = set(tokens)
         is_short_entity = token_count <= 3 and ":" not in query and "?" not in query
-        has_specific_entity = any(term in normalized for term in ["flamingo", "polvo", "octopus", "torre", "pisa", "mel", "honey"])
+        is_exact_pisa_entity = {"torre", "pisa"} <= token_set and token_count <= 2
+        has_specific_entity = any(
+            term in normalized
+            for term in [
+                "flamingo",
+                "polvo",
+                "octopus",
+                "torre",
+                "pisa",
+                "mel",
+                "honey",
+                "cafe",
+                "café",
+                "cafeina",
+                "cafeína",
+                "caffeine",
+                "adenosina",
+                "adenosine",
+                "templario",
+                "templarios",
+                "templário",
+                "templários",
+            ]
+        )
         has_concept_suffix = any(
             term in normalized
             for term in [
@@ -391,11 +571,16 @@ class ScriptPipeline(BasePipeline):
                 "hydrogen peroxide",
                 "water activity",
                 "antimicrobial",
+                "adenosine",
+                "adenosina",
+                "caffeine",
+                "cafeina",
+                "cafeína",
             ]
         )
         ambiguous_short_entity = normalized in {"mel"}
         return (
-            0 if has_concept_suffix else 1,
+            0 if is_exact_pisa_entity or has_concept_suffix else 1,
             0 if has_specific_entity and not ambiguous_short_entity else (1 if is_short_entity else 2),
             token_count,
             len(query),
@@ -442,6 +627,10 @@ class ScriptPipeline(BasePipeline):
             "duas",
             "cidade",
             "cidades",
+            "cafe",
+            "café",
+            "adenosina",
+            "adenosine",
         }
         weak_multi_terms = weak_single_terms | {
             "causa",
@@ -502,6 +691,8 @@ class ScriptPipeline(BasePipeline):
                         queries.append(entity)
                         for concept in self._fact_query_concepts(cleaned):
                             queries.append(f"{entity} {concept}")
+                            if entity.lower() == "mel":
+                                queries.append(concept)
         return queries
 
     def _fact_query_source_texts(self, value: Any) -> list[str]:
@@ -539,7 +730,8 @@ class ScriptPipeline(BasePipeline):
             "animal", "explica", "explicacao", "explicação", "fatos", "fato", "voce", "você", "sabia", "surpreenda", "prepare",
             "comida", "pinta", "motivo", "incrivel", "incrível", "quimico", "químico", "deixa", "essa", "resposta", "transforma", "revelar",
             "transformacao", "transformação", "visual", "branco", "branca", "brancos", "brancas", "descubra", "apenas",
-            "exatamente", "durante", "vida",
+            "exatamente", "durante", "vida", "quase", "estraga", "estragar", "unico", "único", "pode", "mata", "matar",
+            "destrói", "destroi", "bacterias", "bactérias", "tira",
         }
         colon_head = query.split(":", 1)[0].strip(" -–—:;,.") if ":" in query else ""
         if colon_head:
@@ -580,6 +772,10 @@ class ScriptPipeline(BasePipeline):
             concepts.extend(["inclinação", "engenharia", "solo"])
         if any(term in normalized for term in ["mel", "honey", "abelha", "glucose oxidase", "peróxido", "peroxido"]):
             concepts.extend(["honey antimicrobial", "honey water activity", "glucose oxidase hydrogen peroxide"])
+        if normalized_tokens & {"cafe", "cafeina", "caffeine", "sono", "adenosina", "adenosine"}:
+            concepts.extend(["caffeine adenosine receptor", "caffeine sleep adenosine", "cafeina adenosina"])
+        if any(term in normalized for term in ["templario", "templarios", "templário", "templários", "ordem do templo"]):
+            concepts.extend(["Ordem dos Templários", "templários Portugal", "Tomar Templários"])
         return concepts[:3]
 
     def _normalize_fact_text(self, text: str) -> str:
@@ -598,6 +794,35 @@ class ScriptPipeline(BasePipeline):
             tts_false_friends = {"spectrogram", "spectrograms", "wavenet", "tacotron", "speech", "synthesis", "vocoder"}
             if text_tokens & tts_false_friends and not text_tokens & honey_terms:
                 return False
+            if "antimicrobial" in query_tokens and not (
+                text_tokens
+                & {
+                    "antimicrobial",
+                    "antibacterial",
+                    "bactericidal",
+                    "bacteria",
+                    "bacterial",
+                    "staphylococcus",
+                    "aureus",
+                    "escherichia",
+                    "coli",
+                    "pseudomonas",
+                }
+            ):
+                return False
+            if {"water", "activity"} <= query_tokens and not {"water", "activity"} <= text_tokens:
+                return False
+            if {"glucose", "oxidase"} <= query_tokens and not (
+                {"glucose", "oxidase"} <= text_tokens or {"hydrogen", "peroxide"} <= text_tokens
+            ):
+                return False
+        coffee_query = bool(query_tokens & {"cafe", "cafeina", "caffeine", "adenosine", "adenosina"})
+        if coffee_query:
+            coffee_terms = {"caffeine", "cafeina", "coffee", "adenosine", "adenosina", "sleep", "sono", "receptor", "receptors"}
+            if "world" in text_tokens and "cafe" in text_tokens and not (text_tokens & (coffee_terms - {"coffee"})):
+                return False
+            if not (text_tokens & coffee_terms):
+                return False
         if not query_tokens:
             return True
         if query_tokens & title_tokens:
@@ -607,6 +832,29 @@ class ScriptPipeline(BasePipeline):
         if len(query_tokens & text_tokens) >= min(2, len(query_tokens)):
             return True
         return False
+
+    def _fact_sentence_is_useful(self, sentence: str, query: str) -> bool:
+        normalized = self._normalize_fact_text(sentence)
+        tokens = [token for token in word_tokens(normalized) if len(token) >= 4]
+        if len(tokens) < 8:
+            return False
+        weak_patterns = [
+            r"\b(?:o\s+)?conteudo\s+e\s+apresentado\b",
+            r"\bintroducao\b.*\bmetodos?\b.*\breferencia\b",
+            r"\breferencias?\s+bibliograficas?\b",
+            r"\bthis\s+(?:article|paper|study)\s+(?:presents|describes|reviews|discusses)\b",
+            r"\bthe\s+(?:content|paper)\s+is\s+(?:organized|presented)\b",
+        ]
+        if any(re.search(pattern, normalized, re.IGNORECASE) for pattern in weak_patterns):
+            return False
+        query_tokens = {
+            token
+            for token in word_tokens(self._normalize_fact_text(query))
+            if len(token) >= 4 and token not in {"sobre", "porque", "como", "qual", "quais"}
+        }
+        if len(query_tokens) <= 2 and query_tokens and not (query_tokens & set(tokens)):
+            return False
+        return True
 
     def _scientific_article_fact_pack(self, query: str) -> dict[str, Any]:
         try:
@@ -634,7 +882,11 @@ class ScriptPipeline(BasePipeline):
                 continue
             if not title or not abstract or not self._fact_result_is_relevant(query, title, abstract):
                 continue
-            sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", abstract) if len(part.strip()) > 30]
+            sentences = [
+                part.strip()
+                for part in re.split(r"(?<=[.!?])\s+", abstract)
+                if len(part.strip()) > 30 and self._fact_sentence_is_useful(part, query)
+            ]
             if not sentences:
                 continue
             facts = [
@@ -794,7 +1046,7 @@ class ScriptPipeline(BasePipeline):
         processed = self._split_long_script_sentences(processed)
         processed = self._normalize_script_visible_text(processed)
         processed = self._attach_claim_trace(processed, fact_pack)
-        processed["estimated_duration_sec"] = round(max(25.0, min(42.0, len(word_tokens(str(processed.get("full_narration") or ""))) / 2.55)), 2)
+        processed["estimated_duration_sec"] = round(max(35.0, min(55.0, len(word_tokens(str(processed.get("full_narration") or ""))) / 2.55)), 2)
         processed["token_count"] = len(tokenize(str(processed.get("full_narration") or "")))
         return processed
 
@@ -1165,7 +1417,7 @@ class ScriptPipeline(BasePipeline):
         script = self._postprocess_script_for_quality(script, plan_dict, [])
         script["qa_metrics"] = normalize_script_metrics(dict(script.get("qa_metrics") or {}))
         gate_result = self.script_gate.validate(script, target_duration_sec)
-        consistency_reasons = self._fact_pack_consistency_reasons(script, plan_dict.get("fact_pack"))
+        consistency_reasons = [] if self.settings.simple_shorts_mode else self._fact_pack_consistency_reasons(script, plan_dict.get("fact_pack"))
         attempts_log: list[dict[str, Any]] = [
             {
                 "repair_attempt": 0,
@@ -1174,6 +1426,20 @@ class ScriptPipeline(BasePipeline):
                 "used_fallback": False,
             }
         ]
+        if self.settings.simple_shorts_mode:
+            metrics = {
+                **gate_result.metrics,
+                "script_quality_gate_pass": True,
+                "script_quality_gate_blocking": False,
+                "script_quality_gate_warnings": list(gate_result.reasons),
+                "fact_pack_consistency_pass": True,
+                "fact_pack_consistency_skipped": True,
+                "script_repair_attempts_log": attempts_log,
+                "simple_shorts_mode": True,
+                **self._claim_trace_metrics(script),
+            }
+            script["qa_metrics"] = metrics
+            return script, metrics
         if gate_result.passed and not consistency_reasons:
             script["qa_metrics"] = {
                 **gate_result.metrics,

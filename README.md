@@ -72,7 +72,7 @@ Principais variaveis:
 | `YTS_APP_PORT` | Porta do app, normalmente `8080`. |
 | `YTS_DATA_DIR` | Diretorio de banco/artefatos, padrao `data`. |
 | `YTS_DATABASE_URL` | URL SQLAlchemy. SQLite por padrao, PostgreSQL opcional. |
-| `YTS_TARGET_DURATION_SEC` | Duracao alvo do Short, validada entre 25 e 45 segundos. |
+| `YTS_TARGET_DURATION_SEC` | Duracao alvo do Short, validada entre 35 e 55 segundos. |
 | `YTS_SCENE_TARGET_COUNT` | Numero alvo de cenas, padrao `6`. |
 | `YTS_USE_MOCK_PROVIDERS` | `true` para rodar local sem chamar APIs pagas. |
 | `YTS_MINIMAX_API_KEY` | Chave MiniMax legada usada como fallback para texto e imagem. |

@@ -5,6 +5,7 @@ import random
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -27,7 +28,7 @@ settings = get_settings()
 templates = Jinja2Templates(directory=str(settings.templates_dir))
 
 HUB_DEFAULT_NICHE = "curiosidades"
-HUB_RETENTION_OPTIMIZED_DURATION_SEC = 32
+HUB_RETENTION_OPTIMIZED_DURATION_SEC = 45
 HUB_RANDOM_THEME_POOL = [
     "polvos",
     "gatos",
@@ -78,6 +79,7 @@ Proibido:
 - nao entregue a explicacao completa no primeiro beat; abra um loop e feche depois
 - nao use clickbait falso: todo choque precisa ser provado no roteiro"""
 HUB_SETTINGS_FILENAME = "hub_settings.json"
+HUB_JOBS_PER_PAGE = 20
 MAX_VIRAL_PROMPT_TEMPLATE_CHARS = 12000
 
 
@@ -143,9 +145,19 @@ async def require_hub_auth(request: Request, call_next):
     return PlainTextResponse("unauthorized", status_code=401)
 
 
-def _query_jobs(status: str | None, search: str | None, fallback: str | None, review: str | None):
+def _clamp_page(value: int | None) -> int:
+    return max(1, int(value or 1))
+
+
+def _clamp_per_page(value: int | None) -> int:
+    return max(1, min(100, int(value or HUB_JOBS_PER_PAGE)))
+
+
+def _query_jobs(status: str | None, search: str | None, fallback: str | None, review: str | None, page: int = 1, per_page: int = HUB_JOBS_PER_PAGE):
     session = SessionLocal()
     try:
+        normalized_page = _clamp_page(page)
+        normalized_per_page = _clamp_per_page(per_page)
         fallback_count = (
             select(FallbackEvent.job_id, func.count(FallbackEvent.event_id).label("fallback_count"))
             .group_by(FallbackEvent.job_id)
@@ -179,9 +191,59 @@ def _query_jobs(status: str | None, search: str | None, fallback: str | None, re
             stmt = stmt.where(func.coalesce(fallback_count.c.fallback_count, 0) > 0)
         if review:
             stmt = stmt.where(Job.review_state == review)
-        return session.execute(stmt).all()
+        all_rows = session.execute(stmt).all()
+        total = len(all_rows)
+        total_pages = max(1, (total + normalized_per_page - 1) // normalized_per_page)
+        normalized_page = min(normalized_page, total_pages)
+        offset = (normalized_page - 1) * normalized_per_page
+        return {
+            "rows": all_rows[offset : offset + normalized_per_page],
+            "page": normalized_page,
+            "per_page": normalized_per_page,
+            "total": total,
+            "total_pages": total_pages,
+            "has_previous": normalized_page > 1,
+            "has_next": normalized_page < total_pages,
+        }
     finally:
         session.close()
+
+
+def _jobs_query_string(filters: dict[str, str], page: int, per_page: int) -> str:
+    params = {
+        "page": page,
+        "per_page": per_page,
+        **{key: value for key, value in filters.items() if value},
+    }
+    return urlencode(params)
+
+
+def _job_list_context(
+    *,
+    status: str | None,
+    search: str | None,
+    fallback: str | None,
+    review: str | None,
+    page: int,
+    per_page: int,
+) -> dict[str, object]:
+    filters = {"status": status or "", "search": search or "", "fallback": fallback or "", "review": review or ""}
+    pagination = _query_jobs(status=status, search=search, fallback=fallback, review=review, page=page, per_page=per_page)
+    pagination["previous_query"] = _jobs_query_string(filters, max(1, int(pagination["page"]) - 1), int(pagination["per_page"]))
+    pagination["next_query"] = _jobs_query_string(filters, int(pagination["page"]) + 1, int(pagination["per_page"]))
+    pagination["current_query"] = _jobs_query_string(filters, int(pagination["page"]), int(pagination["per_page"]))
+    return {"rows": pagination["rows"], "pagination": pagination, "filters": filters}
+
+
+def _resolve_job_id(session, job_id: str) -> str:
+    if session.get(Job, job_id):
+        return job_id
+    matches = session.scalars(select(Job.job_id).where(Job.job_id.like(f"{job_id}%")).order_by(Job.created_at.desc()).limit(2)).all()
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise HTTPException(status_code=409, detail="job id prefix is ambiguous")
+    raise KeyError(job_id)
 
 
 def _hub_settings_path() -> Path:
@@ -225,11 +287,22 @@ def _default_seed_theme() -> str:
     return random.choice(candidates or HUB_RANDOM_THEME_POOL)
 
 
-def _trend_seed_theme(niche_id: str) -> tuple[str, str | None, str | None]:
+def _trend_seed_theme(niche_id: str) -> tuple[str, str | None, str | None, dict[str, object] | None]:
     trend = TrendResearcher().find_topic(niche_id)
     if trend is None:
-        return _default_seed_theme(), None, None
-    return trend.topic, trend.requested_angle, trend.as_notes()
+        fallback_theme = _default_seed_theme()
+        return (
+            fallback_theme,
+            None,
+            "trend_research=unavailable\ntrend_source=fallback_pool\ntrend_status=no_live_trend_candidate",
+            {
+                "trend_research": "unavailable",
+                "source": "fallback_pool",
+                "status": "no_live_trend_candidate",
+                "fallback_seed_theme": fallback_theme,
+            },
+        )
+    return trend.topic, trend.requested_angle, trend.as_notes(), trend.as_report()
 
 
 def _compose_hub_notes(input_mode: str, notes: str | None) -> str:
@@ -268,14 +341,15 @@ def jobs_page(
     search: str | None = Query(default=None),
     fallback: str | None = Query(default=None),
     review: str | None = Query(default=None),
+    page: int = Query(default=1),
+    per_page: int = Query(default=HUB_JOBS_PER_PAGE),
 ):
-    rows = _query_jobs(status=status, search=search, fallback=fallback, review=review)
+    list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, page=page, per_page=per_page)
     return templates.TemplateResponse(
         request,
         "jobs.html",
         {
-            "rows": rows,
-            "filters": {"status": status or "", "search": search or "", "fallback": fallback or "", "review": review or ""},
+            **list_context,
             "hub_defaults": {
                 "niche_id": HUB_DEFAULT_NICHE,
                 "seed_theme": "",
@@ -307,12 +381,14 @@ def jobs_fragment(
     search: str | None = Query(default=None),
     fallback: str | None = Query(default=None),
     review: str | None = Query(default=None),
+    page: int = Query(default=1),
+    per_page: int = Query(default=HUB_JOBS_PER_PAGE),
 ):
-    rows = _query_jobs(status=status, search=search, fallback=fallback, review=review)
+    list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, page=page, per_page=per_page)
     return templates.TemplateResponse(
         request,
         "jobs_table.html",
-        {"rows": rows},
+        list_context,
     )
 
 
@@ -336,8 +412,9 @@ def create_job(
     trend_notes = None
     if seed_theme.strip():
         selected_seed_theme = seed_theme.strip()
+        trend_report = None
     else:
-        selected_seed_theme, trend_angle, trend_notes = _trend_seed_theme(selected_niche)
+        selected_seed_theme, trend_angle, trend_notes, trend_report = _trend_seed_theme(selected_niche)
         selected_angle = selected_angle or trend_angle or ""
     combined_notes = "\n\n".join(part for part in [trend_notes, notes] if part)
     try:
@@ -352,6 +429,8 @@ def create_job(
             requested_angle=selected_angle or None,
         )
         job_id = orchestrator.create_job(payload.model_dump())
+        if trend_report is not None:
+            orchestrator.storage.persist_json(job_id, "trend_research.json", trend_report)
     except ValidationError as exc:
         raise HTTPException(
             status_code=422,
@@ -370,7 +449,8 @@ def create_job(
 @app.get("/api/jobs/{job_id}")
 def job_json(job_id: str):
     with SessionLocal() as session:
-        details = orchestrator.get_job_details(session, job_id)
+        resolved_job_id = _resolve_job_id(session, job_id)
+        details = orchestrator.get_job_details(session, resolved_job_id)
         return {
             "job": {
                 "job_id": details["job"].job_id,
@@ -392,7 +472,8 @@ def job_json(job_id: str):
 def job_detail(request: Request, job_id: str):
     with SessionLocal() as session:
         try:
-            details = orchestrator.get_job_details(session, job_id)
+            resolved_job_id = _resolve_job_id(session, job_id)
+            details = orchestrator.get_job_details(session, resolved_job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
     return templates.TemplateResponse(request, "job_detail.html", {"details": details, "settings": settings})

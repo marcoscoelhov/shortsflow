@@ -35,7 +35,7 @@
     </div>
     <div class="field">
       <label for="target_duration_sec">Duracao</label>
-      <input id="target_duration_sec" name="target_duration_sec" type="number" min="25" max="45" value="{{ hub_defaults.target_duration_sec }}">
+      <input id="target_duration_sec" name="target_duration_sec" type="number" min="35" max="55" value="{{ hub_defaults.target_duration_sec }}">
     </div>
     <div class="field">
       <label for="tone">Tom</label>
@@ -71,6 +71,8 @@
 <section class="panel filters-panel">
   <form class="filters-grid" hx-get="/jobs" hx-target="#jobs-table" hx-trigger="change, keyup delay:300ms">
     <input type="hidden" name="niche" value="curiosidades">
+    <input type="hidden" name="page" value="1">
+    <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
     <div class="field">
       <label for="status">Status</label>
       <select id="status" name="status">
@@ -103,7 +105,7 @@
 </section>
 
 <section class="panel">
-  <div id="jobs-table" hx-get="/jobs?status={{ filters.status }}&search={{ filters.search }}&fallback={{ filters.fallback }}&review={{ filters.review }}" hx-trigger="load, every 5s">
+  <div id="jobs-table" hx-get="/jobs?{{ pagination.current_query }}" hx-trigger="load, every 5s">
     {% include "jobs_table.html" %}
   </div>
 </section>

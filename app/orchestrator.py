@@ -219,6 +219,24 @@ class JobOrchestrator:
         if self.worker_thread and not self.worker_thread.is_alive():
             self.worker_thread = None
 
+    def _lease_delta(self) -> timedelta:
+        return timedelta(seconds=max(300, self.settings.job_lease_seconds))
+
+    def _start_lease_heartbeat(self, job_id: str) -> threading.Event:
+        stop_heartbeat = threading.Event()
+        interval = max(5.0, min(30.0, max(300, self.settings.job_lease_seconds) / 3))
+
+        def heartbeat() -> None:
+            while not stop_heartbeat.wait(interval):
+                with session_scope() as session:
+                    job = session.get(Job, job_id)
+                    if not job or job.status != "running" or job.lease_owner != self.worker_id:
+                        return
+                    job.lease_expires_at = utcnow() + self._lease_delta()
+
+        threading.Thread(target=heartbeat, name=f"yts-lease-{job_id[:8]}", daemon=True).start()
+        return stop_heartbeat
+
     def _persist_repair_telemetry(self, job_id: str, stage: str, payload: dict[str, Any]) -> str:
         filename = f"{stage}_repair_telemetry.json"
         self.storage.persist_json(job_id, filename, self._serialize_for_json(payload))
@@ -287,7 +305,7 @@ class JobOrchestrator:
                 return job.status
             job.status = "running"
             job.lease_owner = self.worker_id
-            job.lease_expires_at = utcnow() + timedelta(seconds=self.settings.job_lease_seconds)
+            job.lease_expires_at = utcnow() + self._lease_delta()
         for step in self._steps():
             ok = self._run_step(job_id, step)
             if not ok:
@@ -555,7 +573,9 @@ class JobOrchestrator:
                 )
                 session.add(execution)
                 job.current_step = step.name
-                job.lease_expires_at = utcnow() + timedelta(seconds=self.settings.job_lease_seconds)
+                job.lease_owner = self.worker_id
+                job.lease_expires_at = utcnow() + self._lease_delta()
+            heartbeat_stop = self._start_lease_heartbeat(job_id)
             try:
                 with session_scope() as session:
                     job = session.get(Job, job_id)
@@ -590,6 +610,8 @@ class JobOrchestrator:
                 self._record_step_failure(job_id, step.name, attempt, str(exc), recoverable=False)
                 self._fail_job(job_id, step.name, str(exc))
                 return False
+            finally:
+                heartbeat_stop.set()
         return False
 
     def _record_step_failure(self, job_id: str, step_name: str, attempt: int, message: str, recoverable: bool) -> None:
@@ -1481,7 +1503,7 @@ class JobOrchestrator:
 
     def _claim_next_job(self, session: Session) -> str | None:
         now = utcnow()
-        lease_expires_at = now + timedelta(seconds=self.settings.job_lease_seconds)
+        lease_expires_at = now + self._lease_delta()
         claimable_job_id = (
             select(Job.job_id)
             .where(

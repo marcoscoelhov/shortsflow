@@ -241,10 +241,10 @@ class ScriptQualityGate:
         avg_sentence = avg_words_per_sentence(full_narration)
         max_sentence = max_words_single_sentence(full_narration)
         words_per_second = round(word_count / estimated_duration, 2) if estimated_duration else 0.0
-        target_min = max(24.5, target_duration_sec - 10)
-        target_max = min(46.5, target_duration_sec + 10)
+        target_min = max(34.5, target_duration_sec - 10)
+        target_max = min(56.5, target_duration_sec + 10)
 
-        if not 25 <= estimated_duration <= 45:
+        if not 35 <= estimated_duration <= 55:
             reasons.append("estimated_duration_outside_absolute_range")
         if not target_min <= estimated_duration <= target_max:
             reasons.append("estimated_duration_outside_target_window")

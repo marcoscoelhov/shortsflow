@@ -179,6 +179,41 @@ button.ghost {
   border-collapse: collapse;
 }
 
+.jobs-table-header,
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.jobs-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.pagination {
+  margin-top: 1rem;
+}
+
+.pagination a,
+.pagination .disabled {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.4rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  text-decoration: none;
+  background: #fffefb;
+}
+
+.pagination .disabled {
+  opacity: 0.45;
+}
+
 .jobs-table th,
 .jobs-table td {
   padding: 0.8rem 0.5rem;

@@ -11,7 +11,7 @@ class TopicRequestCreate(BaseModel):
     seed_theme: str = Field(min_length=3)
     niche_id: str = "curiosidades"
     language: str = "pt-BR"
-    target_duration_sec: int = 32
+    target_duration_sec: int = 45
     tone: str = "intrigante_direto"
     cta_style: Literal["none", "soft"] = "none"
     notes: str | None = None
@@ -20,8 +20,8 @@ class TopicRequestCreate(BaseModel):
     @field_validator("target_duration_sec")
     @classmethod
     def validate_duration(cls, value: int) -> int:
-        if not 25 <= value <= 45:
-            raise ValueError("target_duration_sec must be between 25 and 45")
+        if not 35 <= value <= 55:
+            raise ValueError("target_duration_sec must be between 35 and 55")
         return value
 
     @field_validator("niche_id")

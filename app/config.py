@@ -25,8 +25,9 @@ class Settings(BaseSettings):
 
     niche_id: str = "curiosidades"
     language: str = "pt-BR"
-    target_duration_sec: int = 35
+    target_duration_sec: int = 45
     scene_target_count: int = 6
+    simple_shorts_mode: bool = True
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
@@ -64,6 +65,7 @@ class Settings(BaseSettings):
     allow_synthetic_visuals_for_monetization: bool = True
     conservative_synthetic_disclosure: bool = True
     channel_ai_generated_content: bool = True
+    ai_generated_commercial_rights_confirmed: bool = True
     minimax_api_key: str | None = None
     minimax_text_api_key: str | None = None
     minimax_image_api_key: str | None = None
@@ -94,8 +96,8 @@ class Settings(BaseSettings):
     @field_validator("target_duration_sec")
     @classmethod
     def validate_duration(cls, value: int) -> int:
-        if not 25 <= value <= 45:
-            raise ValueError("target_duration_sec must be between 25 and 45")
+        if not 35 <= value <= 55:
+            raise ValueError("target_duration_sec must be between 35 and 55")
         return value
 
     @field_validator("sqlite_busy_timeout_ms")

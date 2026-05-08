@@ -163,7 +163,7 @@ class MockCreativeProvider:
         narration_parts = [hook, *body, ending]
         full_narration = " ".join(narration_parts)
         token_count = len(tokenize(full_narration))
-        estimated_duration_sec = round(max(28.5, min(41.5, len(word_tokens(full_narration)) / 2.55)), 2)
+        estimated_duration_sec = round(max(35.0, min(55.0, len(word_tokens(full_narration)) / 2.55)), 2)
         retention_map = topic_plan.get("retention_map") or build_retention_map(round(estimated_duration_sec))
         visual_opening = topic_plan.get("visual_opening") or build_visual_opening_brief(topic_plan)
         qa_metrics = {
@@ -248,7 +248,7 @@ class MockCreativeProvider:
             narration = " ".join(f"{sentence.rstrip('.!?')}." for sentence in shortened_sentences if sentence).strip()
         repaired["full_narration"] = narration
         repaired["language"] = "pt-BR"
-        repaired["estimated_duration_sec"] = round(max(25.0, min(42.0, len(word_tokens(narration)) / 2.55)), 2)
+        repaired["estimated_duration_sec"] = round(max(35.0, min(55.0, len(word_tokens(narration)) / 2.55)), 2)
         repaired["token_count"] = len(tokenize(narration))
         metrics = dict(repaired.get("qa_metrics") or {})
         metrics.update(
@@ -445,7 +445,7 @@ Retorne JSON estrito com:
 title, hook, body_beats, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
 
 Regras:
-- 25 a 45 segundos
+- 35 a 55 segundos
 - prompt_version deve ser "{EDITORIAL_PROMPT_VERSION}" salvo se a Entrada JSON trouxer versão editorial mais nova
 - retention_map deve refletir os blocos da Entrada JSON.retention_map e mapear o roteiro em: visual_hook, proof_or_tension, escalation, turn_or_payoff, loop_close
 - visual_opening deve descrever o primeiro frame esperado: sujeito, contraste visual, ação/resultado e o que evitar
@@ -492,6 +492,7 @@ Regras:
 - sem instruções de camera
 - evite repetir aberturas listadas em recent_pattern_brief.avoid_hook_openings e padrões de título recentes
 - QA deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass, editorial_prompt_version
+- se Entrada JSON.simple_shorts_mode for true: não tente citar fonte, não use frases como "a fonte aponta", não gere source_fact_ids, deixe claim_trace vazio ou conservador, e priorize roteiro viral claro com fatos amplamente seguros, sem números precisos não fornecidos
 """
         payload = self._json_completion(prompt)
         payload["qa_metrics"] = {**payload.get("qa_metrics", {}), "source_provider": self.provider_name}
@@ -521,7 +522,7 @@ Regras obrigatórias:
 - corrija palavras coladas e erros como "ummini", "independiente", "right"
 - corrija pontuação quebrada como "no. centro", "a. refletância" e palavras coladas como "unidadede"
 - remova frases com cara de IA ou meta-roteiro, como "No replay", "agora tudo faz sentido", "isso muda como você olha", "holograma biológico" ou equivalentes prontos
-- mantenha duração estimada entre 25 e 45 segundos
+- mantenha duração estimada entre 35 e 55 segundos
 - primeira frase com no máximo 12 palavras
 - média por frase <= 14 e frase máxima <= 20 palavras
 - preserve a promessa central e os fatos úteis, mas reescreva o necessário
@@ -926,9 +927,9 @@ class ResilientCreativeProvider:
         candidates: list[tuple[str, LLMProvider, float]] = []
         seen: set[int] = set()
         for role, provider, timeout_sec in [
-            ("draft", getattr(self, "script_draft_provider", None), draft_timeout),
             ("primary", self.primary, primary_timeout),
             ("fallback", self.fallback, self._provider_timeout_sec(self.fallback, draft_timeout) if self.fallback else draft_timeout),
+            ("draft", getattr(self, "script_draft_provider", None), draft_timeout),
         ]:
             if not provider or id(provider) in seen:
                 continue

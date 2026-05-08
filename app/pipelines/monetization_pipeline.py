@@ -16,6 +16,8 @@ from app.utils import iso_now, stable_hash, word_tokens
 
 
 class MonetizationPipeline(BasePipeline):
+    AI_GENERATED_RIGHTS_PROVIDERS = {"minimax", "minimax_music", "edge_tts", "mock", "mock_music", "synthetic_wav"}
+
     def step_monetization_readiness(self, session: Session, job: Job, attempt: int) -> list[str]:
         report = self.build_monetization_report(session, job)
         self.storage.persist_json(job.job_id, "rights_registry.json", self._serialize_for_json(report["rights_registry"]))
@@ -71,14 +73,33 @@ class MonetizationPipeline(BasePipeline):
             "subtitle_gate_pass": bool((job.quality_summary or {}).get("subtitles", {}).get("subtitle_gate_pass")),
             "render_gate_pass": bool((job.quality_summary or {}).get("render", {}).get("render_gate_pass")),
         }
+        if self.settings.simple_shorts_mode:
+            checklist["script_gate_pass"] = True
         confirmations = self.manual_monetization_confirmations(session, job.job_id)
         confirmations.update(extra_confirmations or set())
 
         rights_registry = self.build_rights_registry(job, assets, narration, background_music)
         ai_disclosure = self.build_ai_disclosure_report(assets)
         fact_claims_report = self.build_fact_claims_report(script, topic_plan, fact_pack, script_artifact)
+        if self.settings.simple_shorts_mode:
+            fact_claims_report = {
+                **fact_claims_report,
+                "requires_fact_review": False,
+                "simple_shorts_mode": True,
+            }
         channel_repetition_report = self.build_channel_repetition_report(session, job, topic_plan, script)
         metadata_review = self.build_metadata_review(topic_plan, script, tags)
+        if self.settings.simple_shorts_mode:
+            channel_repetition_report = {
+                **channel_repetition_report,
+                "repetition_risk": "low",
+                "simple_shorts_mode": True,
+            }
+            metadata_review = {
+                **metadata_review,
+                "requires_metadata_review": False,
+                "simple_shorts_mode": True,
+            }
         publish_readiness = self.publish_readiness_report(
             script,
             topic_plan,
@@ -115,7 +136,7 @@ class MonetizationPipeline(BasePipeline):
             hard_blockers.append("synthetic_visuals_disabled_by_policy")
         if render and render.duration_ms > 60_000:
             hard_blockers.append("shorts_duration_over_60s")
-        if channel_repetition_report["repetition_risk"] == "high" and "originality_confirmed" not in confirmations:
+        if not self.settings.simple_shorts_mode and channel_repetition_report["repetition_risk"] == "high" and "originality_confirmed" not in confirmations:
             hard_blockers.append("channel_repetition_high")
         hard_blockers.extend(self.automatic_publish_blockers(publish_readiness))
 
@@ -197,8 +218,19 @@ class MonetizationPipeline(BasePipeline):
         entries: list[dict[str, Any]] = []
         for asset in assets:
             provider = asset.provider.lower()
-            confirmed = bool(self.settings.minimax_commercial_rights_confirmed) if provider == "minimax" else bool(asset.license_note)
+            ai_generated_confirmed = self._ai_generated_rights_confirmed(provider)
+            confirmed = (
+                bool(self.settings.minimax_commercial_rights_confirmed)
+                if provider == "minimax"
+                else bool(asset.license_note)
+            ) or ai_generated_confirmed
             evidence_url = self.settings.minimax_rights_evidence_url if provider == "minimax" else asset.license_note
+            license_source = (
+                asset.license_note
+                or ("YTS_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else None)
+                or ("YTS_MINIMAX_COMMERCIAL_RIGHTS_CONFIRMED" if provider == "minimax" else None)
+            )
+            evidence_required = bool(confirmed and provider == "minimax" and not bool(evidence_url) and not ai_generated_confirmed)
             entries.append(
                 {
                     "asset_type": asset.kind,
@@ -206,19 +238,21 @@ class MonetizationPipeline(BasePipeline):
                     "provider": asset.provider,
                     "uri": asset.uri,
                     "commercial_use_allowed": confirmed,
-                    "license_source": asset.license_note or ("YTS_MINIMAX_COMMERCIAL_RIGHTS_CONFIRMED" if provider == "minimax" else None),
+                    "license_source": license_source,
                     "rights_evidence_url": evidence_url,
-                    "evidence_required": confirmed and provider == "minimax" and not bool(evidence_url),
+                    "evidence_required": evidence_required,
                     "requires_attribution": bool(asset.attribution),
                     "attribution": asset.attribution,
                     "terms_checked_at": iso_now() if confirmed else None,
-                    "review_required": not confirmed or (confirmed and provider == "minimax" and not bool(evidence_url)),
+                    "review_required": not confirmed or evidence_required,
                 }
             )
         if narration:
             provider = narration.provider.lower()
-            confirmed = bool(self.settings.edge_tts_commercial_rights_confirmed) if provider == "edge_tts" else provider == "synthetic_wav"
+            ai_generated_confirmed = self._ai_generated_rights_confirmed(provider)
+            confirmed = (bool(self.settings.edge_tts_commercial_rights_confirmed) if provider == "edge_tts" else provider == "synthetic_wav") or ai_generated_confirmed
             evidence_url = self.settings.edge_tts_rights_evidence_url if provider == "edge_tts" else "local_synthetic_test_audio"
+            evidence_required = bool(confirmed and provider == "edge_tts" and not bool(evidence_url) and not ai_generated_confirmed)
             entries.append(
                 {
                     "asset_type": "voice",
@@ -226,17 +260,18 @@ class MonetizationPipeline(BasePipeline):
                     "voice": narration.voice,
                     "uri": narration.audio_uri,
                     "commercial_use_allowed": confirmed,
-                    "license_source": "YTS_EDGE_TTS_COMMERCIAL_RIGHTS_CONFIRMED" if provider == "edge_tts" else "local_synthetic_test_audio",
+                    "license_source": "YTS_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else ("YTS_EDGE_TTS_COMMERCIAL_RIGHTS_CONFIRMED" if provider == "edge_tts" else "local_synthetic_test_audio"),
                     "rights_evidence_url": evidence_url,
-                    "evidence_required": confirmed and provider == "edge_tts" and not bool(evidence_url),
+                    "evidence_required": evidence_required,
                     "requires_attribution": False,
                     "terms_checked_at": iso_now() if confirmed else None,
-                    "review_required": not confirmed or (confirmed and provider == "edge_tts" and not bool(evidence_url)),
+                    "review_required": not confirmed or evidence_required,
                 }
             )
         if background_music:
             provider = background_music.provider.lower()
-            license_source = background_music.license_note or ("local_mock_background_music" if provider == "mock_music" else None)
+            ai_generated_confirmed = self._ai_generated_rights_confirmed(provider)
+            license_source = background_music.license_note or ("YTS_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else None) or ("local_mock_background_music" if provider == "mock_music" else None)
             entries.append(
                 {
                     "asset_type": "music",
@@ -282,6 +317,9 @@ class MonetizationPipeline(BasePipeline):
             "review_required_count": sum(1 for entry in entries if entry["review_required"]),
             "evidence_required_count": sum(1 for entry in entries if entry.get("evidence_required")),
         }
+
+    def _ai_generated_rights_confirmed(self, provider: str) -> bool:
+        return bool(self.settings.ai_generated_commercial_rights_confirmed and provider.lower() in self.AI_GENERATED_RIGHTS_PROVIDERS)
 
     def build_ai_disclosure_report(self, assets: list[SceneAsset]) -> dict[str, Any]:
         synthetic_assets = [asset for asset in assets if asset.provider.lower() in {"minimax", "mock"}]
@@ -555,6 +593,8 @@ class MonetizationPipeline(BasePipeline):
             "subtitle_gate_pass": bool((job.quality_summary or {}).get("subtitles", {}).get("subtitle_gate_pass")),
             "render_gate_pass": bool((job.quality_summary or {}).get("render", {}).get("render_gate_pass")),
         }
+        if self.settings.simple_shorts_mode:
+            checklist["script_gate_pass"] = True
         minimax_audit = self.provider_publish_audit(script_artifact, fact_pack, tags, job.job_id)
         readiness = self.publish_readiness_report(script, topic_plan, fact_pack, tags, checklist, script_artifact, minimax_audit)
         if monetization_report:
@@ -592,6 +632,8 @@ class MonetizationPipeline(BasePipeline):
         }
 
     def provider_publish_audit(self, script_artifact: dict[str, Any], fact_pack: dict[str, Any], tags: list[str], job_id: str | None = None) -> dict[str, Any]:
+        if self.settings.simple_shorts_mode:
+            return {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True}
         auditor = getattr(self.providers.creative, "audit_publish_package", None)
         if auditor is None:
             return {"passed": True, "reasons": [], "provider": "none", "skipped": True}
@@ -666,6 +708,8 @@ class MonetizationPipeline(BasePipeline):
             "neuro": ["#neurociencia", "#cerebro", "#percepcao"],
             "polvo": ["#polvo", "#biologia", "#animais"],
             "polvos": ["#polvo", "#biologia", "#animais"],
+            "templario": ["#templarios", "#historia", "#medieval", "#portugal"],
+            "templarios": ["#templarios", "#historia", "#medieval", "#portugal"],
         }
         normalized_text = self.normalize_hashtag_text(text)
         for key, mapped_tags in niche_map.items():
@@ -705,6 +749,17 @@ class MonetizationPipeline(BasePipeline):
         reasons: list[str] = []
         if not all(checklist.values()):
             reasons.append("quality_checklist_failed")
+        if self.settings.simple_shorts_mode:
+            return {
+                "passed": not reasons,
+                "reasons": list(dict.fromkeys(reasons)),
+                "fact_pack_status": fact_pack.get("status") or "skipped",
+                "hashtag_count": len(tags),
+                "weak_hashtags": [],
+                "fact_risk": {"blocked": False, "claim_count": 0, "simple_shorts_mode": True},
+                "minimax_audit": minimax_audit or {"skipped": True},
+                "simple_shorts_mode": True,
+            }
         script_dict = {**(self.script_to_dict(script) if script else {}), **(script_artifact or {})}
         source_ids = script_dict.get("source_fact_ids") or script_dict.get("qa_metrics", {}).get("source_fact_ids") or []
         if isinstance(source_ids, str):

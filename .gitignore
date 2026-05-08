@@ -15,6 +15,7 @@ data-test/
 data-test-*/
 
 # Local run logs and tool-generated lock files not used by this project
+logs/
 uvicorn-*.log
 *.err.log
 *.out.log

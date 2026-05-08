@@ -3,9 +3,7 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import unquote
 
 import httpx
 
@@ -21,6 +19,7 @@ class TrendCandidate:
     score: float
     raw_title: str
     familiarity_score: float = 0.0
+    source_title: str | None = None
 
     def as_notes(self) -> str:
         return (
@@ -30,17 +29,31 @@ class TrendCandidate:
             f"trend_score={self.score:.3f}\n"
             f"trend_familiarity_score={self.familiarity_score:.3f}\n"
             f"trend_raw_title={self.raw_title}\n"
+            f"trend_source_title={self.source_title or self.raw_title}\n"
             "Priorize conexão imediata com temas familiares/do dia a dia. Evite obscuridade, exceto se o fato tiver payoff visual ou curiosidade muito forte. "
             "Use esta tendência como ponto de partida, mas mantenha fact-check e linguagem conservadora."
         )
+
+    def as_report(self) -> dict[str, Any]:
+        return {
+            "trend_research": "real_source",
+            "topic": self.topic,
+            "requested_angle": self.requested_angle,
+            "source": self.source,
+            "source_url": self.source_url,
+            "score": self.score,
+            "raw_title": self.raw_title,
+            "source_title": self.source_title or self.raw_title,
+            "familiarity_score": self.familiarity_score,
+        }
 
 
 class TrendResearcher:
     """Find real trend-backed topics for an empty hub request.
 
     Primary signal: Google Trends RSS for Brazil. It reflects what people are
-    actively searching today. Wikipedia pageviews remain as a fallback/secondary
-    signal, but rank lower unless the topic is familiar and curiosity-friendly.
+    actively searching today. The RSS feed often exposes short query labels, so
+    related news titles are used as the higher-quality topic surface.
     """
 
     GOOGLE_TRENDS_BR_URL = "https://trends.google.com/trending/rss?geo=BR"
@@ -55,6 +68,13 @@ class TrendResearcher:
     OBSCURE_OR_LOW_CONNECTION_TERMS = {
         "nahui", "ollin", "anime", "manga", "mangá", "episodio", "episódio", "temporada", "campeonato", "futebol", "jogo", "time",
         "eleição", "eleicao", "partido", "senador", "deputado", "presidente", "ministro", "exército", "exercito", "concurso",
+        "al", "hilal", "elfsborg", "playstation", "copa", "saudita", "liga", "champions", "celebridade", "cantor", "show",
+    }
+    FACT_FRIENDLY_TERMS = {
+        "agua", "chuva", "calor", "frio", "sol", "lua", "mar", "praia", "tempo", "clima", "sono", "cerebro", "corpo", "saude",
+        "comida", "cafe", "chocolate", "banana", "leite", "ovo", "arroz", "feijao", "celular", "internet", "energia", "luz",
+        "animal", "animais", "planta", "plantas", "flamingo", "tubarao", "formiga", "abelha", "olho", "pele", "dente",
+        "musculo", "sangue", "memoria", "planeta", "vulcao", "oceano", "fungo", "fungos", "raio", "raios",
     }
 
     def __init__(self, timeout_sec: float = 8.0) -> None:
@@ -63,10 +83,7 @@ class TrendResearcher:
     def find_topic(self, niche_id: str = "curiosidades") -> TrendCandidate | None:
         if niche_id not in SUPPORTED_NICHES:
             return None
-        google_candidates = self._google_trends_candidates()
-        if google_candidates:
-            return max(google_candidates, key=lambda candidate: candidate.score)
-        candidates = self._wikipedia_top_candidates("pt") + self._wikipedia_top_candidates("en")
+        candidates = self._google_trends_candidates()
         if not candidates:
             return None
         return max(candidates, key=lambda candidate: candidate.score)
@@ -89,25 +106,31 @@ class TrendResearcher:
             title = (item.findtext("title") or "").strip()
             traffic_text = item.findtext("ht:approx_traffic", namespaces=ns) or "0"
             traffic = self._parse_traffic(traffic_text)
-            if not self._is_curiosity_candidate(title):
+            topic_title = self._best_topic_title(item, title)
+            if not topic_title or not self._is_curiosity_candidate(topic_title):
                 continue
-            familiarity = self._familiarity_score(title)
-            if familiarity < 0.50 and not self._has_exceptional_trend_signal(traffic, rank):
+            familiarity = self._familiarity_score(topic_title)
+            exceptional_signal = self._has_exceptional_trend_signal(traffic, rank)
+            normalized_tokens = set(re.findall(r"[a-z0-9à-ÿ]+", self._normalize(topic_title)))
+            if not normalized_tokens & self.FACT_FRIENDLY_TERMS and familiarity < 0.80:
+                continue
+            if familiarity < 0.30 and not exceptional_signal:
                 continue
             score = (traffic or 100.0) / rank * (0.45 + familiarity)
             if familiarity < 0.5:
-                score *= 0.2
+                score *= 0.08 if familiarity < 0.30 else (0.65 if exceptional_signal else 0.35)
             candidates.append(
                 TrendCandidate(
-                    topic=f"Por que {title} virou assunto agora?",
+                    topic=f"Por que {topic_title} virou assunto agora?",
                     requested_angle=(
-                        f"Usar a tendência real '{title}' como gancho, mas conectar imediatamente com uma curiosidade familiar, "
+                        f"Usar a tendência real '{topic_title}' como gancho, mas conectar imediatamente com uma curiosidade familiar, "
                         "visual e verificável do dia a dia. Se o tema for obscuro, explicar por que ele importa em uma frase."
                     ),
                     source="google_trends_br",
                     source_url=self.GOOGLE_TRENDS_BR_URL,
                     score=score,
                     raw_title=title,
+                    source_title=topic_title,
                     familiarity_score=familiarity,
                 )
             )
@@ -115,42 +138,17 @@ class TrendResearcher:
                 break
         return candidates
 
-    def _wikipedia_top_candidates(self, language: str) -> list[TrendCandidate]:
-        day = datetime.now(timezone.utc).date() - timedelta(days=1)
-        url = f"https://wikimedia.org/api/rest_v1/metrics/pageviews/top/{language}.wikipedia/all-access/{day:%Y/%m/%d}"
-        try:
-            with httpx.Client(timeout=httpx.Timeout(self.timeout_sec, connect=3.0), headers={"User-Agent": "yts-render/1.0 trend-research"}) as client:
-                response = client.get(url)
-                response.raise_for_status()
-                payload = response.json()
-        except Exception:  # noqa: BLE001
-            return []
-        articles = payload.get("items", [{}])[0].get("articles", [])
-        candidates: list[TrendCandidate] = []
-        for rank, article in enumerate(articles[:80], start=1):
-            raw_title = str(article.get("article") or "")
-            views = float(article.get("views") or 0)
-            title = self._clean_wikipedia_title(raw_title)
-            if not self._is_curiosity_candidate(title):
-                continue
-            familiarity = self._familiarity_score(title)
-            if familiarity < 0.50:
-                continue
-            score = views / max(rank, 1) * (0.25 + familiarity) * 0.35
-            candidates.append(
-                TrendCandidate(
-                    topic=f"Por que {title} está chamando atenção?",
-                    requested_angle=f"Transformar a tendência real '{title}' em uma curiosidade familiar, visual e verificável.",
-                    source=f"wikipedia_pageviews_{language}",
-                    source_url=url,
-                    score=score,
-                    raw_title=raw_title,
-                    familiarity_score=familiarity,
-                )
-            )
-            if len(candidates) >= 8:
-                break
-        return candidates
+    def _best_topic_title(self, item: ET.Element, title: str) -> str:
+        news_titles = [
+            (node.text or "").strip()
+            for node in item.findall(".//ht:news_item_title", namespaces={"ht": "https://trends.google.com/trending/rss"})
+            if (node.text or "").strip()
+        ]
+        surfaces = [*news_titles[:3], title]
+        ranked = [surface for surface in surfaces if self._is_curiosity_candidate(surface)]
+        if not ranked:
+            return ""
+        return max(ranked, key=lambda surface: (self._familiarity_score(surface), -len(surface)))
 
     def _parse_traffic(self, raw: str) -> float:
         cleaned = raw.lower().replace("+", "").replace(",", "").strip()
@@ -164,11 +162,6 @@ class TrendResearcher:
         match = re.search(r"\d+(?:\.\d+)?", cleaned)
         return float(match.group(0)) * multiplier if match else 0.0
 
-    def _clean_wikipedia_title(self, raw_title: str) -> str:
-        title = unquote(raw_title).replace("_", " ").strip()
-        title = re.sub(r"\s+", " ", title)
-        return title
-
     def _is_curiosity_candidate(self, title: str) -> bool:
         lowered = title.lower().replace("_", " ")
         if len(title) < 4 or len(title) > 80:
@@ -179,6 +172,7 @@ class TrendResearcher:
         blocked_terms = {
             "página principal", "main page", "buscar", "search", "portal", "wiki", "categoria", "lista de", "list of",
             "temporada", "campeonato", "eleição", "eleicao", "mortes em", "deaths in", "covid", "porn", "sex",
+            "assassinato", "homicídio", "homicidio", "morre", "morte", "tragédia", "tragedia", "acidente", "acidentes",
         }
         if any(term in lowered for term in blocked_terms):
             return False

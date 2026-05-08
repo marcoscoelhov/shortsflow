@@ -296,7 +296,7 @@ def test_script_quality_gate_blocks_generic_hook_opening() -> None:
         "title": "Polvos pensam com os braços",
         "hook": "Você sabia que os braços do polvo pensam sozinhos?",
         "full_narration": "Você sabia que os braços do polvo pensam sozinhos? Cada braço processa sinais e reage ao ambiente de forma independente. Isso torna o polvo um animal muito diferente do nosso corpo centralizado.",
-        "estimated_duration_sec": 30,
+        "estimated_duration_sec": 35,
         "language": "pt-BR",
         "qa_metrics": {
             "hook_score": 0.9,
@@ -306,7 +306,7 @@ def test_script_quality_gate_blocks_generic_hook_opening() -> None:
             "ending_strength_score": 0.9,
         },
     }
-    result = ScriptQualityGate().validate(script, target_duration_sec=32)
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
     assert not result.passed
     assert "generic_hook_opening" in result.reasons
 
@@ -752,7 +752,7 @@ def test_resilient_creative_provider_repair_script_falls_back_on_timeout() -> No
     assert "timed out after 0.01s" in repaired["qa_metrics"]["fallback_reason"]
 
 
-def test_resilient_creative_provider_uses_fast_script_draft_first() -> None:
+def test_resilient_creative_provider_uses_minimax_before_deepseek_fallback() -> None:
     provider = object.__new__(ResilientCreativeProvider)
     provider.settings = SimpleNamespace(
         minimax_script_timeout_sec=30,
@@ -765,8 +765,59 @@ def test_resilient_creative_provider_uses_fast_script_draft_first() -> None:
         provider_name = "deepseek"
 
         def generate_script(self, topic_plan):
+            raise AssertionError("draft provider should not run before primary script generation")
+
+    class Primary:
+        provider_name = "minimax"
+
+        def generate_script(self, topic_plan):
             return {
-                "title": "Roteiro rapido",
+                "title": "Roteiro MiniMax",
+                "hook": "O começo já entrega tensão.",
+                "body_beats": ["A prova aparece sem enrolação."],
+                "ending": "Na segunda olhada, o começo vira pista.",
+                "cta": None,
+                "full_narration": "O começo já entrega tensão. A prova aparece sem enrolação. Na segunda olhada, o começo vira pista.",
+                "estimated_duration_sec": 28,
+                "key_facts": [],
+                "source_fact_ids": [],
+                "token_count": 20,
+                "language": "pt-BR",
+                "qa_metrics": {"source_provider": "minimax"},
+            }
+
+    provider.script_draft_provider = Draft()
+    provider.primary = Primary()
+    provider.fallback = None
+
+    script = provider.generate_script({"canonical_topic": "polvos"})
+
+    assert script["qa_metrics"]["generation_provider_role"] == "primary"
+    assert script["qa_metrics"]["generation_provider"] == "minimax"
+    assert script["qa_metrics"]["script_generation_fallback_used"] is False
+
+
+def test_resilient_creative_provider_falls_back_to_deepseek_after_minimax_failure() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(
+        minimax_script_timeout_sec=30,
+        llm_script_draft_timeout_sec=0.5,
+        llm_enable_fallback=True,
+    )
+    provider.strict_minimax_validation = False
+
+    class Primary:
+        provider_name = "minimax"
+
+        def generate_script(self, topic_plan):
+            raise ProviderFailure("minimax_text", "minimax failed")
+
+    class Fallback:
+        provider_name = "deepseek"
+
+        def generate_script(self, topic_plan):
+            return {
+                "title": "Roteiro fallback",
                 "hook": "O começo já entrega tensão.",
                 "body_beats": ["A prova aparece sem enrolação."],
                 "ending": "Na segunda olhada, o começo vira pista.",
@@ -780,21 +831,16 @@ def test_resilient_creative_provider_uses_fast_script_draft_first() -> None:
                 "qa_metrics": {"source_provider": "deepseek"},
             }
 
-    class Primary:
-        provider_name = "minimax"
-
-        def generate_script(self, topic_plan):
-            raise AssertionError("primary should not be called when draft succeeds")
-
-    provider.script_draft_provider = Draft()
+    provider.script_draft_provider = None
     provider.primary = Primary()
-    provider.fallback = None
+    provider.fallback = Fallback()
 
     script = provider.generate_script({"canonical_topic": "polvos"})
 
-    assert script["qa_metrics"]["generation_provider_role"] == "draft"
+    assert script["qa_metrics"]["generation_provider_role"] == "fallback"
     assert script["qa_metrics"]["generation_provider"] == "deepseek"
-    assert script["qa_metrics"]["script_generation_fallback_used"] is False
+    assert script["qa_metrics"]["script_generation_fallback_used"] is True
+    assert script["qa_metrics"]["script_generation_fallback_reasons"] == ["minimax failed"]
 
 
 def test_resilient_creative_provider_topic_uses_role_timeout() -> None:
@@ -852,6 +898,7 @@ def test_resilient_creative_provider_scene_uses_role_timeout() -> None:
 
 
 def test_publish_audit_is_cached_by_input_hash(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", False)
     calls = {"count": 0}
 
     def audit_publish_package(payload):
@@ -1017,7 +1064,7 @@ def test_run_step_cancels_job_when_shutdown_is_requested_during_retry(monkeypatc
             "seed_theme": "polvos",
             "niche_id": "curiosidades",
             "language": "pt-BR",
-            "target_duration_sec": 32,
+            "target_duration_sec": 35,
             "tone": "intrigante_direto",
             "cta_style": "none",
             "notes": "teste",
@@ -1063,7 +1110,8 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
         lambda niche_id: (
             "Por que flamingos estão em alta?",
             "Transformar tendência real em curiosidade verificável.",
-            "trend_research=real_source\ntrend_source=wikipedia_pageviews_pt",
+            "trend_research=real_source\ntrend_source=google_trends_br",
+            {"trend_research": "real_source", "source": "google_trends_br"},
         ),
     )
     monkeypatch.setattr(main_module.orchestrator, "create_job", fake_create_job)
@@ -1074,7 +1122,7 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     assert 'name="niche_id" value="curiosidades"' in page.text
     assert 'name="seed_theme" value=""' in page.text
     assert "Vazio = pesquisar tendências reais" in page.text
-    assert 'name="target_duration_sec" type="number" min="25" max="45" value="32"' in page.text
+    assert 'name="target_duration_sec" type="number" min="35" max="55" value="45"' in page.text
 
     response = client.post("/jobs", data={"seed_theme": "", "input_mode": "theme"}, follow_redirects=False)
     assert response.status_code == 303
@@ -1082,7 +1130,100 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     assert captured["requested_angle"] == "Transformar tendência real em curiosidade verificável."
     assert "trend_research=real_source" in str(captured["notes"])
     assert captured["niche_id"] == "curiosidades"
-    assert captured["target_duration_sec"] == 32
+    assert captured["target_duration_sec"] == 45
+
+
+def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
+    client = TestClient(app)
+    base_time = utcnow() - timedelta(days=30)
+    with SessionLocal() as session:
+        for index in range(3):
+            job_id = f"pagehub-job-{index}"
+            topic_request_id = f"pagehub-topic-{index}"
+            created_at = base_time + timedelta(minutes=index)
+            session.add(
+                Job(
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"hash-{job_id}",
+                    created_at=created_at,
+                    updated_at=created_at,
+                    status="monetization_review",
+                    current_step="publish_to_review_hub",
+                    niche_id="curiosidades",
+                    language="pt-BR",
+                    target_duration_sec=35,
+                    topic_request_id=topic_request_id,
+                    artifact_index={},
+                )
+            )
+            session.add(
+                TopicRequest(
+                    topic_request_id=topic_request_id,
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"hash-{topic_request_id}",
+                    created_at=created_at,
+                    niche_id="curiosidades",
+                    seed_theme=f"pagehub tema {index}",
+                    language="pt-BR",
+                    target_duration_sec=35,
+                )
+            )
+        session.commit()
+
+    first_page = client.get("/jobs?search=pagehub&per_page=2&page=1")
+    assert first_page.status_code == 200
+    assert "pagehub-job-2" in first_page.text
+    assert "pagehub-job-1" in first_page.text
+    assert "pagehub-job-0" not in first_page.text
+    assert "Pagina 1 de 2" in first_page.text
+    assert "page=2&amp;per_page=2&amp;search=pagehub" in first_page.text
+
+    second_page = client.get("/jobs?search=pagehub&per_page=2&page=2")
+    assert second_page.status_code == 200
+    assert "pagehub-job-0" in second_page.text
+    assert "pagehub-job-2" not in second_page.text
+    assert "Pagina 2 de 2" in second_page.text
+
+
+def test_job_detail_accepts_unique_short_job_prefix() -> None:
+    client = TestClient(app)
+    job_id = "prefix-open-job-123456789"
+    topic_request_id = "prefix-open-topic-123456789"
+    with SessionLocal() as session:
+        session.add(
+            Job(
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="hash-prefix-open",
+                status="script_quality_failed",
+                current_step="script",
+                niche_id="curiosidades",
+                language="pt-BR",
+                target_duration_sec=35,
+                topic_request_id=topic_request_id,
+                artifact_index={},
+            )
+        )
+        session.add(
+            TopicRequest(
+                topic_request_id=topic_request_id,
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="hash-prefix-open-topic",
+                niche_id="curiosidades",
+                seed_theme="prefix open tema",
+                language="pt-BR",
+                target_duration_sec=35,
+            )
+        )
+        session.commit()
+
+    response = client.get("/jobs/prefix-open-job")
+
+    assert response.status_code == 200
+    assert job_id[:8] in response.text or "prefix open tema" in response.text
 
 
 def test_default_seed_theme_avoids_recent_curiosidades_topics(monkeypatch) -> None:
@@ -1097,7 +1238,7 @@ def test_default_seed_theme_avoids_recent_curiosidades_topics(monkeypatch) -> No
                     niche_id="curiosidades",
                     seed_theme=theme,
                     language="pt-BR",
-                    target_duration_sec=32,
+                    target_duration_sec=35,
                 )
             )
         session.commit()
@@ -1546,7 +1687,7 @@ def test_process_job_returns_persisted_cancelled_status_after_step_abort(monkeyp
             "seed_theme": "polvos",
             "niche_id": "curiosidades",
             "language": "pt-BR",
-            "target_duration_sec": 32,
+            "target_duration_sec": 35,
             "tone": "intrigante_direto",
             "cta_style": "none",
             "notes": "teste",
@@ -1620,7 +1761,7 @@ def test_process_job_returns_persisted_cancelled_status_after_shutdown(monkeypat
             "seed_theme": "polvos",
             "niche_id": "curiosidades",
             "language": "pt-BR",
-            "target_duration_sec": 32,
+            "target_duration_sec": 35,
             "tone": "intrigante_direto",
             "cta_style": "none",
             "notes": "teste",
@@ -2231,6 +2372,28 @@ def test_fact_pack_rejects_verified_source_for_wrong_primary_topic(monkeypatch) 
     assert report["topic_alignment"]["passed"] is False
 
 
+def test_script_pipeline_requires_verified_fact_pack_for_factual_real_topics(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", False)
+    monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
+    topic_plan = SimpleNamespace(
+        canonical_topic="Mecanismo de mudança de cor em polvos",
+        angle="como a pele do polvo muda de cor",
+        hook_promise="explicar o mecanismo biologico",
+    )
+    request = SimpleNamespace(seed_theme="Como os polvos mudam de cor")
+
+    assert pipeline._requires_verified_fact_pack(topic_plan, request, {"status": "limited", "facts": []}) is True
+    assert pipeline._requires_verified_fact_pack(topic_plan, request, {"status": "verified", "facts": [{"fact_id": "F1"}]}) is False
+
+
+def test_job_lease_delta_has_floor_for_real_provider_steps(monkeypatch) -> None:
+    test_orchestrator = JobOrchestrator()
+    monkeypatch.setattr(test_orchestrator.settings, "job_lease_seconds", 60)
+
+    assert test_orchestrator._lease_delta().total_seconds() == 300
+
+
 def test_script_gate_blocks_placeholder_source_language() -> None:
     script = {
         "title": "YouTube é maior do que você imagina",
@@ -2280,6 +2443,7 @@ def test_publish_audit_failures_become_automatic_hard_blockers() -> None:
 
 def test_text_publish_audit_has_hard_timeout(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", False)
     monkeypatch.setattr(pipeline.settings, "llm_publish_audit_timeout_sec", 0.01)
 
     def slow_auditor(payload: dict) -> dict:
@@ -2298,7 +2462,89 @@ def test_text_publish_audit_has_hard_timeout(monkeypatch) -> None:
     assert audit["reasons"] == ["text_publish_audit_timeout"]
 
 
+def test_text_publish_audit_allows_resilient_fallback_window(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", False)
+    monkeypatch.setattr(pipeline.settings, "llm_publish_audit_timeout_sec", 0.01)
+
+    class ResilientLikeAuditor:
+        fallback = object()
+        strict_minimax_validation = False
+
+        def audit_publish_package(self, payload: dict) -> dict:
+            time.sleep(0.02)
+            return {"passed": True, "reasons": [], "provider": "deepseek", "fallback_used": True}
+
+    monkeypatch.setattr(orchestrator.providers, "creative", ResilientLikeAuditor())
+
+    audit = pipeline._text_publish_audit(
+        "job-fallback-window",
+        {"title": "Teste", "hook": "Teste", "ending": "Teste forte agora", "full_narration": "Teste forte agora."},
+        {"status": "verified", "facts": []},
+    )
+
+    assert audit["passed"] is True
+    assert audit["fallback_used"] is True
+
+
+def test_text_publish_audit_ignores_early_weak_hashtags(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", False)
+
+    def auditor(payload: dict) -> dict:
+        assert payload["audit_phase"] == "text_before_assets"
+        return {"passed": False, "reasons": ["weak_hashtags"], "provider": "test"}
+
+    monkeypatch.setattr(orchestrator.providers.creative, "audit_publish_package", auditor)
+
+    audit = pipeline._text_publish_audit(
+        "job-weak-hashtags",
+        {"title": "Mel", "hook": "Mel age contra bactérias", "ending": "Agora o pote parece diferente.", "full_narration": "Mel age contra bactérias."},
+        {"status": "verified", "facts": [{"fact_id": "F1"}]},
+    )
+
+    assert audit["passed"] is True
+    assert audit["reasons"] == []
+    assert audit["ignored_reasons"] == ["weak_hashtags"]
+
+
+def test_simple_shorts_mode_skips_text_publish_audit(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", True)
+
+    def auditor(payload: dict) -> dict:
+        raise AssertionError("auditor should be skipped in simple shorts mode")
+
+    monkeypatch.setattr(orchestrator.providers.creative, "audit_publish_package", auditor)
+
+    audit = pipeline._text_publish_audit(
+        "job-simple-audit",
+        {"title": "Teste", "hook": "Teste", "ending": "Final forte", "full_narration": "Teste simples."},
+        {"status": "skipped", "facts": []},
+    )
+
+    assert audit == {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True}
+
+
+def test_simple_shorts_mode_makes_script_gate_non_blocking(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", True)
+    script = _base_script(
+        "Você sabia que café tira o sono? "
+        "A cafeína muda sua energia. "
+        "Agora tudo faz sentido."
+    )
+    plan_dict = {"canonical_topic": "café", "fact_pack": {"status": "skipped", "facts": []}}
+
+    processed, metrics = orchestrator._validate_or_repair_script(script, plan_dict, 35, "none")
+
+    assert processed["full_narration"]
+    assert metrics["script_quality_gate_pass"] is True
+    assert metrics["script_quality_gate_blocking"] is False
+    assert metrics["simple_shorts_mode"] is True
+
+
 def test_rights_registry_requires_evidence_for_confirmed_minimax_assets(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.settings, "ai_generated_commercial_rights_confirmed", False)
     monkeypatch.setattr(orchestrator.settings, "minimax_commercial_rights_confirmed", True)
     monkeypatch.setattr(orchestrator.settings, "minimax_rights_evidence_url", None)
     report = orchestrator._build_rights_registry(
@@ -2320,6 +2566,32 @@ def test_rights_registry_requires_evidence_for_confirmed_minimax_assets(monkeypa
     assert report["all_commercial_rights_confirmed"] is False
     assert report["evidence_required_count"] == 1
     assert report["entries"][0]["review_required"] is True
+
+
+def test_rights_registry_auto_confirms_ai_generated_assets(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.settings, "ai_generated_commercial_rights_confirmed", True)
+    monkeypatch.setattr(orchestrator.settings, "minimax_commercial_rights_confirmed", False)
+    monkeypatch.setattr(orchestrator.settings, "minimax_rights_evidence_url", None)
+    report = orchestrator._build_rights_registry(
+        SimpleNamespace(job_id="job-ai-rights"),
+        [
+            SimpleNamespace(
+                kind="image",
+                scene_id="scene-1",
+                provider="minimax",
+                uri="file:///tmp/asset.jpg",
+                license_note=None,
+                attribution=None,
+            )
+        ],
+        SimpleNamespace(provider="edge_tts", voice="pt-BR", audio_uri="file:///tmp/voice.wav"),
+        SimpleNamespace(provider="minimax_music", audio_uri="file:///tmp/music.wav", license_note=None, attribution=None, provider_metadata={}),
+    )
+
+    assert report["all_commercial_rights_confirmed"] is True
+    assert report["evidence_required_count"] == 0
+    assert report["review_required_count"] == 0
+    assert {entry["license_source"] for entry in report["entries"]} == {"YTS_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED"}
 
 
 def test_repetition_module_flags_structural_template_matches() -> None:
@@ -2360,7 +2632,7 @@ def _base_script(full_narration: str) -> dict[str, object]:
         "ending": "No fim, essa curiosidade científica muda como você olha para o tema.",
         "cta": None,
         "full_narration": full_narration,
-        "estimated_duration_sec": 32,
+        "estimated_duration_sec": 45,
         "key_facts": [full_narration],
         "token_count": len(full_narration.split()),
         "language": "pt-BR",
@@ -2462,6 +2734,7 @@ def test_script_gate_rejects_generic_loop_ending_template() -> None:
 
 def test_validate_or_repair_script_recovers_simple_loop_closure(monkeypatch) -> None:
     original_repair_attempts = orchestrator.settings.llm_script_repair_attempts
+    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", False)
     monkeypatch.setattr(orchestrator.settings, "llm_script_repair_attempts", 1)
     monkeypatch.setattr(orchestrator.providers.creative, "repair_script", lambda script, reasons, plan: dict(script))
     script = _base_script(
@@ -2485,6 +2758,7 @@ def test_validate_or_repair_script_recovers_simple_loop_closure(monkeypatch) -> 
 
 
 def test_validate_or_repair_script_rewrites_weak_fact_pack_conservatively(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", False)
     monkeypatch.setattr(orchestrator.providers.creative, "repair_script", lambda script, reasons, plan: dict(script))
     script = _base_script(
         "O cérebro apaga exatamente 73% das memórias durante o sono. "
@@ -2724,6 +2998,87 @@ def test_scientific_article_fact_pack_skips_result_without_abstract(monkeypatch)
     assert pack["sources"][0]["provider"] == "openalex"
 
 
+def test_scientific_article_fact_pack_skips_low_information_abstract(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> object:
+            return {
+                "results": [
+                    {
+                        "display_name": "Perspectivas no controle de formigas cortadeiras",
+                        "abstract_inverted_index": {
+                            "O": [0],
+                            "conteudo": [1],
+                            "e": [2],
+                            "apresentado": [3],
+                            "em:": [4],
+                            "Introducao;": [5],
+                            "Metodos": [6],
+                            "de": [7],
+                            "controle;": [8],
+                            "Manejo": [9],
+                            "do": [10],
+                            "controle": [11],
+                            "de": [12],
+                            "formigas": [13],
+                            "cortadeiras;": [14],
+                            "Referencia": [15],
+                            "bibliografica.": [16],
+                        },
+                    },
+                    {
+                        "display_name": "Formigas cortadeiras improve collective foraging decisions",
+                        "abstract_inverted_index": {
+                            "Formigas": [0],
+                            "colonies": [1],
+                            "coordinate": [2],
+                            "foraging": [3],
+                            "through": [4],
+                            "local": [5],
+                            "interactions": [6],
+                            "that": [7],
+                            "allow": [8],
+                            "workers": [9],
+                            "to": [10],
+                            "adjust": [11],
+                            "trail": [12],
+                            "use": [13],
+                            "as": [14],
+                            "food": [15],
+                            "conditions": [16],
+                            "change.": [17],
+                        },
+                        "doi": "https://doi.org/10.0000/ants",
+                        "publication_year": 2024,
+                    },
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url: str, **kwargs):
+            assert url == "https://api.openalex.org/works"
+            return FakeResponse()
+
+    monkeypatch.setattr(script_pipeline_module.httpx, "Client", FakeClient)
+
+    pack = orchestrator._scientific_article_fact_pack("formigas")
+
+    assert pack["status"] == "verified"
+    assert pack["topic_title"] == "Formigas cortadeiras improve collective foraging decisions"
+    assert "conteudo e apresentado" not in pack["facts"][0]["claim"].lower()
+
+
 def test_fact_pack_consistency_requires_source_fact_ids_when_verified() -> None:
     fact_pack = {
         "status": "verified",
@@ -2921,7 +3276,7 @@ def test_step_script_persists_generation_debug_on_provider_failure(monkeypatch) 
     assert debug["error_type"] == "ProviderFailure"
     assert debug["error_message"] == "script generation timed out after 90.0s"
     assert debug["canonical_topic"] == "polvos"
-    assert debug["fact_pack_status"] in {"limited", "verified"}
+    assert debug["fact_pack_status"] in {"limited", "verified", "skipped"}
 
 
 def test_step_background_music_persists_debug_on_provider_failure(monkeypatch) -> None:
@@ -3151,6 +3506,108 @@ def test_fact_pack_query_generation_extracts_entity_and_concepts() -> None:
     assert any("flamingos carotenoid pigmentation" == query for query in normalized)
 
 
+def test_fact_pack_query_generation_uses_honey_concepts_for_mel_topic() -> None:
+    request = SimpleNamespace(seed_theme="Por que o mel quase não estraga?")
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que o mel quase não estraga",
+        angle="auto",
+        hook_promise="A ciência explica por que o mel resiste ao tempo.",
+        search_terms=[],
+        entities=[],
+        title_candidates=[],
+    )
+
+    pipeline = orchestrator.script_pipeline
+    queries = pipeline._fact_pack_queries(request, topic_plan)
+    topic_tokens = pipeline._fact_topic_tokens(request, topic_plan)
+    cleaned = []
+    seen = set()
+    for query in queries:
+        normalized = " ".join(str(query or "").split())
+        if normalized and normalized.lower() not in seen and not pipeline._is_weak_fact_query(normalized):
+            cleaned.append(normalized)
+            seen.add(normalized.lower())
+    ordered = sorted([query for query in cleaned if pipeline._query_matches_primary_fact_topic(query, topic_tokens)], key=pipeline._fact_query_priority)
+
+    assert {"mel", "honey", "honeys"} <= topic_tokens
+    assert "honey water activity" in ordered[:4]
+    assert ordered.index("honey water activity") < ordered.index("mel honey water activity")
+
+
+def test_fact_pack_query_generation_uses_caffeine_concepts_for_cafe_topic() -> None:
+    request = SimpleNamespace(seed_theme="Por que o café tira o sono?")
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que o café tira o sono",
+        angle="cafeina bloqueia adenosina",
+        hook_promise="A cafeína engana o cérebro ao bloquear a adenosina.",
+        search_terms=[],
+        entities=[],
+        title_candidates=[],
+    )
+
+    pipeline = orchestrator.script_pipeline
+    queries = pipeline._fact_pack_queries(request, topic_plan)
+    topic_tokens = pipeline._fact_topic_tokens(request, topic_plan)
+    cleaned = []
+    seen = set()
+    for query in queries:
+        normalized = " ".join(str(query or "").split())
+        if normalized and normalized.lower() not in seen and not pipeline._is_weak_fact_query(normalized):
+            cleaned.append(normalized)
+            seen.add(normalized.lower())
+    ordered = sorted([query for query in cleaned if pipeline._query_matches_primary_fact_topic(query, topic_tokens)], key=pipeline._fact_query_priority)
+
+    assert {"cafe", "cafeina", "caffeine", "adenosina", "adenosine"} <= topic_tokens
+    assert any("adenosina" in query or "caffeine adenosine" in query for query in ordered[:5])
+    assert pipeline._fact_result_is_relevant(
+        "café",
+        "The World Café as a Participatory Method for Collecting Qualitative Data",
+        "World Café is a participatory assessment tool used in community development.",
+    ) is False
+    assert pipeline._is_weak_fact_query("adenosina") is True
+
+
+def test_fact_pack_rejects_adenosine_source_without_caffeine_for_cafe_topic() -> None:
+    pipeline = orchestrator.script_pipeline
+    request = SimpleNamespace(seed_theme="Por que o café tira o sono?")
+    topic_plan = SimpleNamespace(canonical_topic="Por que o café tira o sono", angle="cafeina bloqueia adenosina")
+    fact_pack = {
+        "topic_title": "Dosagem da atividade da adenosina deaminase no líquido pleural",
+        "sources": [{"title": "Dosagem da atividade da adenosina deaminase no líquido pleural"}],
+        "facts": [{"claim": "A dosagem da adenosina deaminase foi usada no diagnóstico da tuberculose pleural."}],
+    }
+
+    assert pipeline._fact_pack_matches_topic(fact_pack, request, topic_plan) is False
+
+
+def test_fact_pack_query_generation_protects_templarios_entity() -> None:
+    request = SimpleNamespace(seed_theme="Templários: como monges-guerreiros viraram uma lenda poderosa")
+    topic_plan = SimpleNamespace(
+        canonical_topic="Templários - Ordem Militar e Religiosa",
+        angle="A jornada real de monges-guerreiros que passaram de protetores de peregrinos a lenda.",
+        title_candidates=["Templários: de monges-guerreiros a lenda"],
+        search_terms=["grupo monges", "Ordem dos Templários", "Tomar templários"],
+        entities=["Templários", "Ordem do Templo"],
+    )
+
+    pipeline = orchestrator.script_pipeline
+    queries = pipeline._fact_pack_queries(request, topic_plan)
+    topic_tokens = pipeline._fact_topic_tokens(request, topic_plan)
+    cleaned = []
+    seen = set()
+    for query in queries:
+        normalized = " ".join(str(query or "").split())
+        if normalized and normalized.lower() not in seen and not pipeline._is_weak_fact_query(normalized):
+            cleaned.append(normalized)
+            seen.add(normalized.lower())
+    filtered = [query for query in cleaned if pipeline._query_matches_primary_fact_topic(query, topic_tokens)]
+    ordered = sorted(filtered, key=pipeline._fact_query_priority)
+
+    assert topic_tokens == {"templarios"}
+    assert "grupo monges" not in ordered
+    assert ordered[0].lower() in {"templários", "templarios", "ordem dos templários", "tomar templários"}
+
+
 def test_fact_query_priority_prefers_conceptual_entity_query_before_broad_entity() -> None:
     queries = [
         "Polvos: curiosidades científicas sobre o cefalópode mais inteligente do oceano",
@@ -3162,6 +3619,14 @@ def test_fact_query_priority_prefers_conceptual_entity_query_before_broad_entity
 
     assert ordered[0] == "polvo corações pigmentos"
     assert ordered.index("polvos") > ordered.index("polvo corações pigmentos")
+
+
+def test_fact_query_priority_keeps_exact_pisa_entity_before_derived_terms() -> None:
+    queries = ["torre pisa solo", "torre pisa inclinação", "torre pisa"]
+
+    ordered = sorted(queries, key=orchestrator._fact_query_priority)
+
+    assert ordered[0] == "torre pisa"
 
 
 def test_fact_pack_query_generation_uses_structured_topic_fields_without_dict_keys() -> None:
@@ -3236,7 +3701,27 @@ def test_publish_hashtags_use_entities_not_weak_words() -> None:
     assert "#cor" not in tags
 
 
-def test_publish_readiness_blocks_limited_fact_pack_with_invented_source_ids() -> None:
+def test_publish_hashtags_use_history_tags_for_templarios() -> None:
+    topic_plan = SimpleNamespace(
+        canonical_topic="Templários: de protetores de peregrinos a lenda medieval",
+        angle="A ordem militar religiosa que virou lenda",
+    )
+    script = SimpleNamespace(
+        title="Como os Templários viraram lenda medieval",
+        key_facts=["A Ordem dos Templários nasceu para proteger peregrinos."],
+    )
+
+    tags = orchestrator._build_publish_hashtags(topic_plan, script)
+
+    assert "#templarios" in tags
+    assert "#historia" in tags
+    assert "#medieval" in tags
+    assert "#protetores" not in tags
+    assert "#peregrinos" not in tags
+
+
+def test_publish_readiness_blocks_limited_fact_pack_with_invented_source_ids(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", False)
     script_artifact = {
         **_base_script(
             "Flamingos ficam rosas por pigmentos na alimentação. "
@@ -3267,15 +3752,23 @@ def test_publish_readiness_blocks_limited_fact_pack_with_invented_source_ids() -
     assert "manual_review_required" in readiness["reasons"]
 
 
-def test_trend_researcher_filters_wikipedia_candidates() -> None:
+def test_trend_researcher_filters_curiosity_candidates() -> None:
     from app.trends import TrendResearcher
 
     researcher = TrendResearcher()
 
-    assert researcher._clean_wikipedia_title("Flamingo") == "Flamingo"
     assert researcher._is_curiosity_candidate("Flamingo") is True
     assert researcher._is_curiosity_candidate("Main_Page") is False
     assert researcher._is_curiosity_candidate("Lista de episódios") is False
+    assert researcher._is_curiosity_candidate("acidente fatal na rodovia") is False
+
+
+def test_trend_researcher_returns_none_without_google_candidates(monkeypatch) -> None:
+    from app.trends import TrendResearcher
+
+    monkeypatch.setattr(TrendResearcher, "_google_trends_candidates", lambda self: [])
+
+    assert TrendResearcher().find_topic("curiosidades") is None
 
 
 def test_google_trends_candidates_prioritize_familiar_topics(monkeypatch) -> None:
@@ -3304,3 +3797,40 @@ def test_google_trends_candidates_prioritize_familiar_topics(monkeypatch) -> Non
     assert candidates
     assert max(candidates, key=lambda candidate: candidate.score).raw_title == "chuva"
     assert all(candidate.source == "google_trends_br" for candidate in candidates)
+
+
+def test_google_trends_candidates_reject_news_title_without_fact_friendly_topic(monkeypatch) -> None:
+    from app.trends import TrendResearcher
+
+    rss = """<?xml version='1.0' encoding='UTF-8'?>
+    <rss xmlns:ht='https://trends.google.com/trending/rss' version='2.0'><channel>
+      <item>
+        <title>br-040</title>
+        <ht:approx_traffic>20K+</ht:approx_traffic>
+        <ht:news_item><ht:news_item_title>Produtos químicos pegam fogo e levantam alerta sobre segurança nas estradas</ht:news_item_title></ht:news_item>
+      </item>
+    </channel></rss>"""
+
+    class FakeResponse:
+        text = rss
+
+        def raise_for_status(self) -> None:
+            pass
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def get(self, url):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.trends.httpx.Client", FakeClient)
+    candidates = TrendResearcher()._google_trends_candidates()
+
+    assert candidates == []
