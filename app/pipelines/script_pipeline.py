@@ -1197,7 +1197,7 @@ class ScriptPipeline(BasePipeline):
                     self._fact_backed_pt_br_sentence(fact, anchor, index)
                     for index, fact in enumerate(grounded_facts[:4])
                 ]
-                rewritten["hook"] = f"{anchor.capitalize()} parece exagero, mas a fonte aponta um mecanismo real."
+                rewritten["hook"] = f"{anchor.capitalize()} parece exagero, até a explicação concreta entrar."
                 rewritten["body_beats"] = beats[: max(3, min(4, len(beats)))]
                 rewritten["key_facts"] = beats[:3]
                 rewritten["source_fact_ids"] = [str(fact.get("fact_id")) for fact in grounded_facts[: max(2, min(3, len(grounded_facts)))]]
@@ -1260,21 +1260,21 @@ class ScriptPipeline(BasePipeline):
             ]
             return templates[index % len(templates)]
         templates = [
-            f"A fonte sustenta um detalhe verificável sobre {anchor}, sem precisar inflar o fato.",
-            f"O mecanismo real aparece quando {anchor} deixa de ser só aparência.",
-            f"A surpresa funciona melhor porque existe lastro por trás da cena.",
-            f"O payoff é esse: {anchor} parece estranho antes da explicação certa entrar.",
+            f"O detalhe verificável sobre {anchor} segura a surpresa sem inflar o fato.",
+            f"A explicação aparece quando {anchor} deixa de ser só aparência.",
+            f"A surpresa funciona melhor quando a cena carrega um detalhe concreto.",
+            f"{anchor.capitalize()} parece estranho antes da explicação certa entrar.",
         ]
         return templates[index % len(templates)]
 
     def _soften_risky_sentence(self, sentence: str, anchor: str) -> str:
         text = " ".join(str(sentence or "").split())
         if not text:
-            return f"Em geral, {anchor} revela um detalhe real sem exagero."
+            return f"{anchor.capitalize()} chama atenção por um detalhe concreto."
         if re.search(r"\b(?:1[0-9]{3}|20[0-9]{2})\b", text):
-            return f"Em geral, {anchor} carrega um contexto antigo, mas o ponto principal aparece no mecanismo."
+            return f"{anchor.capitalize()} carrega um contexto antigo, mas o ponto central aparece com cuidado."
         if re.search(r"\b\d+(?:[,.]\d+)?\s*(?:%|por cento\b|anos?\b|séculos?\b|seculos?\b|dias?\b|horas?\b|minutos?\b|segundos?\b|metros?\b|m\b|cm\b|mm\b|km\b|graus?\b|°|toneladas?\b|kg\b|quilos?\b|milhões?\b|milhoes?\b|bilhões?\b|bilhoes?\b)", text, re.IGNORECASE):
-            return f"Em geral, {anchor} mostra uma escala incomum, sem depender de número exato."
+            return f"{anchor.capitalize()} impressiona pela escala, mesmo sem cravar um número exato."
         replacements = {
             r"\bsempre\b": "em geral",
             r"\bnunca\b": "quase nunca",
@@ -1299,7 +1299,7 @@ class ScriptPipeline(BasePipeline):
             flags=re.IGNORECASE,
         )
         if self.script_gate._fact_risk_report({"hook": "", "full_narration": text, "key_facts": []}).get("blocked"):  # noqa: SLF001
-            return f"Em geral, {anchor} ajuda a explicar o efeito sem exigir precisão que a fonte não sustenta."
+            return f"{anchor.capitalize()} chama atenção pelo efeito, sem transformar hipótese em certeza."
         return text.rstrip(".!?") + "."
 
     def _repair_script_loop_closure(self, script: dict[str, Any], plan_dict: dict[str, Any]) -> dict[str, Any]:
@@ -1427,6 +1427,9 @@ class ScriptPipeline(BasePipeline):
             }
         ]
         if self.settings.simple_shorts_mode:
+            critical_reasons = self._simple_mode_blocking_script_reasons(gate_result.reasons)
+            if critical_reasons:
+                raise RecoverableStepError(f"script quality gate failed: {', '.join(critical_reasons)}")
             metrics = {
                 **gate_result.metrics,
                 "script_quality_gate_pass": True,
@@ -1527,6 +1530,20 @@ class ScriptPipeline(BasePipeline):
             last_reasons = [*fallback_gate.reasons, *fallback_consistency_reasons]
 
         raise RecoverableStepError(f"script quality gate failed: {', '.join(last_reasons)}")
+
+    def _simple_mode_blocking_script_reasons(self, reasons: list[str]) -> list[str]:
+        blocking = {
+            "placeholder_source_language",
+            "repeated_clause",
+            "estimated_duration_outside_absolute_range",
+            "markup_or_ssml_leaked",
+            "foreign_language_detected",
+            "non_latin_text_detected",
+            "em_dash_or_en_dash_detected",
+            "truncated_ending_logic",
+            "generic_ai_style_phrase",
+        }
+        return [reason for reason in reasons if reason in blocking]
 
     def _claim_trace_metrics(self, script: dict[str, Any]) -> dict[str, Any]:
         trace = script.get("claim_trace") if isinstance(script.get("claim_trace"), list) else []

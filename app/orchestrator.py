@@ -306,13 +306,16 @@ class JobOrchestrator:
             job.status = "running"
             job.lease_owner = self.worker_id
             job.lease_expires_at = utcnow() + self._lease_delta()
-        for step in self._steps():
-            ok = self._run_step(job_id, step)
+        steps = self._steps()
+        self._cli_progress(job_id, "job", "started", f"{len(steps)} steps")
+        for step_index, step in enumerate(steps, start=1):
+            ok = self._run_step(job_id, step, step_index=step_index, total_steps=len(steps))
             if not ok:
                 with session_scope() as session:
                     job = session.get(Job, job_id)
                     if not job:
                         raise KeyError(job_id)
+                    self._cli_progress(job_id, "job", "stopped", f"status={job.status}")
                     return job.status
         with session_scope() as session:
             job = session.get(Job, job_id)
@@ -324,6 +327,7 @@ class JobOrchestrator:
             job.lease_expires_at = None
             self._upsert_topic_registry(session, job_id, approved=False)
         self._append_event(job_id, "render.completed", "succeeded", {"status": job.status})
+        self._cli_progress(job_id, "job", "finished", f"status={job.status}")
         return job.status
 
     def get_job_details(self, session: Session, job_id: str) -> dict[str, Any]:
@@ -541,11 +545,13 @@ class JobOrchestrator:
             StepDefinition("publish_to_review_hub", 0, self.monetization_pipeline.step_publish),
         ]
 
-    def _run_step(self, job_id: str, step: StepDefinition) -> bool:
+    def _run_step(self, job_id: str, step: StepDefinition, step_index: int | None = None, total_steps: int | None = None) -> bool:
         for attempt in range(1, step.retries + 2):
             if self.stop_event.is_set():
                 self._cancel_job(job_id, step.name, "worker shutdown requested before retry")
                 return False
+            started = time.monotonic()
+            step_label = f"{step_index}/{total_steps} " if step_index and total_steps else ""
             with session_scope() as session:
                 job = session.get(Job, job_id)
                 assert job
@@ -560,6 +566,7 @@ class JobOrchestrator:
                 )
                 if cached:
                     job.current_step = step.name
+                    self._cli_progress(job_id, step.name, "cached", f"{step_label}attempt={attempt}")
                     return True
                 execution = StepExecution(
                     execution_id=new_id(),
@@ -575,6 +582,7 @@ class JobOrchestrator:
                 job.current_step = step.name
                 job.lease_owner = self.worker_id
                 job.lease_expires_at = utcnow() + self._lease_delta()
+            self._cli_progress(job_id, step.name, "started", f"{step_label}attempt={attempt}/{step.retries + 1}")
             heartbeat_stop = self._start_lease_heartbeat(job_id)
             try:
                 with session_scope() as session:
@@ -596,8 +604,12 @@ class JobOrchestrator:
                 self._persist_performance_timeline(job_id)
                 if step.name == "script":
                     self.asset_pipeline.start_background_music_prefetch(job_id)
+                elapsed = time.monotonic() - started
+                self._cli_progress(job_id, step.name, "done", f"{step_label}{elapsed:.1f}s")
                 return True
             except RecoverableStepError as exc:
+                elapsed = time.monotonic() - started
+                self._cli_progress(job_id, step.name, "retry" if attempt <= step.retries else "failed", f"{step_label}{elapsed:.1f}s {exc}")
                 self._record_step_failure(job_id, step.name, attempt, str(exc), recoverable=True)
                 if attempt <= step.retries:
                     if self.stop_event.is_set():
@@ -607,12 +619,19 @@ class JobOrchestrator:
                 self._fail_job(job_id, step.name, str(exc))
                 return False
             except Exception as exc:  # noqa: BLE001
+                elapsed = time.monotonic() - started
+                self._cli_progress(job_id, step.name, "failed", f"{step_label}{elapsed:.1f}s {type(exc).__name__}: {exc}")
                 self._record_step_failure(job_id, step.name, attempt, str(exc), recoverable=False)
                 self._fail_job(job_id, step.name, str(exc))
                 return False
             finally:
                 heartbeat_stop.set()
         return False
+
+    def _cli_progress(self, job_id: str, stage: str, state: str, detail: str = "") -> None:
+        timestamp = utcnow().strftime("%H:%M:%S")
+        suffix = f" {detail}" if detail else ""
+        print(f"[yts {timestamp}] job={job_id[:8]} stage={stage} {state}{suffix}", flush=True)
 
     def _record_step_failure(self, job_id: str, step_name: str, attempt: int, message: str, recoverable: bool) -> None:
         with session_scope() as session:

@@ -391,7 +391,7 @@ class AssetPipeline(BasePipeline):
         srt_path = self.storage.job_dir(job.job_id) / "audio" / "raw.srt"
         result = self.providers.tts.synthesize(script.full_narration, audio_path, srt_path)
         result = self.tts.fit_tts_duration(audio_path, srt_path, result)
-        if not 24_500 <= result["duration_ms"] <= 46_500:
+        if not 35_000 <= result["duration_ms"] <= 55_000:
             raise RecoverableStepError("tts duration outside allowed range")
         created_at = utcnow()
         payload = {
@@ -880,10 +880,10 @@ class AssetPipeline(BasePipeline):
     def _fit_tts_duration(self, audio_path: Path, srt_path: Path, result: dict[str, Any]) -> dict[str, Any]:
         duration_ms = int(result["duration_ms"])
         target_ms: int | None = None
-        if duration_ms > 46_500:
-            target_ms = 43_500
-        elif duration_ms < 24_500:
-            target_ms = 25_500
+        if duration_ms > 55_000:
+            target_ms = 54_000
+        elif duration_ms < 35_000:
+            target_ms = 36_000
         if target_ms is None:
             return result
         speed = duration_ms / target_ms

@@ -115,7 +115,7 @@ AI_STYLE_PHRASE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 PLACEHOLDER_SOURCE_PHRASE_PATTERN = re.compile(
-    r"\b(?:a fonte aponta|a fonte sustenta|sem precisar inflar o fato|mecanismo real|deixa de ser s[oó] apar[eê]ncia|lastro por tr[aá]s|payoff [ée] esse)\b",
+    r"\b(?:a fonte aponta|a fonte sustenta|sem precisar inflar o fato|mecanismo real|deixa de ser s[oó] apar[eê]ncia|lastro por tr[aá]s|payoff [ée] esse|em geral,[^.?!]{0,140}(?:sem depender de n[úu]mero exato|escala incomum|revela um detalhe real|ajuda a explicar o efeito|contexto antigo))\b",
     re.IGNORECASE,
 )
 TRUNCATED_OR_BROKEN_LOGIC_PATTERN = re.compile(

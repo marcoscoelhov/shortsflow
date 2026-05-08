@@ -2039,7 +2039,7 @@ def test_tts_duration_fit_compresses_audio_and_subtitle_timings(tmp_path: Path) 
     audio_path = tmp_path / "voice.wav"
     srt_path = tmp_path / "voice.srt"
     sample_rate = 24_000
-    duration_sec = 48
+    duration_sec = 58
     with wave.open(str(audio_path), "wb") as wav_file:
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)
@@ -2050,21 +2050,53 @@ def test_tts_duration_fit_compresses_audio_and_subtitle_timings(tmp_path: Path) 
             frames.extend(sample.to_bytes(2, "little", signed=True))
         wav_file.writeframes(frames)
     srt_path.write_text(
-        "1\n00:00:00,000 --> 00:00:24,000\nprimeira metade\n\n"
-        "2\n00:00:24,000 --> 00:00:48,000\nsegunda metade\n",
+        "1\n00:00:00,000 --> 00:00:29,000\nprimeira metade\n\n"
+        "2\n00:00:29,000 --> 00:00:58,000\nsegunda metade\n",
         encoding="utf-8",
     )
 
     result = orchestrator._fit_tts_duration(
         audio_path,
         srt_path,
-        {"duration_ms": 48_000, "provider_metadata": {"mode": "edge"}},
+        {"duration_ms": 58_000, "provider_metadata": {"mode": "edge"}},
     )
     cues = parse_srt(srt_path.read_text(encoding="utf-8"))
 
-    assert 43_000 <= result["duration_ms"] <= 44_000
+    assert 53_500 <= result["duration_ms"] <= 54_500
     assert result["provider_metadata"]["duration_fit_applied"] is True
-    assert cues[-1]["end_ms"] <= 43_600
+    assert cues[-1]["end_ms"] <= 54_600
+
+
+def test_tts_duration_fit_expands_short_audio_and_subtitle_timings(tmp_path: Path) -> None:
+    audio_path = tmp_path / "voice.wav"
+    srt_path = tmp_path / "voice.srt"
+    sample_rate = 24_000
+    duration_sec = 27
+    with wave.open(str(audio_path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        frames = bytearray()
+        for idx in range(sample_rate * duration_sec):
+            sample = int(1200 * math.sin(2 * math.pi * 220 * idx / sample_rate))
+            frames.extend(sample.to_bytes(2, "little", signed=True))
+        wav_file.writeframes(frames)
+    srt_path.write_text(
+        "1\n00:00:00,000 --> 00:00:13,500\nprimeira metade\n\n"
+        "2\n00:00:13,500 --> 00:00:27,000\nsegunda metade\n",
+        encoding="utf-8",
+    )
+
+    result = orchestrator._fit_tts_duration(
+        audio_path,
+        srt_path,
+        {"duration_ms": 27_000, "provider_metadata": {"mode": "edge"}},
+    )
+    cues = parse_srt(srt_path.read_text(encoding="utf-8"))
+
+    assert 35_500 <= result["duration_ms"] <= 36_500
+    assert result["provider_metadata"]["duration_fit_applied"] is True
+    assert 35_500 <= cues[-1]["end_ms"] <= 36_500
 
 
 def test_scene_semantics_keeps_image_prompt_in_english() -> None:
@@ -2423,6 +2455,37 @@ def test_script_gate_blocks_placeholder_source_language() -> None:
     assert result.passed is False
     assert "placeholder_source_language" in result.reasons
     assert "truncated_ending_logic" in result.reasons
+
+
+def test_script_gate_blocks_conservative_filler_visible_text() -> None:
+    script = _base_script(
+        "Em geral, depressão danakil mostra uma escala incomum, sem depender de número exato. "
+        "O povo Afar vive em uma região extrema de sal, calor e atividade geotérmica. "
+        "A cena inicial muda quando você percebe que esse lugar também é casa."
+    )
+    script["hook"] = "Em geral, depressão danakil mostra uma escala incomum, sem depender de número exato."
+
+    result = ScriptQualityGate().validate(script, 45)
+
+    assert result.passed is False
+    assert "placeholder_source_language" in result.reasons
+
+
+def test_simple_shorts_mode_blocks_critical_script_warnings(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", True)
+    script = _base_script(
+        "Em geral, depressão danakil mostra uma escala incomum, sem depender de número exato. "
+        "O povo Afar vive em uma região extrema de sal, calor e atividade geotérmica. "
+        "A cena inicial muda quando você percebe que esse lugar também é casa."
+    )
+    plan_dict = {"canonical_topic": "depressão de danakil", "fact_pack": {"status": "skipped", "facts": []}}
+
+    try:
+        orchestrator._validate_or_repair_script(script, plan_dict, 45, "none")
+    except RecoverableStepError as exc:
+        assert "placeholder_source_language" in str(exc)
+    else:
+        raise AssertionError("expected simple mode to block critical script warning")
 
 
 def test_publish_audit_failures_become_automatic_hard_blockers() -> None:
