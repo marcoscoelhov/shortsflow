@@ -56,6 +56,8 @@ As etapas ficam em `JobOrchestrator._steps()`:
 
 Cada execucao de etapa cria um `StepExecution` com `input_hash`. Se uma etapa ja teve sucesso com o mesmo input, o orquestrador pode reutilizar o resultado.
 
+O app tambem grava `performance_timeline.json` no diretorio do job com duracao por etapa, tentativa e refs geradas. Use esse artefato para comparar mudancas de performance em runs reais antes/depois.
+
 ## Rotas
 
 | Metodo | Rota | Uso |
@@ -76,7 +78,7 @@ Arquivos em `data/artifacts/` sao servidos por `/artifacts/...`.
 
 `ProviderRegistry` monta os providers conforme `.env`:
 
-- `creative`: `ResilientCreativeProvider`, com primary/fallback/repair/scene configurados por `YTS_LLM_*`.
+- `creative`: `ResilientCreativeProvider`, com primary/fallback/draft/repair/scene configurados por `YTS_LLM_*`.
 - `image`: `MockImageProvider` quando `YTS_USE_MOCK_PROVIDERS=true`; caso contrario `MinimaxImageProvider`.
 - `stock`: `ResilientStockProvider`, com fallback Pexels/Pixabay/local quando aplicavel.
 - `tts`: `LocalSpeechFallbackProvider` em mock; caso contrario `EdgeTTSProvider`.
@@ -88,13 +90,18 @@ Variaveis principais:
 - `YTS_USE_MOCK_PROVIDERS`: liga fluxo local sem API paga.
 - `YTS_LLM_PRIMARY_PROVIDER`: provider primario de texto, normalmente `minimax`.
 - `YTS_LLM_FALLBACK_PROVIDER`: fallback barato de texto, normalmente `deepseek`.
+- `YTS_LLM_SCRIPT_DRAFT_PROVIDER`: provider rapido para o primeiro draft de roteiro, normalmente `deepseek`.
 - `YTS_LLM_REPAIR_PROVIDER`: provider forte para repair de roteiro, normalmente `qwen`.
 - `YTS_LLM_SCENE_PROVIDER`: provider forte para refazer cenas quando MiniMax falha ou o gate reprova, normalmente `qwen`.
+- `YTS_REAL_RUN_ALLOW_MOCK_FALLBACK`: deve ficar `false` em runs reais; impede que falha de provider caia em mock silencioso.
+- `YTS_LLM_TOPIC_TIMEOUT_SEC`, `YTS_LLM_SCRIPT_DRAFT_TIMEOUT_SEC`, `YTS_LLM_SCENE_PLAN_TIMEOUT_SEC` e `YTS_LLM_PUBLISH_AUDIT_TIMEOUT_SEC`: limites por papel antes de cair para fallback real, preservando `YTS_STRICT_MINIMAX_VALIDATION`.
+- `YTS_ASSET_GENERATION_PARALLELISM`: quantidade de cenas geradas em paralelo; a persistencia no banco continua serializada no worker.
 - `YTS_MINIMAX_TEXT_API_KEY`: chave para pauta, roteiro, cenas e auditoria.
 - `YTS_DEEPSEEK_API_KEY`: chave do fallback barato OpenAI-compatible.
 - `YTS_QWEN_API_KEY`: chave do provider Qwen OpenAI-compatible para repair e cenas.
 - `YTS_MINIMAX_IMAGE_API_KEY`: chave para geracao de imagens.
 - `YTS_PEXELS_API_KEY` e `YTS_PIXABAY_API_KEY`: fallback de stock.
+- `YTS_CHANNEL_AI_GENERATED_CONTENT`: quando `true`, o disclosure de IA e inferido automaticamente no review.
 
 ## Pipelines
 

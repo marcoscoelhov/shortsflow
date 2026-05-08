@@ -35,15 +35,21 @@ class Settings(BaseSettings):
     llm_repair_provider: str = "qwen"
     llm_scene_provider: str = "qwen"
     llm_enable_fallback: bool = True
+    llm_script_draft_provider: str = "deepseek"
     llm_script_repair_attempts: int = 1
     llm_topic_repair_attempts: int = 2
+    llm_topic_timeout_sec: float = 45.0
+    llm_script_draft_timeout_sec: float = 45.0
     minimax_script_timeout_sec: float = 150.0
+    llm_publish_audit_timeout_sec: float = 45.0
+    real_run_allow_mock_fallback: bool = False
     scene_prompt_gate_enabled: bool = True
     asset_semantic_threshold: float = 0.80
     asset_total_threshold: float = 0.75
     render_min_bitrate: int = 250_000
     asset_generation_timeout_sec: float = 75.0
     asset_generation_regeneration_rounds: int = 2
+    asset_generation_parallelism: int = 3
     background_music_enabled: bool = True
     background_music_gain_db: float = -20.0
     sound_design_enabled: bool = False
@@ -57,6 +63,7 @@ class Settings(BaseSettings):
     edge_tts_rights_evidence_url: str | None = None
     allow_synthetic_visuals_for_monetization: bool = True
     conservative_synthetic_disclosure: bool = True
+    channel_ai_generated_content: bool = True
     minimax_api_key: str | None = None
     minimax_text_api_key: str | None = None
     minimax_image_api_key: str | None = None
@@ -67,6 +74,7 @@ class Settings(BaseSettings):
     minimax_text_timeout_sec: float = 150.0
     minimax_music_timeout_sec: float = 240.0
     minimax_scene_plan_timeout_sec: float = 90.0
+    llm_scene_plan_timeout_sec: float = 45.0
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
@@ -114,6 +122,32 @@ class Settings(BaseSettings):
         if normalized not in allowed:
             raise ValueError("sqlite_synchronous must be a valid SQLite synchronous mode")
         return normalized
+
+    @field_validator(
+        "llm_topic_timeout_sec",
+        "llm_script_draft_timeout_sec",
+        "minimax_script_timeout_sec",
+        "llm_publish_audit_timeout_sec",
+        "asset_generation_timeout_sec",
+        "minimax_text_timeout_sec",
+        "minimax_music_timeout_sec",
+        "minimax_scene_plan_timeout_sec",
+        "llm_scene_plan_timeout_sec",
+        "deepseek_timeout_sec",
+        "qwen_timeout_sec",
+    )
+    @classmethod
+    def validate_positive_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("timeout values must be positive")
+        return value
+
+    @field_validator("asset_generation_parallelism")
+    @classmethod
+    def validate_asset_generation_parallelism(cls, value: int) -> int:
+        if not 1 <= value <= 8:
+            raise ValueError("asset_generation_parallelism must be between 1 and 8")
+        return value
 
     @property
     def templates_dir(self) -> Path:

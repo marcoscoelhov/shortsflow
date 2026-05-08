@@ -403,7 +403,8 @@ def review_job(
     job_id: str,
     reviewer_identity: str = Form(default="tailscale:local-reviewer"),
     action: str = Form(...),
-    reason_codes: str = Form(default=""),
+    reason_codes: list[str] | None = Form(default=None),
+    confirmation_codes: list[str] | None = Form(default=None),
     rights_confirmed: bool = Form(default=False),
     ai_disclosure_confirmed: bool = Form(default=False),
     fact_review_confirmed: bool = Form(default=False),
@@ -411,7 +412,13 @@ def review_job(
     originality_confirmed: bool = Form(default=False),
     notes: str | None = Form(default=None),
 ):
-    parsed_reason_codes = [item.strip() for item in reason_codes.split(",") if item.strip()]
+    parsed_reason_codes = []
+    for raw_reason in reason_codes or []:
+        parsed_reason_codes.extend(item.strip() for item in str(raw_reason).split(",") if item.strip())
+    for confirmation_code in confirmation_codes or []:
+        code = str(confirmation_code).strip()
+        if code and code not in parsed_reason_codes:
+            parsed_reason_codes.append(code)
     for enabled, code in [
         (rights_confirmed, "rights_confirmed"),
         (ai_disclosure_confirmed, "ai_disclosure_confirmed"),

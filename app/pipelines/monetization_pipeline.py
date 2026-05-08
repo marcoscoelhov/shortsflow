@@ -86,7 +86,7 @@ class MonetizationPipeline(BasePipeline):
             tags,
             checklist,
             script_artifact,
-            self.provider_publish_audit(script_artifact, fact_pack, tags),
+            self.provider_publish_audit(script_artifact, fact_pack, tags, job.job_id),
         )
 
         hard_blockers: list[str] = []
@@ -96,7 +96,11 @@ class MonetizationPipeline(BasePipeline):
             hard_blockers.append("quality_gate_not_passed")
         if not rights_registry["all_commercial_rights_confirmed"]:
             manual_required.append("rights_confirmation_required")
-        if ai_disclosure["youtube_disclosure_required"] and "ai_disclosure_confirmed" not in confirmations:
+        if (
+            ai_disclosure["youtube_disclosure_required"]
+            and not ai_disclosure.get("auto_confirmed")
+            and "ai_disclosure_confirmed" not in confirmations
+        ):
             manual_required.append("youtube_ai_disclosure_toggle_required")
         if fact_claims_report["requires_fact_review"] and "fact_review_confirmed" not in confirmations:
             manual_required.append("fact_review_required")
@@ -113,6 +117,7 @@ class MonetizationPipeline(BasePipeline):
             hard_blockers.append("shorts_duration_over_60s")
         if channel_repetition_report["repetition_risk"] == "high" and "originality_confirmed" not in confirmations:
             hard_blockers.append("channel_repetition_high")
+        hard_blockers.extend(self.automatic_publish_blockers(publish_readiness))
 
         hard_blockers = list(dict.fromkeys(hard_blockers))
         manual_required = list(dict.fromkeys(manual_required))
@@ -146,6 +151,23 @@ class MonetizationPipeline(BasePipeline):
             "metadata_review": metadata_review,
             "publish_readiness": publish_readiness,
         }
+
+    def automatic_publish_blockers(self, publish_readiness: dict[str, Any]) -> list[str]:
+        automatic_reasons = {
+            "source_fact_mismatch",
+            "unsupported_claim",
+            "weak_ending",
+            "truncated_ending_logic",
+            "low_retention_hook",
+            "minimax_audit_failed",
+            "minimax_audit_invalid",
+            "text_publish_audit_timeout",
+            "invented_source_fact_ids",
+            "fact_pack_missing_for_factual_topic",
+            "quality_checklist_failed",
+            "placeholder_source_language",
+        }
+        return [reason for reason in publish_readiness.get("reasons") or [] if reason in automatic_reasons]
 
     def build_human_review_checklist(
         self,
@@ -275,14 +297,21 @@ class MonetizationPipeline(BasePipeline):
         ]
         contains_synthetic = bool(synthetic_assets)
         disclosure_required = contains_synthetic if self.settings.conservative_synthetic_disclosure else contains_synthetic and bool(realistic_assets)
+        auto_confirmed = bool(disclosure_required and self.settings.channel_ai_generated_content)
         return {
             "contains_synthetic_visuals": contains_synthetic,
             "youtube_disclosure_required": disclosure_required,
+            "auto_confirmed": auto_confirmed,
+            "confirmation_mode": "channel_policy" if auto_confirmed else "manual_review",
             "description_notice": "Imagens ilustrativas geradas por IA." if contains_synthetic else None,
             "reason": (
-                "Conservative synthetic disclosure mode: AI-generated visuals present."
+                "Channel policy marks AI disclosure automatically because generated visuals are present."
+                if auto_confirmed
+                else "Conservative synthetic disclosure mode: AI-generated visuals present."
                 if disclosure_required and self.settings.conservative_synthetic_disclosure
-                else "Realistic AI-generated illustrative visuals." if disclosure_required else "No realistic synthetic disclosure trigger detected."
+                else "Realistic AI-generated illustrative visuals."
+                if disclosure_required
+                else "No realistic synthetic disclosure trigger detected."
             ),
             "policy_mode": "conservative" if self.settings.conservative_synthetic_disclosure else "realistic_only",
             "synthetic_asset_count": len(synthetic_assets),
@@ -301,10 +330,27 @@ class MonetizationPipeline(BasePipeline):
         source_ids = script_dict.get("source_fact_ids") or script_dict.get("qa_metrics", {}).get("source_fact_ids") or []
         if isinstance(source_ids, str):
             source_ids = [source_ids]
+        claim_trace = script_dict.get("claim_trace") or script_dict.get("qa_metrics", {}).get("claim_trace") or []
+        if not isinstance(claim_trace, list):
+            claim_trace = []
         facts = fact_pack.get("facts") or []
         sources = fact_pack.get("sources") or []
         valid_fact_ids = {str(fact.get("fact_id")) for fact in facts if fact.get("fact_id")}
         grounded_ids = [str(item) for item in source_ids if str(item) in valid_fact_ids]
+        grounded_trace = []
+        ungrounded_trace = []
+        for item in claim_trace:
+            if not isinstance(item, dict):
+                continue
+            item_ids = item.get("source_fact_ids") or []
+            if isinstance(item_ids, str):
+                item_ids = [item_ids]
+            valid_item_ids = [str(source_id) for source_id in item_ids if str(source_id) in valid_fact_ids]
+            normalized_item = {**item, "source_fact_ids": valid_item_ids}
+            if valid_item_ids or str(item.get("grounding") or "").lower() in {"conservative", "common_knowledge", "user_input"}:
+                grounded_trace.append(normalized_item)
+            else:
+                ungrounded_trace.append(normalized_item)
         factual_topic = bool(
             topic_plan
             and re.search(
@@ -331,6 +377,9 @@ class MonetizationPipeline(BasePipeline):
             "requires_fact_review": requires_review,
             "source_fact_ids": list(source_ids),
             "grounded_source_fact_ids": grounded_ids,
+            "claim_trace": claim_trace,
+            "grounded_claim_trace": grounded_trace,
+            "ungrounded_claim_trace": ungrounded_trace,
             "claim_sources": claim_sources,
             "risk_report": fact_risk,
             "editorial_rule": fact_pack.get("editorial_rule"),
@@ -443,6 +492,7 @@ class MonetizationPipeline(BasePipeline):
             "request": "request.json",
             "topic_plan": "topic_plan.json",
             "script": "script.json",
+            "text_publish_audit": "text_publish_audit.json",
             "scene_plan": "scene_plan.json",
             "audio": "audio/narration.wav",
             "background_music": "audio/background_source.wav",
@@ -458,7 +508,9 @@ class MonetizationPipeline(BasePipeline):
             "channel_repetition_report": "channel_repetition_report.json",
             "metadata_review": "metadata_review.json",
             "monetization_report": "monetization_report.json",
+            "publish_audit": "publish_audit.json",
             "publish_package": "publish_package.json",
+            "performance_timeline": "performance_timeline.json",
         }
         if (self.storage.job_dir(job.job_id) / "audio" / "sound_design.wav").exists():
             artifact_index["sound_design"] = "audio/sound_design.wav"
@@ -503,7 +555,7 @@ class MonetizationPipeline(BasePipeline):
             "subtitle_gate_pass": bool((job.quality_summary or {}).get("subtitles", {}).get("subtitle_gate_pass")),
             "render_gate_pass": bool((job.quality_summary or {}).get("render", {}).get("render_gate_pass")),
         }
-        minimax_audit = self.provider_publish_audit(script_artifact, fact_pack, tags)
+        minimax_audit = self.provider_publish_audit(script_artifact, fact_pack, tags, job.job_id)
         readiness = self.publish_readiness_report(script, topic_plan, fact_pack, tags, checklist, script_artifact, minimax_audit)
         if monetization_report:
             readiness = {
@@ -539,7 +591,7 @@ class MonetizationPipeline(BasePipeline):
             "quality_summary": job.quality_summary or {},
         }
 
-    def provider_publish_audit(self, script_artifact: dict[str, Any], fact_pack: dict[str, Any], tags: list[str]) -> dict[str, Any]:
+    def provider_publish_audit(self, script_artifact: dict[str, Any], fact_pack: dict[str, Any], tags: list[str], job_id: str | None = None) -> dict[str, Any]:
         auditor = getattr(self.providers.creative, "audit_publish_package", None)
         if auditor is None:
             return {"passed": True, "reasons": [], "provider": "none", "skipped": True}
@@ -551,15 +603,37 @@ class MonetizationPipeline(BasePipeline):
                 "full_narration": script_artifact.get("full_narration"),
                 "key_facts": script_artifact.get("key_facts"),
                 "source_fact_ids": script_artifact.get("source_fact_ids"),
+                "claim_trace": script_artifact.get("claim_trace"),
             },
             "fact_pack": fact_pack,
             "hashtags": tags,
         }
+        input_hash = stable_hash(payload)
+        if job_id:
+            cached = self.read_job_json(job_id, "publish_audit.json")
+            if cached.get("input_hash") == input_hash and isinstance(cached.get("audit"), dict):
+                audit = dict(cached["audit"])
+                audit["cache_hit"] = True
+                return audit
         try:
             audit = auditor(payload)
         except Exception as exc:  # noqa: BLE001
-            return {"passed": False, "reasons": ["minimax_audit_failed"], "error": str(exc), "provider": "minimax"}
-        return audit if isinstance(audit, dict) else {"passed": False, "reasons": ["minimax_audit_invalid"], "provider": "minimax"}
+            audit = {"passed": False, "reasons": ["minimax_audit_failed"], "error": str(exc), "provider": "minimax"}
+        if not isinstance(audit, dict):
+            audit = {"passed": False, "reasons": ["minimax_audit_invalid"], "provider": "minimax"}
+        if job_id:
+            self.storage.persist_json(
+                job_id,
+                "publish_audit.json",
+                {
+                    "schema_version": self.settings.schema_version,
+                    "job_id": job_id,
+                    "created_at": iso_now(),
+                    "input_hash": input_hash,
+                    "audit": self._serialize_for_json(audit),
+                },
+            )
+        return audit
 
     def read_job_json(self, job_id: str, relative_path: str) -> dict[str, Any]:
         path = self.storage.job_dir(job_id) / relative_path

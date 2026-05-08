@@ -135,6 +135,15 @@ class MockCreativeProvider:
                 f"Esse encadeamento sustenta a promessa sem inventar detalhe tecnico extra.",
             ]
             key_facts = grounded_claims[:3]
+            claim_trace = [
+                {
+                    "text": claim.rstrip(".!?") + ".",
+                    "source_fact_ids": [str(fact.get("fact_id"))],
+                    "grounding": "fact_pack",
+                }
+                for claim, fact in zip(grounded_claims[:3], verified_facts[:3], strict=False)
+                if fact.get("fact_id")
+            ]
         else:
             body = [
                 f"{subject.capitalize()} parece vago so ate aparecer o efeito ao redor.",
@@ -149,6 +158,7 @@ class MockCreativeProvider:
                 f"O comportamento do sujeito economiza energia enquanto reduz risco.",
             ]
             source_fact_ids = []
+            claim_trace = []
         ending = f"No fim, {subject} deixa de ser so um nome e vira um fenomeno legivel."
         narration_parts = [hook, *body, ending]
         full_narration = " ".join(narration_parts)
@@ -180,6 +190,7 @@ class MockCreativeProvider:
             "estimated_duration_sec": estimated_duration_sec,
             "key_facts": key_facts,
             "source_fact_ids": source_fact_ids,
+            "claim_trace": claim_trace,
             "token_count": token_count,
             "language": "pt-BR",
             "retention_map": retention_map,
@@ -215,6 +226,15 @@ class MockCreativeProvider:
             repaired["body_beats"] = grounded_claims[:3]
             repaired["key_facts"] = grounded_claims[:3]
             repaired["source_fact_ids"] = [str(fact.get("fact_id")) for fact in verified_facts if fact.get("fact_id")][: max(2, min(3, len(verified_facts)))]
+            repaired["claim_trace"] = [
+                {
+                    "text": claim.rstrip(".!?") + ".",
+                    "source_fact_ids": [str(fact.get("fact_id"))],
+                    "grounding": "fact_pack",
+                }
+                for claim, fact in zip(grounded_claims[:3], verified_facts[:3], strict=False)
+                if fact.get("fact_id")
+            ]
         if "avg_sentence_too_long" in gate_reasons or "sentence_too_long" in gate_reasons:
             shortened_sentences = []
             for sentence in sentence_split(narration):
@@ -422,7 +442,7 @@ Escreva um roteiro viral de curiosidades em pt-BR.
 Entrada JSON: {json.dumps(topic_plan, ensure_ascii=False)}
 
 Retorne JSON estrito com:
-title, hook, body_beats, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
+title, hook, body_beats, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
 
 Regras:
 - 25 a 45 segundos
@@ -442,9 +462,12 @@ Regras:
 - não use frase meta como "fecha o ciclo", "agora tudo faz sentido" ou "essa curiosidade muda como você olha" no ending
 - transforme fatos em consequência visual/mental, evitando tom de Wikipedia
 - todos os campos textuais do JSON devem estar em portugues do Brasil (pt-BR)
+- não use travessão nem en dash nos campos narrados; proibido usar os caracteres "—" e "–"; prefira ponto, virgula, dois-pontos ou frase nova
 - nao use chines, ingles, espanhol ou outro idioma em title, hook, body_beats, ending, cta, full_narration, key_facts ou valores textuais de qa_metrics
 - excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas, titulos de fontes e URLs
 - key_facts deve ser uma lista em pt-BR, sem trechos em outros alfabetos ou idiomas
+- não use frases com cara de IA ou meta-roteiro, como "No replay", "agora tudo faz sentido", "isso muda como você olha", "holograma biológico" ou equivalentes prontos
+- escreva como uma pessoa brasileira narrando: oral, concreto, com ritmo, sem floreio genérico e sem parecer resumo de IA
 - title deve ser otimizado para SEO e copywriting viral, com promessa especifica e palavra-chave cedo quando natural
 - title não pode parecer título de artigo científico; evite "metabolismo de", "análise de", "estudo sobre", "mecanismos de" e formule como promessa visual ou surpresa concreta
 - hook deve abrir com choque, contraste ou tensão imediata, sem introducao generica
@@ -456,6 +479,8 @@ Regras:
 - evite frases absolutas/enganosas como “está garantida”, “a física prova”, “domina a física”, “desafia a física” ou “a inclinação sustenta”
 - se a Entrada JSON tiver fact_pack.status="verified", use o fact_pack como fonte factual obrigatória: toda afirmação de número, data, causa técnica, evento histórico, ciência, saúde ou engenharia deve derivar de facts[].claim
 - source_fact_ids deve listar somente fact_id existentes em fact_pack.facts; inclua pelo menos 2 quando houver 2+ fatos disponíveis
+- claim_trace deve mapear cada afirmação factual de risco do texto narrado para fact_id existentes em fact_pack.facts; formato: lista de objetos com text, source_fact_ids e grounding
+- se uma afirmação factual não tiver fact_id direto, remova o detalhe ou use grounding="conservative" com linguagem como "pode", "em geral", "tende a"; nunca use grounding para justificar exagero
 - se fact_pack.status não for "verified" ou facts estiver vazio, source_fact_ids deve ser [] e o roteiro deve evitar precisão factual forte sem fonte
 - não cite fontes no texto narrado; use os fatos como bastidor e mantenha retenção viral
 - key_facts deve listar apenas fatos que o roteiro realmente usa, sem exagero e sem detalhe técnico duvidoso
@@ -480,18 +505,22 @@ Contexto da pauta JSON: {json.dumps(topic_plan, ensure_ascii=False)}
 Motivos de reprovação: {json.dumps(gate_reasons, ensure_ascii=False)}
 
 Retorne JSON estrito com os mesmos campos:
-title, hook, body_beats, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
+title, hook, body_beats, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
 
 Regras obrigatórias:
 - mantenha prompt_version="{EDITORIAL_PROMPT_VERSION}" e preserve/atualize retention_map e visual_opening
 - se os motivos incluírem weak_loop_closure ou ending_not_connected_to_hook, corrija o bloco loop_close sem criar final genérico repetitivo
-- o novo ending deve criar loop de reassistência: o início precisa ganhar novo significado no replay
+- o novo ending deve criar loop de reassistência: o início precisa ganhar novo significado na segunda visualização
 - não use frase meta como "fecha o ciclo", "agora tudo faz sentido" ou "essa curiosidade muda como você olha"
 - preserve tom viral mesmo quando usar fatos científicos; não transforme o roteiro em aula ou resumo acadêmico
 - todos os campos textuais devem estar em portugues do Brasil (pt-BR)
+- remova travessão e en dash dos campos narrados; proibido usar os caracteres "—" e "–"; use ponto, virgula, dois-pontos ou frase nova
 - remova qualquer palavra, frase ou expressão em ingles, espanhol, chines ou outro idioma
 - remova qualquer SSML, HTML, XML, tags, entidades ou markup
+- remova caracteres fora do alfabeto latino/pt-BR, especialmente caracteres CJK
 - corrija palavras coladas e erros como "ummini", "independiente", "right"
+- corrija pontuação quebrada como "no. centro", "a. refletância" e palavras coladas como "unidadede"
+- remova frases com cara de IA ou meta-roteiro, como "No replay", "agora tudo faz sentido", "isso muda como você olha", "holograma biológico" ou equivalentes prontos
 - mantenha duração estimada entre 25 e 45 segundos
 - primeira frase com no máximo 12 palavras
 - média por frase <= 14 e frase máxima <= 20 palavras
@@ -503,6 +532,8 @@ Regras obrigatórias:
 - se os motivos incluírem factual_risk_requires_conservative_rewrite, reescreva TODA afirmação de risco factual: números precisos, datas, porcentagens, medidas, causalidade técnica, claims médicos/biológicos, engenharia e frases absolutas
 - se os motivos incluírem fact_pack_source_ids_missing ou high_risk_claims_need_fact_pack_grounding, use apenas facts[].claim do fact_pack no Contexto da pauta JSON e preencha source_fact_ids com os fact_id usados
 - se os motivos incluírem invented_source_fact_ids, remova source_fact_ids inventados; se fact_pack não estiver verified, use source_fact_ids=[]
+- se os motivos incluírem factual_claim_trace_missing, preencha claim_trace para cada afirmação factual de risco com fact_id existente ou reescreva a afirmação de modo conservador
+- claim_trace deve ter objetos com text, source_fact_ids e grounding; source_fact_ids só pode conter ids existentes no fact_pack
 - para afirmações de alto risco sem fonte explícita, use linguagem conservadora: “pode”, “tende a”, “em geral”, “uma das explicações”, “cerca de”, ou remova o detalhe específico
 - se um detalhe técnico parecer duvidoso, substitua por formulação conservadora e verificável
 - qa_metrics deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass
@@ -672,6 +703,7 @@ class ResilientCreativeProvider:
         self.registry = LLMProviderRegistry()
         self.primary = self.registry.primary_provider()
         self.fallback = self.registry.fallback_provider()
+        self.script_draft_provider = self.registry.script_draft_provider()
         self.repair_provider = self.registry.repair_provider()
         self.scene_provider = self.registry.scene_provider()
         self.strict_minimax_validation = self.settings.strict_minimax_validation
@@ -686,17 +718,20 @@ class ResilientCreativeProvider:
         notes: str | None = None,
     ) -> dict[str, Any]:
         if self.primary:
+            timeout_sec = float(getattr(self.settings, "llm_topic_timeout_sec", self.settings.minimax_text_timeout_sec))
             try:
                 return self._run_primary_with_timeout(
                     lambda: self.primary.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes),
-                    timeout_sec=self.settings.minimax_text_timeout_sec,
+                    timeout_sec=timeout_sec,
                 )
             except concurrent.futures.TimeoutError as exc:
                 if self.strict_minimax_validation:
-                    raise ProviderFailure("minimax_text", f"topic planner timed out after {self.settings.minimax_text_timeout_sec}s") from exc
+                    raise ProviderFailure("minimax_text", f"topic planner timed out after {timeout_sec}s") from exc
+                if not self.fallback:
+                    raise ProviderFailure("llm_registry", f"topic planner timed out after {timeout_sec}s and no fallback provider is available") from exc
                 payload = self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
                 payload["quality_metrics"]["fallback_reason"] = (
-                    f"minimax_text topic planner timed out after {self.settings.minimax_text_timeout_sec}s"
+                    f"minimax_text topic planner timed out after {timeout_sec}s"
                 )
                 payload["quality_metrics"]["fallback_used"] = True
                 payload["quality_metrics"]["fallback_stage"] = "topic_plan_timeout"
@@ -704,59 +739,69 @@ class ResilientCreativeProvider:
             except ProviderFailure as exc:
                 if self.strict_minimax_validation:
                     raise
+                if not self.fallback:
+                    raise
                 payload = self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
                 payload["quality_metrics"]["fallback_reason"] = str(exc)
                 payload["quality_metrics"]["fallback_used"] = True
                 return payload
         if self.strict_minimax_validation:
             raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
+        if not self.fallback:
+            raise ProviderFailure("llm_registry", "no topic llm provider is available")
         return self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
 
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
-        if self.primary:
+        candidates = self._script_generation_candidates()
+        if not candidates:
+            raise ProviderFailure("llm_registry", "no script llm provider is available")
+        failures: list[str] = []
+        for index, (role, provider, timeout_sec) in enumerate(candidates):
             try:
-                return self._run_primary_with_timeout(
-                    lambda: self.primary.generate_script(topic_plan),
-                    timeout_sec=self.settings.minimax_script_timeout_sec,
+                payload = self._run_primary_with_timeout(
+                    lambda provider=provider: provider.generate_script(topic_plan),
+                    timeout_sec=timeout_sec,
                 )
+                metrics = payload.setdefault("qa_metrics", {})
+                metrics["generation_provider_role"] = role
+                metrics["generation_provider"] = getattr(provider, "provider_name", role)
+                metrics["script_generation_fallback_used"] = index > 0
+                if failures:
+                    metrics["script_generation_fallback_reasons"] = failures
+                return payload
             except concurrent.futures.TimeoutError as exc:
-                if self.strict_minimax_validation:
-                    raise ProviderFailure("minimax_text", f"script generation timed out after {self.settings.minimax_script_timeout_sec}s") from exc
-                payload = self.fallback.generate_script(topic_plan)
-                payload["qa_metrics"]["fallback_reason"] = (
-                    f"minimax_text script generator timed out after {self.settings.minimax_script_timeout_sec}s"
-                )
-                payload["qa_metrics"]["fallback_used"] = True
-                payload["qa_metrics"]["fallback_stage"] = "script_generation_timeout"
-                return payload
+                message = f"{getattr(provider, 'provider_name', role)} script generation timed out after {timeout_sec}s"
+                failures.append(message)
+                if self.strict_minimax_validation and provider is self.primary:
+                    raise ProviderFailure(getattr(provider, "failure_provider_name", role), message) from exc
             except ProviderFailure as exc:
-                if self.strict_minimax_validation:
+                failures.append(str(exc))
+                if self.strict_minimax_validation and provider is self.primary:
                     raise
-                payload = self.fallback.generate_script(topic_plan)
-                payload["qa_metrics"]["fallback_reason"] = str(exc)
-                payload["qa_metrics"]["fallback_used"] = True
-                return payload
-        if self.strict_minimax_validation:
-            raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
-        return self.fallback.generate_script(topic_plan)
+        raise ProviderFailure("llm_registry", f"script generation failed across providers: {'; '.join(failures)}")
 
     def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self.primary:
+            timeout_sec = float(getattr(self.settings, "llm_publish_audit_timeout_sec", self.settings.minimax_text_timeout_sec))
             try:
                 return self._run_primary_with_timeout(
                     lambda: self.primary.audit_publish_package(payload),
-                    timeout_sec=self.settings.minimax_text_timeout_sec,
+                    timeout_sec=timeout_sec,
                 )
             except concurrent.futures.TimeoutError as exc:
                 if self.strict_minimax_validation:
-                    raise ProviderFailure("minimax_text", f"publish audit timed out after {self.settings.minimax_text_timeout_sec}s") from exc
+                    raise ProviderFailure("minimax_text", f"publish audit timed out after {timeout_sec}s") from exc
+                if not self.fallback:
+                    raise ProviderFailure("llm_registry", f"publish audit timed out after {timeout_sec}s and no fallback provider is available") from exc
                 audit = self.fallback.audit_publish_package(payload)
-                audit["fallback_reason"] = f"minimax_text publish audit timed out after {self.settings.minimax_text_timeout_sec}s"
+                audit["fallback_reason"] = f"minimax_text publish audit timed out after {timeout_sec}s"
                 audit["fallback_used"] = True
                 audit["fallback_stage"] = "publish_audit_timeout"
                 return audit
             except ProviderFailure as exc:
                 if self.strict_minimax_validation:
+                    raise
+                if not self.fallback:
                     raise
                 audit = self.fallback.audit_publish_package(payload)
                 audit["fallback_reason"] = str(exc)
@@ -764,29 +809,36 @@ class ResilientCreativeProvider:
                 return audit
         if self.strict_minimax_validation:
             raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
+        if not self.fallback:
+            raise ProviderFailure("llm_registry", "no publish audit llm provider is available")
         return self.fallback.audit_publish_package(payload)
 
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         if self.primary:
+            timeout_sec = float(getattr(self.settings, "llm_scene_plan_timeout_sec", self.settings.minimax_scene_plan_timeout_sec))
             try:
                 return self._run_primary_with_timeout(
                     lambda: self.primary.plan_scenes(script, target_scene_count),
-                    timeout_sec=self.settings.minimax_scene_plan_timeout_sec,
+                    timeout_sec=timeout_sec,
                 )
             except concurrent.futures.TimeoutError:
                 if self.strict_minimax_validation:
-                    raise ProviderFailure("minimax_text", f"scene planner timed out after {self.settings.minimax_scene_plan_timeout_sec}s")
+                    raise ProviderFailure("minimax_text", f"scene planner timed out after {timeout_sec}s")
                 provider = getattr(self, "scene_provider", None) or self.fallback
+                if not provider:
+                    raise ProviderFailure("llm_registry", f"scene planner timed out after {timeout_sec}s and no fallback provider is available")
                 scenes = provider.plan_scenes(script, target_scene_count)
                 for scene in scenes:
                     scene["provider_fallback_reason"] = (
-                        f"minimax_text scene planner timed out after {self.settings.minimax_scene_plan_timeout_sec}s"
+                        f"minimax_text scene planner timed out after {timeout_sec}s"
                     )
                 return scenes
             except ProviderFailure as exc:
                 if self.strict_minimax_validation:
                     raise
                 provider = getattr(self, "scene_provider", None) or self.fallback
+                if not provider:
+                    raise
                 scenes = provider.plan_scenes(script, target_scene_count)
                 for scene in scenes:
                     scene["provider_fallback_reason"] = str(exc)
@@ -794,6 +846,8 @@ class ResilientCreativeProvider:
         if self.strict_minimax_validation:
             raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
         provider = getattr(self, "scene_provider", None) or self.fallback
+        if not provider:
+            raise ProviderFailure("llm_registry", "no scene llm provider is available")
         return provider.plan_scenes(script, target_scene_count)
 
     def repair_script(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any]:
@@ -809,7 +863,13 @@ class ResilientCreativeProvider:
                     timeout_sec = self._provider_timeout_sec(provider, self.settings.minimax_script_timeout_sec)
                     raise ProviderFailure(getattr(provider, "failure_provider_name", "llm_provider"), f"script repair timed out after {timeout_sec}s") from exc
                 if self.settings.llm_enable_fallback and self.fallback:
-                    payload = self.fallback.repair_script(script, [*gate_reasons, str(exc)], topic_plan)
+                    payload = self._run_primary_with_timeout(
+                        lambda: self.fallback.repair_script(script, [*gate_reasons, str(exc)], topic_plan),
+                        timeout_sec=self._provider_timeout_sec(
+                            self.fallback,
+                            float(getattr(self.settings, "llm_script_draft_timeout_sec", self.settings.minimax_script_timeout_sec)),
+                        ),
+                    )
                     payload.setdefault("qa_metrics", {})["fallback_used"] = True
                     timeout_sec = self._provider_timeout_sec(provider, self.settings.minimax_script_timeout_sec)
                     payload["qa_metrics"]["fallback_reason"] = (
@@ -822,13 +882,21 @@ class ResilientCreativeProvider:
                 if self.strict_minimax_validation:
                     raise
                 if self.settings.llm_enable_fallback and self.fallback:
-                    payload = self.fallback.repair_script(script, [*gate_reasons, str(exc)], topic_plan)
+                    payload = self._run_primary_with_timeout(
+                        lambda: self.fallback.repair_script(script, [*gate_reasons, str(exc)], topic_plan),
+                        timeout_sec=self._provider_timeout_sec(
+                            self.fallback,
+                            float(getattr(self.settings, "llm_script_draft_timeout_sec", self.settings.minimax_script_timeout_sec)),
+                        ),
+                    )
                     payload.setdefault("qa_metrics", {})["fallback_used"] = True
                     payload["qa_metrics"]["fallback_reason"] = str(exc)
                     return payload
                 raise
         if self.strict_minimax_validation:
             raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
+        if not self.fallback:
+            raise ProviderFailure("llm_registry", "no script repair llm provider is available")
         return self.fallback.repair_script(script, gate_reasons, topic_plan)
 
     def repair_script_with_fallback(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any] | None:
@@ -836,13 +904,37 @@ class ResilientCreativeProvider:
             return None
         if not self.settings.llm_enable_fallback or not self.fallback:
             return None
-        payload = self.fallback.repair_script(script, gate_reasons, topic_plan)
+        payload = self._run_primary_with_timeout(
+            lambda: self.fallback.repair_script(script, gate_reasons, topic_plan),
+            timeout_sec=self._provider_timeout_sec(
+                self.fallback,
+                float(getattr(self.settings, "llm_script_draft_timeout_sec", self.settings.minimax_script_timeout_sec)),
+            ),
+        )
         payload.setdefault("qa_metrics", {})["fallback_used"] = True
         payload["qa_metrics"]["fallback_stage"] = "script_quality_gate"
         return payload
 
     def _provider_timeout_sec(self, provider: LLMProvider, default_timeout_sec: float) -> float:
         return float(getattr(provider, "timeout_sec", default_timeout_sec) or default_timeout_sec)
+
+    def _script_generation_candidates(self) -> list[tuple[str, LLMProvider, float]]:
+        primary_timeout = float(getattr(self.settings, "minimax_script_timeout_sec", 150.0))
+        draft_timeout = float(getattr(self.settings, "llm_script_draft_timeout_sec", primary_timeout))
+        if self.strict_minimax_validation:
+            return [("primary", self.primary, primary_timeout)] if self.primary else []
+        candidates: list[tuple[str, LLMProvider, float]] = []
+        seen: set[int] = set()
+        for role, provider, timeout_sec in [
+            ("draft", getattr(self, "script_draft_provider", None), draft_timeout),
+            ("primary", self.primary, primary_timeout),
+            ("fallback", self.fallback, self._provider_timeout_sec(self.fallback, draft_timeout) if self.fallback else draft_timeout),
+        ]:
+            if not provider or id(provider) in seen:
+                continue
+            seen.add(id(provider))
+            candidates.append((role, provider, timeout_sec))
+        return candidates
 
     def _run_primary_with_timeout(self, fn: Callable[[], Any], timeout_sec: float) -> Any:
         result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
@@ -873,11 +965,20 @@ class LLMProviderRegistry:
             return MockCreativeProvider()
         return self._build_provider(self.settings.llm_primary_provider, required=True)
 
-    def fallback_provider(self) -> LLMProvider:
+    def fallback_provider(self) -> LLMProvider | None:
         if self.settings.use_mock_providers:
             return MockCreativeProvider()
         provider = self._build_provider(self.settings.llm_fallback_provider, required=False)
-        return provider or MockCreativeProvider()
+        if provider:
+            return provider
+        if getattr(self.settings, "real_run_allow_mock_fallback", False):
+            return MockCreativeProvider()
+        return None
+
+    def script_draft_provider(self) -> LLMProvider | None:
+        if self.settings.use_mock_providers:
+            return MockCreativeProvider()
+        return self._build_provider(getattr(self.settings, "llm_script_draft_provider", ""), required=False)
 
     def repair_provider(self) -> LLMProvider | None:
         if self.settings.use_mock_providers:
@@ -896,6 +997,10 @@ class LLMProviderRegistry:
                 raise ProviderFailure("llm_registry", "primary llm provider is disabled")
             return None
         if normalized in {"mock", "local"}:
+            if not self.settings.use_mock_providers and not getattr(self.settings, "real_run_allow_mock_fallback", False):
+                if required:
+                    raise ProviderFailure("llm_registry", "mock provider is disabled for real runs")
+                return None
             return MockCreativeProvider()
         try:
             if normalized in {"minimax", "minimax_2_7", "minimax-m2.7"}:
@@ -1583,6 +1688,7 @@ class MiniMaxBackgroundMusicProvider:
             self._download_audio_to_wav(source_url, output_path)
         else:
             self._decode_audio_to_wav(audio_payload, output_path)
+        trim_metadata = self._trim_wav_to_target_duration(output_path, target_duration_ms)
         extra_info = body.get("extra_info", {}) if isinstance(body.get("extra_info"), dict) else {}
         return {
             "provider": self.provider_name,
@@ -1606,6 +1712,7 @@ class MiniMaxBackgroundMusicProvider:
                 "returned_sample_rate": extra_info.get("music_sample_rate"),
                 "returned_channels": extra_info.get("music_channel"),
                 "returned_bitrate": extra_info.get("bitrate"),
+                **trim_metadata,
             },
         }
 
@@ -1708,6 +1815,45 @@ class MiniMaxBackgroundMusicProvider:
             capture_output=True,
             text=True,
         )
+
+    def _trim_wav_to_target_duration(self, output_path: Path, target_duration_ms: int) -> dict[str, Any]:
+        target_sec = max(target_duration_ms / 1000, 1.0)
+        temp_path = output_path.with_suffix(".trimmed.wav")
+        try:
+            subprocess.run(
+                [
+                    imageio_ffmpeg.get_ffmpeg_exe(),
+                    "-y",
+                    "-i",
+                    str(output_path),
+                    "-t",
+                    f"{target_sec:.3f}",
+                    "-ar",
+                    "24000",
+                    "-ac",
+                    "1",
+                    str(temp_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            temp_path.replace(output_path)
+        except subprocess.CalledProcessError as exc:
+            raise ProviderFailure(
+                "minimax_music",
+                "failed to trim minimax music to target duration",
+                details={
+                    "target_duration_ms": target_duration_ms,
+                    "stderr": exc.stderr[-1000:] if exc.stderr else None,
+                },
+            ) from exc
+        finally:
+            temp_path.unlink(missing_ok=True)
+        return {
+            "source_trimmed_to_ms": round(target_sec * 1000),
+            "source_trim_applied": True,
+        }
 
 
 class ResilientMusicProvider:

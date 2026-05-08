@@ -358,6 +358,7 @@ class JobOrchestrator:
             job = session.get(Job, job_id)
             if not job:
                 raise KeyError(job_id)
+            self._validate_review_action(job, payload["action"])
             review = ReviewRecord(
                 review_id=new_id(),
                 job_id=job_id,
@@ -430,6 +431,27 @@ class JobOrchestrator:
         )
         return new_job_id
 
+    def _validate_review_action(self, job: Job, action: str) -> None:
+        reviewable_statuses = {"monetization_review", "blocked_for_monetization", "ready_for_upload"}
+        retryable_statuses = {
+            "monetization_review",
+            "blocked_for_monetization",
+            "rejected",
+            "failed",
+            "script_quality_failed",
+            "scene_plan_quality_failed",
+            "asset_quality_failed",
+            "subtitle_quality_failed",
+            "render_quality_failed",
+        }
+        rejectable_statuses = reviewable_statuses | retryable_statuses
+        if action == "approve" and job.status not in reviewable_statuses:
+            raise FatalStepError(f"job status {job.status} cannot be approved")
+        if action == "reject" and job.status not in rejectable_statuses:
+            raise FatalStepError(f"job status {job.status} cannot be rejected")
+        if action == "retry" and job.status not in retryable_statuses:
+            raise FatalStepError(f"job status {job.status} cannot be retried")
+
     def publish_job(self, job_id: str, youtube_video_id: str | None = None, youtube_url: str | None = None) -> None:
         with session_scope() as session:
             job = session.get(Job, job_id)
@@ -437,6 +459,8 @@ class JobOrchestrator:
                 raise KeyError(job_id)
             if job.status not in {"approved_for_publish", "published"}:
                 raise FatalStepError("job must be approved_for_publish before publishing")
+            if self.settings.youtube_publish_mode == "manual" and not (str(youtube_video_id or "").strip() or str(youtube_url or "").strip()):
+                raise FatalStepError("manual publish requires youtube_video_id or youtube_url")
             monetization_report = self._read_job_json(job.job_id, "monetization_report.json")
             if monetization_report and not monetization_report.get("passed"):
                 raise FatalStepError("job has not passed monetization readiness gate")
@@ -549,6 +573,9 @@ class JobOrchestrator:
                     execution.output_refs = refs
                     execution.finished_at = utcnow()
                     job.current_step = step.name
+                self._persist_performance_timeline(job_id)
+                if step.name == "script":
+                    self.asset_pipeline.start_background_music_prefetch(job_id)
                 return True
             except RecoverableStepError as exc:
                 self._record_step_failure(job_id, step.name, attempt, str(exc), recoverable=True)
@@ -592,7 +619,45 @@ class JobOrchestrator:
                     attempt=attempt,
                 )
             )
+        self._persist_performance_timeline(job_id)
         self._append_event(job_id, f"{step_name}.failed", "failed", {"attempt": attempt, "message": message})
+
+    def _persist_performance_timeline(self, job_id: str) -> None:
+        with session_scope() as session:
+            rows = session.scalars(
+                select(StepExecution)
+                .where(StepExecution.job_id == job_id)
+                .order_by(StepExecution.started_at, StepExecution.step_name, StepExecution.attempt)
+            ).all()
+        steps: list[dict[str, Any]] = []
+        total_ms = 0
+        for row in rows:
+            duration_ms = None
+            if row.finished_at and row.started_at:
+                duration_ms = max(0, round((row.finished_at - row.started_at).total_seconds() * 1000))
+                if row.status == "succeeded":
+                    total_ms += duration_ms
+            steps.append(
+                {
+                    "step_name": row.step_name,
+                    "attempt": row.attempt,
+                    "status": row.status,
+                    "started_at": row.started_at.isoformat() if row.started_at else None,
+                    "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+                    "duration_ms": duration_ms,
+                    "output_refs": row.output_refs or [],
+                }
+            )
+        self.storage.persist_json(
+            job_id,
+            "performance_timeline.json",
+            {
+                "job_id": job_id,
+                "created_at": iso_now(),
+                "total_succeeded_step_duration_ms": total_ms,
+                "steps": steps,
+            },
+        )
 
     def _fail_job(self, job_id: str, step_name: str, message: str) -> None:
         with session_scope() as session:

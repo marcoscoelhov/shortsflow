@@ -186,6 +186,21 @@ button.ghost {
   text-align: left;
 }
 
+.evidence-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0 1rem;
+  font-size: 0.92rem;
+}
+
+.evidence-table th,
+.evidence-table td {
+  padding: 0.65rem 0.5rem;
+  border-bottom: 1px solid rgba(34, 28, 20, 0.08);
+  text-align: left;
+  vertical-align: top;
+}
+
 .badge {
   display: inline-flex;
   padding: 0.25rem 0.65rem;

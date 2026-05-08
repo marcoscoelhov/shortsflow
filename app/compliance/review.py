@@ -25,7 +25,8 @@ def build_human_review_checklist(
             "confirmation_code": "ai_disclosure_confirmed",
             "label": "Disclosure de IA marcado no YouTube",
             "required": bool(ai_disclosure.get("youtube_disclosure_required")),
-            "completed": "ai_disclosure_confirmed" in confirmations,
+            "completed": bool(ai_disclosure.get("auto_confirmed")) or "ai_disclosure_confirmed" in confirmations,
+            "auto_completed": bool(ai_disclosure.get("auto_confirmed")),
             "source": "ai_disclosure",
         },
         {

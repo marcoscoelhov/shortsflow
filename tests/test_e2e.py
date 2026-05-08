@@ -107,6 +107,10 @@ def test_full_pipeline_reaches_monetization_review() -> None:
         assert job.artifact_index["monetization_report"] == "monetization_report.json"
         assert job.artifact_index["background_music"] == "audio/background_source.wav"
         assert job.artifact_index["mixed_audio"] == "audio/mixed.wav"
+        assert job.artifact_index["performance_timeline"] == "performance_timeline.json"
+        timeline_path = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / job_id / "performance_timeline.json"
+        timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+        assert any(step["step_name"] == "render" and step["duration_ms"] is not None for step in timeline["steps"])
     detail = client.get(f"/jobs/{job_id}")
     assert detail.status_code == 200
     assert "Render" in detail.text
@@ -282,6 +286,8 @@ def test_minimax_script_prompt_requires_pt_br_for_all_text_fields(monkeypatch) -
     assert "todos os campos textuais do JSON devem estar em portugues do Brasil" in prompt
     assert "nao use chines" in prompt
     assert "key_facts deve ser uma lista em pt-BR" in prompt
+    assert "claim_trace" in prompt
+    assert "proibido usar os caracteres" in prompt
     assert "ignore esse formato e mantenha exatamente o JSON estrito" in prompt
 
 
@@ -337,12 +343,123 @@ def test_script_quality_gate_blocks_mixed_language_markup_and_glued_words() -> N
     assert "suspicious_glued_words" in result.reasons
 
 
+def test_script_quality_gate_blocks_ai_punctuation_and_non_latin_text() -> None:
+    script = {
+        "title": "Polvo muda de cor rápido",
+        "hook": "A pele do polvo parece um painel vivo.",
+        "body_beats": ["O sinal passa pela pele — e aparece no corpo."],
+        "ending": "Quando você vê de novo, a pele entrega a pista.",
+        "cta": None,
+        "full_narration": (
+            "A pele do polvo parece um painel vivo. "
+            "A unidade muda no. centro da pele. "
+            "O polvo faz isso sem pedir指令ao cérebro."
+        ),
+        "estimated_duration_sec": 30,
+        "key_facts": ["A pele do polvo muda de cor."],
+        "token_count": 24,
+        "language": "pt-BR",
+        "qa_metrics": {
+            "hook_score": 0.9,
+            "clarity_score": 0.9,
+            "information_density_score": 0.8,
+            "repetition_score": 0.1,
+            "ending_strength_score": 0.8,
+        },
+    }
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert not result.passed
+    assert "em_dash_or_en_dash_detected" in result.reasons
+    assert "non_latin_text_detected" in result.reasons
+    assert "broken_sentence_punctuation" in result.reasons
+
+
+def test_script_quality_gate_requires_trace_for_risky_factual_claims() -> None:
+    full_narration = (
+        "O cérebro apaga exatamente 73% das memórias durante o sono. "
+        "Quando você vê de novo, a primeira frase vira alerta."
+    )
+    script = {
+        "title": "O cérebro durante o sono",
+        "hook": "O cérebro apaga memórias enquanto você dorme.",
+        "body_beats": [full_narration],
+        "ending": "Quando você vê de novo, a primeira frase vira alerta.",
+        "cta": None,
+        "full_narration": full_narration,
+        "estimated_duration_sec": 30,
+        "key_facts": ["O cérebro apaga memórias durante o sono."],
+        "token_count": 18,
+        "language": "pt-BR",
+        "source_fact_ids": [],
+        "qa_metrics": {
+            "hook_score": 0.9,
+            "clarity_score": 0.9,
+            "information_density_score": 0.8,
+            "repetition_score": 0.1,
+            "ending_strength_score": 0.8,
+        },
+    }
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert not result.passed
+    assert "factual_claim_trace_missing" in result.reasons
+
+
+def test_script_quality_gate_does_not_accept_global_source_ids_as_claim_trace() -> None:
+    full_narration = (
+        "O cérebro apaga exatamente 73% das memórias durante o sono. "
+        "Na segunda olhada, a primeira frase vira alerta."
+    )
+    script = {
+        "title": "O cérebro durante o sono",
+        "hook": "O cérebro apaga memórias enquanto você dorme.",
+        "body_beats": [full_narration],
+        "ending": "Na segunda olhada, a primeira frase vira alerta.",
+        "cta": None,
+        "full_narration": full_narration,
+        "estimated_duration_sec": 30,
+        "key_facts": ["O cérebro apaga memórias durante o sono."],
+        "token_count": 18,
+        "language": "pt-BR",
+        "source_fact_ids": ["F1"],
+        "qa_metrics": {
+            "hook_score": 0.9,
+            "clarity_score": 0.9,
+            "information_density_score": 0.8,
+            "repetition_score": 0.1,
+            "ending_strength_score": 0.8,
+        },
+    }
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert not result.passed
+    assert "factual_claim_trace_missing" in result.reasons
+
+
 def test_llm_registry_uses_mock_when_mock_providers_enabled() -> None:
     registry = LLMProviderRegistry()
     assert registry.primary_provider().provider_name == "mock"
     assert registry.fallback_provider().provider_name == "mock"
     assert registry.repair_provider().provider_name == "mock"
     assert registry.scene_provider().provider_name == "mock"
+
+
+def test_llm_registry_does_not_mock_fallback_in_real_runs(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        use_mock_providers=False,
+        llm_fallback_provider="deepseek",
+        deepseek_api_key=None,
+        real_run_allow_mock_fallback=False,
+    )
+    monkeypatch.setattr("app.providers.get_settings", lambda: settings)
+
+    registry = LLMProviderRegistry()
+
+    assert registry.fallback_provider() is None
 
 
 def test_deepseek_provider_uses_v4_flash_openai_compatible_client(monkeypatch) -> None:
@@ -635,6 +752,126 @@ def test_resilient_creative_provider_repair_script_falls_back_on_timeout() -> No
     assert "timed out after 0.01s" in repaired["qa_metrics"]["fallback_reason"]
 
 
+def test_resilient_creative_provider_uses_fast_script_draft_first() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(
+        minimax_script_timeout_sec=30,
+        llm_script_draft_timeout_sec=0.5,
+        llm_enable_fallback=True,
+    )
+    provider.strict_minimax_validation = False
+
+    class Draft:
+        provider_name = "deepseek"
+
+        def generate_script(self, topic_plan):
+            return {
+                "title": "Roteiro rapido",
+                "hook": "O começo já entrega tensão.",
+                "body_beats": ["A prova aparece sem enrolação."],
+                "ending": "Na segunda olhada, o começo vira pista.",
+                "cta": None,
+                "full_narration": "O começo já entrega tensão. A prova aparece sem enrolação. Na segunda olhada, o começo vira pista.",
+                "estimated_duration_sec": 28,
+                "key_facts": [],
+                "source_fact_ids": [],
+                "token_count": 20,
+                "language": "pt-BR",
+                "qa_metrics": {"source_provider": "deepseek"},
+            }
+
+    class Primary:
+        provider_name = "minimax"
+
+        def generate_script(self, topic_plan):
+            raise AssertionError("primary should not be called when draft succeeds")
+
+    provider.script_draft_provider = Draft()
+    provider.primary = Primary()
+    provider.fallback = None
+
+    script = provider.generate_script({"canonical_topic": "polvos"})
+
+    assert script["qa_metrics"]["generation_provider_role"] == "draft"
+    assert script["qa_metrics"]["generation_provider"] == "deepseek"
+    assert script["qa_metrics"]["script_generation_fallback_used"] is False
+
+
+def test_resilient_creative_provider_topic_uses_role_timeout() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(llm_topic_timeout_sec=0.01, minimax_text_timeout_sec=30)
+    provider.strict_minimax_validation = False
+
+    class SlowPrimary:
+        def plan_topic(self, *args, **kwargs):
+            time.sleep(0.05)
+            return {"quality_metrics": {}}
+
+    class Fallback:
+        def plan_topic(self, *args, **kwargs):
+            return {
+                "canonical_topic": "fallback",
+                "angle": "rapido",
+                "hook_promise": "gancho",
+                "title_candidates": ["fallback"],
+                "quality_metrics": {},
+            }
+
+    provider.primary = SlowPrimary()
+    provider.fallback = Fallback()
+
+    plan = provider.plan_topic("tema", 1, [], None)
+
+    assert plan["canonical_topic"] == "fallback"
+    assert plan["quality_metrics"]["fallback_used"] is True
+    assert "timed out after 0.01s" in plan["quality_metrics"]["fallback_reason"]
+
+
+def test_resilient_creative_provider_scene_uses_role_timeout() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(llm_scene_plan_timeout_sec=0.01, minimax_scene_plan_timeout_sec=30)
+    provider.strict_minimax_validation = False
+
+    class SlowPrimary:
+        def plan_scenes(self, *args, **kwargs):
+            time.sleep(0.05)
+            return []
+
+    class SceneFallback:
+        def plan_scenes(self, *args, **kwargs):
+            return [{"scene_id": "scene-1", "narration_text": "fallback"}]
+
+    provider.primary = SlowPrimary()
+    provider.fallback = SceneFallback()
+    provider.scene_provider = SceneFallback()
+
+    scenes = provider.plan_scenes({"full_narration": "x"}, 1)
+
+    assert scenes[0]["scene_id"] == "scene-1"
+    assert "timed out after 0.01s" in scenes[0]["provider_fallback_reason"]
+
+
+def test_publish_audit_is_cached_by_input_hash(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    def audit_publish_package(payload):
+        calls["count"] += 1
+        return {"passed": True, "reasons": [], "provider": "test-auditor"}
+
+    monkeypatch.setattr(orchestrator.providers.creative, "audit_publish_package", audit_publish_package)
+    job_id = "publish-audit-cache-test"
+    script = {"title": "Titulo", "hook": "Hook", "ending": "Fim", "full_narration": "Texto", "key_facts": [], "source_fact_ids": []}
+    fact_pack = {"status": "limited", "facts": []}
+    tags = ["#shorts"]
+
+    first = orchestrator.monetization_pipeline.provider_publish_audit(script, fact_pack, tags, job_id)
+    second = orchestrator.monetization_pipeline.provider_publish_audit(script, fact_pack, tags, job_id)
+
+    assert first["passed"] is True
+    assert second["cache_hit"] is True
+    assert calls["count"] == 1
+
+
 def test_resilient_creative_provider_disables_repair_fallback_in_strict_minimax_mode() -> None:
     provider = object.__new__(ResilientCreativeProvider)
     provider.settings = SimpleNamespace(minimax_script_timeout_sec=0.01, llm_enable_fallback=True, strict_minimax_validation=True)
@@ -685,10 +922,41 @@ def test_mock_generate_script_grounds_source_fact_ids_when_fact_pack_is_verified
     )
 
     assert script["source_fact_ids"] == ["F1", "F2"]
+    assert script["claim_trace"][0]["source_fact_ids"] == ["F1"]
     assert script["key_facts"][:2] == [
         "Os polvos são moluscos marinhos da classe Cephalopoda.",
         "O polvo possui oito braços fortes com ventosas.",
     ]
+
+
+def test_fact_query_prioritizes_honey_concepts_over_ambiguous_mel() -> None:
+    pipeline = object.__new__(script_pipeline_module.ScriptPipeline)
+    request = SimpleNamespace(seed_theme="curiosidades")
+    topic_plan = SimpleNamespace(
+        canonical_topic="Durabilidade do mel",
+        angle="Fato surpreendente",
+        hook_promise="Descubra por que o mel nunca estraga",
+        search_terms=["mel nunca estraga", "mel durabilidade", "mel conservação"],
+        entities=["Mel", "Abelha", "Enzima glucose oxidase", "Peróxido de hidrogênio"],
+        title_candidates=["Mel nunca estraga: o segredo da natureza"],
+    )
+
+    queries = []
+    seen = set()
+    for query in pipeline._fact_pack_queries(request, topic_plan):
+        normalized = " ".join(str(query or "").split())
+        if normalized and normalized.lower() not in seen and not pipeline._is_weak_fact_query(normalized):
+            queries.append(normalized)
+            seen.add(normalized.lower())
+    queries.sort(key=pipeline._fact_query_priority)
+
+    assert queries[0] != "mel"
+    assert any("honey antimicrobial" in query for query in queries[:5])
+    assert not pipeline._fact_result_is_relevant(
+        "mel",
+        "Natural TTS Synthesis by Conditioning Wavenet on MEL Spectrogram Predictions",
+        "This paper describes Tacotron 2, a neural network architecture for speech synthesis.",
+    )
 
 
 def test_mock_generate_script_includes_retention_map_and_visual_opening() -> None:
@@ -946,6 +1214,148 @@ def test_retry_action_creates_new_job() -> None:
     assert new_job_id != job_id
 
 
+def test_review_action_rejects_non_reviewable_status() -> None:
+    client = TestClient(app)
+    response = client.post("/jobs", data={"seed_theme": "polvos", "target_duration_sec": 35}, follow_redirects=False)
+    job_id = response.headers["location"].split("/")[-1]
+
+    approve = client.post(
+        f"/jobs/{job_id}/review",
+        data={"action": "approve", "reason_codes": "rights_confirmed"},
+        follow_redirects=False,
+    )
+
+    assert approve.status_code == 409
+    assert "cannot be approved" in approve.text
+
+
+def test_manual_publish_requires_youtube_reference() -> None:
+    client = TestClient(app)
+    job_id = "manual-publish-reference-required"
+    topic_request_id = "manual-publish-reference-required-request"
+    with SessionLocal() as session:
+        session.add(
+            Job(
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="publish",
+                status="approved_for_publish",
+                niche_id="curiosidades",
+                language="pt-BR",
+                target_duration_sec=35,
+                topic_request_id=topic_request_id,
+                artifact_index={},
+            )
+        )
+        session.add(
+            TopicRequest(
+                topic_request_id=topic_request_id,
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="request",
+                niche_id="curiosidades",
+                seed_theme="polvos",
+                language="pt-BR",
+                target_duration_sec=35,
+            )
+        )
+        session.commit()
+
+    response = client.post(f"/jobs/{job_id}/publish", data={}, follow_redirects=False)
+
+    assert response.status_code == 409
+    assert "manual publish requires" in response.text
+
+
+def test_review_page_renders_dynamic_checklist_and_structured_reason_codes() -> None:
+    client = TestClient(app)
+    job_id = "review-page-dynamic-checklist"
+    topic_request_id = "review-page-dynamic-checklist-request"
+    with SessionLocal() as session:
+        session.add(
+            Job(
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="review-page",
+                status="monetization_review",
+                niche_id="curiosidades",
+                language="pt-BR",
+                target_duration_sec=35,
+                topic_request_id=topic_request_id,
+                artifact_index={},
+            )
+        )
+        session.add(
+            TopicRequest(
+                topic_request_id=topic_request_id,
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="request",
+                niche_id="curiosidades",
+                seed_theme="polvos",
+                language="pt-BR",
+                target_duration_sec=35,
+            )
+        )
+        session.commit()
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "final_status": "monetization_review",
+            "passed": False,
+            "hard_blockers": [],
+            "manual_required": ["rights_confirmation_required"],
+            "human_review_checklist": {
+                "items": [
+                    {
+                        "code": "rights_confirmation_required",
+                        "confirmation_code": "rights_confirmed",
+                        "label": "Direitos comerciais confirmados",
+                        "required": True,
+                        "completed": False,
+                        "source": "rights_registry",
+                    },
+                    {
+                        "code": "youtube_ai_disclosure_toggle_required",
+                        "confirmation_code": "ai_disclosure_confirmed",
+                        "label": "Disclosure de IA marcado no YouTube",
+                        "required": True,
+                        "completed": True,
+                        "auto_completed": True,
+                        "source": "ai_disclosure",
+                    },
+                ],
+            },
+            "ai_disclosure": {"youtube_disclosure_required": True, "auto_confirmed": True},
+            "rights_registry": {
+                "entries": [
+                    {
+                        "asset_type": "image",
+                        "scene_id": "scene-1",
+                        "provider": "minimax",
+                        "commercial_use_allowed": False,
+                        "license_source": None,
+                        "evidence_required": False,
+                    }
+                ]
+            },
+            "fact_claims_report": {"claim_trace": [], "claim_sources": []},
+            "metadata_review": {"title": "Polvos", "suggested_hashtags": ["#shorts"], "reasons": []},
+            "channel_repetition_report": {"repetition_risk": "low"},
+        },
+    )
+
+    response = client.get(f"/jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert 'name="confirmation_codes" value="rights_confirmed"' in response.text
+    assert 'name="ai_disclosure_confirmed"' not in response.text
+    assert 'name="reason_codes" value="visual_incoherence"' in response.text
+    assert "Disclosure de IA marcado no YouTube" in response.text
+    assert "automático" in response.text
+
+
 def test_record_performance_metrics_persists_artifact_and_learning_brief() -> None:
     job_id = orchestrator.create_job(
         {
@@ -1036,8 +1446,8 @@ def test_review_page_no_longer_promises_partial_retry() -> None:
     assert detail.status_code == 200
     assert 'name="retry_step"' not in detail.text
     assert 'value="retry_from_step"' not in detail.text
-    assert 'value="retry"' in detail.text
-    assert "Criar novo job completo" in detail.text
+    assert 'value="retry"' not in detail.text
+    assert "Nenhuma ação de review disponível para o status atual." in detail.text
 
 
 def test_claim_next_job_is_atomic_under_concurrency() -> None:
@@ -1723,8 +2133,25 @@ def test_human_review_checklist_marks_required_completed_and_pending_items() -> 
     assert "fact_review_required" not in checklist["required_codes"]
 
 
+def test_human_review_checklist_auto_completes_channel_ai_disclosure() -> None:
+    checklist = build_human_review_checklist(
+        rights_registry={"all_commercial_rights_confirmed": True},
+        ai_disclosure={"youtube_disclosure_required": True, "auto_confirmed": True},
+        fact_claims_report={"requires_fact_review": False},
+        metadata_review={"requires_metadata_review": False},
+        channel_repetition_report={"repetition_risk": "low"},
+        confirmations=set(),
+    )
+
+    assert "youtube_ai_disclosure_toggle_required" in checklist["completed_codes"]
+    assert "youtube_ai_disclosure_toggle_required" not in checklist["pending_codes"]
+    disclosure_item = next(item for item in checklist["items"] if item["code"] == "youtube_ai_disclosure_toggle_required")
+    assert disclosure_item["auto_completed"] is True
+
+
 def test_conservative_ai_disclosure_requires_toggle_for_any_synthetic_asset(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator.settings, "conservative_synthetic_disclosure", True)
+    monkeypatch.setattr(orchestrator.settings, "channel_ai_generated_content", False)
     report = orchestrator._build_ai_disclosure_report(
         [
             SimpleNamespace(
@@ -1736,7 +2163,139 @@ def test_conservative_ai_disclosure_requires_toggle_for_any_synthetic_asset(monk
     )
 
     assert report["youtube_disclosure_required"] is True
+    assert report["auto_confirmed"] is False
+
+
+def test_channel_ai_generated_content_auto_confirms_disclosure(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.settings, "conservative_synthetic_disclosure", True)
+    monkeypatch.setattr(orchestrator.settings, "channel_ai_generated_content", True)
+    report = orchestrator._build_ai_disclosure_report(
+        [
+            SceneAsset(
+                asset_id="asset-ai-auto",
+                job_id="job",
+                scene_id="scene-1",
+                content_hash="hash",
+                kind="image",
+                provider="minimax",
+                uri="file:///tmp/a.png",
+                width=1080,
+                height=1920,
+                prompt_snapshot="cinematic documentary image",
+                scores={"semantic_match": 0.9, "aesthetic_score": 0.9, "technical_score": 0.9},
+                selected=True,
+            )
+        ]
+    )
+
+    assert report["youtube_disclosure_required"] is True
+    assert report["auto_confirmed"] is True
+    assert report["confirmation_mode"] == "channel_policy"
     assert report["policy_mode"] == "conservative"
+
+
+def test_fact_pack_rejects_verified_source_for_wrong_primary_topic(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
+
+    def fake_article_pack(query: str) -> dict:
+        return {
+            "status": "verified",
+            "provider": "openalex",
+            "query_used": query,
+            "topic_title": "Google Earth Engine: Planetary-scale geospatial analysis for everyone",
+            "facts": [
+                {
+                    "fact_id": "F1",
+                    "claim": "Google Earth Engine is a cloud-based platform for planetary-scale geospatial analysis.",
+                    "source_id": "S1",
+                }
+            ],
+            "sources": [{"source_id": "S1", "title": "Google Earth Engine: Planetary-scale geospatial analysis for everyone"}],
+        }
+
+    monkeypatch.setattr(pipeline, "_scientific_article_fact_pack", fake_article_pack)
+    topic_plan = SimpleNamespace(
+        canonical_topic="YouTube como plataforma dominante em vídeo",
+        angle="Comparar YouTube com Google e TikTok sem trocar a entidade principal.",
+        hook_promise="Mostrar um dado verificável sobre YouTube.",
+        search_terms=["Google", "YouTube crescimento"],
+        entities=["YouTube", "Google", "TikTok"],
+        title_candidates=["YouTube é maior do que você imagina"],
+    )
+    request = SimpleNamespace(seed_theme="Por que YouTube está chamando atenção?")
+
+    report = pipeline._build_fact_pack(topic_plan, request)
+
+    assert report["status"] == "limited"
+    assert report["topic_alignment"]["passed"] is False
+
+
+def test_script_gate_blocks_placeholder_source_language() -> None:
+    script = {
+        "title": "YouTube é maior do que você imagina",
+        "hook": "Youtube como parece exagero, mas a fonte aponta um mecanismo real.",
+        "body_beats": ["A fonte sustenta um detalhe verificável sobre youtube como, sem precisar inflar o fato."],
+        "ending": "Na segunda olhada, a primeira frase já apontava para O mecanismo real aparece.",
+        "full_narration": (
+            "Youtube como parece exagero, mas a fonte aponta um mecanismo real. "
+            "A fonte sustenta um detalhe verificável sobre youtube como, sem precisar inflar o fato. "
+            "Na segunda olhada, a primeira frase já apontava para O mecanismo real aparece. "
+            "quando youtube como deixa de ser só aparência."
+        ),
+        "key_facts": [],
+        "language": "pt-BR",
+        "estimated_duration_sec": 25,
+        "qa_metrics": {
+            "hook_score": 0.9,
+            "clarity_score": 0.9,
+            "information_density_score": 0.9,
+            "ending_strength_score": 0.9,
+            "repetition_score": 0.1,
+        },
+    }
+
+    result = ScriptQualityGate().validate(script, 35)
+
+    assert result.passed is False
+    assert "placeholder_source_language" in result.reasons
+    assert "truncated_ending_logic" in result.reasons
+
+
+def test_publish_audit_failures_become_automatic_hard_blockers() -> None:
+    blockers = orchestrator.monetization_pipeline.automatic_publish_blockers(
+        {
+            "passed": False,
+            "reasons": [
+                "source_fact_mismatch",
+                "unsupported_claim",
+                "rights_confirmation_required",
+                "low_retention_hook",
+            ],
+        }
+    )
+
+    assert blockers == ["source_fact_mismatch", "unsupported_claim", "low_retention_hook"]
+
+
+def test_text_publish_audit_has_hard_timeout(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "llm_publish_audit_timeout_sec", 0.01)
+
+    def slow_auditor(payload: dict) -> dict:
+        time.sleep(0.2)
+        return {"passed": True, "reasons": []}
+
+    monkeypatch.setattr(orchestrator.providers.creative, "audit_publish_package", slow_auditor)
+
+    audit = pipeline._text_publish_audit(
+        "job-timeout",
+        {"title": "Teste", "hook": "Teste", "ending": "Teste", "full_narration": "Teste."},
+        {"status": "limited", "facts": []},
+    )
+
+    assert audit["passed"] is False
+    assert audit["reasons"] == ["text_publish_audit_timeout"]
 
 
 def test_rights_registry_requires_evidence_for_confirmed_minimax_assets(monkeypatch) -> None:
@@ -1861,11 +2420,11 @@ def test_script_gate_accepts_rewatch_loop_without_exact_token_overlap() -> None:
     script = _base_script(
         "A pena rosa começa no prato. "
         "O pigmento entra pela comida antes de aparecer na cor. "
-        "No replay, aquela refeição vira tinta."
+        "Quando você vê de novo, aquela refeição vira tinta."
     )
     script["title"] = "A comida que pinta flamingos de rosa"
     script["hook"] = "A pena rosa começa no prato."
-    script["ending"] = "No replay, aquela refeição vira tinta."
+    script["ending"] = "Quando você vê de novo, aquela refeição vira tinta."
 
     result = ScriptQualityGate().validate(script, target_duration_sec=35)
 
@@ -1922,6 +2481,7 @@ def test_validate_or_repair_script_recovers_simple_loop_closure(monkeypatch) -> 
     assert metrics["loop_gate"]["connected_to_opening"] is True
     assert metrics["loop_gate"]["rewatch_loop_signal"] is True
     assert "fecha o ciclo" not in repaired["ending"].lower()
+    assert "no replay" not in repaired["ending"].lower()
 
 
 def test_validate_or_repair_script_rewrites_weak_fact_pack_conservatively(monkeypatch) -> None:
@@ -1940,6 +2500,57 @@ def test_validate_or_repair_script_rewrites_weak_fact_pack_conservatively(monkey
     assert metrics["fact_risk"]["blocked"] is False
     assert repaired["source_fact_ids"] == []
     assert "número exato" in repaired["full_narration"] or "Em geral" in repaired["full_narration"]
+    assert repaired["claim_trace"]
+    assert repaired["claim_trace"][0]["grounding"] == "conservative"
+
+
+def test_postprocess_script_normalizes_visible_text_and_attaches_claim_trace() -> None:
+    script = _base_script(
+        "A pele do polvo reflete luz — e muda no. centro da unidade. "
+        "A célula permite ajustar a refletância da pele."
+    )
+    script["source_fact_ids"] = ["F1", "F2"]
+    script["ending"] = "Quando você vê de novo, a pele entrega a pista."
+    fact_pack = {
+        "status": "verified",
+        "facts": [
+            {"fact_id": "F1", "claim": "Leucóforos refletem luz em banda ampla.", "source_id": "S1"},
+            {"fact_id": "F2", "claim": "A unidade cromática contém iridóforos e cromatóforos.", "source_id": "S1"},
+        ],
+    }
+
+    processed = orchestrator._postprocess_script_for_quality(script, {"canonical_topic": "polvo", "fact_pack": fact_pack}, [])
+
+    assert "—" not in processed["full_narration"]
+    assert "no. centro" not in processed["full_narration"]
+    assert processed["claim_trace"]
+    assert processed["claim_trace"][0]["grounding"] == "missing"
+    assert processed["claim_trace"][0]["source_fact_ids"] == []
+
+
+def test_postprocess_conservative_verified_fact_pack_keeps_narration_pt_br() -> None:
+    script = _base_script(
+        "Octopus skin can reflect broad-spectrum light because chromatophores control the surface. "
+        "Na segunda olhada, a primeira frase entrega a pista."
+    )
+    fact_pack = {
+        "status": "verified",
+        "facts": [
+            {"fact_id": "F1", "claim": "Chromatophores and iridophores contribute to octopus camouflage.", "source_id": "S1"},
+            {"fact_id": "F2", "claim": "Reflective cells alter the appearance of the octopus skin.", "source_id": "S1"},
+        ],
+    }
+
+    processed = orchestrator._postprocess_script_for_quality(
+        script,
+        {"canonical_topic": "polvo", "fact_pack": fact_pack},
+        ["factual_claim_trace_missing"],
+    )
+
+    assert "Chromatophores" not in processed["full_narration"]
+    assert "octopus" not in processed["full_narration"].lower()
+    assert "Células especializadas" in processed["full_narration"]
+    assert processed["claim_trace"][0]["source_fact_ids"] == ["F1"]
 
 
 def test_full_pipeline_with_sound_design_persists_rights_and_artifacts(monkeypatch) -> None:
@@ -2117,12 +2728,13 @@ def test_fact_pack_consistency_requires_source_fact_ids_when_verified() -> None:
     fact_pack = {
         "status": "verified",
         "facts": [
-            {"fact_id": "F1", "claim": "O tema começou em 1173.", "source_id": "S1"},
-            {"fact_id": "F2", "claim": "A inclinação foi estabilizada por intervenção moderna.", "source_id": "S1"},
+            {"fact_id": "F1", "claim": "O sono reorganiza memórias.", "source_id": "S1"},
+            {"fact_id": "F2", "claim": "Neurônios mudam conexões durante o sono.", "source_id": "S1"},
         ],
     }
     script = _base_script(
-        "A obra começou em 1173. Engenheiros estabilizaram a inclinação com uma intervenção moderna."
+        "O cérebro apaga exatamente 73% das memórias durante o sono. "
+        "Isso acontece porque a dopamina destrói conexões fracas nos neurônios."
     )
 
     reasons = orchestrator._fact_pack_consistency_reasons(script, fact_pack)
@@ -2134,16 +2746,60 @@ def test_fact_pack_consistency_accepts_grounded_source_fact_ids() -> None:
     fact_pack = {
         "status": "verified",
         "facts": [
-            {"fact_id": "F1", "claim": "O tema começou em 1173.", "source_id": "S1"},
-            {"fact_id": "F2", "claim": "A inclinação foi estabilizada por intervenção moderna.", "source_id": "S1"},
+            {"fact_id": "F1", "claim": "O sono reorganiza memórias.", "source_id": "S1"},
+            {"fact_id": "F2", "claim": "Neurônios mudam conexões durante o sono.", "source_id": "S1"},
         ],
     }
     script = _base_script(
-        "A obra começou em 1173. Engenheiros estabilizaram a inclinação com uma intervenção moderna."
+        "O cérebro apaga exatamente 73% das memórias durante o sono. "
+        "Isso acontece porque a dopamina destrói conexões fracas nos neurônios."
+    )
+    script["source_fact_ids"] = ["F1", "F2"]
+    script["claim_trace"] = [
+        {"text": "A obra começou em 1173.", "source_fact_ids": ["F1"], "grounding": "fact_pack"},
+        {
+            "text": "Engenheiros estabilizaram a inclinação com uma intervenção moderna.",
+            "source_fact_ids": ["F2"],
+            "grounding": "fact_pack",
+        },
+    ]
+
+    assert orchestrator._fact_pack_consistency_reasons(script, fact_pack) == []
+
+
+def test_fact_pack_consistency_requires_claim_trace_per_risky_claim() -> None:
+    fact_pack = {
+        "status": "verified",
+        "facts": [
+            {"fact_id": "F1", "claim": "O sono reorganiza memórias.", "source_id": "S1"},
+            {"fact_id": "F2", "claim": "Neurônios mudam conexões durante o sono.", "source_id": "S1"},
+        ],
+    }
+    script = _base_script(
+        "O cérebro apaga exatamente 73% das memórias durante o sono. "
+        "Isso acontece porque a dopamina destrói conexões fracas nos neurônios."
     )
     script["source_fact_ids"] = ["F1", "F2"]
 
-    assert orchestrator._fact_pack_consistency_reasons(script, fact_pack) == []
+    reasons = orchestrator._fact_pack_consistency_reasons(script, fact_pack)
+
+    assert "factual_claim_trace_missing" in reasons
+
+
+def test_fact_pack_consistency_rejects_invented_claim_trace_fact_ids() -> None:
+    fact_pack = {
+        "status": "verified",
+        "facts": [{"fact_id": "F1", "claim": "O tema começou em 1173.", "source_id": "S1"}],
+    }
+    script = _base_script("A obra começou em 1173.")
+    script["source_fact_ids"] = ["F1"]
+    script["claim_trace"] = [
+        {"text": "A obra começou em 1173.", "source_fact_ids": ["F9"], "grounding": "fact_pack"}
+    ]
+
+    reasons = orchestrator._fact_pack_consistency_reasons(script, fact_pack)
+
+    assert "invented_claim_trace_fact_ids" in reasons
 
 
 def test_fact_pack_consistency_rejects_source_ids_when_fact_pack_limited() -> None:
@@ -2153,6 +2809,31 @@ def test_fact_pack_consistency_rejects_source_ids_when_fact_pack_limited() -> No
     reasons = orchestrator._fact_pack_consistency_reasons(script, {"status": "limited", "facts": []})
 
     assert "invented_source_fact_ids" in reasons
+
+
+def test_fact_claims_report_exposes_claim_trace() -> None:
+    script_artifact = {
+        **_base_script("A pele do polvo pode refletir luz em uma banda ampla."),
+        "source_fact_ids": ["F1"],
+        "claim_trace": [
+            {
+                "text": "A pele do polvo pode refletir luz em uma banda ampla.",
+                "source_fact_ids": ["F1"],
+                "grounding": "fact_pack",
+            }
+        ],
+    }
+    fact_pack = {
+        "status": "verified",
+        "facts": [{"fact_id": "F1", "claim": "A região central reflete luz em uma banda ampla.", "source_id": "S1"}],
+        "sources": [{"source_id": "S1", "url": "https://doi.org/10.test/example"}],
+    }
+
+    report = orchestrator._build_fact_claims_report(None, None, fact_pack, script_artifact)
+
+    assert report["claim_trace"] == script_artifact["claim_trace"]
+    assert report["grounded_claim_trace"][0]["source_fact_ids"] == ["F1"]
+    assert report["ungrounded_claim_trace"] == []
 
 
 def test_scene_token_coverage_normalization_rebuilds_contiguous_spans() -> None:
@@ -2403,9 +3084,20 @@ def test_minimax_background_music_provider_uses_output_url(monkeypatch, tmp_path
         assert input_path.exists()
         output_path.write_bytes(b"RIFFfake")
 
+    trimmed: dict[str, object] = {}
+
+    def fake_trim(output_path: Path, target_duration_ms: int) -> dict[str, object]:
+        trimmed["path"] = output_path
+        trimmed["target_duration_ms"] = target_duration_ms
+        return {
+            "source_trimmed_to_ms": target_duration_ms,
+            "source_trim_applied": True,
+        }
+
     monkeypatch.setattr("app.providers.httpx.post", fake_post)
     monkeypatch.setattr("app.providers.httpx.get", fake_get)
     monkeypatch.setattr(provider, "_convert_audio_file_to_wav", fake_convert)
+    monkeypatch.setattr(provider, "_trim_wav_to_target_duration", fake_trim)
 
     result = provider.select_track(
         {"canonical_topic": "polvos", "angle": "inteligencia distribuida"},
@@ -2418,6 +3110,9 @@ def test_minimax_background_music_provider_uses_output_url(monkeypatch, tmp_path
     assert "exactly 32 seconds" in result["provider_metadata"]["prompt"]
     assert result["source_url"] == "https://example.com/music.mp3"
     assert result["provider_metadata"]["returned_duration_ms"] == 31876
+    assert result["provider_metadata"]["source_trimmed_to_ms"] == 32000
+    assert result["provider_metadata"]["source_trim_applied"] is True
+    assert trimmed == {"path": tmp_path / "background.wav", "target_duration_ms": 32000}
     assert Path(result["audio_uri"].removeprefix("file://")).exists()
 
 

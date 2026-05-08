@@ -78,8 +78,16 @@ FOREIGN_LANGUAGE_MARKERS = {
 }
 
 MARKUP_PATTERN = re.compile(r"</?[a-zA-Z][^>\s]*(?:\s[^>]*)?>?|&(?:lt|gt|amp|quot|apos);")
+EM_DASH_PATTERN = re.compile(r"[–—]")
+NON_LATIN_NARRATION_PATTERN = re.compile(
+    r"[^\x00-\x7FÀ-ÖØ-öø-ÿĀ-ſ0-9\s.,!?;:()\"'/%#@+\-=ºª°]"
+)
+BROKEN_SHORT_TOKEN_SENTENCE_PATTERN = re.compile(
+    r"\b(?:a|o|e|de|do|da|dos|das|no|na|nos|nas|em|por|com)\.\s+[a-záàãâéêíóõôúç]",
+    re.IGNORECASE,
+)
 SUSPICIOUS_GLUED_PATTERN = re.compile(
-    r"\b(?:um|uma|o|a|os|as|de|do|da|dos|das|no|na|nos|nas|e|que)(?:mini|micro|macro|super|ultra)[a-záàãâéêíóõôúç-]*\b",
+    r"\b(?:(?:um|uma|o|a|os|as|de|do|da|dos|das|no|na|nos|nas|e|que)(?:mini|micro|macro|super|ultra)[a-záàãâéêíóõôúç-]*|[a-záàãâéêíóõôúç]{3,}(?:dede|doda|dodo|aoao|emem)[a-záàãâéêíóõôúç]*)\b",
     re.IGNORECASE,
 )
 GENERIC_HOOK_OPENING_PATTERN = re.compile(
@@ -95,12 +103,23 @@ VIRAL_TITLE_SIGNAL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 REWATCH_LOOP_PATTERN = re.compile(
-    r"\b(?:replay|rever|ver de novo|v[eê] de novo|quando voc[eê] volta|no come[cç]o|primeir[ao] frase|primeir[ao] cena|cena inicial|aquela imagem|aquele detalhe|a pista)\b",
+    r"\b(?:replay|rever|ver de novo|v[eê] de novo|segunda olhada|volta para|quando voc[eê] volta|in[ií]cio|no come[cç]o|primeir[ao] frase|primeir[ao] cena|primeir[ao] imagem|cena inicial|aquela imagem|aquele detalhe|a pista)\b",
     re.IGNORECASE,
 )
 GENERIC_LOOP_ENDING_PATTERN = re.compile(
-    r"\b(?:fecha o ciclo|agora tudo faz sentido|parece inevit[aá]vel)\b",
+    r"\b(?:fecha o ciclo|agora tudo faz sentido|parece inevit[aá]vel|isso muda como voc[eê] olha|essa curiosidade muda como voc[eê] olha)\b",
     re.IGNORECASE,
+)
+AI_STYLE_PHRASE_PATTERN = re.compile(
+    r"\b(?:no replay|holograma biol[oó]gico|parece fora deste mundo|animal mais alien[ií]gena que existe)\b",
+    re.IGNORECASE,
+)
+PLACEHOLDER_SOURCE_PHRASE_PATTERN = re.compile(
+    r"\b(?:a fonte aponta|a fonte sustenta|sem precisar inflar o fato|mecanismo real|deixa de ser s[oó] apar[eê]ncia|lastro por tr[aá]s|payoff [ée] esse)\b",
+    re.IGNORECASE,
+)
+TRUNCATED_OR_BROKEN_LOGIC_PATTERN = re.compile(
+    r"(?:\b[A-ZÁÀÃÂÉÊÍÓÕÔÚÇ][^.!?]{0,80}\.\s+quando\b|\bpara\s+[A-ZÁÀÃÂÉÊÍÓÕÔÚÇ]|apontava\s+para\s+[A-ZÁÀÃÂÉÊÍÓÕÔÚÇ])",
 )
 
 OVERCONFIDENT_FACT_MARKERS = {
@@ -181,6 +200,12 @@ class ScriptQualityGate:
             reasons.append("language_field_not_pt_br")
         if MARKUP_PATTERN.search(combined_text):
             reasons.append("markup_or_ssml_leaked")
+        if EM_DASH_PATTERN.search(combined_text):
+            reasons.append("em_dash_or_en_dash_detected")
+        if NON_LATIN_NARRATION_PATTERN.search(combined_text):
+            reasons.append("non_latin_text_detected")
+        if BROKEN_SHORT_TOKEN_SENTENCE_PATTERN.search(combined_text):
+            reasons.append("broken_sentence_punctuation")
         if self._contains_foreign_language(combined_text):
             reasons.append("foreign_language_detected")
         if SUSPICIOUS_GLUED_PATTERN.search(combined_text.replace("-", "")):
@@ -189,9 +214,20 @@ class ScriptQualityGate:
             reasons.append("generic_hook_opening")
         if GENERIC_LOOP_ENDING_PATTERN.search(str(script.get("ending") or "")):
             reasons.append("generic_loop_ending")
+        if AI_STYLE_PHRASE_PATTERN.search(combined_text):
+            reasons.append("generic_ai_style_phrase")
+        if PLACEHOLDER_SOURCE_PHRASE_PATTERN.search(combined_text):
+            reasons.append("placeholder_source_language")
+        if TRUNCATED_OR_BROKEN_LOGIC_PATTERN.search(combined_text):
+            reasons.append("truncated_ending_logic")
+        if self._has_repeated_clause(full_narration):
+            reasons.append("repeated_clause")
         fact_risk = self._fact_risk_report(script)
+        trace_report = self._claim_trace_report(script, fact_risk)
         if self._has_overconfident_or_unsupported_factual_claims(combined_text):
             reasons.append("overconfident_or_unsupported_factual_claim")
+        if trace_report["missing_risky_claim_trace"]:
+            reasons.append("factual_claim_trace_missing")
         if fact_risk["blocked"]:
             reasons.append("factual_risk_requires_conservative_rewrite")
         loop_metrics = self._loop_report(script)
@@ -250,6 +286,7 @@ class ScriptQualityGate:
             "script_quality_gate_pass": not reasons,
             "script_quality_gate_reasons": reasons,
             "fact_risk": fact_risk,
+            "claim_trace": trace_report,
             "loop_gate": loop_metrics,
         }
         return ScriptGateResult(passed=not reasons, reasons=reasons, metrics=metrics)
@@ -341,6 +378,38 @@ class ScriptQualityGate:
             "claims": claims[:8],
         }
 
+    def _claim_trace_report(self, script: dict[str, Any], fact_risk: dict[str, Any] | None = None) -> dict[str, Any]:
+        fact_risk = fact_risk or self._fact_risk_report(script)
+        source_ids = script.get("source_fact_ids") or script.get("qa_metrics", {}).get("source_fact_ids") or []
+        if isinstance(source_ids, str):
+            source_ids = [source_ids]
+        source_ids = [str(item) for item in source_ids if str(item)]
+        raw_trace = script.get("claim_trace") or script.get("qa_metrics", {}).get("claim_trace") or []
+        trace = raw_trace if isinstance(raw_trace, list) else []
+        traced_items = [
+            item
+            for item in trace
+            if isinstance(item, dict)
+            and str(item.get("text") or "").strip()
+            and (
+                item.get("source_fact_ids")
+                or str(item.get("grounding") or "").strip().lower() in {"conservative", "common_knowledge", "user_input"}
+            )
+        ]
+        risky_claims = [
+            claim
+            for claim in fact_risk.get("claims", [])
+            if claim.get("score", 0) > 0 and not claim.get("conservative_language")
+        ]
+        missing = bool(risky_claims and len(traced_items) < len(risky_claims))
+        return {
+            "claim_trace_count": len(trace),
+            "grounded_claim_trace_count": len(traced_items),
+            "risky_claim_count": len(risky_claims),
+            "source_fact_ids": source_ids,
+            "missing_risky_claim_trace": missing,
+        }
+
     def _loop_report(self, script: dict[str, Any]) -> dict[str, Any]:
         hook = str(script.get("hook") or "")
         ending = str(script.get("ending") or "")
@@ -384,6 +453,24 @@ class ScriptQualityGate:
             return True
         if "pisa" in normalized and any(marker in normalized for marker in {self._normalize(item) for item in PISA_UNSUPPORTED_CLAIM_MARKERS}):
             return True
+        return False
+
+    def _has_repeated_clause(self, text: str) -> bool:
+        normalized = re.sub(r"\s+", " ", self._normalize(text))
+        clauses = [
+            clause.strip(" ,.;:!?")
+            for clause in re.split(r"[.!?;:]", normalized)
+            if len(word_tokens(clause)) >= 3
+        ]
+        seen: set[str] = set()
+        for clause in clauses:
+            tokens = word_tokens(clause)
+            if len(tokens) < 5:
+                continue
+            key = " ".join(tokens)
+            if key in seen:
+                return True
+            seen.add(key)
         return False
 
     def _normalize(self, text: str) -> str:

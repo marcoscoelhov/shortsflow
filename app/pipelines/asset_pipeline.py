@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 import wave
+import concurrent.futures
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.audio.music_mix import mix_background_music
 from app.audio.sound_design import generate_sound_design_track, mix_sound_design_track
+from app.db import session_scope
 from app.models import BackgroundMusicAsset, FallbackEvent, Job, NarrationAsset, SceneAsset, ScenePlan, Script, SubtitleTrack, TopicPlan
 from app.pipelines.common import RecoverableStepError, model_payload
 from app.pipelines.base import BasePipeline
@@ -112,6 +114,67 @@ class AssetPipeline(BasePipeline):
         self.tts = TTSDomain(self)
         self.subtitles = SubtitleDomain(self)
         self.music = MusicDomain(self)
+        self._music_prefetch_lock = threading.Lock()
+        self._music_prefetch_futures: dict[str, concurrent.futures.Future] = {}
+
+    def start_background_music_prefetch(self, job_id: str) -> None:
+        if not self.settings.background_music_enabled:
+            return
+        with self._music_prefetch_lock:
+            if job_id in self._music_prefetch_futures:
+                return
+            future: concurrent.futures.Future = concurrent.futures.Future()
+            self._music_prefetch_futures[job_id] = future
+
+        thread = threading.Thread(target=self._run_background_music_prefetch, args=(job_id, future), daemon=True)
+        thread.start()
+
+    def _run_background_music_prefetch(self, job_id: str, future: concurrent.futures.Future) -> None:
+        try:
+            with session_scope() as session:
+                script = session.scalar(select(Script).where(Script.job_id == job_id))
+                topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job_id))
+                if not script or not topic_plan:
+                    raise RuntimeError("missing script or topic plan for music prefetch")
+                topic_dict = {
+                    "canonical_topic": topic_plan.canonical_topic,
+                    "angle": topic_plan.angle,
+                    "title_candidates": topic_plan.title_candidates,
+                }
+                script_dict = {
+                    "title": script.title,
+                    "hook": script.hook,
+                    "ending": script.ending,
+                    "full_narration": script.full_narration,
+                }
+                estimated_ms = max(8_000, int(float(script.estimated_duration_sec or 35) * 1000))
+            output_path = self.storage.job_dir(job_id) / "audio" / "background_source.prefetch.wav"
+            started_at = time.perf_counter()
+            result = self.providers.music.select_track(topic_dict, script_dict, output_path, estimated_ms)
+            result.setdefault("provider_metadata", {})["prefetch_used"] = True
+            result["provider_metadata"]["prefetch_elapsed_ms"] = round((time.perf_counter() - started_at) * 1000, 1)
+            future.set_result({"result": result, "path": output_path, "target_duration_ms": estimated_ms})
+        except Exception as exc:  # noqa: BLE001
+            future.set_exception(exc)
+
+    def _consume_background_music_prefetch(self, job_id: str, raw_music_path: Path) -> tuple[dict[str, Any] | None, Exception | None]:
+        with self._music_prefetch_lock:
+            future = self._music_prefetch_futures.pop(job_id, None)
+        if future is None:
+            return None, None
+        try:
+            prefetched = future.result(timeout=max(float(self.settings.minimax_music_timeout_sec), 1.0))
+            result = dict(prefetched["result"])
+            source_path = Path(prefetched["path"])
+            if source_path.exists() and source_path.resolve() != raw_music_path.resolve():
+                raw_music_path.parent.mkdir(parents=True, exist_ok=True)
+                source_path.replace(raw_music_path)
+            result["audio_uri"] = raw_music_path.resolve().as_uri()
+            result["duration_ms"] = prefetched.get("target_duration_ms") or result.get("duration_ms")
+            result.setdefault("provider_metadata", {})["prefetch_consumed"] = True
+            return result, None
+        except Exception as exc:  # noqa: BLE001
+            return None, exc
 
     def step_assets(self, session: Session, job: Job, attempt: int) -> list[str]:
         self._remove_stale_quality_report(job.job_id, "asset_quality_report.json")
@@ -120,24 +183,59 @@ class AssetPipeline(BasePipeline):
         session.execute(delete(SceneAsset).where(SceneAsset.job_id == job.job_id))
         asset_refs: list[str] = []
         selected_assets: list[dict[str, Any]] = []
-        for scene in scene_plan.scenes:
-            scene_dir = self.storage.job_dir(job.job_id) / "assets" / scene["scene_id"]
-            candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
-            fallback_used = False
-            primary_provider = "minimax"
-            variant_cursor = 0
-            for regeneration_round in range(1, max(1, self.settings.asset_generation_regeneration_rounds) + 1):
-                for variant_index, variant_scene in enumerate(self.image_assets.image_prompt_variants(scene, regeneration_round), start=1):
-                    variant_cursor += 1
-                    ai_path = scene_dir / ("ai.png" if variant_cursor == 1 else f"ai-{variant_cursor}.png")
-                    try:
-                        ai_asset = self.image_assets.generate_primary_asset(variant_scene, ai_path)
-                        ai_asset = self.image_assets.normalize_asset_uri_extension(ai_asset)
-                        ai_scores = self.image_assets.score_asset(variant_scene, ai_asset)
-                        candidates.append((ai_asset, ai_scores))
-                        primary_provider = ai_asset["provider"]
-                        self._append_event(
-                            job.job_id,
+        parallelism = max(1, min(int(self.settings.asset_generation_parallelism), len(scene_plan.scenes)))
+        if parallelism == 1:
+            scene_results = [self._generate_assets_for_scene(job.job_id, scene, attempt) for scene in scene_plan.scenes]
+        else:
+            scene_results_by_id: dict[str, dict[str, Any]] = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=parallelism, thread_name_prefix="asset-scene") as executor:
+                futures = {
+                    executor.submit(self._generate_assets_for_scene, job.job_id, scene, attempt): scene["scene_id"]
+                    for scene in scene_plan.scenes
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    scene_id = futures[future]
+                    scene_results_by_id[scene_id] = future.result()
+            scene_results = [scene_results_by_id[scene["scene_id"]] for scene in scene_plan.scenes]
+        for result in scene_results:
+            for event_name, status, payload in result["events"]:
+                self._append_event(job.job_id, event_name, status, payload)
+            for fallback_payload in result["fallback_events"]:
+                session.add(FallbackEvent(**model_payload(FallbackEvent, fallback_payload)))
+            for asset_payload in result["asset_rows"]:
+                session.add(SceneAsset(**model_payload(SceneAsset, asset_payload)))
+            selected_assets.append(result["selected_asset"])
+            asset_refs.extend(result["asset_refs"])
+        asset_gate = self.asset_gate.validate_selected(selected_assets)
+        if not asset_gate.passed:
+            self.storage.persist_json(job.job_id, "asset_quality_report.json", {"reasons": asset_gate.reasons, "metrics": asset_gate.metrics})
+            raise RecoverableStepError(f"asset quality gate failed: {', '.join(asset_gate.reasons[:6])}")
+        quality_summary = dict(job.quality_summary or {})
+        quality_summary["assets"] = {**asset_gate.metrics, "semantic_threshold_pass": True}
+        job.quality_summary = quality_summary
+        self._append_event(job.job_id, "asset.selected", "succeeded", quality_summary["assets"])
+        return asset_refs
+
+    def _generate_assets_for_scene(self, job_id: str, scene: dict[str, Any], attempt: int) -> dict[str, Any]:
+        scene_dir = self.storage.job_dir(job_id) / "assets" / scene["scene_id"]
+        candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        events: list[tuple[str, str, dict[str, Any]]] = []
+        fallback_events: list[dict[str, Any]] = []
+        fallback_used = False
+        primary_provider = "minimax"
+        variant_cursor = 0
+        for regeneration_round in range(1, max(1, self.settings.asset_generation_regeneration_rounds) + 1):
+            for variant_scene in self.image_assets.image_prompt_variants(scene, regeneration_round):
+                variant_cursor += 1
+                ai_path = scene_dir / ("ai.png" if variant_cursor == 1 else f"ai-{variant_cursor}.png")
+                try:
+                    ai_asset = self.image_assets.generate_primary_asset(variant_scene, ai_path)
+                    ai_asset = self.image_assets.normalize_asset_uri_extension(ai_asset)
+                    ai_scores = self.image_assets.score_asset(variant_scene, ai_asset)
+                    candidates.append((ai_asset, ai_scores))
+                    primary_provider = ai_asset["provider"]
+                    events.append(
+                        (
                             "asset.primary_candidate_scored",
                             "succeeded",
                             {
@@ -149,30 +247,31 @@ class AssetPipeline(BasePipeline):
                                 "total_score": ai_scores["total_score"],
                             },
                         )
-                        if self.image_assets.asset_scores_pass(ai_scores):
-                            break
-                    except Exception as exc:  # noqa: BLE001
-                        fallback_used = True
-                        reason_code = "ai_provider_timeout" if "timed out" in str(exc).lower() else "ai_provider_error"
-                        if not self.settings.strict_minimax_validation:
-                            session.add(
-                                FallbackEvent(
-                                    event_id=new_id(),
-                                    job_id=job.job_id,
-                                    schema_version=self.settings.schema_version,
-                                    content_hash=stable_hash({"scene": scene["scene_id"], "attempt": attempt, "mode": f"{reason_code}_{variant_cursor}"}),
-                                    created_at=utcnow(),
-                                    step="asset_generation",
-                                    reason_code=reason_code,
-                                    attempt=attempt,
-                                    scene_id=scene["scene_id"],
-                                    from_provider="minimax",
-                                    to_provider="local_semantic",
-                                    reason_detail=str(exc),
-                                )
-                            )
-                        self._append_event(
-                            job.job_id,
+                    )
+                    if self.image_assets.asset_scores_pass(ai_scores):
+                        break
+                except Exception as exc:  # noqa: BLE001
+                    fallback_used = True
+                    reason_code = "ai_provider_timeout" if "timed out" in str(exc).lower() else "ai_provider_error"
+                    if not self.settings.strict_minimax_validation:
+                        fallback_events.append(
+                            {
+                                "event_id": new_id(),
+                                "job_id": job_id,
+                                "schema_version": self.settings.schema_version,
+                                "content_hash": stable_hash({"scene": scene["scene_id"], "attempt": attempt, "mode": f"{reason_code}_{variant_cursor}"}),
+                                "created_at": utcnow(),
+                                "step": "asset_generation",
+                                "reason_code": reason_code,
+                                "attempt": attempt,
+                                "scene_id": scene["scene_id"],
+                                "from_provider": "minimax",
+                                "to_provider": "local_semantic",
+                                "reason_detail": str(exc),
+                            }
+                        )
+                    events.append(
+                        (
                             "asset.primary_candidate_failed",
                             "failed",
                             {
@@ -182,108 +281,108 @@ class AssetPipeline(BasePipeline):
                                 "reason": str(exc),
                             },
                         )
-                if any(self.image_assets.asset_scores_pass(scores) for _, scores in candidates):
-                    break
-                self._append_event(
-                    job.job_id,
+                    )
+            if any(self.image_assets.asset_scores_pass(scores) for _, scores in candidates):
+                break
+            events.append(
+                (
                     "asset.regeneration_round_completed",
                     "succeeded",
                     {
                         "scene_id": scene["scene_id"],
                         "regeneration_round": regeneration_round,
                         "candidate_count": len(candidates),
-                        "passing_candidate_count": sum(1 for _, scores in candidates if self._asset_scores_pass(scores)),
+                        "passing_candidate_count": sum(1 for _, scores in candidates if self.image_assets.asset_scores_pass(scores)),
                     },
                 )
-            needs_quality_fallback = not candidates or all(not self._asset_scores_pass(scores) for _, scores in candidates)
-            if not candidates and not self.settings.use_mock_providers:
-                fallback_used = True
-            if needs_quality_fallback and not self.settings.strict_minimax_validation:
-                fallback_used = True
-                fallback_reason_code = "low_semantic_score" if candidates else "no_primary_image_candidate"
-                fallback_reason_detail = (
-                    "Primary image candidates fell below semantic thresholds."
-                    if candidates
-                    else "Primary image provider returned no usable candidates."
-                )
-                session.add(
-                    FallbackEvent(
-                        event_id=new_id(),
-                        job_id=job.job_id,
-                        schema_version=self.settings.schema_version,
-                        content_hash=stable_hash({"scene": scene["scene_id"], "attempt": attempt, "mode": fallback_reason_code}),
-                        created_at=utcnow(),
-                        step="asset_generation",
-                        reason_code=fallback_reason_code,
-                        attempt=attempt,
-                        scene_id=scene["scene_id"],
-                        from_provider=primary_provider,
-                        to_provider="local_semantic",
-                        reason_detail=fallback_reason_detail,
-                    )
-                )
-                self._append_event(job.job_id, "asset.semantic_fallback", "succeeded", {"scene_id": scene["scene_id"]})
-                local_asset = self.providers.local_image.generate(scene, scene_dir / "local-semantic.png")
-                local_asset = self._normalize_asset_uri_extension(local_asset)
-                local_scores = self._score_asset(scene, local_asset)
-                candidates.append((local_asset, local_scores))
-            passing_candidates = [(asset, scores) for asset, scores in candidates if self.image_assets.asset_scores_pass(scores)]
-            if passing_candidates:
-                winner_asset, winner_scores = sorted(passing_candidates, key=lambda item: item[1]["total_score"], reverse=True)[0]
-            else:
-                self.storage.persist_json(
-                    job.job_id,
-                    f"assets/{scene['scene_id']}/rejected_candidates.json",
-                    {
-                        "scene": scene,
-                        "thresholds": {
-                            "semantic_match": 0.80,
-                            "total_score": 0.75,
-                            "text_or_watermark_penalty": 0.15,
-                            "artifact_penalty": 0.30,
-                        },
-                        "candidates": [
-                            {"asset": asset, "scores": scores}
-                            for asset, scores in sorted(candidates, key=lambda item: item[1]["total_score"], reverse=True)
-                        ],
+            )
+        needs_quality_fallback = not candidates or all(not self.image_assets.asset_scores_pass(scores) for _, scores in candidates)
+        if not candidates and not self.settings.use_mock_providers:
+            fallback_used = True
+        if needs_quality_fallback and not self.settings.strict_minimax_validation:
+            fallback_used = True
+            fallback_reason_code = "low_semantic_score" if candidates else "no_primary_image_candidate"
+            fallback_reason_detail = (
+                "Primary image candidates fell below semantic thresholds."
+                if candidates
+                else "Primary image provider returned no usable candidates."
+            )
+            fallback_events.append(
+                {
+                    "event_id": new_id(),
+                    "job_id": job_id,
+                    "schema_version": self.settings.schema_version,
+                    "content_hash": stable_hash({"scene": scene["scene_id"], "attempt": attempt, "mode": fallback_reason_code}),
+                    "created_at": utcnow(),
+                    "step": "asset_generation",
+                    "reason_code": fallback_reason_code,
+                    "attempt": attempt,
+                    "scene_id": scene["scene_id"],
+                    "from_provider": primary_provider,
+                    "to_provider": "local_semantic",
+                    "reason_detail": fallback_reason_detail,
+                }
+            )
+            events.append(("asset.semantic_fallback", "succeeded", {"scene_id": scene["scene_id"]}))
+            local_asset = self.providers.local_image.generate(scene, scene_dir / "local-semantic.png")
+            local_asset = self.image_assets.normalize_asset_uri_extension(local_asset)
+            local_scores = self.image_assets.score_asset(scene, local_asset)
+            candidates.append((local_asset, local_scores))
+        passing_candidates = [(asset, scores) for asset, scores in candidates if self.image_assets.asset_scores_pass(scores)]
+        if passing_candidates:
+            winner_asset, winner_scores = sorted(passing_candidates, key=lambda item: item[1]["total_score"], reverse=True)[0]
+        else:
+            self.storage.persist_json(
+                job_id,
+                f"assets/{scene['scene_id']}/rejected_candidates.json",
+                {
+                    "scene": scene,
+                    "thresholds": {
+                        "semantic_match": self.settings.asset_semantic_threshold,
+                        "total_score": self.settings.asset_total_threshold,
+                        "text_or_watermark_penalty": 0.15,
+                        "artifact_penalty": 0.30,
                     },
-                )
-                raise RecoverableStepError(f"asset quality gate failed for {scene['scene_id']}")
-            for asset_payload, scores in candidates:
-                selected = asset_payload["uri"] == winner_asset["uri"]
-                rejection = None if selected else ("score_below_threshold" if not self._asset_scores_pass(scores) else "score_below_winner")
-                asset_row = SceneAsset(
-                    asset_id=new_id(),
-                    job_id=job.job_id,
-                    scene_id=scene["scene_id"],
-                    schema_version=self.settings.schema_version,
-                    content_hash=stable_hash({"asset": asset_payload["uri"], "scores": scores}),
-                    created_at=utcnow(),
-                    provider=asset_payload["provider"],
-                    uri=asset_payload["uri"],
-                    width=asset_payload["width"],
-                    height=asset_payload["height"],
-                    selected=selected,
-                    scores=scores,
-                    source_url=asset_payload.get("source_url"),
-                    attribution=asset_payload.get("attribution"),
-                    license_note=asset_payload.get("license_note"),
-                    prompt_snapshot=asset_payload["prompt_snapshot"],
-                    rejection_reason=rejection,
-                    fallback_used=fallback_used and selected and asset_payload["provider"] != primary_provider,
-                )
-                session.add(asset_row)
-            selected_assets.append({"scene_id": scene["scene_id"], "provider": winner_asset["provider"], **winner_scores})
-            asset_refs.extend([path_from_uri(asset["uri"]).name for asset, _ in candidates])
-        asset_gate = self.asset_gate.validate_selected(selected_assets)
-        if not asset_gate.passed:
-            self.storage.persist_json(job.job_id, "asset_quality_report.json", {"reasons": asset_gate.reasons, "metrics": asset_gate.metrics})
-            raise RecoverableStepError(f"asset quality gate failed: {', '.join(asset_gate.reasons[:6])}")
-        quality_summary = dict(job.quality_summary or {})
-        quality_summary["assets"] = {**asset_gate.metrics, "semantic_threshold_pass": True}
-        job.quality_summary = quality_summary
-        self._append_event(job.job_id, "asset.selected", "succeeded", quality_summary["assets"])
-        return asset_refs
+                    "candidates": [
+                        {"asset": asset, "scores": scores}
+                        for asset, scores in sorted(candidates, key=lambda item: item[1]["total_score"], reverse=True)
+                    ],
+                },
+            )
+            raise RecoverableStepError(f"asset quality gate failed for {scene['scene_id']}")
+        asset_rows: list[dict[str, Any]] = []
+        for asset_payload, scores in candidates:
+            selected = asset_payload["uri"] == winner_asset["uri"]
+            rejection = None if selected else ("score_below_threshold" if not self.image_assets.asset_scores_pass(scores) else "score_below_winner")
+            asset_rows.append(
+                {
+                    "asset_id": new_id(),
+                    "job_id": job_id,
+                    "scene_id": scene["scene_id"],
+                    "schema_version": self.settings.schema_version,
+                    "content_hash": stable_hash({"asset": asset_payload["uri"], "scores": scores}),
+                    "created_at": utcnow(),
+                    "provider": asset_payload["provider"],
+                    "uri": asset_payload["uri"],
+                    "width": asset_payload["width"],
+                    "height": asset_payload["height"],
+                    "selected": selected,
+                    "scores": scores,
+                    "source_url": asset_payload.get("source_url"),
+                    "attribution": asset_payload.get("attribution"),
+                    "license_note": asset_payload.get("license_note"),
+                    "prompt_snapshot": asset_payload["prompt_snapshot"],
+                    "rejection_reason": rejection,
+                    "fallback_used": fallback_used and selected and asset_payload["provider"] != primary_provider,
+                }
+            )
+        return {
+            "events": events,
+            "fallback_events": fallback_events,
+            "asset_rows": asset_rows,
+            "selected_asset": {"scene_id": scene["scene_id"], "provider": winner_asset["provider"], **winner_scores},
+            "asset_refs": [path_from_uri(asset["uri"]).name for asset, _ in candidates],
+        }
 
     def step_tts(self, session: Session, job: Job, attempt: int) -> list[str]:
         script = session.scalar(select(Script).where(Script.job_id == job.job_id))
@@ -420,27 +519,40 @@ class AssetPipeline(BasePipeline):
             "full_narration": script.full_narration,
         }
         music_started_at = time.perf_counter()
-        try:
-            result = self.providers.music.select_track(topic_dict, script_dict, raw_music_path, narration.duration_ms)
-        except Exception as exc:
+        result, prefetch_error = self._consume_background_music_prefetch(job.job_id, raw_music_path)
+        if prefetch_error is not None:
             self.music.persist_background_music_debug(
                 job.job_id,
                 attempt=attempt,
                 topic_dict=topic_dict,
                 script_dict=script_dict,
                 target_duration_ms=narration.duration_ms,
-                phase="provider_failure",
+                phase="prefetch_failure",
                 elapsed_ms=(time.perf_counter() - music_started_at) * 1000,
-                error=exc,
+                error=prefetch_error,
             )
-            raise
+        if result is None:
+            try:
+                result = self.providers.music.select_track(topic_dict, script_dict, raw_music_path, narration.duration_ms)
+            except Exception as exc:
+                self.music.persist_background_music_debug(
+                    job.job_id,
+                    attempt=attempt,
+                    topic_dict=topic_dict,
+                    script_dict=script_dict,
+                    target_duration_ms=narration.duration_ms,
+                    phase="provider_failure",
+                    elapsed_ms=(time.perf_counter() - music_started_at) * 1000,
+                    error=exc,
+                )
+                raise
         self.music.persist_background_music_debug(
             job.job_id,
             attempt=attempt,
             topic_dict=topic_dict,
             script_dict=script_dict,
             target_duration_ms=narration.duration_ms,
-            phase="provider_completed",
+            phase="provider_completed_prefetch" if (result.get("provider_metadata") or {}).get("prefetch_consumed") else "provider_completed",
             elapsed_ms=(time.perf_counter() - music_started_at) * 1000,
             result=result,
         )
