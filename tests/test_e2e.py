@@ -31,7 +31,7 @@ from app.editorial.repetition import build_channel_repetition_report  # noqa: E4
 from app.main import app, artifact_url  # noqa: E402
 from app.models import BackgroundMusicAsset, Job, NarrationAsset, PerformanceMetric, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest  # noqa: E402
 from app.orchestrator import JobOrchestrator, RecoverableStepError, StepDefinition, normalize_script_metrics, orchestrator  # noqa: E402
-from app.providers import DeepSeekCreativeProvider, LLMProviderRegistry, LocalSpeechFallbackProvider, MiniMaxBackgroundMusicProvider, MinimaxCreativeProvider, MinimaxImageProvider, MockCreativeProvider, ProviderFailure, QwenCreativeProvider, ResilientCreativeProvider, ResilientMusicProvider  # noqa: E402
+from app.providers import DeepSeekCreativeProvider, LLMProviderRegistry, LocalSpeechFallbackProvider, MiniMaxBackgroundMusicProvider, MinimaxCreativeProvider, MinimaxImageProvider, MockCreativeProvider, ProviderFailure, ResilientCreativeProvider, ResilientMusicProvider  # noqa: E402
 from app.quality.asset_gate import AssetGate  # noqa: E402
 from app.quality.render_gate import RenderGate  # noqa: E402
 from app.quality.scene_gate import ScenePlanGate  # noqa: E402
@@ -520,62 +520,31 @@ def test_deepseek_provider_uses_v4_flash_openai_compatible_client(monkeypatch) -
     assert result["qa_metrics"]["repair_provider"] == "deepseek"
 
 
-def test_qwen_provider_uses_max_openai_compatible_client(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    settings = SimpleNamespace(
-        qwen_api_key="qwen-key",
-        qwen_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        qwen_model="qwen3.6-max-preview",
-        qwen_timeout_sec=90,
+def test_llm_registry_uses_deepseek_for_repair_and_scene_defaults(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.providers.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            llm_primary_provider="minimax",
+            llm_fallback_provider="deepseek",
+            llm_script_draft_provider="deepseek",
+            llm_repair_provider="deepseek",
+            llm_scene_provider="deepseek",
+            real_run_allow_mock_fallback=False,
+            resolved_minimax_text_api_key="minimax-key",
+            minimax_text_base_url="https://api.minimax.io/v1",
+            minimax_text_timeout_sec=150,
+            deepseek_api_key="deepseek-key",
+            deepseek_base_url="https://api.deepseek.com",
+            deepseek_model="deepseek-v4-flash",
+            deepseek_timeout_sec=90,
+        ),
     )
 
-    class FakeCompletions:
-        def create(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(
-                choices=[
-                    SimpleNamespace(
-                        message=SimpleNamespace(
-                            content=json.dumps(
-                                {
-                                    "title": "A comida que pinta flamingos",
-                                    "hook": "A pena rosa começa no prato.",
-                                    "body_beats": ["Pigmentos da dieta podem influenciar a cor."],
-                                    "ending": "No replay, a primeira frase já mostrava a tinta.",
-                                    "cta": None,
-                                    "full_narration": "A pena rosa começa no prato. Pigmentos da dieta podem influenciar a cor. No replay, a primeira frase já mostrava a tinta.",
-                                    "estimated_duration_sec": 30,
-                                    "key_facts": ["Pigmentos da dieta podem influenciar a cor."],
-                                    "source_fact_ids": [],
-                                    "token_count": 24,
-                                    "language": "pt-BR",
-                                    "retention_map": {},
-                                    "visual_opening": {},
-                                    "qa_metrics": {},
-                                    "prompt_version": EDITORIAL_PROMPT_VERSION,
-                                }
-                            )
-                        )
-                    )
-                ]
-            )
+    registry = LLMProviderRegistry()
 
-    class FakeOpenAI:
-        def __init__(self, **kwargs):
-            captured["client_kwargs"] = kwargs
-            self.chat = SimpleNamespace(completions=FakeCompletions())
-
-    monkeypatch.setattr("app.providers.get_settings", lambda: settings)
-    monkeypatch.setattr("app.providers.OpenAI", FakeOpenAI)
-
-    provider = QwenCreativeProvider()
-    result = provider.generate_script({"canonical_topic": "flamingos", "angle": "cor pela alimentação"})
-
-    assert captured["client_kwargs"]["api_key"] == "qwen-key"
-    assert captured["client_kwargs"]["base_url"] == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-    assert captured["model"] == "qwen3.6-max-preview"
-    assert result["qa_metrics"]["source_provider"] == "qwen"
+    assert registry.repair_provider().provider_name == "deepseek"
+    assert registry.scene_provider().provider_name == "deepseek"
 
 
 def test_scene_plan_gate_rejects_generic_prompt_without_no_text_constraint() -> None:
@@ -2495,13 +2464,14 @@ def test_publish_audit_failures_become_automatic_hard_blockers() -> None:
             "reasons": [
                 "source_fact_mismatch",
                 "unsupported_claim",
+                "claim_trace_grounding_missing",
                 "rights_confirmation_required",
                 "low_retention_hook",
             ],
         }
     )
 
-    assert blockers == ["source_fact_mismatch", "unsupported_claim", "low_retention_hook"]
+    assert blockers == ["source_fact_mismatch", "unsupported_claim", "claim_trace_grounding_missing", "low_retention_hook"]
 
 
 def test_text_publish_audit_has_hard_timeout(monkeypatch) -> None:
@@ -2589,6 +2559,65 @@ def test_simple_shorts_mode_skips_text_publish_audit(monkeypatch) -> None:
     assert audit == {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True}
 
 
+def test_simple_shorts_mode_publish_readiness_requires_manual_publish_audit(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
+    readiness = orchestrator._publish_readiness_report(
+        None,
+        SimpleNamespace(canonical_topic="paisagens extremas", angle="curiosidades visuais"),
+        {"status": "skipped", "facts": []},
+        ["#shorts", "#curiosidades", "#paisagens"],
+        {
+            "script_gate_pass": True,
+            "scene_plan_gate_pass": True,
+            "asset_gate_pass": True,
+            "subtitle_gate_pass": True,
+            "render_gate_pass": True,
+        },
+        {
+            **_base_script("Paisagens extremas parecem de outro planeta."),
+            "claim_trace": [{"text": "Paisagens extremas parecem de outro planeta.", "source_fact_ids": [], "grounding": "conservative"}],
+        },
+        {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True},
+    )
+
+    assert readiness["passed"] is False
+    assert readiness["reasons"] == ["text_publish_audit_skipped"]
+
+
+def test_simple_shorts_mode_publish_readiness_blocks_factual_topic_without_grounding(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
+    readiness = orchestrator._publish_readiness_report(
+        None,
+        SimpleNamespace(canonical_topic="Por que cafe tira o sono", angle="neurociencia"),
+        {"status": "skipped", "facts": []},
+        ["#shorts", "#ciencia", "#cerebro"],
+        {
+            "script_gate_pass": True,
+            "scene_plan_gate_pass": True,
+            "asset_gate_pass": True,
+            "subtitle_gate_pass": True,
+            "render_gate_pass": True,
+        },
+        {
+            **_base_script("A cafeina bloqueia os receptores de adenosina no cerebro."),
+            "source_fact_ids": [],
+            "claim_trace": [
+                {
+                    "text": "A cafeina bloqueia os receptores de adenosina no cerebro.",
+                    "source_fact_ids": [],
+                    "grounding": "missing",
+                }
+            ],
+        },
+        {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True},
+    )
+
+    assert readiness["passed"] is False
+    assert "text_publish_audit_skipped" in readiness["reasons"]
+    assert "fact_pack_missing_for_factual_topic" in readiness["reasons"]
+    assert "claim_trace_grounding_missing" in readiness["reasons"]
+
+
 def test_simple_shorts_mode_makes_script_gate_non_blocking(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", True)
     script = _base_script(
@@ -2604,6 +2633,92 @@ def test_simple_shorts_mode_makes_script_gate_non_blocking(monkeypatch) -> None:
     assert metrics["script_quality_gate_pass"] is True
     assert metrics["script_quality_gate_blocking"] is False
     assert metrics["simple_shorts_mode"] is True
+
+
+def test_build_monetization_report_turns_skipped_publish_audit_into_manual_review(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "paisagens extremas",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 45,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste",
+            "requested_angle": None,
+        }
+    )
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic",
+                canonical_topic="paisagens extremas",
+                angle="curiosidades visuais",
+                hook_promise="paisagens de outro planeta",
+                entities=["paisagens"],
+                search_terms=["paisagens extremas"],
+                title_candidates=["Paisagens extremas parecem irreais"],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"script-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="script",
+                title="Paisagens extremas parecem irreais",
+                hook="Paisagens extremas parecem irreais.",
+                body_beats=[],
+                ending="No fim, parece outro planeta.",
+                cta=None,
+                full_narration="Paisagens extremas parecem irreais.",
+                estimated_duration_sec=35,
+                key_facts=[],
+                token_count=5,
+                language="pt-BR",
+                qa_metrics={"script_quality_gate_pass": True},
+            )
+        )
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.quality_summary = {
+            "script": {"script_quality_gate_pass": True},
+            "scene_plan": {"scene_plan_gate_pass": True},
+            "assets": {"semantic_threshold_pass": True},
+            "subtitles": {"subtitle_gate_pass": True},
+            "render": {"render_gate_pass": True},
+        }
+        session.commit()
+
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline,
+        "publish_readiness_report",
+        lambda *args, **kwargs: {
+            "passed": False,
+            "reasons": ["text_publish_audit_skipped"],
+            "fact_pack_status": "skipped",
+            "hashtag_count": 3,
+            "weak_hashtags": [],
+            "fact_risk": {"blocked": False, "claim_count": 0, "simple_shorts_mode": True},
+            "minimax_audit": {"passed": True, "skipped": True},
+            "simple_shorts_mode": True,
+        },
+    )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        report = orchestrator.monetization_pipeline.build_monetization_report(session, job)
+
+    assert report["final_status"] == "monetization_review"
+    assert report["passed"] is False
+    assert report["hard_blockers"] == []
+    assert "publish_audit_required" in report["manual_required"]
 
 
 def test_rights_registry_requires_evidence_for_confirmed_minimax_assets(monkeypatch) -> None:

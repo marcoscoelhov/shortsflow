@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     strict_minimax_validation: bool = False
     llm_primary_provider: str = "minimax"
     llm_fallback_provider: str = "deepseek"
-    llm_repair_provider: str = "qwen"
-    llm_scene_provider: str = "qwen"
+    llm_repair_provider: str = "deepseek"
+    llm_scene_provider: str = "deepseek"
     llm_enable_fallback: bool = True
     llm_script_draft_provider: str = "deepseek"
     llm_script_repair_attempts: int = 1

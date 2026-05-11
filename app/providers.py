@@ -1008,8 +1008,6 @@ class LLMProviderRegistry:
                 return MinimaxCreativeProvider()
             if normalized in {"deepseek", "deepseek_v4_flash", "deepseek-v4-flash", "deepseek_v4"}:
                 return DeepSeekCreativeProvider()
-            if normalized in {"qwen", "qwen_max", "qwen-max", "qwen3-max", "qwen3.6-max-preview", "qwen3_6_max_preview"}:
-                return QwenCreativeProvider()
         except ProviderFailure:
             if required:
                 raise

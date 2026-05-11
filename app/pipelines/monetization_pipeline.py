@@ -129,6 +129,8 @@ class MonetizationPipeline(BasePipeline):
             manual_required.append("metadata_review_required")
         if channel_repetition_report["repetition_risk"] != "low" and "originality_confirmed" not in confirmations:
             manual_required.append("originality_review_required")
+        if "text_publish_audit_skipped" in publish_readiness["reasons"]:
+            manual_required.append("publish_audit_required")
         if "rights_confirmed" in confirmations:
             manual_required = [item for item in manual_required if item != "rights_confirmation_required"]
         warnings.extend(publish_readiness["reasons"])
@@ -183,6 +185,7 @@ class MonetizationPipeline(BasePipeline):
             "minimax_audit_failed",
             "minimax_audit_invalid",
             "text_publish_audit_timeout",
+            "claim_trace_grounding_missing",
             "invented_source_fact_ids",
             "fact_pack_missing_for_factual_topic",
             "quality_checklist_failed",
@@ -746,28 +749,41 @@ class MonetizationPipeline(BasePipeline):
         script_artifact: dict[str, Any] | None = None,
         minimax_audit: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        script_dict = {**(self.script_to_dict(script) if script else {}), **(script_artifact or {})}
+        source_ids = script_dict.get("source_fact_ids") or script_dict.get("qa_metrics", {}).get("source_fact_ids") or []
+        if isinstance(source_ids, str):
+            source_ids = [source_ids]
+        fact_risk = self.script_gate._fact_risk_report(script_dict) if script_dict else {"blocked": False, "claim_count": 0}  # noqa: SLF001
+        factual_topic = bool(topic_plan and re.search(r"\b(?:por que|porque|como|ci[eê]ncia|f[ií]sica|biologia|engenharia|hist[oó]ria|sa[uú]de|m[eé]dico|animal|animais|flamingo|torre|c[eé]rebro|neuro)\b", f"{topic_plan.canonical_topic} {topic_plan.angle}", re.IGNORECASE))
         reasons: list[str] = []
         if not all(checklist.values()):
             reasons.append("quality_checklist_failed")
         if self.settings.simple_shorts_mode:
+            claim_trace = script_dict.get("claim_trace") or script_dict.get("qa_metrics", {}).get("claim_trace") or []
+            if not isinstance(claim_trace, list):
+                claim_trace = []
+            has_missing_grounding = any(
+                isinstance(item, dict) and str(item.get("grounding") or "").lower() == "missing"
+                for item in claim_trace
+            )
+            if minimax_audit and minimax_audit.get("skipped"):
+                reasons.append("text_publish_audit_skipped")
+            if factual_topic and fact_pack.get("status") != "verified":
+                reasons.append("fact_pack_missing_for_factual_topic")
+            if factual_topic and (has_missing_grounding or (fact_risk.get("claim_count", 0) > 0 and not source_ids)):
+                reasons.append("claim_trace_grounding_missing")
             return {
                 "passed": not reasons,
                 "reasons": list(dict.fromkeys(reasons)),
                 "fact_pack_status": fact_pack.get("status") or "skipped",
                 "hashtag_count": len(tags),
                 "weak_hashtags": [],
-                "fact_risk": {"blocked": False, "claim_count": 0, "simple_shorts_mode": True},
+                "fact_risk": {**fact_risk, "simple_shorts_mode": True},
                 "minimax_audit": minimax_audit or {"skipped": True},
                 "simple_shorts_mode": True,
             }
-        script_dict = {**(self.script_to_dict(script) if script else {}), **(script_artifact or {})}
-        source_ids = script_dict.get("source_fact_ids") or script_dict.get("qa_metrics", {}).get("source_fact_ids") or []
-        if isinstance(source_ids, str):
-            source_ids = [source_ids]
         if fact_pack.get("status") != "verified" and source_ids:
             reasons.append("invented_source_fact_ids")
-        fact_risk = self.script_gate._fact_risk_report(script_dict) if script_dict else {"blocked": False, "claim_count": 0}  # noqa: SLF001
-        factual_topic = bool(topic_plan and re.search(r"\b(?:por que|porque|como|ci[eê]ncia|f[ií]sica|biologia|engenharia|hist[oó]ria|sa[uú]de|m[eé]dico|animal|animais|flamingo|torre|c[eé]rebro|neuro)\b", f"{topic_plan.canonical_topic} {topic_plan.angle}", re.IGNORECASE))
         if factual_topic and fact_pack.get("status") != "verified" and (fact_risk.get("claim_count", 0) > 0 or len(word_tokens(script_dict.get("full_narration", ""))) >= 45):
             reasons.append("fact_pack_missing_for_factual_topic")
         weak_tags = [tag for tag in tags if tag.lower() != "#shorts" and (tag.lstrip("#") in self.weak_hashtag_terms() or len(tag.lstrip("#")) < 4)]
