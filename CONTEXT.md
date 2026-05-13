@@ -52,6 +52,10 @@ _Avoid_: fact-check automatico, fonte do app, aprovacao de publicacao
 A data, hora e fuso escolhidos para publicar um **Job de Video** aprovado.
 _Avoid_: data tecnica, timestamp cru, horario do servidor
 
+**Progresso do Job**:
+A leitura operacional de onde um **Job de Video** esta no pipeline, quais etapas ja terminaram, qual etapa esta em andamento e qual proxima acao resta.
+_Avoid_: log bruto, porcentagem decorativa, timeline tecnica
+
 ## Relationships
 
 - Um **Job de Video** produz zero ou um **Arquivo de Video Final**.
@@ -67,6 +71,7 @@ _Avoid_: data tecnica, timestamp cru, horario do servidor
 - **Fatos Declarados** dependem de **Confirmacao de Factualidade**.
 - O **Hub de Revisao** oferece **Roteiro Pronto** como modo de entrada distinto de tema e titulo.
 - Um **Horario de Publicacao** so deve ser escolhido depois da aprovacao do **Job de Video**.
+- Um **Hub de Revisao** deve exibir o **Progresso do Job** sem exigir leitura de logs ou artefatos tecnicos.
 
 ## Example dialogue
 
@@ -106,6 +111,8 @@ _Avoid_: data tecnica, timestamp cru, horario do servidor
 > **Domain expert:** "Nao. Hashtags sao metadados e podem ser completadas automaticamente sem alterar o roteiro."
 > **Dev:** "Data e hora no job e um timestamp tecnico?"
 > **Domain expert:** "Nao. E o Horario de Publicacao: a escolha humana de quando o Short aprovado deve ir ao YouTube."
+> **Dev:** "Progresso quer dizer mostrar todos os logs do worker?"
+> **Domain expert:** "Nao. Progresso do Job e uma leitura resumida das etapas reais: concluido, rodando, pendente ou falhou."
 
 ## Flagged ambiguities
 
@@ -125,3 +132,4 @@ _Avoid_: data tecnica, timestamp cru, horario do servidor
 - "titulo" em **Roteiro Pronto** nao significa fala narrada; resolvido: titulo e metadado, enquanto hook, beats, payoff e fechamento formam a narracao.
 - "hashtags" em **Roteiro Pronto** nao sao fonte de verdade narrativa; resolvido: podem ser derivadas automaticamente como metadados.
 - "data e hora" em agendamento nao significa horario do servidor; resolvido: use **Horario de Publicacao**, com fuso explicito.
+- "progresso" nao significa percentual inventado nem log bruto; resolvido: derive o **Progresso do Job** das etapas reais, execucoes persistidas e estado atual do job.

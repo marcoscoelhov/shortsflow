@@ -95,6 +95,7 @@ def _create_basic_job(
     *,
     job_id: str,
     status: str,
+    current_step: str | None = None,
     seed_theme: str = "Polvos",
     updated_at: datetime | None = None,
     quality_summary: dict | None = None,
@@ -111,6 +112,7 @@ def _create_basic_job(
             created_at=timestamp,
             updated_at=timestamp,
             status=status,
+            current_step=current_step,
             niche_id="curiosidades",
             language="pt-BR",
             target_duration_sec=35,
@@ -140,6 +142,52 @@ def _write_job_artifact(job_id: str, relative_path: str, content: str = "artifac
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(content, encoding="utf-8")
     return artifact_path
+
+
+def test_job_progress_is_exposed_in_detail_and_api() -> None:
+    job_id = "job-progress-running"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="running", current_step="script")
+        session.commit()
+    _write_job_artifact(
+        job_id,
+        "performance_timeline.json",
+        json.dumps(
+            {
+                "job_id": job_id,
+                "steps": [
+                    {"step_name": "input_gate", "attempt": 1, "status": "succeeded", "duration_ms": 120},
+                    {"step_name": "topic_plan", "attempt": 1, "status": "succeeded", "duration_ms": 340},
+                    {"step_name": "script", "attempt": 1, "status": "running", "duration_ms": None},
+                ],
+            }
+        ),
+    )
+    _write_job_artifact(
+        job_id,
+        "events.jsonl",
+        json.dumps({"event_name": "script.started", "status": "succeeded"}, ensure_ascii=False) + "\n",
+    )
+
+    client = TestClient(app)
+    response = client.get(f"/api/jobs/{job_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["progress"]["state"] == "running"
+    assert payload["progress"]["percent"] > 0
+    assert payload["progress"]["current_label"] == "Roteiro"
+    assert payload["progress"]["steps"][0]["status"] == "completed"
+    assert payload["progress"]["steps"][2]["status"] == "running"
+
+    detail = client.get(f"/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert "Progresso do job" in detail.text
+    assert "Roteiro" in detail.text
+    assert "script.started" in detail.text
+
+    hub = client.get("/")
+    assert hub.status_code == 200
+    assert "Progresso do job" in hub.text
 
 
 def test_full_pipeline_reaches_monetization_review() -> None:

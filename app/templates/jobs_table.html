@@ -4,6 +4,7 @@
 </div>
 <div class="job-list">
   {% for job, seed_theme, duration_ms, fallback_count, asset_count in rows %}
+  {% set row_progress = job_progress_snapshot(job) %}
   <article class="job-row-card">
     <div class="job-row-main">
       <div class="job-row-head">
@@ -18,6 +19,15 @@
         <span><strong>Criado:</strong> {{ job.created_at }}</span>
         <span><strong>Duração:</strong> {% if duration_ms %}{{ (duration_ms / 1000)|round(1) }} s{% else %}-{% endif %}</span>
         <span><strong>Fallbacks:</strong> {{ fallback_count }}</span>
+      </div>
+      <div class="job-progress-compact" aria-label="Progresso do job">
+        <div>
+          <strong>{{ row_progress.percent }}%</strong>
+          <span>{{ row_progress.current_label }}</span>
+        </div>
+        <div class="job-progress-bar compact" aria-hidden="true">
+          <span class="job-progress-fill {{ row_progress.state }}" style="width: {{ row_progress.percent }}%"></span>
+        </div>
       </div>
       <p class="job-row-next"><strong>Próxima ação:</strong> {{ job_next_action(job.status) }}</p>
     </div>

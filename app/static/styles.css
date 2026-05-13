@@ -388,6 +388,60 @@ button.ghost {
   font-size: 0.92rem;
 }
 
+.job-progress-compact {
+  display: grid;
+  gap: 0.45rem;
+  max-width: 520px;
+}
+
+.job-progress-compact > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.job-progress-compact strong {
+  color: var(--ink);
+}
+
+.job-progress-bar {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  min-height: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.52);
+}
+
+.job-progress-bar.compact {
+  min-height: 0.52rem;
+}
+
+.job-progress-fill {
+  display: block;
+  height: 100%;
+  min-height: inherit;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  transition: width 240ms ease;
+}
+
+.job-progress-fill.completed {
+  background: linear-gradient(90deg, var(--success), #86efac);
+}
+
+.job-progress-fill.failed {
+  background: linear-gradient(90deg, var(--danger), #fca5a5);
+}
+
+.job-progress-fill.queued,
+.job-progress-fill.waiting {
+  background: linear-gradient(90deg, #64748b, #94a3b8);
+}
+
 .job-row-actions {
   display: grid;
   gap: 0.65rem;
@@ -837,6 +891,101 @@ pre {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.job-progress-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.job-progress-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.job-progress-head h3,
+.job-progress-head p {
+  margin: 0.25rem 0 0;
+}
+
+.job-progress-head > strong {
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  letter-spacing: -0.06em;
+  color: var(--ink);
+}
+
+.job-progress-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 0.65rem;
+}
+
+.job-progress-step {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: rgba(2, 6, 23, 0.28);
+  color: var(--muted);
+}
+
+.job-progress-step > span {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.job-progress-step strong {
+  color: var(--ink);
+}
+
+.job-progress-step small {
+  font-size: 0.78rem;
+}
+
+.job-progress-step.completed {
+  border-color: rgba(34, 197, 94, 0.32);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.job-progress-step.completed > span {
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+}
+
+.job-progress-step.running {
+  border-color: rgba(249, 115, 22, 0.5);
+  background: rgba(249, 115, 22, 0.12);
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.1), 0 16px 42px rgba(249, 115, 22, 0.1);
+}
+
+.job-progress-step.running > span {
+  background: rgba(249, 115, 22, 0.18);
+  color: #fed7aa;
+}
+
+.job-progress-step.failed {
+  border-color: rgba(248, 113, 113, 0.38);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.job-progress-step.failed > span {
+  background: rgba(248, 113, 113, 0.16);
+  color: #fca5a5;
+}
+
+.job-progress-last {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .minimal-featured-render {

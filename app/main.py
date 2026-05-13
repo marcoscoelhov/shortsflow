@@ -187,6 +187,10 @@ def _job_next_action(job_status: str | None, schedule_status: str | None = None)
     return "Aguardar a próxima etapa automática."
 
 
+def _job_progress_snapshot(job: Job) -> dict[str, object]:
+    return orchestrator.build_job_progress(job)
+
+
 def _job_action_guide(
     job: Job,
     monetization_report: dict[str, object] | None,
@@ -264,6 +268,7 @@ templates.env.globals["job_status_label"] = _job_status_label
 templates.env.globals["schedule_status_label"] = _schedule_status_label
 templates.env.globals["job_flow_stage"] = _job_flow_stage
 templates.env.globals["job_next_action"] = _job_next_action
+templates.env.globals["job_progress_snapshot"] = _job_progress_snapshot
 
 
 @asynccontextmanager
@@ -984,6 +989,7 @@ def job_json(job_id: str):
                 "video_uri": details["render"].video_uri if details["render"] else None,
                 "duration_ms": details["render"].duration_ms if details["render"] else None,
             },
+            "progress": details["progress"],
         }
 
 

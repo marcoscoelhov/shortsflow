@@ -16,6 +16,7 @@
 {% set repair = details.repair_telemetry or {} %}
 {% set publication_attempts = details.publication_attempts or [] %}
 {% set publish_result = details.publish_result or {} %}
+{% set progress = details.progress or {} %}
 {% set retention = (job.quality_summary or {}).get("retention", {}) %}
 {% set retention_cleanup = details.retention_cleanup or {} %}
 {% set artifacts_cleaned = details.artifacts_cleaned %}
@@ -75,6 +76,10 @@
           <strong>Próxima ação</strong>
           <span>{{ job_next_action(job.status, schedule_status) }}</span>
         </div>
+        <div class="focus-pill">
+          <strong>Progresso</strong>
+          <span>{{ progress.percent }}% · {{ progress.current_label }}</span>
+        </div>
         {% if publication_schedule_display %}
         <div class="focus-pill">
           <strong>Agenda</strong>
@@ -88,6 +93,40 @@
         </div>
         {% endif %}
       </div>
+    </section>
+
+    <section class="panel job-progress-panel">
+      <div class="job-progress-head">
+        <div>
+          <p class="eyebrow">Progresso do job</p>
+          <h3>{{ progress.current_label }}</h3>
+          <p>{{ progress.summary }}</p>
+        </div>
+        <strong>{{ progress.percent }}%</strong>
+      </div>
+      <div class="job-progress-bar" aria-label="{{ progress.percent }}% concluído">
+        <span class="job-progress-fill {{ progress.state }}" style="width: {{ progress.percent }}%"></span>
+      </div>
+      <div class="job-progress-steps" aria-label="Etapas do pipeline">
+        {% for step in progress.steps %}
+        <div class="job-progress-step {{ step.status }}">
+          <span>{{ step.index }}</span>
+          <strong>{{ step.label }}</strong>
+          {% if step.duration_ms %}
+          <small>{{ (step.duration_ms / 1000)|round(1) }} s</small>
+          {% elif step.status == "running" %}
+          <small>rodando</small>
+          {% elif step.status == "failed" %}
+          <small>falhou</small>
+          {% else %}
+          <small>{{ step.status }}</small>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% if progress.last_event %}
+      <p class="job-progress-last">Último evento: {{ progress.last_event.event_name }} · {{ progress.last_event.status }}</p>
+      {% endif %}
     </section>
 
     <section class="panel featured-render minimal-featured-render">
