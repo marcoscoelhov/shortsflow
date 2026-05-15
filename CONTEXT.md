@@ -33,7 +33,7 @@ Um tema escolhido pelo sistema quando o pedido nao traz um assunto explicito.
 _Avoid_: tema aleatorio, fallback local, sugestao solta
 
 **Roteiro Pronto**:
-Um roteiro fornecido por uma pessoa como fonte de verdade editorial para um **Job de Video**.
+Um roteiro fornecido por uma pessoa como fonte de verdade editorial para um **Job de Video**; o sistema nao deve reescrever hook, beats, payoff ou fechamento automaticamente.
 _Avoid_: prompt, tema, titulo completo
 
 **Texto Rotulado**:
@@ -90,9 +90,9 @@ _Avoid_: log bruto, porcentagem decorativa, timeline tecnica
 > **Dev:** "Se eu mando titulo, hook, beats, payoff e fechamento, isso e so um prompt?"
 > **Domain expert:** "Nao. Isso e um Roteiro Pronto; o sistema deve preservar a intencao editorial e nao tratar como tema bruto."
 > **Dev:** "O gerador pode trocar a ideia central do roteiro para melhorar retencao?"
-> **Domain expert:** "Nao. Roteiro Pronto e fonte de verdade editorial; melhorias automaticas devem ser conservadoras."
+> **Domain expert:** "Nao. Roteiro Pronto e fonte de verdade editorial; o texto enviado deve ser preservado."
 > **Dev:** "Se o roteiro pronto vier com problema mecanico, o job deve falhar direto?"
-> **Domain expert:** "Nao. Pode reparar automaticamente, desde que preserve a intencao editorial."
+> **Domain expert:** "Sim, se o problema impedir o pipeline; nao reescreva automaticamente o roteiro pronto."
 > **Dev:** "Posso mandar esse roteiro pronto em JSON?"
 > **Domain expert:** "Nao por enquanto. O formato canonico e Texto Rotulado."
 > **Dev:** "Se o roteiro pronto traz numeros factuais, o app precisa refazer toda a checagem?"
@@ -123,11 +123,11 @@ _Avoid_: log bruto, porcentagem decorativa, timeline tecnica
 - "dark mode" nao significa tema alternavel por usuario neste momento; resolvido: e o padrao visual do **Console Operacional**.
 - "tema automatico" nao significa escolha aleatoria; resolvido: o sistema deve preferir tendencia real e expor quando caiu em fallback.
 - "roteiro pronto" nao significa prompt livre; resolvido: e conteudo editorial estruturado fornecido por uma pessoa e tratado como fonte de verdade.
-- "reparar automaticamente" nao significa reescrever criativamente; resolvido: o reparo deve ser conservador e preservar a intencao editorial do **Roteiro Pronto**.
+- "reparar automaticamente" nao se aplica ao texto de **Roteiro Pronto**; resolvido: se o texto pronto tiver problema que bloqueia o pipeline, bloqueie e exponha o motivo em vez de reescrever hook, beats, payoff ou fechamento.
 - "texto rotulado" nao significa JSON nem markdown livre; resolvido: o formato canonico inicial usa rotulos editoriais em texto simples.
 - "confiar em mim" nao significa que o fato foi verificado automaticamente pelo app; resolvido: fatos do **Roteiro Pronto** entram como **Fatos Declarados** sob responsabilidade de quem enviou.
 - "confirmacao de factualidade" nao significa aprovacao de publicacao; resolvido: ela cobre a responsabilidade factual do **Roteiro Pronto**.
-- "pular geracao por LLM" nao significa pular validacao; resolvido: **Roteiro Pronto** preserva o texto enviado, mas ainda passa por gates e reparos conservadores.
+- "pular geracao por LLM" nao significa pular validacao; resolvido: **Roteiro Pronto** preserva o texto enviado e eventuais problemas viram warnings, revisão ou bloqueio, nao reparo automatico do roteiro.
 - "ajustar duracao" nao significa expandir ou cortar livremente; resolvido: desvios pequenos podem ser reparados, desvios grandes bloqueiam antes da midia.
 - "titulo" em **Roteiro Pronto** nao significa fala narrada; resolvido: titulo e metadado, enquanto hook, beats, payoff e fechamento formam a narracao.
 - "hashtags" em **Roteiro Pronto** nao sao fonte de verdade narrativa; resolvido: podem ser derivadas automaticamente como metadados.

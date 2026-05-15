@@ -1634,6 +1634,9 @@ class ScriptPipeline(BasePipeline):
         cta_style: str = "none",
         job_id: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if plan_dict.get("ready_script_mode"):
+            return self._validate_ready_script_without_repair(script, plan_dict, target_duration_sec)
+
         script = self._apply_cta_policy(dict(script), cta_style)
         script = self._postprocess_script_for_quality(script, plan_dict, [])
         script["qa_metrics"] = normalize_script_metrics(dict(script.get("qa_metrics") or {}))
@@ -1785,6 +1788,44 @@ class ScriptPipeline(BasePipeline):
             last_reasons = [*fallback_gate.reasons, *fallback_consistency_reasons]
 
         raise RecoverableStepError(f"script quality gate failed: {', '.join(last_reasons)}")
+
+    def _validate_ready_script_without_repair(
+        self,
+        script: dict[str, Any],
+        plan_dict: dict[str, Any],
+        target_duration_sec: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        preserved = dict(script)
+        preserved["qa_metrics"] = normalize_script_metrics(dict(preserved.get("qa_metrics") or {}))
+        gate_result = self.script_gate.validate(preserved, target_duration_sec)
+        fact_pack = plan_dict.get("fact_pack") if isinstance(plan_dict.get("fact_pack"), dict) else {}
+        consistency_reasons = self._fact_pack_consistency_reasons(preserved, fact_pack)
+        attempts_log: list[dict[str, Any]] = [
+            {
+                "repair_attempt": 0,
+                "reason_codes": [*gate_result.reasons, *consistency_reasons],
+                "passed": not consistency_reasons,
+                "used_fallback": False,
+                "repair_strategy": "ready_script_preserve",
+            }
+        ]
+        if consistency_reasons:
+            raise RecoverableStepError(f"script quality gate failed: {', '.join(consistency_reasons)}")
+
+        metrics = {
+            **gate_result.metrics,
+            "script_quality_gate_pass": True,
+            "script_quality_gate_blocking": False,
+            "script_quality_gate_warnings": list(gate_result.reasons),
+            "fact_pack_consistency_pass": True,
+            "ready_script_declared_fact_check_accepted": bool(plan_dict.get("ready_script_fact_check_confirmed")),
+            "ready_script_preserved": True,
+            "script_auto_repair_skipped": True,
+            "script_repair_attempts_log": attempts_log,
+            **self._claim_trace_metrics(preserved),
+        }
+        preserved["qa_metrics"] = metrics
+        return preserved, metrics
 
     def _ready_script_declared_fact_check_accepts(
         self,

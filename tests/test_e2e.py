@@ -340,6 +340,14 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
     assert "ready_script_fact_check_confirmed=true" in str(captured["notes"])
 
 
+def test_hub_ready_script_mode_hides_tone_control() -> None:
+    client = TestClient(app)
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert '<div class="field" data-mode-section="theme title">\n          <label for="tone">Tom</label>' in response.text
+
+
 def test_hub_create_job_rejects_ready_script_without_fact_confirmation(monkeypatch) -> None:
     monkeypatch.setattr(main_module.orchestrator, "create_job", lambda _payload: "should-not-run")
     client = TestClient(app)
@@ -4499,6 +4507,63 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
     assert "243 dias para girar" in script["full_narration"]
     assert "“" not in script["full_narration"]
     assert script["claim_trace"]
+
+
+def test_ready_script_preserves_author_closing_without_auto_repair(monkeypatch) -> None:
+    from app.manual_script import parse_ready_script
+
+    ready_script = """Título: Água-viva imortal: o animal que pode reiniciar a vida
+Hook: Turritopsis não foge da velhice; ela aperta “voltar”.
+Loop: O que acontece quando morrer deixa de ser a única saída?
+Beats: Essa água-viva começa adulta, frágil e transparente.
+Quando sofre estresse, ela pode inverter o próprio ciclo.
+O corpo adulto volta a uma fase jovem, como uma planta marinha grudada.
+É como ver uma borboleta virar lagarta de novo.
+A natureza não criou imortalidade mística; criou um botão biológico.
+Payoff: A Turritopsis dohrnii pode voltar de medusa para pólipo, reiniciando sua fase de vida.
+Fechamento: Ela não vence o tempo; ela sai da partida.
+Hashtags: #curiosidades #facts #natureza #didyouknow #shorts"""
+    ready = parse_ready_script(ready_script, fact_check_confirmed=True)
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(
+        pipeline,
+        "_postprocess_script_for_quality",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("ready script must not be postprocessed")),
+    )
+    monkeypatch.setattr(
+        orchestrator.providers.creative,
+        "repair_script",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("ready script must not call LLM repair")),
+    )
+
+    script, metrics = pipeline._validate_or_repair_script(
+        ready.script,
+        {
+            "fact_pack": ready.fact_pack,
+            "ready_script_mode": True,
+            "ready_script_fact_check_confirmed": True,
+            "canonical_topic": "Turritopsis dohrnii",
+        },
+        45,
+        "none",
+        "ready-script-preserve-test",
+    )
+
+    assert script["ending"] == "Ela não vence o tempo; ela sai da partida."
+    assert script["full_narration"].endswith("Ela não vence o tempo; ela sai da partida.")
+    assert "Volta para a primeira imagem" not in script["full_narration"]
+    assert metrics["ready_script_preserved"] is True
+    assert metrics["script_auto_repair_skipped"] is True
+    assert metrics["script_quality_gate_warnings"] == ["ending_not_connected_to_hook"]
+    assert metrics["script_repair_attempts_log"] == [
+        {
+            "repair_attempt": 0,
+            "reason_codes": ["ending_not_connected_to_hook"],
+            "passed": True,
+            "used_fallback": False,
+            "repair_strategy": "ready_script_preserve",
+        }
+    ]
 
 
 def test_job_lease_delta_has_floor_for_real_provider_steps(monkeypatch) -> None:
