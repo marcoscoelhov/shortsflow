@@ -37,6 +37,15 @@ YTS_DATA_DIR=data
 Para subir o app:
 
 ```bash
+scripts/install_systemd_service.sh
+```
+
+O servico systemd fixa o hub em `127.0.0.1:8080`, reinicia em falhas e roda um
+port guard antes do start para liberar instancias antigas do proprio YTS
+Render. O instalador renderiza a unit de `deploy/systemd/yts-render-hub.service.in`
+com o caminho real do checkout. Para desenvolvimento manual sem systemd:
+
+```bash
 uvicorn app.main:app --host 127.0.0.1 --port 8080
 ```
 

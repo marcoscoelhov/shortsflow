@@ -64,19 +64,40 @@ Sempre reinicie o `uvicorn` depois de mudar `.env`.
 
 ## 4. Subir o hub
 
-Padrao local:
+Padrao operacional com systemd:
+
+```bash
+scripts/install_systemd_service.sh
+```
+
+O servico fixa o hub em `127.0.0.1:8080` e executa um port guard antes do
+start. O guard libera a porta somente quando o processo ocupando `8080`
+parece ser uma instancia anterior do proprio YTS Render; processos de outro
+app fazem o start falhar em vez de serem mortos silenciosamente. A unit
+versionada em `deploy/systemd/yts-render-hub.service.in` e renderizada pelo
+instalador com o caminho real do checkout.
+
+Para operacao manual sem systemd:
 
 ```bash
 uvicorn app.main:app --host 127.0.0.1 --port 8080
 ```
 
-Se a porta estiver ocupada:
+Nao use uma porta alternativa para o hub principal sem atualizar tambem
+Tailscale, `YTS_APP_URL` e os links operacionais. Se `8080` estiver ocupada,
+identifique o dono da porta antes de subir outro hub:
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8081
+ss -ltnp '( sport = :8080 )'
 ```
 
 ## 5. Validar que iniciou corretamente
+
+Com systemd:
+
+```bash
+systemctl status yts-render-hub.service --no-pager
+```
 
 ```bash
 curl http://127.0.0.1:8080/healthz
@@ -215,9 +236,15 @@ curl https://<hostname>.<tailnet>/healthz
 
 ## 15. Encerrar
 
-No terminal do `uvicorn`, use `Ctrl+C`.
+Com systemd:
 
-Se o processo ficou em background:
+```bash
+systemctl stop yts-render-hub.service
+```
+
+No terminal do `uvicorn` manual, use `Ctrl+C`.
+
+Se um processo manual ficou em background:
 
 ```bash
 ps -ef | rg 'uvicorn|app.main'
