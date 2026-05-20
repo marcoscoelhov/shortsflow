@@ -26,13 +26,14 @@ os.environ.setdefault("YTS_USE_MOCK_PROVIDERS", "true")
 import app.main as main_module  # noqa: E402
 import app.orchestrator as orchestrator_module  # noqa: E402
 import app.pipelines.script_pipeline as script_pipeline_module  # noqa: E402
+from app.automation import AutomationService  # noqa: E402
 from app.compliance.review import build_human_review_checklist  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.editorial.retention import EDITORIAL_PROMPT_VERSION, build_retention_map  # noqa: E402
 from app.editorial.repetition import build_channel_repetition_report  # noqa: E402
 from app.main import app, artifact_url  # noqa: E402
-from app.models import BackgroundMusicAsset, Job, NarrationAsset, PerformanceMetric, PublicationSchedule, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest  # noqa: E402
+from app.models import AutomationRun, ReadyScriptItem, BackgroundMusicAsset, Job, NarrationAsset, PerformanceMetric, PublicationSchedule, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest  # noqa: E402
 from app.orchestrator import JobOrchestrator, RecoverableStepError, StepDefinition, normalize_script_metrics, orchestrator  # noqa: E402
 from app.providers import DeepSeekCreativeProvider, LLMProviderRegistry, LocalSpeechFallbackProvider, MiniMaxBackgroundMusicProvider, MinimaxCreativeProvider, MinimaxImageProvider, MockCreativeProvider, OpenAICreativeProvider, ProviderFailure, ResilientCreativeProvider, ResilientMusicProvider  # noqa: E402
 from app.quality.asset_gate import AssetGate  # noqa: E402
@@ -211,7 +212,7 @@ def test_full_pipeline_reaches_monetization_review() -> None:
         assert subtitles.coverage_ratio >= 0.99
         assert subtitles.p95_drift_ms >= 0
         assert subtitles.max_drift_ms >= subtitles.p95_drift_ms
-        assert background_music.gain_db == -20.0
+        assert background_music.gain_db == -17.0
         assert Path(background_music.audio_uri.removeprefix("file://")).exists()
         assert Path(background_music.mixed_audio_uri.removeprefix("file://")).exists()
         assert len(selected_assets) >= 5
@@ -365,6 +366,160 @@ def test_hub_create_job_rejects_ready_script_without_fact_confirmation(monkeypat
     assert "ready_script_fact_check_confirmed" in response.text
 
 
+def test_ready_script_batch_import_persists_available_items() -> None:
+    client = TestClient(app)
+    batch = """Título: Terremoto teste lote A
+Hook: O chão abriu e a cidade mudou de forma.
+Loop: Como um abalo vira uma crise maior?
+Beats: A primeira ruptura derrubou estruturas.
+O dano atingiu sistemas vitais da cidade.
+Payoff: O impacto principal veio da sequência de falhas.
+Fechamento: O tremor começou. A cidade sentiu por dias.
+Hashtags: #curiosidades #shorts
+
+Título: Terremoto teste lote B
+Hook: A manhã começou com poeira e sirenes.
+Loop: Por que uma cidade preparada ainda pode colapsar?
+Beats: O impacto inicial afetou ruas e prédios.
+Depois vieram falhas em cadeia.
+Payoff: O desastre cresceu porque a infraestrutura perdeu defesa.
+Fechamento: O chão mexeu uma vez. O resto caiu em sequência.
+Hashtags: #curiosidades #shorts"""
+
+    response = client.post(
+        "/automation/ready-scripts/import",
+        data={"ready_script_batch": batch, "fact_check_confirmed": "true", "return_to": "/calendar"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/calendar?imported=2"
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(ReadyScriptItem).where(ReadyScriptItem.title.in_(["Terremoto teste lote A", "Terremoto teste lote B"]))
+        ).all()
+
+    assert len(rows) == 2
+    assert {row.status for row in rows} == {"available"}
+    assert all(row.fact_check_confirmed for row in rows)
+    page = client.get("/")
+    assert page.status_code == 200
+    assert 'id="ready-script-bank-modal"' in page.text
+    assert "Terremoto teste lote A" in page.text
+    assert "Terremoto teste lote B" in page.text
+    assert "2 disponíveis" in page.text
+
+
+def test_automation_preflight_fails_before_consuming_ready_script() -> None:
+    service = AutomationService(orchestrator)
+    service.set_automation_enabled(True)
+    result = service.import_ready_script_batch(
+        """Título: Preflight YouTube roteiro unico
+Hook: Uma agenda automatica sem OAuth vira armadilha.
+Loop: Por que o sistema precisa parar antes de gerar?
+Beats: Sem canal conectado, o upload não tem destino real.
+O roteiro ainda deve ficar no banco.
+Payoff: O preflight evita consumir material sem publicar.
+Fechamento: Primeiro conecta. Depois automatiza.
+Hashtags: #curiosidades #shorts""",
+        fact_check_confirmed=True,
+        source="test-preflight",
+    )
+    assert result.imported == 1
+
+    run_result = service.run_daily_cycle(force=True)
+
+    assert run_result["status"] == "failed"
+    assert "YTS_YOUTUBE_API_ENABLED=false" in str(run_result["error"])
+    with SessionLocal() as session:
+        item = session.scalar(select(ReadyScriptItem).where(ReadyScriptItem.title == "Preflight YouTube roteiro unico"))
+        run = session.scalar(select(AutomationRun).where(AutomationRun.run_id == run_result["run_id"]))
+
+    assert item is not None
+    assert item.status == "available"
+    assert run is not None
+    assert run.attempts_used == 0
+
+
+def test_autoapproval_score_blocks_high_repetition() -> None:
+    service = AutomationService(orchestrator)
+    job_id = "auto-score-high-repetition"
+    topic_request_id = f"{job_id}-request"
+    with SessionLocal() as session:
+        session.add(
+            Job(
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="auto-score",
+                status="ready_for_upload",
+                niche_id="curiosidades",
+                language="pt-BR",
+                target_duration_sec=45,
+                topic_request_id=topic_request_id,
+                artifact_index={},
+                quality_summary={
+                    "assets": {"asset_semantic_score_avg": 0.9},
+                    "monetization": {"passed": True, "final_status": "ready_for_upload", "hard_blockers": [], "manual_required": []},
+                },
+            )
+        )
+        session.add(
+            TopicRequest(
+                topic_request_id=topic_request_id,
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="auto-score-request",
+                niche_id="curiosidades",
+                seed_theme="Score alto com repeticao",
+                language="pt-BR",
+                target_duration_sec=45,
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"{job_id}-script",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="auto-score-script",
+                title="Score alto com repetição",
+                hook="Um vídeo pode passar nos scores e ainda repetir demais.",
+                body_beats=["O bloqueio principal vem da similaridade narrativa."],
+                ending="Score bom não salva uma história repetida.",
+                cta=None,
+                full_narration="Um vídeo pode passar nos scores e ainda repetir demais. O bloqueio principal vem da similaridade narrativa. Score bom não salva uma história repetida.",
+                estimated_duration_sec=40,
+                key_facts=[],
+                token_count=24,
+                language="pt-BR",
+                qa_metrics={"hook_score": 0.9, "information_density_score": 0.9},
+            )
+        )
+        session.commit()
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "passed": True,
+            "channel_repetition_report": {"repetition_risk": "high", "max_similarity": 0.91},
+            "metadata_review": {"requires_metadata_review": False},
+            "fact_claims_report": {"requires_fact_review": False},
+            "publish_readiness": {
+                "minimax_audit": {
+                    "factual_score": 0.9,
+                    "retention_score": 0.9,
+                    "metadata_score": 0.9,
+                }
+            },
+        },
+    )
+
+    report = service.evaluate_autoapproval(job_id)
+
+    assert report["eligible"] is False
+    assert "high_narrative_similarity" in report["reasons"]
+    assert report["score"] >= 0.82
+
+
 def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: Path) -> None:
     prompt_path = tmp_path / "hub_settings.json"
     monkeypatch.setattr(main_module, "_hub_settings_path", lambda: prompt_path)
@@ -373,18 +528,33 @@ def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: 
 
     page = client.get("/")
     assert page.status_code == 200
-    assert "⚙" in page.text
-    assert "Prompt viral" in page.text
+    assert "Prompt viral avançado" in page.text
+    assert "Banco de roteiros" in page.text
+    assert 'data-open-ready-script-bank' in page.text
+    assert "/automation/ready-scripts/import" in page.text
     assert main_module.DEFAULT_VIRAL_PROMPT_TEMPLATE.splitlines()[0] in page.text
 
     custom_prompt = "Priorize gancho contraintuitivo, titulo SEO e payoff visual."
-    save = client.post("/hub/prompt", data={"viral_prompt_template": custom_prompt, "action": "save"}, follow_redirects=False)
+    save = client.post(
+        "/hub/prompt",
+        data={"viral_prompt_template": custom_prompt, "action": "save", "return_to": "/calendar"},
+        follow_redirects=False,
+    )
     assert save.status_code == 303
+    assert save.headers["location"] == "/calendar"
     assert main_module._viral_prompt_template() == custom_prompt
 
-    reset = client.post("/hub/prompt", data={"action": "reset"}, follow_redirects=False)
+    reset = client.post("/hub/prompt", data={"action": "reset", "return_to": "/jobs?status=queued"}, follow_redirects=False)
     assert reset.status_code == 303
+    assert reset.headers["location"] == "/jobs?status=queued"
     assert main_module._viral_prompt_template() == main_module.DEFAULT_VIRAL_PROMPT_TEMPLATE
+
+
+def test_redirect_back_appends_params_before_fragment() -> None:
+    response = main_module._redirect_back("/#publication-hub", {"automation_error": "failed"})
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/?automation_error=failed#publication-hub"
 
 
 def test_create_job_rejects_unsupported_niche() -> None:
@@ -993,7 +1163,7 @@ def test_background_music_gate_rejects_inaudible_bed(tmp_path: Path) -> None:
         music_path=music_path,
         mixed_audio_path=mixed_path,
         expected_duration_ms=1000,
-        gain_db=-20.0,
+        gain_db=-17.0,
     )
 
     assert not result.passed
@@ -1376,8 +1546,8 @@ def test_resilient_creative_provider_disables_repair_fallback_in_strict_minimax_
     assert provider.repair_script_with_fallback({"title": "x"}, ["fact_pack_source_ids_missing"], {"canonical_topic": "polvos"}) is None
 
 
-def test_resilient_music_provider_requires_minimax_success_in_strict_mode(monkeypatch) -> None:
-    settings = SimpleNamespace(use_mock_providers=False, resolved_minimax_music_api_key="music-key", strict_minimax_validation=True)
+def test_resilient_music_provider_requires_minimax_success_in_real_mode(monkeypatch) -> None:
+    settings = SimpleNamespace(use_mock_providers=False, resolved_minimax_music_api_key="music-key", strict_minimax_validation=False)
 
     class FailingMusicProvider:
         def select_track(self, *args, **kwargs):
@@ -1391,9 +1561,21 @@ def test_resilient_music_provider_requires_minimax_success_in_strict_mode(monkey
     try:
         provider.select_track({}, {}, Path("/tmp/out.wav"), 30_000)
     except ProviderFailure as exc:
-        assert "strict minimax validation requires minimax music success" in str(exc)
+        assert "minimax music generation failed" in str(exc)
+        assert "minimax music unavailable" in str(exc)
     else:
         raise AssertionError("expected ProviderFailure")
+
+
+def test_resilient_music_provider_allows_mock_only_in_mock_mode(monkeypatch, tmp_path: Path) -> None:
+    settings = SimpleNamespace(use_mock_providers=True, resolved_minimax_music_api_key=None, strict_minimax_validation=False)
+    monkeypatch.setattr("app.providers.get_settings", lambda: settings)
+
+    provider = ResilientMusicProvider()
+    result = provider.select_track({"canonical_topic": "polvos"}, {"title": "Polvos", "hook": "Polvos somem."}, tmp_path / "music.wav", 10_000)
+
+    assert result["provider"] == "mock_music"
+    assert result["provider_metadata"]["fallback_used"] is True
 
 
 def test_mock_generate_script_grounds_source_fact_ids_when_fact_pack_is_verified() -> None:
@@ -3310,6 +3492,7 @@ def test_publication_dashboard_fragment_shows_ready_and_scheduled_items() -> Non
     assert "Morcegos enxergam com o som" in response.text
     assert "14:00" in response.text
     assert "Canal" in response.text
+    assert "/automation/ready-scripts/import" not in response.text
 
 
 def test_review_page_renders_dynamic_checklist_and_structured_reason_codes() -> None:
@@ -5489,6 +5672,38 @@ def test_repetition_module_flags_structural_template_matches() -> None:
     assert report["signals"]["exact_structural_signature_matches"] == 1
 
 
+def test_repetition_module_does_not_block_only_same_duration_and_beat_count() -> None:
+    report = build_channel_repetition_report(
+        current={
+            "canonical_topic": "chuva vermelha em cidades",
+            "angle": "fenomeno natural",
+            "script": {
+                "title": "Chuva de sangue já pintou cidades de vermelho",
+                "hook": "O céu ficou vermelho e muita gente pensou em sangue.",
+                "ending": "O céu não estava sangrando. Estava carregando poeira.",
+                "estimated_duration_sec": 35,
+                "body_beats": ["A", "B", "C", "D", "E", "F"],
+            },
+        },
+        recent_rows=[
+            {
+                "job_id": "previous",
+                "topic_summary": "asteroide passou perto da Terra",
+                "title": "Asteroide 2026 JH2 passou perto demais",
+                "hook": "Uma rocha espacial passou perto e quase ninguém viu.",
+                "ending": "O risco real era menor do que o susto.",
+                "estimated_duration_sec": 35,
+                "body_beats": ["A", "B", "C", "D", "E", "F"],
+            }
+        ],
+    )
+
+    assert report["repetition_risk"] == "low"
+    assert report["signals"]["repetitive_template_matches"] == 0
+    assert report["signals"]["exact_duration_bucket_matches"] == 1
+    assert report["signals"]["exact_beat_count_matches"] == 1
+
+
 def _base_script(full_narration: str) -> dict[str, object]:
     return {
         "title": "Curiosidade científica em menos de um minuto",
@@ -6438,6 +6653,32 @@ def test_minimax_background_music_provider_uses_output_url(monkeypatch, tmp_path
     assert result["provider_metadata"]["source_trim_applied"] is True
     assert trimmed == {"path": tmp_path / "background.wav", "target_duration_ms": 32000}
     assert Path(result["audio_uri"].removeprefix("file://")).exists()
+
+
+def test_minimax_background_music_provider_surfaces_usage_limit(monkeypatch, tmp_path: Path) -> None:
+    provider = MiniMaxBackgroundMusicProvider()
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": {},
+                "trace_id": "trace-limit",
+                "base_resp": {"status_code": 2056, "status_msg": "usage limit exceeded"},
+            }
+
+    monkeypatch.setattr("app.providers.httpx.post", lambda *args, **kwargs: FakeResponse())
+
+    with pytest.raises(ProviderFailure) as exc_info:
+        provider.select_track({"canonical_topic": "polvos"}, {"title": "Polvos", "hook": "Polvos somem."}, tmp_path / "background.wav", 32000)
+
+    assert "provider limit: usage limit exceeded" in str(exc_info.value)
+    assert exc_info.value.details["base_resp"]["status_code"] == 2056
 
 
 def test_minimax_background_music_prompt_is_compact_and_duration_aware() -> None:

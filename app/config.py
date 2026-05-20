@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     asset_generation_regeneration_rounds: int = 2
     asset_generation_parallelism: int = 3
     background_music_enabled: bool = True
-    background_music_gain_db: float = -20.0
+    background_music_gain_db: float = -17.0
     sound_design_enabled: bool = False
     sound_design_gain_db: float = -18.0
     youtube_publish_mode: str = "manual"
@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     youtube_client_secret: str | None = None
     youtube_oauth_redirect_uri: str | None = None
     youtube_notify_subscribers: bool = False
+    automation_enabled: bool = False
+    automation_daily_timezone: str = "America/Sao_Paulo"
+    automation_daily_run_time: str = "02:00"
+    automation_publish_time: str = "11:00"
+    automation_fill_window_days: int = 14
+    automation_max_generation_attempts: int = 3
+    automation_max_publish_attempts_per_job: int = 3
+    automation_score_threshold: float = 0.82
     minimax_commercial_rights_confirmed: bool = False
     edge_tts_commercial_rights_confirmed: bool = False
     minimax_rights_evidence_url: str | None = None
@@ -175,6 +183,27 @@ class Settings(BaseSettings):
     def validate_positive_retention_values(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("retention values must be positive")
+        return value
+
+    @field_validator("automation_fill_window_days")
+    @classmethod
+    def validate_automation_fill_window_days(cls, value: int) -> int:
+        if not 1 <= value <= 60:
+            raise ValueError("automation_fill_window_days must be between 1 and 60")
+        return value
+
+    @field_validator("automation_max_generation_attempts", "automation_max_publish_attempts_per_job")
+    @classmethod
+    def validate_automation_attempts(cls, value: int) -> int:
+        if not 1 <= value <= 10:
+            raise ValueError("automation attempts must be between 1 and 10")
+        return value
+
+    @field_validator("automation_score_threshold")
+    @classmethod
+    def validate_automation_score_threshold(cls, value: float) -> float:
+        if not 0 <= value <= 1:
+            raise ValueError("automation_score_threshold must be between 0 and 1")
         return value
 
     @property

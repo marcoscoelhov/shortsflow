@@ -10,12 +10,13 @@ from typing import Annotated
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Form, HTTPException, Query, Request
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, or_, select
 
+from app.automation import AutomationService
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.manual_script import build_ready_script_notes, parse_ready_script
@@ -29,7 +30,24 @@ from app.utils import path_from_uri
 
 
 settings = get_settings()
-templates = Jinja2Templates(directory=str(settings.templates_dir))
+automation_service = AutomationService(orchestrator)
+
+
+def _request_path_with_query(request: Request) -> str:
+    query = request.url.query
+    return f"{request.url.path}?{query}" if query else request.url.path
+
+
+def _shared_template_context(request: Request) -> dict[str, object]:
+    return {
+        "settings": settings,
+        "automation": automation_service.dashboard_context(),
+        "viral_prompt_template": _viral_prompt_template(),
+        "return_to": _request_path_with_query(request),
+    }
+
+
+templates = Jinja2Templates(directory=str(settings.templates_dir), context_processors=[_shared_template_context])
 
 HUB_DEFAULT_NICHE = "curiosidades"
 HUB_RETENTION_OPTIMIZED_DURATION_SEC = 45
@@ -574,6 +592,7 @@ def _publication_dashboard_context(request: Request, limit: int = 6) -> dict[str
 
     return {
         "integration": _youtube_integration_context(request),
+        "automation": automation_service.dashboard_context(),
         "ready_to_schedule": ready_to_schedule,
         "upcoming_schedule": upcoming_schedule,
         "recent_publications": recent_publications,
@@ -735,6 +754,24 @@ def _save_viral_prompt_template(template: str | None) -> None:
     _hub_settings_path().write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _safe_return_to(return_to: str | None, default: str = "/") -> str:
+    target = (return_to or "").strip()
+    if not target or not target.startswith("/") or target.startswith("//") or any(char in target for char in "\r\n"):
+        return default
+    return target
+
+
+def _redirect_back(return_to: str | None, params: dict[str, str] | None = None, default: str = "/") -> RedirectResponse:
+    target = _safe_return_to(return_to, default=default)
+    if params:
+        path, fragment_separator, fragment = target.partition("#")
+        separator = "&" if "?" in path else "?"
+        target = f"{path}{separator}{urlencode(params)}"
+        if fragment_separator:
+            target = f"{target}#{fragment}"
+    return RedirectResponse(url=target, status_code=303)
+
+
 def _default_seed_theme() -> str:
     with SessionLocal() as session:
         recent_themes = session.scalars(
@@ -814,6 +851,7 @@ def jobs_page(
             **list_context,
             "workflow_summary": publication_context["metrics"],
             "youtube_integration": publication_context["integration"],
+            "automation": publication_context["automation"],
             "hub_defaults": {
                 "niche_id": HUB_DEFAULT_NICHE,
                 "seed_theme": "",
@@ -831,12 +869,13 @@ def jobs_page(
 def update_hub_prompt(
     viral_prompt_template: str | None = Form(default=None),
     action: str = Form(default="save"),
+    return_to: str | None = Form(default=None),
 ):
     if action == "reset":
         _save_viral_prompt_template(DEFAULT_VIRAL_PROMPT_TEMPLATE)
     else:
         _save_viral_prompt_template(viral_prompt_template)
-    return RedirectResponse(url="/", status_code=303)
+    return _redirect_back(return_to)
 
 
 @app.get("/jobs", response_class=HTMLResponse)
@@ -867,6 +906,40 @@ def publication_dashboard_fragment(request: Request):
             "settings": settings,
         },
     )
+
+
+@app.post("/automation/toggle")
+def toggle_automation(enabled: bool = Form(default=False), return_to: str | None = Form(default=None)):
+    automation_service.set_automation_enabled(enabled)
+    return _redirect_back(return_to, default="/#publication-hub")
+
+
+@app.post("/automation/run")
+def run_automation_now(force: bool = Form(default=False), return_to: str | None = Form(default=None)):
+    result = automation_service.run_daily_cycle(force=force)
+    if result and result.get("status") == "failed":
+        return _redirect_back(return_to, {"automation_error": result.get("error") or "failed"}, default="/#publication-hub")
+    return _redirect_back(return_to, default="/#publication-hub")
+
+
+@app.post("/automation/ready-scripts/import")
+async def import_ready_scripts(
+    ready_script_batch: str = Form(default=""),
+    ready_script_file: UploadFile | None = File(default=None),
+    fact_check_confirmed: bool = Form(default=False),
+    return_to: str | None = Form(default=None),
+):
+    if not fact_check_confirmed:
+        raise HTTPException(status_code=422, detail="fact_check_confirmed is required for automation-ready script batches")
+    file_text = ""
+    if ready_script_file and ready_script_file.filename:
+        file_text = (await ready_script_file.read()).decode("utf-8")
+    raw_text = "\n\n".join(part for part in [ready_script_batch, file_text] if part and part.strip())
+    result = automation_service.import_ready_script_batch(raw_text, fact_check_confirmed=fact_check_confirmed)
+    params = {"imported": str(result.imported)}
+    if result.errors:
+        params["errors"] = str(len(result.errors))
+    return _redirect_back(return_to, params=params)
 
 
 @app.get("/youtube/connect")

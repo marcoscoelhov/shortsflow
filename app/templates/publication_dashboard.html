@@ -12,6 +12,58 @@
     </div>
   </section>
 
+  <section class="panel automation-panel">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Automação</p>
+        <h3>Ciclo diário</h3>
+      </div>
+      <form method="post" action="/automation/toggle" class="inline-form">
+        <input type="hidden" name="return_to" value="/#publication-hub">
+        <input type="hidden" name="enabled" value="{% if automation.metrics.enabled %}false{% else %}true{% endif %}">
+        <button type="submit" class="{% if automation.metrics.enabled %}ghost{% endif %}">
+          {% if automation.metrics.enabled %}Pausar{% else %}Ativar{% endif %}
+        </button>
+      </form>
+    </div>
+    <div class="stats-grid compact">
+      <div><strong>Status</strong><span>{% if automation.metrics.enabled %}ligada{% else %}pausada{% endif %}</span></div>
+      <div><strong>Roteiros</strong><span>{{ automation.metrics.available_ready_scripts }} disponíveis</span></div>
+      <div><strong>Ciclo</strong><span>{{ automation.settings.run_time }} · {{ automation.settings.timezone }}</span></div>
+      <div><strong>Publicação</strong><span>{{ automation.settings.publish_time }} · 14 dias</span></div>
+    </div>
+    {% if automation.last_run %}
+    <div class="publication-list">
+      <div class="publication-item">
+        <strong>Último ciclo: {{ automation.last_run.status }}</strong>
+        <p>{{ automation.last_run.local_date }} · tentativas {{ automation.last_run.attempts_used }} · alvo {{ automation.last_run.target_publish_date or "-" }}</p>
+        {% if automation.last_run.result_job_id %}
+        <small><a href="/jobs/{{ automation.last_run.result_job_id }}">abrir job {{ automation.last_run.result_job_id[:8] }}</a></small>
+        {% elif automation.last_run.error %}
+        <small>{{ automation.last_run.error }}</small>
+        {% elif automation.last_run.skipped_reason %}
+        <small>{{ automation.last_run.skipped_reason }}</small>
+        {% endif %}
+      </div>
+      {% for attempt in automation.last_attempts %}
+      <div class="publication-item">
+        <strong>Tentativa {{ attempt.attempt_number }} · {{ attempt.status }}</strong>
+        <p>{{ attempt.source }}{% if attempt.score is not none %} · score {{ attempt.score }}{% endif %}</p>
+        {% if attempt.job_id %}<small><a href="/jobs/{{ attempt.job_id }}">{{ attempt.job_id[:8] }}</a></small>{% endif %}
+        {% if attempt.error %}<small>{{ attempt.error }}</small>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="button-row">
+      <form method="post" action="/automation/run">
+        <input type="hidden" name="return_to" value="/#publication-hub">
+        <input type="hidden" name="force" value="true">
+        <button type="submit" class="ghost">Rodar ciclo agora</button>
+      </form>
+    </div>
+  </section>
+
   <section class="publication-grid">
     <article class="panel publication-panel">
       <p class="eyebrow">Estado da integração</p>
@@ -58,7 +110,7 @@
         </a>
         {% else %}
         <div class="publication-item empty">
-          <strong>Nenhum vídeo aguardando agenda.</strong>
+          <strong>Nenhum job aguardando agenda.</strong>
         </div>
         {% endfor %}
       </div>

@@ -1925,6 +1925,23 @@ class MiniMaxBackgroundMusicProvider:
                 details={**debug_payload, "error_type": type(exc).__name__},
             ) from exc
         data = body.get("data", {}) if isinstance(body.get("data"), dict) else {}
+        base_resp = body.get("base_resp", {}) if isinstance(body.get("base_resp"), dict) else {}
+        base_status_code = base_resp.get("status_code")
+        base_status_msg = str(base_resp.get("status_msg") or "").strip()
+        if base_status_code not in (None, 0, "0"):
+            raise ProviderFailure(
+                "minimax_music",
+                f"provider limit: {base_status_msg or f'minimax status {base_status_code}'}",
+                details={
+                    **debug_payload,
+                    "response_trace_id": body.get("trace_id"),
+                    "base_resp": base_resp,
+                    "data_keys": sorted(data.keys()),
+                    "extra_info": body.get("extra_info"),
+                    "analysis_info": body.get("analysis_info"),
+                    "response_keys": sorted(body.keys()),
+                },
+            )
         audio_payload = str(data.get("audio") or "")
         if not audio_payload:
             raise ProviderFailure(
@@ -1933,7 +1950,11 @@ class MiniMaxBackgroundMusicProvider:
                 details={
                     **debug_payload,
                     "response_trace_id": body.get("trace_id"),
+                    "base_resp": body.get("base_resp"),
                     "provider_status": data.get("status"),
+                    "data_keys": sorted(data.keys()),
+                    "extra_info": body.get("extra_info"),
+                    "analysis_info": body.get("analysis_info"),
                     "response_keys": sorted(body.keys()),
                 },
             )
@@ -2114,14 +2135,16 @@ class ResilientMusicProvider:
     def __init__(self) -> None:
         settings = get_settings()
         self.providers: list[Any] = []
-        if not settings.use_mock_providers and settings.resolved_minimax_music_api_key:
-            self.providers.append(MiniMaxBackgroundMusicProvider())
-        if not settings.strict_minimax_validation:
+        if settings.use_mock_providers:
             self.providers.append(MockBackgroundMusicProvider())
+        elif settings.resolved_minimax_music_api_key:
+            self.providers.append(MiniMaxBackgroundMusicProvider())
 
     def select_track(self, topic_plan: dict[str, Any], script: dict[str, Any], output_path: Path, target_duration_ms: int) -> dict[str, Any]:
         last_error = "music selection failed"
         last_details: dict[str, Any] = {}
+        if not self.providers:
+            raise ProviderFailure("background_music", "minimax music generation failed: missing minimax music api key")
         for provider in self.providers:
             try:
                 return provider.select_track(topic_plan, script, output_path, target_duration_ms)
@@ -2129,13 +2152,7 @@ class ResilientMusicProvider:
                 last_error = str(exc)
                 if isinstance(exc, ProviderFailure):
                     last_details = dict(exc.details or {})
-        if get_settings().strict_minimax_validation:
-            raise ProviderFailure(
-                "background_music",
-                f"strict minimax validation requires minimax music success: {last_error}",
-                details=last_details,
-            )
-        raise ProviderFailure("background_music", last_error, details=last_details)
+        raise ProviderFailure("background_music", f"minimax music generation failed: {last_error}", details=last_details)
 
 
 class LocalSpeechFallbackProvider:

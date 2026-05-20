@@ -12,7 +12,7 @@
     <span><strong>{{ workflow_summary.scheduled_count }}</strong> programados</span>
   </div>
   <div class="hub-action-bar">
-    <a class="button-link" href="#create-job">Criar novo vídeo</a>
+    <a class="button-link" href="#create-job">Criar job</a>
     <a class="button-link ghost-link" href="#jobs-table">Revisar fila</a>
     <a class="button-link ghost-link" href="/calendar">Abrir agenda</a>
   </div>
@@ -23,7 +23,7 @@
     <section id="create-job" class="panel create-panel">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Novo vídeo</p>
+          <p class="eyebrow">Entrada</p>
           <h3>Criar job</h3>
         </div>
         <p class="section-note">Modo enxuto. Só aparece o que precisa preencher.</p>
@@ -130,6 +130,7 @@
         </div>
       </form>
     </section>
+
   </aside>
 
   <section class="panel queue-panel">
@@ -152,24 +153,6 @@
   </section>
 </section>
 
-<section class="panel hub-settings-panel">
-  <details class="settings-disclosure">
-    <summary aria-label="Configurar prompt viral">
-      <span class="settings-icon" aria-hidden="true">⚙</span>
-      <span>Prompt viral avançado</span>
-    </summary>
-    <form method="post" action="/hub/prompt" class="prompt-form">
-      <div class="field full">
-        <label for="viral_prompt_template">Template</label>
-        <textarea id="viral_prompt_template" name="viral_prompt_template" rows="13">{{ viral_prompt_template }}</textarea>
-      </div>
-      <div class="button-row prompt-actions">
-        <button type="submit" name="action" value="save">Salvar prompt</button>
-        <button type="submit" name="action" value="reset" class="ghost">Restaurar template</button>
-      </div>
-    </form>
-  </details>
-</section>
 <script>
   (() => {
     const mode = document.querySelector("#input_mode");

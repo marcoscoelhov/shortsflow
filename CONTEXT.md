@@ -24,6 +24,10 @@ _Avoid_: servidor, porta, painel
 Uma apresentacao do **Hub de Revisao** orientada a fila, estado e proxima acao sobre **Jobs de Video**.
 _Avoid_: formulario administrativo, landing page, dashboard decorativo
 
+**Barra Lateral Global do Hub**:
+A area persistente do **Console Operacional** que aparece em todas as telas e concentra identidade, navegacao principal, conexao e configuracoes operacionais recorrentes.
+_Avoid_: sidebar do workbench, painel de criacao, bloco de publicacao
+
 **Fluxo de Decisao**:
 A ordem de tela que prioriza a proxima acao humana sobre diagnosticos e configuracoes.
 _Avoid_: dashboard generico, tela de dados, painel tecnico
@@ -35,6 +39,42 @@ _Avoid_: tema aleatorio, fallback local, sugestao solta
 **Roteiro Pronto**:
 Um roteiro fornecido por uma pessoa como fonte de verdade editorial para um **Job de Video**; o sistema nao deve reescrever hook, beats, payoff ou fechamento automaticamente.
 _Avoid_: prompt, tema, titulo completo
+
+**Banco de Roteiros Prontos**:
+Um estoque de **Roteiros Prontos** fornecidos por uma pessoa para a automacao transformar em **Jobs de Video** sem gerar nova pauta ou novo roteiro por LLM.
+_Avoid_: fila de prompts, temas soltos, backlog gerado pelo app
+
+**Controle Recolhido de Banco de Roteiros**:
+A apresentacao compacta do **Banco de Roteiros Prontos** na **Barra Lateral Global do Hub**, aberta apenas quando uma pessoa vai importar ou consultar roteiros.
+_Avoid_: textarea sempre aberto, painel principal de publicacao, configuracao escondida
+
+**Configuracao Global de Prompt Viral**:
+A configuracao recorrente do **Hub de Revisao** que orienta copywriting e retencao sem substituir o formato interno dos **Jobs de Video**.
+_Avoid_: acao da fila, roteiro pronto, instrucao por job
+
+**Status Compacto da Automacao**:
+O resumo da **Pausa Global da Automacao** e do estoque do **Banco de Roteiros Prontos** na **Barra Lateral Global do Hub**, podendo alternar a pausa sem iniciar ciclos.
+_Avoid_: botao de rodar ciclo, comando de upload, log completo
+
+**Lote de Roteiros Prontos**:
+Um conjunto de **Roteiros Prontos** enviado por arquivo ou copiar/colar para alimentar o **Banco de Roteiros Prontos**.
+_Avoid_: upload de videos, lista de temas, texto sem rotulos, CSV inicial, JSON inicial
+
+**Roteiro Pronto Consumido**:
+Um item do **Banco de Roteiros Prontos** que ja foi usado em uma tentativa de criacao de **Job de Video** e nao deve ser reutilizado automaticamente.
+_Avoid_: tentar o mesmo roteiro todo dia, duplicar job, reciclar sem revisao
+
+**Selecao Aleatoria de Roteiro**:
+A escolha nao sequencial de um item disponivel do **Banco de Roteiros Prontos**, filtrada por **Similaridade Narrativa** para evitar repeticao.
+_Avoid_: ordem de importacao obrigatoria, prioridade manual inicial, sorteio sem filtro
+
+**Roteiro Pulado por Similaridade**:
+Um item disponivel do **Banco de Roteiros Prontos** que nao gera **Job de Video** em uma execucao porque esta semanticamente proximo demais da agenda atual.
+_Avoid_: consumido, rejeitado, apagado
+
+**Fallback para Tema Automatico**:
+A escolha de usar **Tema Automatico** quando o **Banco de Roteiros Prontos** esta vazio ou quando seus itens disponiveis foram pulados por **Similaridade Narrativa** no ciclo atual.
+_Avoid_: parar sem tentar, forcar roteiro repetitivo, ignorar dia vago
 
 **Texto Rotulado**:
 Um texto dividido por rotulos editoriais reconheciveis, como titulo, hook, beats, payoff e fechamento.
@@ -52,9 +92,113 @@ _Avoid_: fato verificado pelo app, fonte automatica, suposicao
 A declaracao de que os **Fatos Declarados** em um **Roteiro Pronto** ja foram revisados antes do envio.
 _Avoid_: fact-check automatico, fonte do app, aprovacao de publicacao
 
+**Confirmacao Factual por Lote**:
+A declaracao de uma pessoa de que assume a factualidade dos **Fatos Declarados** em todos os itens de um **Lote de Roteiros Prontos**.
+_Avoid_: IA confirmou, verdade automatica, checagem implicita
+
 **Horario de Publicacao**:
 A data, hora e fuso escolhidos para publicar um **Job de Video** aprovado.
 _Avoid_: data tecnica, timestamp cru, horario do servidor
+
+**Publicacao Automatizada**:
+A decisao do sistema de aprovar, agendar e publicar um **Job de Video** sem **Revisao Humana** previa, usando criterios explicitos de score e bloqueios.
+_Avoid_: aprovacao manual, piloto automatico solto, upload sem criterio
+
+**Elegibilidade Automatizada**:
+A condicao de um **Job de Video** em `ready_for_upload` que permite **Publicacao Automatizada** depois de passar por scores minimos e checagem de repeticao.
+_Avoid_: monetization_review, blocked_for_monetization, publicar qualquer job concluido
+
+**Tema Amplo**:
+Uma categoria editorial recorrente, como espacial ou tecnologia, que pode aparecer em varios **Jobs de Video** sem ser considerada repeticao por si so.
+_Avoid_: roteiro repetido, historia similar, duplicata semantica
+
+**Similaridade Narrativa**:
+A proximidade semantica entre roteiro, historia, hook, virada, payoff ou estrutura de dois **Jobs de Video**.
+_Avoid_: mesmo tema amplo, mesma categoria, nicho parecido
+
+**Risco Medio de Repeticao**:
+Um sinal de **Similaridade Narrativa** que reduz o score de **Elegibilidade Automatizada**, mas nao bloqueia sozinho a **Publicacao Automatizada**.
+_Avoid_: bloqueio automatico, duplicata comprovada, erro grotesco
+
+**Risco Alto de Repeticao**:
+Um sinal forte de **Similaridade Narrativa** que bloqueia **Publicacao Automatizada**.
+_Avoid_: sugestao leve, tema amplo repetido, penalidade pequena
+
+**Score de Autoaprovacao**:
+Uma pontuacao composta que combina monetizacao, factualidade, retencao, metadados, alinhamento semantico de assets e repeticao para decidir **Elegibilidade Automatizada**.
+_Avoid_: aprovacao subjetiva, score unico sem criterio, decisao invisivel
+
+**Tentativa Automatizada Sem Publicacao**:
+Um **Job de Video** criado pela automacao que falha, nao chega a `ready_for_upload` ou nao atinge o **Score de Autoaprovacao**, consumindo uma tentativa diaria sem ser descartado automaticamente.
+_Avoid_: rejeicao automatica, apagar candidato, loop sem custo
+
+**Retomada de Publicacao Automatizada**:
+A continuacao de uma tentativa que ja gerou um **Job de Video** elegivel, mas ainda nao confirmou o **Agendamento Nativo do YouTube**.
+_Avoid_: criar outro job para a mesma falha, duplicar upload, perder candidato aprovado
+
+**Limite de Retomada de Publicacao**:
+O maximo de tres tentativas de upload ou agendamento para o mesmo **Job de Video** elegivel antes de deixar a falha para acao manual.
+_Avoid_: retry infinito, recriar job sem necessidade, insistir em upload problemático
+
+**Avaliacao Posterior no YouTube Studio**:
+A revisao feita por uma pessoa no YouTube Studio depois que um **Job de Video** ja foi publicado por **Publicacao Automatizada**.
+_Avoid_: Revisao Humana, aprovacao previa, gate do hub
+
+**Cadencia Diaria de Geracao**:
+A regra operacional que cria ate tres **Jobs de Video** por dia para tentar preencher um **Dia Vago de Publicacao** sem sobrecarregar provedores, agenda ou revisao posterior.
+_Avoid_: lote grande, geracao ilimitada, backlog automatico, retry aberto
+
+**Primeiro Sucesso Automatizado**:
+O primeiro **Job de Video** do dia que atinge **Elegibilidade Automatizada** e preenche um **Dia Vago de Publicacao**, encerrando novas tentativas naquele dia.
+_Avoid_: gerar todos os candidatos, continuar apos agendar, publicar multiplos por acidente
+
+**Dia Vago de Publicacao**:
+Um dia no fuso de Sao Paulo sem **Horario de Publicacao** ativo na agenda interna.
+_Avoid_: dia sem video no YouTube Studio, slot inferido fora do hub, lacuna manual
+
+**Horario Padrao de Publicacao**:
+O horario das 11h no fuso de Sao Paulo usado pela automacao para preencher um **Dia Vago de Publicacao**.
+_Avoid_: horario aleatorio, proximo horario livre, horario do servidor
+
+**Agendamento Nativo do YouTube**:
+A publicacao futura configurada na propria plataforma do YouTube por `publishAt`, depois que o video foi enviado pela automacao.
+_Avoid_: publicar na hora do cron, depender do worker as 11h, agenda apenas local
+
+**Confirmacao de Publicacao no YouTube**:
+A evidencia posterior de que o YouTube tornou o video publico no horario agendado.
+_Avoid_: upload agendado, publishAt configurado, agenda local
+
+**Sincronizacao Posterior de Publicacao**:
+A verificacao automatica futura do estado real de publicacao no YouTube depois do horario agendado.
+_Avoid_: requisito da primeira versao, marcar publicado por publishAt, avaliacao manual no Studio
+
+**Preflight de YouTube Automatizado**:
+A verificacao de que OAuth, modo API, canal e credenciais do YouTube estao prontos antes de iniciar **Publicacao Automatizada**.
+_Avoid_: criar job sem poder agendar, consumir roteiro antes do OAuth, marcar agenda sem YouTube
+
+**Ciclo Diario de Automacao**:
+A execucao diaria as 02h no fuso de Sao Paulo que tenta gerar, autoaprovar e agendar um **Job de Video** para o primeiro **Dia Vago de Publicacao**.
+_Avoid_: rodar sob demanda sem registro, horario do servidor, execucao concorrente
+
+**Lock Diario de Automacao**:
+A garantia de que apenas um **Ciclo Diario de Automacao** pode executar para uma data local de Sao Paulo por vez.
+_Avoid_: cron concorrente, consumo duplicado de roteiro, agenda duplicada
+
+**Pausa Global da Automacao**:
+A chave operacional que impede **Publicacao Automatizada**, consumo de roteiros, criacao de jobs e upload para o YouTube enquanto estiver desligada.
+_Avoid_: pausa parcial, bloquear so upload, continuar consumindo banco
+
+**Painel de Automacao**:
+A area do **Hub de Revisao** que mostra estado da automacao, ultimo ciclo, tentativas, origem do conteudo, dia vago escolhido, falhas e links de job ou YouTube.
+_Avoid_: log escondido, status so no terminal, painel tecnico completo
+
+**Registro de Automacao**:
+O historico persistente dos ciclos e tentativas de **Publicacao Automatizada**, usado para lock, auditoria e exibicao no **Painel de Automacao**.
+_Avoid_: arquivo solto, log apenas textual, estado so em memoria
+
+**Janela de Preenchimento da Agenda**:
+O intervalo de 14 dias futuros em que a automacao procura o primeiro **Dia Vago de Publicacao**, comecando em amanha.
+_Avoid_: hoje, backlog infinito, preencher qualquer lacuna historica
 
 **Calendario de Publicacao**:
 A visao mensal do **Hub de Revisao** usada para consultar e criar **Horarios de Publicacao** por dia.
@@ -83,16 +227,62 @@ _Avoid_: provider editorial diferente, fallback local, banco de imagens
 - Um **Job de Video** pode chegar a **Revisao Humana** sem estar aprovado para publicacao.
 - Um **Hub de Revisao** apresenta um ou mais **Jobs de Video** para **Revisao Humana**.
 - Um **Hub de Revisao** pode se apresentar como **Console Operacional**.
+- Um **Console Operacional** pode conter uma **Barra Lateral Global do Hub**.
 - Um **Hub de Revisao** deve organizar a tela como **Fluxo de Decisao**.
 - Um **Job de Video** pode comecar a partir de um **Tema Automatico**.
 - Um **Job de Video** pode comecar a partir de um **Roteiro Pronto**.
+- Um **Job de Video** pode ser criado a partir de um item do **Banco de Roteiros Prontos**.
+- Um **Banco de Roteiros Prontos** pode ser apresentado como **Controle Recolhido de Banco de Roteiros** na **Barra Lateral Global do Hub**.
+- Uma **Configuracao Global de Prompt Viral** deve ser acessada pela **Barra Lateral Global do Hub**.
+- Uma **Barra Lateral Global do Hub** pode exibir **Status Compacto da Automacao**.
+- **Status Compacto da Automacao** pode alternar a **Pausa Global da Automacao**.
+- **Status Compacto da Automacao** nao deve iniciar um **Ciclo Diario de Automacao**.
+- **Status Compacto da Automacao** deve limitar-se a estado, estoque de roteiros e horario do ciclo diario.
+- **Painel de Automacao** deve manter ultimo ciclo, tentativas, erros e links fora da **Barra Lateral Global do Hub**.
+- Acoes auxiliares feitas pela **Barra Lateral Global do Hub** devem preservar a tela atual do **Console Operacional**.
+- Um **Lote de Roteiros Prontos** pode alimentar o **Banco de Roteiros Prontos** por arquivo ou por texto colado, usando somente **Texto Rotulado** na versao inicial.
+- Um **Lote de Roteiros Prontos** pode ser enviado pela **Barra Lateral Global do Hub**.
+- Um item do **Banco de Roteiros Prontos** deve preservar a intencao autoral do **Roteiro Pronto** consumido.
+- **Ciclo Diario de Automacao** deve priorizar o **Banco de Roteiros Prontos** antes de usar **Tema Automatico**.
+- O **Banco de Roteiros Prontos** deve usar **Selecao Aleatoria de Roteiro**, respeitando filtro de **Similaridade Narrativa**.
+- Um **Roteiro Pulado por Similaridade** nao deve virar **Roteiro Pronto Consumido**.
+- **Fallback para Tema Automatico** deve ocorrer quando nao houver **Roteiro Pronto** disponivel e adequado no ciclo atual.
+- Um item do **Banco de Roteiros Prontos** que gerar uma tentativa deve virar **Roteiro Pronto Consumido**, mesmo quando o **Job de Video** nao for publicado automaticamente.
 - Um **Roteiro Pronto** deve ser enviado como **Texto Rotulado**.
 - Um **Roteiro Pronto** deve conter **Loop Editorial** entre hook e beats.
 - Um **Roteiro Pronto** pode conter **Fatos Declarados**.
 - **Fatos Declarados** dependem de **Confirmacao de Factualidade**.
+- Um **Lote de Roteiros Prontos** pode entrar em **Publicacao Automatizada** quando houver **Confirmacao Factual por Lote**.
+- Um **Lote de Roteiros Prontos** gerado por IA nao tem **Confirmacao Factual por Lote** automaticamente.
 - **Loop Editorial** nao e **Fato Declarado** por si so.
 - O **Hub de Revisao** oferece **Roteiro Pronto** como modo de entrada distinto de tema e titulo.
 - Um **Horario de Publicacao** so deve ser escolhido depois da aprovacao do **Job de Video**.
+- **Publicacao Automatizada** pode aprovar, agendar e publicar um **Job de Video** sem **Revisao Humana** previa quando os criterios de score e bloqueio forem satisfeitos.
+- **Elegibilidade Automatizada** exige status `ready_for_upload`; **Jobs de Video** em `monetization_review` ou `blocked_for_monetization` nao podem entrar em **Publicacao Automatizada**.
+- **Tema Amplo** pode se repetir em varios **Jobs de Video** quando a **Similaridade Narrativa** for baixa.
+- **Similaridade Narrativa** alta deve bloquear **Publicacao Automatizada** para evitar conteudo massivo ou repetitivo.
+- **Risco Medio de Repeticao** deve reduzir o score, mas nao bloquear sozinho a **Publicacao Automatizada**.
+- **Risco Alto de Repeticao** deve bloquear **Publicacao Automatizada**.
+- **Score de Autoaprovacao** deve exigir monetizacao aprovada, factualidade minima de 0.80 quando existir, retencao minima de 0.75 quando existir, metadados minimos de 0.75 quando existirem, alinhamento semantico medio de assets de 0.80 quando houver assets e pontuacao composta minima de 0.82.
+- **Risco Medio de Repeticao** deve aplicar penalidade de 0.10 no **Score de Autoaprovacao**.
+- **Tentativa Automatizada Sem Publicacao** consome uma tentativa da **Cadencia Diaria de Geracao** e permanece disponivel no **Hub de Revisao** para avaliacao manual.
+- **Retomada de Publicacao Automatizada** deve reutilizar o mesmo **Job de Video** quando ele ja atingiu **Elegibilidade Automatizada** e a falha ocorreu antes da confirmacao do YouTube.
+- **Limite de Retomada de Publicacao** deve parar a retomada automatica apos tres falhas de upload ou agendamento do mesmo **Job de Video**.
+- **Avaliacao Posterior no YouTube Studio** nao substitui **Revisao Humana**; ela e uma etapa posterior para auditar o que ja foi publicado automaticamente.
+- **Cadencia Diaria de Geracao** deve limitar a criacao automatica inicial a ate tres **Jobs de Video** por dia quando tentativas anteriores falham ou nao atingem **Elegibilidade Automatizada**.
+- **Primeiro Sucesso Automatizado** encerra a **Cadencia Diaria de Geracao** do dia.
+- **Dia Vago de Publicacao** deve ser identificado pela agenda interna, nao pela leitura externa do YouTube Studio.
+- **Horario Padrao de Publicacao** ocorre sempre as 11h no fuso de Sao Paulo.
+- **Publicacao Automatizada** deve usar **Agendamento Nativo do YouTube** para o **Horario Padrao de Publicacao** do **Dia Vago de Publicacao**.
+- **Agendamento Nativo do YouTube** nao deve marcar um **Job de Video** como publicado sem **Confirmacao de Publicacao no YouTube**.
+- **Sincronizacao Posterior de Publicacao** fica fora da primeira versao da **Publicacao Automatizada**.
+- **Preflight de YouTube Automatizado** deve passar antes de criar **Jobs de Video** ou consumir **Roteiros Prontos** em um ciclo automatico.
+- **Ciclo Diario de Automacao** deve rodar as 02h no fuso de Sao Paulo.
+- **Lock Diario de Automacao** deve impedir ciclos concorrentes para a mesma data local.
+- **Pausa Global da Automacao** deve ser verificada antes de criar **Jobs de Video**, consumir itens do **Banco de Roteiros Prontos** ou chamar o YouTube.
+- **Painel de Automacao** deve expor quando o ciclo foi pulado, falhou, esta rodando ou conseguiu agendar uma publicacao.
+- O **Banco de Roteiros Prontos** e o **Registro de Automacao** devem ser persistidos no banco do app para suportar selecao, consumo, lock e auditoria.
+- **Janela de Preenchimento da Agenda** deve comecar em amanha, cobrir 14 dias e evitar publicacao automatica no mesmo dia.
 - Um **Calendario de Publicacao** pode criar um **Horario de Publicacao** para um **Job de Video** aprovado, desde que ele ainda nao esteja publicado nem tenha agenda ativa.
 - Um **Hub de Revisao** deve exibir o **Progresso do Job** sem exigir leitura de logs ou artefatos tecnicos.
 - **Limite de Provedor** deve ser distinguido de falha transiente antes de trocar a origem da geracao.
@@ -111,10 +301,24 @@ _Avoid_: provider editorial diferente, fallback local, banco de imagens
 > **Domain expert:** "Nao. Fluxo de Decisao vem primeiro: criar, revisar, aprovar, agendar; diagnosticos ficam depois."
 > **Dev:** "Console operacional quer dizer uma tela clara com graficos bonitos?"
 > **Domain expert:** "Nao. Console Operacional quer dizer fila, estado e proxima acao em primeiro plano; o modo escuro e o padrao visual escolhido para essa superficie."
+> **Dev:** "Quando voce fala sidebar, quer dizer a coluna lateral do formulario de criacao?"
+> **Domain expert:** "Nao. Quero a Barra Lateral Global do Hub, onde ficam identidade do console, navegacao e configuracoes recorrentes."
 > **Dev:** "Sem tema explicito, posso escolher qualquer assunto do pool local?"
 > **Domain expert:** "Nao. Use Tema Automatico, com preferencia por tendencia real e rastreabilidade."
 > **Dev:** "Se eu mando titulo, hook, beats, payoff e fechamento, isso e so um prompt?"
 > **Domain expert:** "Nao. Isso e um Roteiro Pronto; o sistema deve preservar a intencao editorial e nao tratar como tema bruto."
+> **Dev:** "Se houver varios roteiros prontos guardados, a automacao pode escolher um?"
+> **Domain expert:** "Sim. O Banco de Roteiros Prontos e uma fonte de entrada para criar Jobs de Video sem regenerar pauta ou roteiro."
+> **Dev:** "A automacao deve consumir na ordem em que eu colei?"
+> **Domain expert:** "Nao. Use Selecao Aleatoria de Roteiro, mas filtre Similaridade Narrativa para nao repetir historia ou roteiro."
+> **Dev:** "Se um roteiro foi pulado por estar parecido com a agenda atual, ele foi consumido?"
+> **Domain expert:** "Nao. Ele vira Roteiro Pulado por Similaridade naquela execucao e pode ser usado no futuro."
+> **Dev:** "Se todos os roteiros disponiveis estiverem parecidos demais, paro o ciclo?"
+> **Domain expert:** "Nao. Use Fallback para Tema Automatico para tentar preencher o dia vago."
+> **Dev:** "Como voce vai enviar varios roteiros?"
+> **Domain expert:** "Como Lote de Roteiros Prontos, por arquivo ou copiar/colar, mantendo os rotulos Titulo, Hook, Loop, Beats, Payoff, Fechamento e Hashtags, sem CSV ou JSON inicialmente."
+> **Dev:** "Se um roteiro pronto falha no score, tento o mesmo roteiro amanha?"
+> **Domain expert:** "Nao automaticamente. Ele vira Roteiro Pronto Consumido e fica para revisao."
 > **Dev:** "Loop e mais um fato que preciso rastrear?"
 > **Domain expert:** "Nao. Loop Editorial e tensao narrativa. Os fatos declarados ficam nos beats e no payoff."
 > **Dev:** "O gerador pode trocar a ideia central do roteiro para melhorar retencao?"
@@ -125,6 +329,8 @@ _Avoid_: provider editorial diferente, fallback local, banco de imagens
 > **Domain expert:** "Nao por enquanto. O formato canonico e Texto Rotulado."
 > **Dev:** "Se o roteiro pronto traz numeros factuais, o app precisa refazer toda a checagem?"
 > **Domain expert:** "Nao. Esses numeros entram como Fatos Declarados quando eu assumo que ja revisei o roteiro antes de enviar."
+> **Dev:** "Se o lote foi feito por IA, os fatos ja estao confirmados?"
+> **Domain expert:** "Nao automaticamente. A Confirmacao Factual por Lote acontece quando eu assumo explicitamente a factualidade do lote."
 > **Dev:** "Essa confirmacao quer dizer que o job ja esta aprovado para publicar?"
 > **Domain expert:** "Nao. Confirmacao de Factualidade cobre os fatos declarados; Revisao Humana ainda decide publicacao."
 > **Dev:** "Posso colocar roteiro pronto no mesmo campo de tema?"
@@ -139,6 +345,48 @@ _Avoid_: provider editorial diferente, fallback local, banco de imagens
 > **Domain expert:** "Nao. Hashtags sao metadados e podem ser completadas automaticamente sem alterar o roteiro."
 > **Dev:** "Data e hora no job e um timestamp tecnico?"
 > **Domain expert:** "Nao. E o Horario de Publicacao: a escolha humana de quando o Short aprovado deve ir ao YouTube."
+> **Dev:** "Se a meta e automacao total, ainda preciso assistir no hub antes de publicar?"
+> **Domain expert:** "Nao. Na Publicacao Automatizada, o sistema pode aprovar, agendar e publicar se os scores passarem; minha revisao vem depois no YouTube Studio."
+> **Dev:** "Posso publicar automaticamente um job em monetization_review?"
+> **Domain expert:** "Nao. Elegibilidade Automatizada exige ready_for_upload; monetization_review e blocked_for_monetization ficam fora da automacao."
+> **Dev:** "Se dois jobs forem sobre tecnologia, isso ja e repeticao?"
+> **Domain expert:** "Nao. Tema Amplo pode repetir; o bloqueio e Similaridade Narrativa alta entre roteiro, historia, hook, virada ou payoff."
+> **Dev:** "Risco medio de repeticao impede publicar?"
+> **Domain expert:** "Nao sozinho. Risco Medio de Repeticao reduz o score; Risco Alto de Repeticao bloqueia a Publicacao Automatizada."
+> **Dev:** "Se o job passou no gate final, ja publica automaticamente?"
+> **Domain expert:** "So se tambem atingir o Score de Autoaprovacao minimo, incluindo factualidade, retencao, metadados, assets e repeticao."
+> **Dev:** "Se o job fica ready_for_upload mas nao bate o score, rejeito automaticamente?"
+> **Domain expert:** "Nao. Ele vira Tentativa Automatizada Sem Publicacao, consome tentativa diaria e fica no Hub de Revisao."
+> **Dev:** "Se o job ja passou no score, mas o upload ou agendamento falhou, gero outro?"
+> **Domain expert:** "Nao. Use Retomada de Publicacao Automatizada para tentar publicar o mesmo Job de Video antes de criar outro."
+> **Dev:** "E se o mesmo job falhar varias vezes no YouTube?"
+> **Domain expert:** "Use Limite de Retomada de Publicacao: tres falhas param a retomada automatica e deixam acao manual no hub."
+> **Dev:** "Posso gerar dez jobs de uma vez para encher o calendario?"
+> **Domain expert:** "Nao no inicio. Use Cadencia Diaria de Geracao para tentar ate tres jobs por dia quando os anteriores falham ou nao atingem elegibilidade."
+> **Dev:** "Se o primeiro job ja preencheu a agenda, continuo gerando os outros dois?"
+> **Domain expert:** "Nao. Primeiro Sucesso Automatizado encerra as tentativas do dia."
+> **Dev:** "Dia vago deve olhar o YouTube Studio?"
+> **Domain expert:** "Nao. Dia Vago de Publicacao e definido pela agenda interna do hub, sempre preenchido as 11h no fuso de Sao Paulo."
+> **Dev:** "O cron precisa estar rodando exatamente as 11h para publicar?"
+> **Domain expert:** "Nao. A automacao deve usar Agendamento Nativo do YouTube, enviando antes e configurando publishAt para o dia vago as 11h."
+> **Dev:** "Depois que o YouTube aceitou publishAt, o job ja esta publicado?"
+> **Domain expert:** "Nao. Ele esta agendado; publicado exige Confirmacao de Publicacao no YouTube."
+> **Dev:** "A primeira versao precisa consultar depois se o YouTube publicou?"
+> **Domain expert:** "Nao. Sincronizacao Posterior de Publicacao fica para depois; nesta versao basta registrar o agendamento nativo e avaliar no YouTube Studio."
+> **Dev:** "Se o YouTube OAuth caiu, ainda gero o video para agendar depois?"
+> **Domain expert:** "Nao. Preflight de YouTube Automatizado deve passar antes de criar job ou consumir roteiro."
+> **Dev:** "Quando a automacao deve gerar os videos?"
+> **Domain expert:** "O Ciclo Diario de Automacao roda as 02h no fuso de Sao Paulo."
+> **Dev:** "Se o cron disparar duas vezes no mesmo dia?"
+> **Domain expert:** "O Lock Diario de Automacao impede execucoes concorrentes e duplicacao de agenda."
+> **Dev:** "Se eu desligar a automacao, ela ainda pode consumir roteiro ou gerar job?"
+> **Domain expert:** "Nao. Pausa Global da Automacao bloqueia criacao, consumo de roteiro e upload."
+> **Dev:** "Se a automacao nao publicou hoje, onde vejo o motivo?"
+> **Domain expert:** "No Painel de Automacao do Hub de Revisao, com ultimo ciclo, tentativas, falhas, origem do conteudo e links relevantes."
+> **Dev:** "O banco de roteiros e os ciclos podem ficar em arquivo solto?"
+> **Domain expert:** "Nao. Banco de Roteiros Prontos e Registro de Automacao ficam no banco do app para lock, auditoria e painel."
+> **Dev:** "Se hoje ainda esta antes das 11h, posso preencher hoje?"
+> **Domain expert:** "Nao. A Janela de Preenchimento da Agenda comeca em amanha para manter folga operacional."
 > **Dev:** "O calendario serve apenas para ver os jobs ja agendados?"
 > **Domain expert:** "Nao. O Calendario de Publicacao tambem deve permitir criar Horario de Publicacao no dia escolhido para jobs aprovados e ainda livres para agendar."
 > **Dev:** "Progresso quer dizer mostrar todos os logs do worker?"
@@ -159,16 +407,46 @@ _Avoid_: provider editorial diferente, fallback local, banco de imagens
 - "dark mode" nao significa tema alternavel por usuario neste momento; resolvido: e o padrao visual do **Console Operacional**.
 - "tema automatico" nao significa escolha aleatoria; resolvido: o sistema deve preferir tendencia real e expor quando caiu em fallback.
 - "roteiro pronto" nao significa prompt livre; resolvido: e conteudo editorial estruturado fornecido por uma pessoa e tratado como fonte de verdade.
+- "banco de roteiros" nao significa backlog de temas; resolvido: use **Banco de Roteiros Prontos** para armazenar textos autorais prontos para consumo pela automacao.
+- "aleatorio" nao significa ignorar repeticao; resolvido: use **Selecao Aleatoria de Roteiro** com filtro de **Similaridade Narrativa**.
+- "pulado por similaridade" nao significa consumido; resolvido: **Roteiro Pulado por Similaridade** continua disponivel para ciclos futuros.
+- "banco saturado" nao significa parar; resolvido: use **Fallback para Tema Automatico**.
+- "colar em lote" nao significa texto livre sem contrato; resolvido: use **Lote de Roteiros Prontos** com os mesmos rotulos canonicos de **Texto Rotulado**.
+- "consumir roteiro" nao significa publicar obrigatoriamente; resolvido: um **Roteiro Pronto Consumido** pode virar tentativa sem publicacao e nao deve ser retentado automaticamente.
 - "loop" em **Roteiro Pronto** nao significa claim factual; resolvido: use **Loop Editorial** como tensao de retencao entre hook e beats.
 - "reparar automaticamente" nao se aplica ao texto de **Roteiro Pronto**; resolvido: se o texto pronto tiver problema que bloqueia o pipeline, bloqueie e exponha o motivo em vez de reescrever hook, beats, payoff ou fechamento.
 - "texto rotulado" nao significa JSON nem markdown livre; resolvido: o formato canonico inicial usa rotulos editoriais em texto simples.
 - "confiar em mim" nao significa que o fato foi verificado automaticamente pelo app; resolvido: fatos do **Roteiro Pronto** entram como **Fatos Declarados** sob responsabilidade de quem enviou.
+- "feito por IA" nao significa fato confirmado; resolvido: use **Confirmacao Factual por Lote** quando uma pessoa assume explicitamente a factualidade do lote.
 - "confirmacao de factualidade" nao significa aprovacao de publicacao; resolvido: ela cobre a responsabilidade factual do **Roteiro Pronto**.
 - "pular geracao por LLM" nao significa pular validacao; resolvido: **Roteiro Pronto** preserva o texto enviado e eventuais problemas viram warnings, revisão ou bloqueio, nao reparo automatico do roteiro.
 - "ajustar duracao" nao significa expandir ou cortar livremente; resolvido: desvios pequenos podem ser reparados, desvios grandes bloqueiam antes da midia.
 - "titulo" em **Roteiro Pronto** nao significa fala narrada; resolvido: titulo e metadado, enquanto hook, beats, payoff e fechamento formam a narracao.
 - "hashtags" em **Roteiro Pronto** nao sao fonte de verdade narrativa; resolvido: podem ser derivadas automaticamente como metadados.
 - "data e hora" em agendamento nao significa horario do servidor; resolvido: use **Horario de Publicacao**, com fuso explicito.
+- "auto aprovar" nao significa ignorar criterios; resolvido: use **Publicacao Automatizada**, com scores explicitos, bloqueios e auditoria posterior.
+- "automacao total" nao significa publicar jobs em revisao; resolvido: use **Elegibilidade Automatizada** restrita a `ready_for_upload`.
+- "sem repetir" nao significa banir o mesmo tema amplo; resolvido: permita **Tema Amplo** recorrente e bloqueie **Similaridade Narrativa** alta.
+- "similaridade media" nao significa bloqueio imediato; resolvido: use **Risco Medio de Repeticao** como penalidade e **Risco Alto de Repeticao** como bloqueio.
+- "score" nao significa uma nota opaca; resolvido: use **Score de Autoaprovacao** com criterios minimos explicitos e score composto minimo de 0.82.
+- "nao passou no score" nao significa rejeicao automatica; resolvido: vira **Tentativa Automatizada Sem Publicacao** e permanece revisavel.
+- "falha depois do score" nao significa criar outro job; resolvido: use **Retomada de Publicacao Automatizada** para reutilizar o job elegivel.
+- "retomar publicacao" nao significa retry infinito; resolvido: use **Limite de Retomada de Publicacao** de tres falhas por job elegivel.
+- "avaliacao humana no YouTube Studio" nao significa **Revisao Humana** previa no hub; resolvido: use **Avaliacao Posterior no YouTube Studio**.
+- "cronjob diario" nao significa gerar backlog grande; resolvido: use **Cadencia Diaria de Geracao** com limite inicial de ate tres jobs por dia se as tentativas anteriores falharem.
+- "tres videos por dia" nao significa publicar tres se o primeiro funcionar; resolvido: **Primeiro Sucesso Automatizado** para novas tentativas.
+- "dia vago" nao significa consultar o YouTube Studio; resolvido: use **Dia Vago de Publicacao** baseado na agenda interna.
+- "todo dia as 11h" nao significa horario local do servidor; resolvido: use **Horario Padrao de Publicacao** no fuso de Sao Paulo.
+- "publicar as 11h" nao significa depender do worker nesse horario; resolvido: use **Agendamento Nativo do YouTube**.
+- "agendado no YouTube" nao significa publicado; resolvido: use **Confirmacao de Publicacao no YouTube** antes de marcar `published`.
+- "confirmar publicacao no YouTube" nao e requisito inicial; resolvido: **Sincronizacao Posterior de Publicacao** fica fora da primeira versao.
+- "falha no YouTube" nao significa criar backlog automatico; resolvido: **Preflight de YouTube Automatizado** falha cedo antes de criar job ou consumir roteiro.
+- "cron diario" nao significa horario UTC nem execucao concorrente livre; resolvido: use **Ciclo Diario de Automacao** as 02h no fuso de Sao Paulo.
+- "cron duplicado" nao significa duas tentativas independentes; resolvido: use **Lock Diario de Automacao** por data local de Sao Paulo.
+- "pausar automacao" nao significa apenas parar upload; resolvido: **Pausa Global da Automacao** bloqueia criacao, consumo de roteiro e chamadas ao YouTube.
+- "status da automacao" nao deve ficar apenas em log ou terminal; resolvido: use **Painel de Automacao** no **Hub de Revisao**.
+- "historico da automacao" nao deve ser arquivo solto; resolvido: use **Registro de Automacao** persistido no banco do app.
+- "preencher dia vago" nao significa publicar hoje se ainda houver tempo; resolvido: use **Janela de Preenchimento da Agenda** com inicio em amanha.
 - "calendario" nao significa visualizacao passiva; resolvido: o **Calendario de Publicacao** tambem e ponto de entrada para agendar jobs aprovados por dia.
 - "progresso" nao significa percentual inventado nem log bruto; resolvido: derive o **Progresso do Job** das etapas reais, execucoes persistidas e estado atual do job.
 - "limite" de provedor nao significa qualquer falha de API; resolvido: use **Limite de Provedor** apenas para quota, saldo, credito ou rate limit.

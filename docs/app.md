@@ -120,6 +120,7 @@ Comportamento atual:
 - `manual`: o formulario de publish exige `youtube_video_id` ou `youtube_url` e apenas registra a publicacao no hub.
 - `api`: o hub pode subir o video direto pela YouTube Data API.
 - agenda automatica: so e consumida pelo worker quando o modo efetivo e `api`.
+- automacao diaria: um CLI pode gerar ate tres tentativas, autoaprovar apenas `ready_for_upload` com score suficiente e agendar nativamente no YouTube para o primeiro dia vago.
 
 Fluxo OAuth:
 
@@ -150,6 +151,9 @@ O contexto de integracao exposto no hub usa:
 | `POST` | `/youtube/disconnect` | Remove token OAuth local. |
 | `GET` | `/calendar` | Calendario mensal de programados, publicados e jobs aprovados livres para agendar. |
 | `POST` | `/calendar/schedule` | Agenda um job aprovado a partir do dia escolhido no calendario. |
+| `POST` | `/automation/toggle` | Liga ou pausa a automacao diaria. |
+| `POST` | `/automation/run` | Executa um ciclo de automacao sob demanda. |
+| `POST` | `/automation/ready-scripts/import` | Importa lote de roteiros prontos confirmados. |
 | `POST` | `/jobs` | Cria novo job. |
 | `GET` | `/api/jobs/{job_id}` | JSON compacto com status e render. |
 | `GET` | `/jobs/{job_id}` | Detalhe do job com revisao, agenda e metadados. |
@@ -178,6 +182,10 @@ Defaults importantes:
 - `llm_fallback_provider=deepseek`
 - `youtube_publish_mode=manual`
 - `youtube_api_enabled=false`
+- `automation_enabled=false`
+- `automation_daily_timezone=America/Sao_Paulo`
+- `automation_daily_run_time=02:00`
+- `automation_publish_time=11:00`
 - `artifact_retention_enabled=true`
 
 Blocos relevantes de configuracao:
@@ -188,6 +196,7 @@ Blocos relevantes de configuracao:
 - providers e timeouts: `YTS_LLM_*`, `YTS_MINIMAX_*`, `YTS_OPENAI_*`, `YTS_DEEPSEEK_*`, `YTS_QWEN_*`
 - audio: `YTS_BACKGROUND_MUSIC_*`, `YTS_SOUND_DESIGN_*`
 - YouTube: `YTS_YOUTUBE_*`
+- automacao: `YTS_AUTOMATION_*`
 - direitos: `YTS_*COMMERCIAL_RIGHTS*`, `YTS_CONSERVATIVE_SYNTHETIC_DISCLOSURE`, `YTS_ALLOW_SYNTHETIC_VISUALS_FOR_MONETIZATION`
 - worker e retencao: `YTS_WORKER_POLL_SECONDS`, `YTS_JOB_LEASE_SECONDS`, `YTS_ARTIFACT_RETENTION_*`
 
@@ -286,6 +295,19 @@ Conteudo tecnico, erros e artefatos ficam colapsados em paines secundarios.
 
 O calendario e uma superficie operacional secundaria. Ele mostra slots programados e publicados, mas tambem abre um modal de agenda pelo botao `+` de cada dia do mes atual. Esse modal lista apenas jobs em `approved_for_publish` que ainda nao estejam publicados nem tenham agenda ativa.
 
+## Automacao diaria
+
+A primeira versao roda por CLI e systemd timer, nao por scheduler interno do FastAPI:
+
+```bash
+python -m app.cli automation-run
+scripts/install_automation_timer.sh
+```
+
+O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de 14 dias a partir de amanha. Quando encontra dia vago na agenda interna, tenta primeiro consumir um roteiro pronto aleatorio do banco, filtrado por similaridade narrativa. Se o banco estiver vazio ou saturado por similaridade, usa Tema Automatico.
+
+Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` para 11h em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
+
 ## Testes
 
 O foco principal esta em `tests/test_e2e.py`. A suite cobre:
@@ -294,6 +316,7 @@ O foco principal esta em `tests/test_e2e.py`. A suite cobre:
 - tabela e detalhe de jobs
 - agenda e calendario
 - publish manual e via API
+- automacao diaria e banco de roteiros prontos
 - OAuth do YouTube
 - retencao de artefatos
 - gates de qualidade
@@ -317,6 +340,13 @@ Para mudar publicacao e YouTube:
 - `app/orchestrator.py`
 - `app/youtube_api.py`
 - `app/schemas.py`
+
+Para mudar automacao diaria:
+
+- `app/automation.py`
+- `app/cli.py`
+- `app/models.py`
+- `app/templates/publication_dashboard.html`
 
 Para mudar regras de retencao:
 

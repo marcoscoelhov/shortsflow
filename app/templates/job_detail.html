@@ -136,11 +136,11 @@
         {% elif artifacts_cleaned %}
         <div class="empty-state-card">
           <strong>Os arquivos de mídia deste job já foram removidos.</strong>
-          <p>O registro do job continua aqui, mas vídeo, áudio e assets expiraram pela política de retenção.</p>
+          <p>O registro do job continua aqui, mas arquivo final, áudio e assets expiraram pela política de retenção.</p>
         </div>
         {% else %}
         <div class="empty-state-card">
-          <strong>Vídeo ainda não disponível.</strong>
+          <strong>Arquivo final ainda não disponível.</strong>
           <p>Aguarde o render terminar para revisar aqui.</p>
         </div>
         {% endif %}
@@ -149,7 +149,7 @@
         <p class="eyebrow">Revisão</p>
         <h3>Assista e decida</h3>
         <div class="compact-checklist">
-          <span>1. Veja o vídeo final</span>
+          <span>1. Veja o arquivo final</span>
           <span>2. Ajuste o título se quiser</span>
           <span>3. Aprove</span>
           <span>4. Escolha data e hora</span>
@@ -164,7 +164,7 @@
           <span>{{ (render.duration_ms / 1000)|round(1) }} s</span>
         </div>
         <div class="featured-actions">
-          <a class="button-link" href="{{ artifact_url(render.video_uri) }}" target="_blank" rel="noopener">Abrir vídeo</a>
+          <a class="button-link" href="{{ artifact_url(render.video_uri) }}" target="_blank" rel="noopener">Abrir arquivo</a>
           <a class="button-link ghost-link" href="{{ artifact_url(render.poster_uri) }}" target="_blank" rel="noopener">Poster</a>
         </div>
         {% endif %}
@@ -349,8 +349,8 @@
     <section class="panel sticky workflow-focus">
       <div class="focus-step">
         <p class="eyebrow">Passo 1</p>
-        <h3>Aprovar vídeo</h3>
-        <p class="publication-note">Se o vídeo estiver bom, aprove aqui. A agenda libera em seguida.</p>
+        <h3>Aprovar job</h3>
+        <p class="publication-note">Se o arquivo final estiver bom, aprove aqui. A agenda libera em seguida.</p>
         <form method="post" action="/jobs/{{ job.job_id }}/review" class="review-form">
           <input type="hidden" name="reviewer_identity" value="tailscale:local-reviewer">
           {% if checklist_items %}
@@ -401,7 +401,7 @@
         {% if is_approved %}
         <p class="publication-note">
           {% if youtube_integration.publish_mode == "api" %}
-          Ao salvar, o vídeo sobe agora como privado e fica programado no próprio YouTube para publicar no horário escolhido.
+          Ao salvar, o arquivo final sobe agora como privado e fica programado no próprio YouTube para publicar no horário escolhido.
           {% else %}
           Escolha a data, a hora e a visibilidade. O worker publica quando o horário chegar.
           {% endif %}
@@ -412,7 +412,7 @@
           <p>{{ publication_schedule_display.local_date }} às {{ publication_schedule_display.local_time }} · {{ publication_schedule_display.timezone }}</p>
           <small>
             {% if youtube_integration.publish_mode == "api" and publication_schedule_display.youtube_url %}
-            O vídeo já está no YouTube e programado no canal. Use o link abaixo para conferir no Studio ou na watch page.
+            O arquivo final já está no YouTube e programado no canal. Use o link abaixo para conferir no Studio ou na watch page.
             {% else %}
             Não precisa clicar em mais nada. O worker publica automaticamente no horário salvo.
             {% endif %}
@@ -518,7 +518,7 @@
         </form>
         {% else %}
         <p class="publication-note">Publicado em {{ publication_schedule_display.published_local_label or publication_schedule_display.published_at }}.</p>
-        <p class="publication-note">Se publicou no dia errado, apague o vídeo no YouTube Studio e depois reabra aqui para republicar com nova agenda.</p>
+        <p class="publication-note">Se publicou no dia errado, remova a publicação no YouTube Studio e depois reabra aqui para republicar com nova agenda.</p>
         <form method="post" action="/jobs/{{ job.job_id }}/reopen-publication" class="review-form">
           <button type="submit" class="ghost">Reabrir para republicação</button>
         </form>

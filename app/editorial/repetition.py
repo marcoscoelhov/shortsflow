@@ -61,7 +61,15 @@ def build_channel_repetition_report(
                 }
             )
     max_similarity = max((match["similarity"] for match in matches), default=0.0)
-    repetitive_template_matches = sum(1 for match in matches if match.get("template_signal_count", 0) >= 2)
+    repetitive_template_matches = sum(
+        1
+        for match in matches
+        if match.get("template_signal_count", 0) >= 2
+        and (
+            match["similarity"] >= 0.45
+            or {"same_hook_opening", "same_title_opening", "same_ending_pattern"} & set(match.get("signals") or [])
+        )
+    )
     exact_structural_signature_matches = sum(
         1 for match in matches if {"same_hook_opening", "same_duration_bucket", "same_beat_count"} <= set(match.get("signals") or [])
     )

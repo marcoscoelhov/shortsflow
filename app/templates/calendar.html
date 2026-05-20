@@ -46,12 +46,12 @@
     <div class="calendar-head">Dom</div>
     {% for week in weeks %}
       {% for day in week %}
-      <article class="calendar-cell {% if not day.is_current_month %}muted{% endif %}">
+      <article class="calendar-cell {% if not day.is_current_month %}muted{% endif %} {% if day.entries %}has-events{% endif %}">
         <header>
           <div class="calendar-day-label">
             <span>{{ day.day_number }}</span>
             {% if day.entries %}
-            <small>{{ day.entries|length }} item(ns)</small>
+            <small>{{ day.entries|length }} item{% if day.entries|length != 1 %}s{% endif %}</small>
             {% endif %}
           </div>
           {% if day.is_current_month %}

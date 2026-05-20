@@ -260,6 +260,80 @@ class PerformanceMetric(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class ReadyScriptItem(Base):
+    __tablename__ = "ready_script_items"
+
+    script_item_id: Mapped[str] = mapped_column(String, primary_key=True)
+    schema_version: Mapped[str] = mapped_column(String, default="1.0.0")
+    content_hash: Mapped[str] = mapped_column(String, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    status: Mapped[str] = mapped_column(String, default="available", index=True)
+    source: Mapped[str] = mapped_column(String, default="batch")
+    title: Mapped[str] = mapped_column(String)
+    raw_text: Mapped[str] = mapped_column(Text)
+    parsed_script: Mapped[dict] = mapped_column(JSON)
+    hashtags: Mapped[list] = mapped_column(JSON)
+    fact_check_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    consumed_job_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    last_skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_similarity_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class AutomationSetting(Base):
+    __tablename__ = "automation_settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AutomationRun(Base):
+    __tablename__ = "automation_runs"
+    __table_args__ = (UniqueConstraint("local_date", name="uq_automation_run_local_date"),)
+
+    run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    schema_version: Mapped[str] = mapped_column(String, default="1.0.0")
+    content_hash: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    local_date: Mapped[str] = mapped_column(String, index=True)
+    timezone: Mapped[str] = mapped_column(String, default="America/Sao_Paulo")
+    status: Mapped[str] = mapped_column(String, default="running", index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    target_publish_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_publish_at_utc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    attempts_used: Mapped[int] = mapped_column(Integer, default=0)
+    result_job_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    result_schedule_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    skipped_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    run_metadata: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
+
+
+class AutomationAttempt(Base):
+    __tablename__ = "automation_attempts"
+
+    attempt_id: Mapped[str] = mapped_column(String, primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("automation_runs.run_id"), index=True)
+    schema_version: Mapped[str] = mapped_column(String, default="1.0.0")
+    content_hash: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ready_script_item_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    job_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class FallbackEvent(Base):
     __tablename__ = "fallback_events"
 
