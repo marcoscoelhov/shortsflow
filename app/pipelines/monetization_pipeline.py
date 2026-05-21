@@ -22,6 +22,18 @@ class MonetizationPipeline(BasePipeline):
     def _simple_mode_fact_skip(self, fact_pack: dict[str, Any]) -> bool:
         return self.settings.simple_shorts_mode and fact_pack.get("status") == "skipped"
 
+    def _ready_script_fact_check_confirmed(self, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
+        qa_metrics = dict((script_artifact or {}).get("qa_metrics") or {})
+        sources = fact_pack.get("sources") or []
+        has_human_confirmation = any(isinstance(source, dict) and source.get("kind") == "human_confirmation" for source in sources)
+        return (
+            fact_pack.get("status") == "verified"
+            and fact_pack.get("provider") == "user_declared_fact_check"
+            and has_human_confirmation
+            and bool(qa_metrics.get("ready_script"))
+            and bool(qa_metrics.get("fact_check_confirmed"))
+        )
+
     def step_monetization_readiness(self, session: Session, job: Job, attempt: int) -> list[str]:
         report = self.build_monetization_report(session, job)
         self.storage.persist_json(job.job_id, "rights_registry.json", self._serialize_for_json(report["rights_registry"]))
@@ -69,6 +81,7 @@ class MonetizationPipeline(BasePipeline):
         assets = session.scalars(select(SceneAsset).where(SceneAsset.job_id == job.job_id, SceneAsset.selected.is_(True)).order_by(SceneAsset.scene_id)).all()
         fact_pack = self.read_job_json(job.job_id, "fact_pack.json")
         script_artifact = self.read_job_json(job.job_id, "script.json")
+        ready_script_fact_check_confirmed = self._ready_script_fact_check_confirmed(fact_pack, script_artifact)
         tags = self.build_publish_hashtags(topic_plan, script)
         checklist = {
             "script_gate_pass": bool((job.quality_summary or {}).get("script", {}).get("script_quality_gate_pass")),
@@ -81,6 +94,8 @@ class MonetizationPipeline(BasePipeline):
             checklist["script_gate_pass"] = True
         confirmations = self.manual_monetization_confirmations(session, job.job_id)
         confirmations.update(extra_confirmations or set())
+        if ready_script_fact_check_confirmed:
+            confirmations.update({"fact_review_confirmed", "publish_audit_confirmed", "originality_confirmed"})
 
         rights_registry = self.build_rights_registry(job, assets, narration, background_music)
         ai_disclosure = self.build_ai_disclosure_report(assets)
@@ -671,6 +686,8 @@ class MonetizationPipeline(BasePipeline):
     def provider_publish_audit(self, script_artifact: dict[str, Any], fact_pack: dict[str, Any], tags: list[str], job_id: str | None = None) -> dict[str, Any]:
         if self._simple_mode_fact_skip(fact_pack):
             return {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True}
+        if self._ready_script_fact_check_confirmed(fact_pack, script_artifact):
+            return {"passed": True, "reasons": [], "provider": "ready_script_manual_fact_check", "skipped": True}
         auditor = getattr(self.providers.creative, "audit_publish_package", None)
         if auditor is None:
             return {"passed": True, "reasons": [], "provider": "none", "skipped": True}

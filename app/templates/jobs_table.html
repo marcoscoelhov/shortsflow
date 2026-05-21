@@ -1,3 +1,4 @@
+<div id="jobs-table" hx-get="/jobs?{{ pagination.current_query }}" hx-trigger="every 5s" hx-swap="outerHTML">
 <div class="job-list">
   {% if rows %}
   <div class="jobs-grid-head" aria-hidden="true">
@@ -56,13 +57,14 @@
 </div>
 <nav class="pagination" aria-label="Paginação de jobs">
   {% if pagination.has_previous %}
-  <a href="/?{{ pagination.previous_query }}" hx-get="/jobs?{{ pagination.previous_query }}" hx-target="#jobs-table">Anterior</a>
+  <a href="/?{{ pagination.previous_query }}" hx-get="/jobs?{{ pagination.previous_query }}" hx-target="#jobs-table" hx-swap="outerHTML">Anterior</a>
   {% else %}
   <span class="disabled">Anterior</span>
   {% endif %}
   {% if pagination.has_next %}
-  <a href="/?{{ pagination.next_query }}" hx-get="/jobs?{{ pagination.next_query }}" hx-target="#jobs-table">Próxima</a>
+  <a href="/?{{ pagination.next_query }}" hx-get="/jobs?{{ pagination.next_query }}" hx-target="#jobs-table" hx-swap="outerHTML">Próxima</a>
   {% else %}
   <span class="disabled">Próxima</span>
   {% endif %}
 </nav>
+</div>

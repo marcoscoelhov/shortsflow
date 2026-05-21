@@ -6045,6 +6045,115 @@ def test_build_monetization_report_allows_manual_publish_audit_confirmation(monk
     assert "publish_audit_required" not in report["manual_required"]
 
 
+def test_ready_script_fact_check_confirmation_bypasses_external_publish_audit(monkeypatch) -> None:
+    from app.manual_script import parse_ready_script
+
+    ready = parse_ready_script(
+        """Título: Peixe-pescador usa luz viva para atrair vítimas
+Hook: Escuridão total vira isca quando esse peixe acende.
+Loop: Por que brilhar no fundo do mar pode significar morte?
+Beats: Nas profundezas, a luz do Sol quase nunca chega.
+Mesmo assim, o peixe-pescador carrega um brilho próprio.
+A luz balança na frente da boca como promessa.
+Presas se aproximam achando que encontraram comida.
+Quando chegam perto, encontram dentes.
+Payoff: A lanterna é uma isca bioluminescente para atrair presas.
+Fechamento: Lá embaixo, uma luz pequena pode ser uma armadilha.
+Hashtags: #curiosidades #deepsea #biologia #shorts""",
+        fact_check_confirmed=True,
+    )
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": ready.script["title"],
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 45,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "input_mode=script\nready_script_fact_check_confirmed=true",
+            "requested_angle": None,
+        }
+    )
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic",
+                canonical_topic=ready.script["title"],
+                angle="biologia marinha",
+                hook_promise=ready.script["hook"],
+                entities=["peixe-pescador"],
+                search_terms=["peixe-pescador bioluminescencia"],
+                title_candidates=[ready.script["title"]],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"script-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="script",
+                title=ready.script["title"],
+                hook=ready.script["hook"],
+                body_beats=ready.script["body_beats"],
+                ending=ready.script["ending"],
+                cta=None,
+                full_narration=ready.script["full_narration"],
+                estimated_duration_sec=ready.script["estimated_duration_sec"],
+                key_facts=ready.script["key_facts"],
+                token_count=ready.script["token_count"],
+                language="pt-BR",
+                qa_metrics=ready.script["qa_metrics"],
+            )
+        )
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.quality_summary = {
+            "script": {"script_quality_gate_pass": True},
+            "scene_plan": {"scene_plan_gate_pass": True},
+            "assets": {"semantic_threshold_pass": True, "asset_semantic_score_avg": 0.95},
+            "subtitles": {"subtitle_gate_pass": True},
+            "render": {"render_gate_pass": True},
+        }
+        session.commit()
+
+    artifact_dir = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / job_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "fact_pack.json").write_text(json.dumps(ready.fact_pack), encoding="utf-8")
+    (artifact_dir / "script.json").write_text(json.dumps(ready.script), encoding="utf-8")
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline.providers.creative,
+        "audit_publish_package",
+        lambda *_args, **_kwargs: {
+            "passed": False,
+            "reasons": ["self_declared_source_only", "sensationalized_framing", "weak_hashtags"],
+            "factual_score": 0.4,
+            "metadata_score": 0.4,
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline,
+        "build_channel_repetition_report",
+        lambda *args, **kwargs: {"repetition_risk": "medium", "matches": [], "signals": {}},
+    )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        report = orchestrator.monetization_pipeline.build_monetization_report(session, job)
+
+    assert report["passed"] is True
+    assert report["final_status"] == "ready_for_upload"
+    assert report["manual_required"] == []
+    assert report["publish_readiness"]["minimax_audit"]["provider"] == "ready_script_manual_fact_check"
+    assert "fact_review_confirmed" in report["manual_confirmations"]
+    assert "publish_audit_confirmed" in report["manual_confirmations"]
+    assert "originality_confirmed" in report["manual_confirmations"]
+
+
 def test_rights_registry_requires_evidence_for_confirmed_minimax_assets(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator.settings, "ai_generated_commercial_rights_confirmed", False)
     monkeypatch.setattr(orchestrator.settings, "minimax_commercial_rights_confirmed", True)

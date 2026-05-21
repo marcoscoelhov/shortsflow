@@ -4,6 +4,17 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ settings.app_name }}</title>
+    <script>
+      (() => {
+        try {
+          if (localStorage.getItem("sidebar-collapsed") === "true") {
+            document.documentElement.classList.add("sidebar-collapsed");
+          }
+        } catch (_error) {
+          // Keep the default expanded layout when storage is unavailable.
+        }
+      })();
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
     <script src="/static/htmx.min.js"></script>
@@ -12,13 +23,17 @@
     <div class="app-frame">
       <header class="app-topbar" aria-label="Barra superior">
         <a class="topbar-product" href="/">
-          <span>ShortsFlow</span>
+          <span class="brand-full">ShortsFlow</span>
+          <span class="brand-compact">SF</span>
         </a>
         <form class="topbar-search" action="/" method="get">
           <span class="material-symbols-outlined" aria-hidden="true">search</span>
           <input name="search" value="{{ filters.search if filters is defined else '' }}" placeholder="Buscar jobs por título...">
         </form>
         <div class="topbar-actions" aria-label="Ações rápidas">
+          <button type="button" class="topbar-icon sidebar-toggle" data-toggle-sidebar aria-label="Colapsar sidebar" aria-pressed="false">
+            <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
+          </button>
           <button type="button" class="topbar-icon" data-open-ready-script-bank aria-label="Abrir banco de roteiros">
             <span class="material-symbols-outlined" aria-hidden="true">bolt</span>
           </button>
@@ -238,6 +253,28 @@
       </form>
     </dialog>
     <script>
+      (() => {
+        const root = document.documentElement;
+        const button = document.querySelector("[data-toggle-sidebar]");
+        if (!button) return;
+        const icon = button.querySelector(".material-symbols-outlined");
+        const sync = () => {
+          const collapsed = root.classList.contains("sidebar-collapsed");
+          button.setAttribute("aria-pressed", collapsed ? "true" : "false");
+          button.setAttribute("aria-label", collapsed ? "Expandir sidebar" : "Colapsar sidebar");
+          if (icon) icon.textContent = collapsed ? "left_panel_open" : "left_panel_close";
+        };
+        button.addEventListener("click", () => {
+          root.classList.toggle("sidebar-collapsed");
+          try {
+            localStorage.setItem("sidebar-collapsed", root.classList.contains("sidebar-collapsed") ? "true" : "false");
+          } catch (_error) {
+            // The visual state still changes even if persistence is blocked.
+          }
+          sync();
+        });
+        sync();
+      })();
       (() => {
         const dialog = document.getElementById("ready-script-bank-modal");
         if (!dialog) return;

@@ -2886,6 +2886,11 @@ a:focus-visible {
   font-size: 1.7rem;
   font-weight: 900;
   letter-spacing: -0.04em;
+  white-space: nowrap;
+}
+
+.brand-compact {
+  display: none;
 }
 
 .topbar-search {
@@ -2926,6 +2931,13 @@ a:focus-visible {
   width: 320px;
   padding: 2rem 1.25rem;
   background: linear-gradient(90deg, rgba(19, 19, 22, 0.98), rgba(19, 19, 22, 0.88));
+  scrollbar-width: none;
+  transition: width 180ms ease, padding 180ms ease;
+}
+
+.app-sidebar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .app-sidebar .topnav {
@@ -2994,6 +3006,7 @@ a:focus-visible {
 .page-shell {
   margin-left: 320px;
   padding: 7.75rem 2.5rem 3rem;
+  transition: margin-left 180ms ease;
 }
 
 .jobs-control-hero {
@@ -3175,6 +3188,64 @@ a:focus-visible {
 
 .publication-overview {
   display: none;
+}
+
+@media (min-width: 861px) {
+  .sidebar-collapsed .app-topbar {
+    grid-template-columns: 88px minmax(320px, 760px) minmax(220px, 1fr);
+  }
+
+  .sidebar-collapsed .brand-full {
+    display: none;
+  }
+
+  .sidebar-collapsed .brand-compact {
+    display: inline;
+  }
+
+  .sidebar-collapsed .app-sidebar {
+    width: 88px;
+    padding: 2rem 0.75rem;
+  }
+
+  .sidebar-collapsed .page-shell {
+    margin-left: 88px;
+  }
+
+  .sidebar-collapsed .app-sidebar .topnav a,
+  .sidebar-collapsed .app-sidebar .topnav button,
+  .sidebar-collapsed .sidebar-footer-nav a,
+  .sidebar-collapsed .sidebar-footer-nav button {
+    justify-content: center;
+    gap: 0;
+    min-height: 3.5rem;
+    padding: 0;
+    font-size: 0;
+    letter-spacing: 0;
+  }
+
+  .sidebar-collapsed .app-sidebar .topnav .material-symbols-outlined,
+  .sidebar-collapsed .sidebar-footer-nav .material-symbols-outlined,
+  .sidebar-collapsed .sidebar-new-project .material-symbols-outlined {
+    font-size: 1.45rem;
+  }
+
+  .sidebar-collapsed .app-sidebar .topnav .active {
+    border-left-width: 0;
+    border-radius: 12px;
+  }
+
+  .sidebar-collapsed .sidebar-new-project {
+    width: 3.5rem;
+    min-height: 3.5rem;
+    margin-inline: auto;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .sidebar-collapsed .sidebar-spacer {
+    min-height: clamp(9rem, 34vh, 36rem);
+  }
 }
 
 @media (max-width: 860px) {
