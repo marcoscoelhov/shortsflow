@@ -24,6 +24,18 @@ _Avoid_: servidor, porta, painel
 Uma apresentacao do **Hub de Revisao** orientada a fila, estado e proxima acao sobre **Jobs de Video**.
 _Avoid_: formulario administrativo, landing page, dashboard decorativo
 
+**Configuracao de Ambiente**:
+Um valor necessario para iniciar ou conectar o sistema, como caminho de dados, URL publica, segredo ou credencial de provedor.
+_Avoid_: ajuste diario, preferencia de operacao, controle de rotina
+
+**Configuracao Operacional do Hub**:
+Um ajuste nao secreto que uma pessoa muda no **Hub de Revisao** para controlar providers, musica, automacao ou publicacao sem editar a **Configuracao de Ambiente**.
+_Avoid_: segredo, variavel obrigatoria de boot, tuning interno
+
+**Sobreposicao Operacional**:
+O valor persistido pelo **Hub de Revisao** que prevalece sobre o default da **Configuracao de Ambiente** para uma **Configuracao Operacional do Hub**.
+_Avoid_: duplicidade de env, patch manual, estado invisivel
+
 **Barra Lateral Global do Hub**:
 A area persistente do **Console Operacional** que aparece em todas as telas e concentra identidade, navegacao principal, conexao e configuracoes operacionais recorrentes.
 _Avoid_: sidebar do workbench, painel de criacao, bloco de publicacao
@@ -220,6 +232,30 @@ _Avoid_: chave invalida, provider offline, timeout, bloqueio diario global autom
 Uma chave MiniMax separada para geracao de imagens, usada quando a chave primaria encontra **Limite de Provedor**.
 _Avoid_: provider editorial diferente, fallback local, banco de imagens
 
+**Trilha Aprovada**:
+Uma musica de fundo previamente aceita para uso em **Jobs de Video**, com origem e licenca conhecidas.
+_Avoid_: musica aleatoria, faixa baixada em runtime, trilha sem licenca
+
+**Trilha Sintetica Local**:
+Uma **Trilha Aprovada** criada pelo proprio projeto, sem amostras externas, vocal ou letra.
+_Avoid_: musica baixada, faixa de catalogo, mock de teste
+
+**Banco de Trilhas Aprovadas**:
+Um estoque curado de **Trilhas Aprovadas** usado para reduzir custo, quota e risco operacional na etapa de musica de fundo.
+_Avoid_: API de musica, cache de downloads, playlist sem curadoria
+
+**Populacao Automatizada do Banco de Trilhas**:
+A criacao local de **Trilhas Sinteticas Locais** para garantir que o **Banco de Trilhas Aprovadas** tenha um estoque inicial sem depender de API ou download externo.
+_Avoid_: baixar catalogo automaticamente, scraping de musica, usar faixas sem revisao
+
+**Trilha Reaproveitada de Provedor**:
+Uma **Trilha Aprovada** gerada anteriormente por um provedor externo e importada de artefatos locais depois de passar por qualidade e evidencia de origem.
+_Avoid_: baixar novamente do provedor, reaproveitar sem metadados, copiar audio sem licenca
+
+**Fallback de Musica por API**:
+O uso excepcional de um provedor externo de musica quando o **Banco de Trilhas Aprovadas** nao atende ao **Job de Video**.
+_Avoid_: caminho primario, fallback silencioso, mock em run real
+
 ## Relationships
 
 - Um **Job de Video** produz zero ou um **Arquivo de Video Final**.
@@ -288,6 +324,13 @@ _Avoid_: provider editorial diferente, fallback local, banco de imagens
 - **Limite de Provedor** deve ser distinguido de falha transiente antes de trocar a origem da geracao.
 - Uma **Chave Esgotada** deve ser evitada pelo restante do **Job de Video** em andamento.
 - **Chave Dedicada de Imagem** deve ser usada depois que a chave primaria de imagem vira **Chave Esgotada**.
+- Um **Job de Video** pode usar zero ou uma **Trilha Aprovada**.
+- Um **Banco de Trilhas Aprovadas** pode conter uma ou mais **Trilhas Aprovadas**.
+- Uma **Trilha Sintetica Local** pode entrar no **Banco de Trilhas Aprovadas** sem licenca externa porque nao usa material de terceiros.
+- Uma **Trilha Reaproveitada de Provedor** deve preservar job original, provedor, licenca e evidencia de qualidade.
+- Uma **Trilha Aprovada** deve ter origem e licenca rastreaveis antes de entrar em um **Job de Video**.
+- **Populacao Automatizada do Banco de Trilhas** deve criar trilhas locais, nao baixar musicas de catalogos externos.
+- **Fallback de Musica por API** nao deve ocorrer sem configuracao explicita.
 
 ## Example dialogue
 
@@ -397,6 +440,12 @@ _Avoid_: provider editorial diferente, fallback local, banco de imagens
 > **Domain expert:** "Nao. Marque como Chave Esgotada para o restante do Job de Video e use a alternativa dedicada."
 > **Dev:** "A chave dedicada muda o fornecedor editorial da imagem?"
 > **Domain expert:** "Nao. Continua sendo MiniMax; a Chave Dedicada de Imagem so muda a credencial usada depois de limite."
+> **Dev:** "Para cada job real, preciso gerar musica nova por API?"
+> **Domain expert:** "Nao. Use uma Trilha Aprovada do Banco de Trilhas Aprovadas; API de musica e fallback explicito, nao caminho padrao."
+> **Dev:** "Posso popular automaticamente baixando musicas royalty-free da internet?"
+> **Domain expert:** "Nao como padrao. A Populacao Automatizada do Banco de Trilhas cria Trilhas Sinteticas Locais; catalogos externos exigem curadoria e evidencia."
+> **Dev:** "E as musicas que a MiniMax ja gerou?"
+> **Domain expert:** "Podem virar Trilha Reaproveitada de Provedor se o artifact local tiver licenca, job original e quality gate aprovado."
 
 ## Flagged ambiguities
 
@@ -452,3 +501,8 @@ _Avoid_: provider editorial diferente, fallback local, banco de imagens
 - "limite" de provedor nao significa qualquer falha de API; resolvido: use **Limite de Provedor** apenas para quota, saldo, credito ou rate limit.
 - "esgotada" nao significa que a chave foi revogada nem que todo job futuro deve bloquear a chave; resolvido: **Chave Esgotada** vale para evitar novas tentativas no job atual apos quota ou rate limit.
 - "fallback de imagem" nao significa provider editorial diferente neste caso; resolvido: use **Chave Dedicada de Imagem** para a credencial MiniMax alternativa.
+- "musica de fundo" nao significa gerar faixa nova por API em todo job; resolvido: use **Banco de Trilhas Aprovadas** como caminho primario.
+- "royalty-free" nao significa seguro sem evidencia; resolvido: uma **Trilha Aprovada** precisa de origem e licenca rastreaveis.
+- "popular automaticamente" nao significa baixar musicas da internet; resolvido: use **Populacao Automatizada do Banco de Trilhas** com **Trilhas Sinteticas Locais**.
+- "reaproveitar MiniMax" nao significa chamar MiniMax de novo nem guardar URL assinada; resolvido: importe o audio local como **Trilha Reaproveitada de Provedor** com evidencia.
+- "fallback de musica" nao significa voltar silenciosamente para MiniMax; resolvido: **Fallback de Musica por API** exige configuracao explicita.

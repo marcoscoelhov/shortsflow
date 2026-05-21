@@ -9,7 +9,7 @@ O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipelin
 - Hub SSR em `http://127.0.0.1:8080`, com lista paginada de jobs, detalhe focado em aprovar e agendar, dashboard de publicacao e calendario mensal.
 - Worker em thread, iniciado no lifespan do FastAPI, responsavel pelo pipeline e tambem pela publicacao agendada quando o modo YouTube esta em `api`.
 - Banco padrao em SQLite e artefatos em `data/artifacts/<job_id>/`.
-- Integracao real com YouTube disponivel por OAuth e upload via API quando `YTS_YOUTUBE_PUBLISH_MODE=api` e `YTS_YOUTUBE_API_ENABLED=true`.
+- Integracao real com YouTube disponivel por OAuth e upload via API quando o modo API esta ligado no Hub.
 - Politica de retencao automatica para artefatos temporarios: jobs continuam visiveis no hub mesmo depois da limpeza dos arquivos pesados.
 
 ## Comeco rapido
@@ -121,24 +121,16 @@ Tambem existem falhas especificas por etapa, como `script_quality_failed`, `scen
 
 ## Configuracao
 
-O arquivo `.env.example` agora e exaustivo e segue `app/config.py` como fonte de verdade.
+O `.env.example` e intencionalmente pequeno. Ele deve guardar boot, infraestrutura e segredos: URL do app, diretorio de dados, banco, chaves de provedores, OAuth do YouTube e Tailnet.
 
-Blocos mais importantes:
+Ajustes operacionais nao secretos ficam no Hub de Revisao, em Configurações:
 
-- app e hub: `YTS_APP_URL`, `YTS_HUB_AUTH_TOKEN`
-- banco e SQLite: `YTS_DATABASE_URL`, `YTS_SQLITE_*`
-- defaults editoriais: `YTS_NICHE_ID`, `YTS_LANGUAGE`, `YTS_SIMPLE_SHORTS_MODE`
-- providers e timeouts: `YTS_LLM_*`, `YTS_MINIMAX_*`, `YTS_OPENAI_*`, `YTS_DEEPSEEK_*`, `YTS_QWEN_*`
-- YouTube: `YTS_YOUTUBE_PUBLISH_MODE`, `YTS_YOUTUBE_API_ENABLED`, `YTS_YOUTUBE_CLIENT_ID`, `YTS_YOUTUBE_CLIENT_SECRET`, `YTS_YOUTUBE_OAUTH_REDIRECT_URI`
-- retencao: `YTS_ARTIFACT_RETENTION_*`
+- LLM principal, fallback, reparo, cenas e rascunho.
+- musica de fundo, banco local e fallback para API.
+- modo de publicacao, API do YouTube e notificacao de inscritos.
+- horario do ciclo diario, horario padrao de publicacao, janela da agenda, tentativas e score minimo.
 
-Defaults atuais importantes:
-
-- `YTS_SIMPLE_SHORTS_MODE=true`
-- `YTS_LLM_PRIMARY_PROVIDER=minimax`
-- `YTS_LLM_FALLBACK_PROVIDER=deepseek`
-- `YTS_YOUTUBE_PUBLISH_MODE=manual`
-- `YTS_YOUTUBE_API_ENABLED=false`
+O Hub persiste esses valores como sobreposicoes operacionais no banco. Use `Restaurar .env` no modal para limpar as sobreposicoes e voltar aos defaults do ambiente/codigo.
 
 ### MiniMax para imagens
 
@@ -153,12 +145,10 @@ YTS_MINIMAX_IMAGE_API_KEY=...
 
 ## YouTube e OAuth
 
-Para upload real via API:
+Para upload real via API, coloque apenas credenciais no `.env`:
 
 ```env
 YTS_USE_MOCK_PROVIDERS=false
-YTS_YOUTUBE_PUBLISH_MODE=api
-YTS_YOUTUBE_API_ENABLED=true
 YTS_YOUTUBE_CLIENT_ID=...
 YTS_YOUTUBE_CLIENT_SECRET=...
 YTS_YOUTUBE_CHANNEL_ID=...
@@ -169,7 +159,8 @@ Depois de subir o app:
 1. abra `/youtube/connect`
 2. conclua o OAuth do canal
 3. verifique o token salvo em `data/youtube_oauth_token.json`
-4. use o hub para aprovar, agendar ou publicar
+4. no Hub, abra `Configurações` e ligue modo `API` e `API YouTube ativa`
+5. use o hub para aprovar, agendar ou publicar
 
 Quando `YTS_YOUTUBE_OAUTH_REDIRECT_URI` estiver vazio, o app usa a URL atual do hub como callback efetivo.
 

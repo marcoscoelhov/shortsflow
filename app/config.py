@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
-    llm_primary_provider: str = "minimax"
+    llm_primary_provider: str = "openai"
     llm_fallback_provider: str = "deepseek"
     llm_repair_provider: str = "deepseek"
     llm_scene_provider: str = "deepseek"
@@ -52,7 +52,11 @@ class Settings(BaseSettings):
     asset_generation_regeneration_rounds: int = 2
     asset_generation_parallelism: int = 3
     background_music_enabled: bool = True
+    background_music_provider: str = "local_bank"
     background_music_gain_db: float = -17.0
+    music_bank_dir: Path = Path("data/music_bank")
+    music_bank_auto_populate: bool = True
+    allow_music_api_fallback: bool = False
     sound_design_enabled: bool = False
     sound_design_gain_db: float = -18.0
     youtube_publish_mode: str = "manual"
@@ -173,6 +177,15 @@ class Settings(BaseSettings):
             raise ValueError("asset_generation_parallelism must be between 1 and 8")
         return value
 
+    @field_validator("background_music_provider")
+    @classmethod
+    def validate_background_music_provider(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"local_bank", "minimax", "auto"}
+        if normalized not in allowed:
+            raise ValueError("background_music_provider must be one of: local_bank, minimax, auto")
+        return normalized
+
     @field_validator(
         "artifact_retention_sweep_seconds",
         "artifact_ttl_hard_failure_hours",
@@ -244,4 +257,5 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    settings.music_bank_dir.mkdir(parents=True, exist_ok=True)
     return settings

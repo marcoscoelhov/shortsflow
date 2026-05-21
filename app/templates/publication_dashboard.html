@@ -30,7 +30,7 @@
       <div><strong>Status</strong><span>{% if automation.metrics.enabled %}ligada{% else %}pausada{% endif %}</span></div>
       <div><strong>Roteiros</strong><span>{{ automation.metrics.available_ready_scripts }} disponíveis</span></div>
       <div><strong>Ciclo</strong><span>{{ automation.settings.run_time }} · {{ automation.settings.timezone }}</span></div>
-      <div><strong>Publicação</strong><span>{{ automation.settings.publish_time }} · 14 dias</span></div>
+      <div><strong>Publicação</strong><span>{{ automation.settings.publish_time }} · {{ automation.settings.fill_window_days }} dias</span></div>
     </div>
     {% if automation.last_run %}
     <div class="publication-list">

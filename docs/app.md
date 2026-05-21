@@ -30,8 +30,8 @@ Persistencia local padrao:
 6. O revisor abre `/jobs/{job_id}`, assiste ao video, revisa checklist e aprova ou rejeita.
 7. Ao aprovar, o job vira `approved_for_publish`.
 8. A partir disso, o operador pode salvar metadados de upload, agendar pela pagina do job ou pelo calendario, publicar imediatamente ou reabrir para republicacao.
-9. Em `YTS_YOUTUBE_PUBLISH_MODE=api` com OAuth conectado, o worker processa slots vencidos e sobe o video no YouTube automaticamente.
-10. Em `manual`, o hub continua servindo para aprovacao, agenda local e registro de publish manual.
+9. Em modo YouTube `api` no Hub com OAuth conectado, o worker processa slots vencidos e sobe o video no YouTube automaticamente.
+10. Em modo `manual`, o hub continua servindo para aprovacao, agenda local e registro de publish manual.
 
 ## Modos de entrada
 
@@ -106,7 +106,7 @@ Etapas atuais de `JobOrchestrator._steps()`:
 | `asset_generation` | 2 | Gera ou seleciona imagens e aplica score semantico. |
 | `tts` | 2 | Gera narracao e metadados basicos de audio. |
 | `subtitle_alignment` | 1 | Normaliza legenda e arquivos de render. |
-| `background_music` | 1 | Gera trilha, faz mix e valida audio final. |
+| `background_music` | 1 | Seleciona ou gera trilha, faz mix e valida audio final. |
 | `render` | 1 | Gera `render/final.mp4` vertical via FFmpeg. |
 | `monetization_readiness_gate` | 0 | Consolida direitos, disclosure, factualidade, repeticao e publish readiness. |
 | `publish_to_review_hub` | 0 | Persiste o pacote de publicacao e leva o job ao hub. |
@@ -178,7 +178,7 @@ Defaults importantes:
 - `language=pt-BR`
 - `target_duration_sec=45`
 - `simple_shorts_mode=true`
-- `llm_primary_provider=minimax`
+- `llm_primary_provider=openai`
 - `llm_fallback_provider=deepseek`
 - `youtube_publish_mode=manual`
 - `youtube_api_enabled=false`
@@ -188,17 +188,25 @@ Defaults importantes:
 - `automation_publish_time=11:00`
 - `artifact_retention_enabled=true`
 
-Blocos relevantes de configuracao:
+Camadas de configuracao:
 
-- hub e auth: `YTS_APP_URL`, `YTS_HUB_AUTH_TOKEN`
-- banco: `YTS_DATABASE_URL`, `YTS_SQLITE_*`
-- editorial: `YTS_NICHE_ID`, `YTS_LANGUAGE`, `YTS_SIMPLE_SHORTS_MODE`
-- providers e timeouts: `YTS_LLM_*`, `YTS_MINIMAX_*`, `YTS_OPENAI_*`, `YTS_DEEPSEEK_*`, `YTS_QWEN_*`
-- audio: `YTS_BACKGROUND_MUSIC_*`, `YTS_SOUND_DESIGN_*`
-- YouTube: `YTS_YOUTUBE_*`
-- automacao: `YTS_AUTOMATION_*`
-- direitos: `YTS_*COMMERCIAL_RIGHTS*`, `YTS_CONSERVATIVE_SYNTHETIC_DISCLOSURE`, `YTS_ALLOW_SYNTHETIC_VISUALS_FOR_MONETIZATION`
-- worker e retencao: `YTS_WORKER_POLL_SECONDS`, `YTS_JOB_LEASE_SECONDS`, `YTS_ARTIFACT_RETENTION_*`
+- `.env`: boot, infraestrutura e segredos. Inclui `YTS_APP_URL`, `YTS_HUB_AUTH_TOKEN`, `YTS_DATABASE_URL`, chaves de provedores, OAuth do YouTube e exposicao Tailnet.
+- Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, fonte de musica, autopopulacao do banco local, modo de publicacao, API do YouTube, horario do ciclo diario, horario padrao de publicacao, janela da agenda e score minimo.
+- defaults do codigo: valores seguros usados quando nem `.env` nem Hub definem uma sobreposicao.
+
+As sobreposicoes do Hub ficam na tabela `operational_settings`. Elas sao aplicadas no startup do FastAPI e no comando `yts-render automation-run`. Segredos nunca devem ser adicionados a essa tabela; novos campos editaveis precisam entrar pela allowlist em `app/operational_settings.py`.
+
+Musica de fundo:
+
+- o padrao e banco local, alteravel no Hub de Revisao
+- `local_bank` le `YTS_MUSIC_BANK_DIR/manifest.json` e usa apenas faixas aprovadas para YouTube, com licenca ou origem rastreavel
+- a autopopulacao do banco local pode ser ligada ou desligada no Hub
+- trilhas MiniMax antigas podem ser importadas com `scripts/import_minimax_music_artifacts.py` e recebem prioridade sobre as sinteticas locais
+- o fallback para API fica desligado por padrao para impedir custo silencioso quando o banco local falha
+- `minimax` força MiniMax Music como fonte primaria
+- `auto` tenta o banco local e depois MiniMax, quando houver chave
+- o manifest pode ser uma lista ou um objeto com `tracks`; cada item deve ter `path`, `license` ou `license_note`, `source_url` ou `license_file`, `approved_for_youtube=true`, e nao deve estar marcado como Content ID registrado
+- veja `docs/music-bank.md` para o formato recomendado do banco local
 
 Credenciais MiniMax por midia:
 
@@ -206,7 +214,7 @@ Credenciais MiniMax por midia:
 - imagem tenta primeiro a chave resolvida de texto
 - imagem usa `YTS_MINIMAX_IMAGE_API_KEY` so depois de limite ou quota na chave de texto, e marca essa chave como esgotada para o job atual
 - se nao houver chave de texto, imagem usa diretamente `YTS_MINIMAX_IMAGE_API_KEY`
-- musica usa `YTS_MINIMAX_MUSIC_API_KEY` ou a chave resolvida de texto
+- musica usa `YTS_MINIMAX_MUSIC_API_KEY` ou a chave resolvida de texto apenas quando MiniMax Music esta configurado como provider ou fallback
 
 Limite de provedor para troca de chave de imagem significa quota, saldo, credito ou rate limit. Timeout, erro de conexao, resposta invalida e `5xx` continuam sendo falhas transientes da chamada atual.
 

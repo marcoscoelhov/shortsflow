@@ -1004,6 +1004,7 @@ class AssetPipeline(BasePipeline):
             "elapsed_ms": elapsed_ms,
             "strict_minimax_validation": self.settings.strict_minimax_validation,
             "background_music_enabled": self.settings.background_music_enabled,
+            "background_music_provider": self.settings.background_music_provider,
             "background_music_gain_db": self.settings.background_music_gain_db,
             "minimax_music_timeout_sec": self.settings.minimax_music_timeout_sec,
             "canonical_topic": topic_dict.get("canonical_topic"),

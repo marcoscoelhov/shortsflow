@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.automation import AutomationService
 from app.db import init_db
+from app.operational_settings import apply_operational_settings
 from app.orchestrator import orchestrator
 
 
@@ -23,6 +24,7 @@ def main() -> None:
 
     args = parser.parse_args()
     init_db()
+    apply_operational_settings(orchestrator.settings)
     service = AutomationService(orchestrator)
 
     if args.command == "automation-run":

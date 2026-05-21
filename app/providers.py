@@ -28,6 +28,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from app.config import get_settings
 from app.editorial.research_brief import build_research_brief
 from app.editorial.retention import EDITORIAL_PROMPT_VERSION, build_retention_map, build_visual_opening_brief
+from app.music_bank import populate_builtin_music_bank
 from app.utils import avg_words_per_sentence, max_words_single_sentence, parse_srt, sentence_split, tokenize, word_tokens, wrap_caption
 
 
@@ -1856,6 +1857,226 @@ class MockBackgroundMusicProvider:
             wav_file.writeframes(frames)
 
 
+class LocalMusicBankProvider:
+    provider_name = "local_music_bank"
+
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self.bank_dir = Path(self.settings.music_bank_dir)
+        self.manifest_path = self.bank_dir / "manifest.json"
+
+    def select_track(self, topic_plan: dict[str, Any], script: dict[str, Any], output_path: Path, target_duration_ms: int) -> dict[str, Any]:
+        mood = self._infer_mood(topic_plan, script)
+        query = self._query_hint(topic_plan, script, mood)
+        tracks = self._load_manifest()
+        track = self._select_approved_track(tracks, mood, query)
+        source_path = self._resolve_bank_path(track.get("path"))
+        if not source_path.exists():
+            raise ProviderFailure(
+                self.provider_name,
+                f"approved music bank track is missing: {source_path}",
+                details={"manifest_path": str(self.manifest_path), "track_id": track.get("id"), "source_path": str(source_path)},
+            )
+        self._prepare_track_audio(source_path, output_path, target_duration_ms)
+        license_file = self._resolve_optional_bank_path(track.get("license_file"))
+        requires_attribution = bool(track.get("requires_attribution"))
+        attribution = str(track.get("attribution") or "").strip() or None
+        if requires_attribution and not attribution:
+            attribution = self._default_attribution(track)
+        license_note = str(track.get("license_note") or track.get("license") or "approved_local_music_bank").strip()
+        return {
+            "provider": self.provider_name,
+            "query": query,
+            "mood": mood,
+            "source_url": str(track.get("source_url") or "").strip() or None,
+            "attribution": attribution,
+            "license_note": license_note,
+            "audio_uri": output_path.resolve().as_uri(),
+            "duration_ms": target_duration_ms,
+            "provider_metadata": {
+                "selection_mode": "approved_bank",
+                "track_id": track.get("id"),
+                "track_title": track.get("title"),
+                "artist": track.get("artist"),
+                "source_path": str(source_path),
+                "license_file": str(license_file) if license_file else None,
+                "requires_attribution": requires_attribution,
+                "content_id_registered": bool(track.get("content_id_registered")),
+                "content_id_risk": str(track.get("content_id_risk") or "unknown"),
+                "approved_for_youtube": bool(track.get("approved_for_youtube")),
+                "requested_duration_ms": target_duration_ms,
+                "source_looped_to_ms": target_duration_ms,
+            },
+        }
+
+    def _load_manifest(self) -> list[dict[str, Any]]:
+        if not self.manifest_path.exists():
+            if bool(getattr(self.settings, "music_bank_auto_populate", True)):
+                populate_builtin_music_bank(self.bank_dir)
+            else:
+                raise ProviderFailure(
+                    self.provider_name,
+                    "approved music bank manifest is missing",
+                    details={"manifest_path": str(self.manifest_path)},
+                )
+        try:
+            payload = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ProviderFailure(
+                self.provider_name,
+                f"approved music bank manifest is invalid: {exc}",
+                details={"manifest_path": str(self.manifest_path)},
+            ) from exc
+        tracks = payload.get("tracks") if isinstance(payload, dict) else payload
+        if not isinstance(tracks, list):
+            raise ProviderFailure(self.provider_name, "approved music bank manifest must contain a list of tracks")
+        return [track for track in tracks if isinstance(track, dict)]
+
+    def _select_approved_track(self, tracks: list[dict[str, Any]], mood: str, query: str) -> dict[str, Any]:
+        candidates = [track for track in tracks if self._is_usable_track(track)]
+        if not candidates and bool(getattr(self.settings, "music_bank_auto_populate", True)):
+            populate_builtin_music_bank(self.bank_dir)
+            tracks = self._load_manifest()
+            candidates = [track for track in tracks if self._is_usable_track(track)]
+        if not candidates:
+            raise ProviderFailure(
+                self.provider_name,
+                "approved music bank has no usable YouTube-approved tracks",
+                details={"manifest_path": str(self.manifest_path), "track_count": len(tracks)},
+            )
+        scored = sorted(
+            ((self._score_track(track, mood, query), str(track.get("id") or track.get("path") or ""), track) for track in candidates),
+            key=lambda item: (-item[0], item[1]),
+        )
+        best_score = scored[0][0]
+        best_tracks = [item[2] for item in scored if item[0] == best_score]
+        index = sum(ord(char) for char in query) % len(best_tracks)
+        return best_tracks[index]
+
+    def _is_usable_track(self, track: dict[str, Any]) -> bool:
+        if not track.get("approved_for_youtube"):
+            return False
+        if track.get("content_id_registered"):
+            return False
+        if str(track.get("content_id_risk") or "").strip().lower() in {"high", "registered", "blocked"}:
+            return False
+        if not track.get("path"):
+            return False
+        if not (track.get("license") or track.get("license_note")):
+            return False
+        if not (track.get("source_url") or track.get("license_file")):
+            return False
+        return True
+
+    def _score_track(self, track: dict[str, Any], mood: str, query: str) -> int:
+        labels = self._track_labels(track)
+        score = 0
+        if str(track.get("quality_tier") or "").strip().lower() == "primary":
+            score += 40
+        if str(track.get("bank_source") or "").strip().lower() == "minimax_artifact":
+            score += 15
+        if mood in labels:
+            score += 20
+        for token in word_tokens(query):
+            if token in labels:
+                score += 2
+        if str(track.get("content_id_risk") or "").strip().lower() == "low":
+            score += 2
+        if not bool(track.get("requires_attribution")):
+            score += 1
+        return score
+
+    def _track_labels(self, track: dict[str, Any]) -> set[str]:
+        values: list[str] = []
+        for key in ("mood", "moods", "tags", "genre", "genres"):
+            raw = track.get(key)
+            if isinstance(raw, list):
+                values.extend(str(item) for item in raw)
+            elif raw:
+                values.append(str(raw))
+        return {token for value in values for token in word_tokens(value)}
+
+    def _infer_mood(self, topic_plan: dict[str, Any], script: dict[str, Any]) -> str:
+        surface = " ".join(
+            [
+                str(topic_plan.get("canonical_topic") or ""),
+                str(topic_plan.get("angle") or ""),
+                str(script.get("title") or ""),
+                str(script.get("hook") or ""),
+            ]
+        ).lower()
+        if any(term in surface for term in ["mistério", "misterio", "segredo", "sombra", "buraco negro", "crime"]):
+            return "suspense"
+        if any(term in surface for term in ["cafeína", "cafeina", "neuro", "tecnologia", "universo", "espaço", "espaco"]):
+            return "technology"
+        if any(term in surface for term in ["polvo", "gato", "animal", "oceano", "natureza", "história", "historia"]):
+            return "documentary"
+        return "cinematic"
+
+    def _query_hint(self, topic_plan: dict[str, Any], script: dict[str, Any], mood: str) -> str:
+        topic = str(topic_plan.get("canonical_topic") or "").strip()
+        angle = str(topic_plan.get("angle") or "").strip()
+        title = str(script.get("title") or "").strip()
+        return " ".join(part for part in [topic, angle, title, mood] if part).strip()
+
+    def _resolve_bank_path(self, value: Any) -> Path:
+        raw_path = Path(str(value or ""))
+        return raw_path if raw_path.is_absolute() else self.bank_dir / raw_path
+
+    def _resolve_optional_bank_path(self, value: Any) -> Path | None:
+        if not value:
+            return None
+        return self._resolve_bank_path(value)
+
+    def _default_attribution(self, track: dict[str, Any]) -> str:
+        title = str(track.get("title") or track.get("id") or "Unknown track").strip()
+        artist = str(track.get("artist") or "Unknown artist").strip()
+        source = str(track.get("source_url") or "").strip()
+        parts = [f"{title} by {artist}"]
+        if source:
+            parts.append(source)
+        return " - ".join(parts)
+
+    def _prepare_track_audio(self, source_path: Path, output_path: Path, target_duration_ms: int) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        duration_sec = max(target_duration_ms / 1000, 1.0)
+        fade_duration = min(1.2, max(duration_sec / 2, 0.1))
+        fade_out_start = max(duration_sec - fade_duration, 0.0)
+        temp_path = output_path.with_suffix(".local-bank.wav")
+        try:
+            result = subprocess.run(
+                [
+                    imageio_ffmpeg.get_ffmpeg_exe(),
+                    "-y",
+                    "-stream_loop",
+                    "-1",
+                    "-i",
+                    str(source_path),
+                    "-t",
+                    f"{duration_sec:.3f}",
+                    "-af",
+                    f"aresample=24000,afade=t=in:st=0:d=0.25,afade=t=out:st={fade_out_start:.3f}:d={fade_duration:.3f}",
+                    "-ar",
+                    "24000",
+                    "-ac",
+                    "1",
+                    str(temp_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise ProviderFailure(
+                    self.provider_name,
+                    "failed to prepare approved music bank track",
+                    details={"source_path": str(source_path), "stderr": result.stderr[-1000:] if result.stderr else None},
+                )
+            temp_path.replace(output_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+
 class MiniMaxBackgroundMusicProvider:
     provider_name = "minimax_music"
 
@@ -2135,16 +2356,30 @@ class ResilientMusicProvider:
     def __init__(self) -> None:
         settings = get_settings()
         self.providers: list[Any] = []
+        provider_mode = str(getattr(settings, "background_music_provider", "local_bank") or "local_bank").strip().lower()
+        allow_api_fallback = bool(getattr(settings, "allow_music_api_fallback", False))
         if settings.use_mock_providers:
             self.providers.append(MockBackgroundMusicProvider())
-        elif settings.resolved_minimax_music_api_key:
+        elif provider_mode == "local_bank":
+            self.providers.append(LocalMusicBankProvider())
+            if allow_api_fallback and settings.resolved_minimax_music_api_key:
+                self.providers.append(MiniMaxBackgroundMusicProvider())
+        elif provider_mode == "auto":
+            self.providers.append(LocalMusicBankProvider())
+            if settings.resolved_minimax_music_api_key:
+                self.providers.append(MiniMaxBackgroundMusicProvider())
+        elif provider_mode == "minimax" and settings.resolved_minimax_music_api_key:
             self.providers.append(MiniMaxBackgroundMusicProvider())
+        elif provider_mode == "minimax":
+            self.providers = []
+        else:
+            raise ProviderFailure("background_music", f"unknown background music provider: {provider_mode}")
 
     def select_track(self, topic_plan: dict[str, Any], script: dict[str, Any], output_path: Path, target_duration_ms: int) -> dict[str, Any]:
         last_error = "music selection failed"
         last_details: dict[str, Any] = {}
         if not self.providers:
-            raise ProviderFailure("background_music", "minimax music generation failed: missing minimax music api key")
+            raise ProviderFailure("background_music", "background music provider is not configured")
         for provider in self.providers:
             try:
                 return provider.select_track(topic_plan, script, output_path, target_duration_ms)
@@ -2152,7 +2387,7 @@ class ResilientMusicProvider:
                 last_error = str(exc)
                 if isinstance(exc, ProviderFailure):
                     last_details = dict(exc.details or {})
-        raise ProviderFailure("background_music", f"minimax music generation failed: {last_error}", details=last_details)
+        raise ProviderFailure("background_music", f"background music selection failed: {last_error}", details=last_details)
 
 
 class LocalSpeechFallbackProvider:

@@ -416,6 +416,8 @@ class AutomationService:
                     item.last_skip_reason = "high_narrative_similarity"
                     item.last_similarity_score = float(report.get("max_similarity") or 0.0)
                     continue
+                item.last_skip_reason = None
+                item.last_similarity_score = None
                 return item
         return None
 

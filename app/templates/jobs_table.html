@@ -1,45 +1,46 @@
-<div class="jobs-table-header">
-  <span>{{ pagination.total }} jobs</span>
-  <span>Página {{ pagination.page }} de {{ pagination.total_pages }}</span>
-</div>
 <div class="job-list">
+  {% if rows %}
+  <div class="jobs-grid-head" aria-hidden="true">
+    <span>Thumbnail</span>
+    <span>Título do vídeo</span>
+    <span>Status</span>
+    <span>Progresso</span>
+    <span>Data de criação</span>
+  </div>
+  {% endif %}
   {% for job, seed_theme, duration_ms, fallback_count, asset_count in rows %}
   {% set row_progress = job_progress_snapshot(job) %}
-  <article class="job-row-card">
-    <div class="job-row-main">
-      <div class="job-row-head">
-        <div>
-          <p class="eyebrow">Job {{ job.job_id[:8] }}</p>
-          <h3><a href="/jobs/{{ job.job_id }}" title="{{ job.job_id }}">{{ seed_theme or job.topic_summary or job.job_id }}</a></h3>
-        </div>
-        <span class="badge {{ job.status }}">{{ job_status_label(job.status) }}</span>
-      </div>
+  {% set created_text = job.created_at|string %}
+  <article class="job-row-card jobs-grid-row">
+    <a class="job-thumb" href="/jobs/{{ job.job_id }}" aria-label="Abrir job {{ job.job_id }}">
+      <span class="material-symbols-outlined" aria-hidden="true">smart_display</span>
+    </a>
+    <div class="job-title-cell">
+      <p class="eyebrow">Job {{ job.job_id[:8] }}</p>
+      <h3><a href="/jobs/{{ job.job_id }}" title="{{ job.job_id }}">{{ seed_theme or job.topic_summary or job.job_id }}</a></h3>
       <div class="job-row-meta">
-        <span><strong>Etapa:</strong> {{ job_flow_stage(job.status) }}</span>
-        <span><strong>Criado:</strong> {{ job.created_at }}</span>
-        <span><strong>Duração:</strong> {% if duration_ms %}{{ (duration_ms / 1000)|round(1) }} s{% else %}-{% endif %}</span>
-        <span><strong>Fallbacks:</strong> {{ fallback_count }}</span>
+        <span>{{ job.created_at }}</span>
+        <span>{% if duration_ms %}{{ (duration_ms / 1000)|round(1) }} s{% else %}-{% endif %}</span>
+        <span>{{ fallback_count }} fallbacks</span>
       </div>
-      <div class="job-progress-compact" aria-label="Progresso do job">
-        <div>
-          <strong>{{ row_progress.percent }}%</strong>
-          <span>{{ row_progress.current_label }}</span>
-        </div>
-        <div class="job-progress-bar compact" aria-hidden="true">
-          <span class="job-progress-fill {{ row_progress.state }}" style="width: {{ row_progress.percent }}%"></span>
-        </div>
-      </div>
-      <p class="job-row-next"><strong>Próxima ação:</strong> {{ job_next_action(job.status) }}</p>
     </div>
-    <div class="job-row-actions">
-      <a class="button-link" href="/jobs/{{ job.job_id }}">Abrir job</a>
-      {% if job.status in ["ready_for_upload", "monetization_review"] %}
-      <span class="inline-hint">Aprovação pendente</span>
-      {% elif job.status == "approved_for_publish" %}
-      <span class="inline-hint">Já pode programar</span>
-      {% elif job.status == "published" %}
-      <span class="inline-hint">Publicado</span>
-      {% endif %}
+    <div class="job-status-cell">
+      <span class="badge {{ job.status }}">{{ job_status_label(job.status) }}</span>
+      <small>{{ job_flow_stage(job.status) }}</small>
+    </div>
+    <div class="job-progress-compact" aria-label="Progresso do job">
+      <div>
+        <strong>{{ row_progress.percent }}%</strong>
+        <span>{{ row_progress.current_label }}</span>
+      </div>
+      <div class="job-progress-bar compact" aria-hidden="true">
+        <span class="job-progress-fill {{ row_progress.state }}" style="width: {{ row_progress.percent }}%"></span>
+      </div>
+      <p class="job-row-next">{{ job_next_action(job.status) }}</p>
+    </div>
+    <div class="job-date-cell">
+      <time datetime="{{ created_text }}">{{ created_text[:10] }}</time>
+      <span>{{ created_text[11:16] if created_text|length >= 16 else "" }}</span>
     </div>
   </article>
   {% else %}
@@ -48,6 +49,10 @@
     <p>Altere os filtros ou crie um novo job.</p>
   </article>
   {% endfor %}
+</div>
+<div class="jobs-table-header">
+  <span>Exibindo {{ rows|length }} de {{ pagination.total }} jobs encontrados</span>
+  <span>Página {{ pagination.page }} de {{ pagination.total_pages }}</span>
 </div>
 <nav class="pagination" aria-label="Paginação de jobs">
   {% if pagination.has_previous %}

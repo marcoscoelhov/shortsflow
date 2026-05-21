@@ -289,6 +289,14 @@ class AutomationSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class OperationalSetting(Base):
+    __tablename__ = "operational_settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class AutomationRun(Base):
     __tablename__ = "automation_runs"
     __table_args__ = (UniqueConstraint("local_date", name="uq_automation_run_local_date"),)

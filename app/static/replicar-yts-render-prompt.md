@@ -410,17 +410,21 @@ Regras:
 
 ## Musica de fundo
 
-Use MiniMax Music para jobs reais.
+Use Banco de Trilhas Aprovadas como caminho primario para jobs reais. MiniMax Music so deve ser usado quando `YTS_BACKGROUND_MUSIC_PROVIDER=minimax` ou quando fallback por API estiver explicitamente habilitado.
 
 Regras obrigatorias:
 
 - `YTS_BACKGROUND_MUSIC_GAIN_DB=-17.0`
+- `YTS_BACKGROUND_MUSIC_PROVIDER=local_bank` por padrao
+- o banco local deve usar apenas faixas com origem e licenca rastreaveis e `approved_for_youtube=true`
+- `YTS_MUSIC_BANK_AUTO_POPULATE=true` pode criar trilhas sinteticas locais, sem download externo, quando o banco estiver vazio
+- trilhas MiniMax antigas com quality gate aprovado podem ser importadas para o banco e devem ter prioridade sobre trilhas sinteticas locais
 - mock de musica so pode existir quando `YTS_USE_MOCK_PROVIDERS=true`
-- se MiniMax Music falhar em job real, a etapa `background_music` deve falhar
+- se a fonte de musica configurada falhar em job real, a etapa `background_music` deve falhar
 - nao caia para mock em job real
 - persista `background_music_debug.json` com erro, payload, `base_resp`, `trace_id`, `data_keys`, `extra_info`, `analysis_info`
-- use `output_format=url` no payload MiniMax
-- baixe o audio retornado e converta para WAV
+- use `output_format=url` no payload MiniMax quando MiniMax Music estiver configurado
+- converta a fonte selecionada para WAV
 - se o provider devolver duracao maior que o alvo, corte localmente
 - misture abaixo da narracao com `sidechaincompress + amix + loudnorm`
 - render deve usar `mixed_audio_uri` quando existir

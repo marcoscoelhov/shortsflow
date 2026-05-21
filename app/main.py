@@ -21,6 +21,13 @@ from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.manual_script import build_ready_script_notes, parse_ready_script
 from app.models import FallbackEvent, Job, PublicationSchedule, RenderOutput, SceneAsset, Script, TopicRequest
+from app.operational_settings import (
+    apply_operational_settings,
+    build_operational_settings_context,
+    clear_operational_settings,
+    parse_operational_form_values,
+    save_operational_settings,
+)
 from app.orchestrator import FatalStepError, orchestrator
 from pydantic import ValidationError
 
@@ -41,6 +48,7 @@ def _request_path_with_query(request: Request) -> str:
 def _shared_template_context(request: Request) -> dict[str, object]:
     return {
         "settings": settings,
+        "operational_settings": build_operational_settings_context(settings),
         "automation": automation_service.dashboard_context(),
         "viral_prompt_template": _viral_prompt_template(),
         "return_to": _request_path_with_query(request),
@@ -101,7 +109,7 @@ Proibido:
 - nao entregue a explicacao completa no primeiro beat; abra um loop e feche depois
 - nao use clickbait falso: todo choque precisa ser provado no roteiro"""
 HUB_SETTINGS_FILENAME = "hub_settings.json"
-HUB_JOBS_PER_PAGE = 20
+HUB_JOBS_PER_PAGE = 4
 MAX_VIRAL_PROMPT_TEMPLATE_CHARS = 12000
 COMMON_SCHEDULE_TIMEZONES = [
     "UTC",
@@ -292,6 +300,7 @@ templates.env.globals["job_progress_snapshot"] = _job_progress_snapshot
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    apply_operational_settings(settings)
     orchestrator.start_worker()
     yield
     orchestrator.stop_worker()
@@ -876,6 +885,21 @@ def update_hub_prompt(
     else:
         _save_viral_prompt_template(viral_prompt_template)
     return _redirect_back(return_to)
+
+
+@app.post("/operations/settings")
+async def update_operational_settings(request: Request):
+    form = await request.form()
+    return_to = str(form.get("return_to") or "")
+    action = str(form.get("action") or "save")
+    try:
+        if action == "reset":
+            clear_operational_settings(settings)
+        else:
+            save_operational_settings(settings, parse_operational_form_values(dict(form)))
+    except (ValueError, ValidationError) as exc:
+        return _redirect_back(return_to, {"settings_error": str(exc)}, default="/#publication-hub")
+    return _redirect_back(return_to, {"settings_saved": "1"}, default="/#publication-hub")
 
 
 @app.get("/jobs", response_class=HTMLResponse)

@@ -4,23 +4,73 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ settings.app_name }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
     <script src="/static/htmx.min.js"></script>
   </head>
   <body>
     <div class="app-frame">
-      <header class="topbar app-sidebar">
-        <div class="brand-block">
-          <p class="eyebrow">Console operacional</p>
-          <h1><a href="/">{{ settings.app_name }}</a></h1>
-          <p class="sidebar-copy">Fila, revisão humana e publicação em uma superfície.</p>
+      <header class="app-topbar" aria-label="Barra superior">
+        <a class="topbar-product" href="/">
+          <span>ShortsFlow</span>
+        </a>
+        <form class="topbar-search" action="/" method="get">
+          <span class="material-symbols-outlined" aria-hidden="true">search</span>
+          <input name="search" value="{{ filters.search if filters is defined else '' }}" placeholder="Buscar jobs por título...">
+        </form>
+        <div class="topbar-actions" aria-label="Ações rápidas">
+          <button type="button" class="topbar-icon" data-open-ready-script-bank aria-label="Abrir banco de roteiros">
+            <span class="material-symbols-outlined" aria-hidden="true">bolt</span>
+          </button>
+          <button type="button" class="topbar-icon" data-open-ready-script-bank aria-label="Abrir banco de roteiros">
+            <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
+          </button>
+          <button type="button" class="topbar-icon" data-open-operational-settings aria-label="Abrir configurações">
+            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+          </button>
+          <button type="button" class="topbar-avatar" data-open-operational-settings aria-label="Abrir perfil operacional">YT</button>
         </div>
+      </header>
+      <aside class="app-sidebar">
         <nav class="topnav" aria-label="Navegação principal">
-          <a href="/">Fila</a>
-          <a href="/calendar">Agenda</a>
-          <a href="/#publication-hub">Publicação</a>
+          <a href="/">
+            <span class="material-symbols-outlined" aria-hidden="true">dashboard</span>
+            Dashboard
+          </a>
+          <a class="active" href="/">
+            <span class="material-symbols-outlined" aria-hidden="true">video_camera_back</span>
+            Automação
+          </a>
+          <button type="button" data-open-ready-script-bank>
+            <span class="material-symbols-outlined" aria-hidden="true">video_library</span>
+            Biblioteca
+          </button>
+          <a href="/#publication-hub">
+            <span class="material-symbols-outlined" aria-hidden="true">bar_chart</span>
+            Analytics
+          </a>
+          <a href="/calendar">
+            <span class="material-symbols-outlined" aria-hidden="true">event_upcoming</span>
+            Agendamento
+          </a>
         </nav>
-        <section class="global-automation" aria-label="Automação global">
+        <div class="sidebar-spacer"></div>
+        <button type="button" class="sidebar-new-project" data-open-create-job>
+          <span class="material-symbols-outlined" aria-hidden="true">add</span>
+          Novo Projeto
+        </button>
+        <nav class="sidebar-footer-nav" aria-label="Suporte">
+          <button type="button" data-open-operational-settings>
+            <span class="material-symbols-outlined" aria-hidden="true">help</span>
+            Suporte
+          </button>
+          <a href="/">
+            <span class="material-symbols-outlined" aria-hidden="true">logout</span>
+            Sair
+          </a>
+        </nav>
+        <div class="sidebar-legacy-controls sr-only">
+          <section class="global-automation" aria-label="Automação global">
           <div class="global-automation-head">
             <div>
               <p class="eyebrow">Automação</p>
@@ -38,30 +88,35 @@
             <span>{{ automation.metrics.available_ready_scripts }} roteiros</span>
             <span>{{ automation.settings.run_time }} em {{ automation.settings.timezone }}</span>
           </div>
-        </section>
-        <button type="button" class="sidebar-modal-button" data-open-ready-script-bank>
-          <span>Banco de roteiros</span>
-          <small>{{ automation.metrics.available_ready_scripts }} disponíveis</small>
-        </button>
-        <details class="sidebar-disclosure hub-tools-disclosure">
-          <summary>Prompt viral avançado</summary>
-          <form method="post" action="/hub/prompt" class="sidebar-form prompt-form">
-            <input type="hidden" name="return_to" value="{{ return_to }}">
-            <div class="field full">
-              <label for="global_viral_prompt_template">Template</label>
-              <textarea id="global_viral_prompt_template" name="viral_prompt_template" rows="8">{{ viral_prompt_template }}</textarea>
-            </div>
-            <div class="button-row prompt-actions">
-              <button type="submit" name="action" value="save" class="sidebar-button">Salvar</button>
-              <button type="submit" name="action" value="reset" class="sidebar-button ghost">Restaurar</button>
-            </div>
-          </form>
-        </details>
-        <div class="tailnet-box">
-          <span>Local: {{ settings.app_host }}:{{ settings.app_port }}</span>
-          <span>Tailnet: https://{{ settings.tailscale_hostname }}.{{ settings.tailnet_domain }}</span>
+          </section>
+          <button type="button" class="sidebar-modal-button" data-open-ready-script-bank>
+            <span>Banco de roteiros</span>
+            <small>{{ automation.metrics.available_ready_scripts }} disponíveis</small>
+          </button>
+          <button type="button" class="sidebar-modal-button" data-open-operational-settings>
+            <span>Configurações</span>
+            <small>{{ operational_settings.saved_count }} no hub</small>
+          </button>
+          <details class="sidebar-disclosure hub-tools-disclosure">
+            <summary>Prompt viral avançado</summary>
+            <form method="post" action="/hub/prompt" class="sidebar-form prompt-form">
+              <input type="hidden" name="return_to" value="{{ return_to }}">
+              <div class="field full">
+                <label for="global_viral_prompt_template">Template</label>
+                <textarea id="global_viral_prompt_template" name="viral_prompt_template" rows="8">{{ viral_prompt_template }}</textarea>
+              </div>
+              <div class="button-row prompt-actions">
+                <button type="submit" name="action" value="save" class="sidebar-button">Salvar</button>
+                <button type="submit" name="action" value="reset" class="sidebar-button ghost">Restaurar</button>
+              </div>
+            </form>
+          </details>
+          <div class="tailnet-box">
+            <span>Local: {{ settings.app_host }}:{{ settings.app_port }}</span>
+            <span>Tailnet: https://{{ settings.tailscale_hostname }}.{{ settings.tailnet_domain }}</span>
+          </div>
         </div>
-      </header>
+      </aside>
       <main class="page-shell">
         {% block content %}{% endblock %}
       </main>
@@ -127,12 +182,82 @@
         </div>
       </div>
     </dialog>
+    <dialog id="operational-settings-modal" class="schedule-picker-modal operational-settings-modal" aria-labelledby="operational-settings-title">
+      <form method="post" action="/operations/settings" class="schedule-picker-card operational-settings-card">
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        <div class="schedule-picker-head">
+          <div>
+            <p class="eyebrow">Operação</p>
+            <h4 id="operational-settings-title">Configurações do hub</h4>
+          </div>
+          <button type="button" class="ghost icon-button" data-close-operational-settings aria-label="Fechar configurações">X</button>
+        </div>
+        <div class="operational-settings-grid">
+          {% for group in operational_settings.groups %}
+          <section class="operational-settings-group" aria-label="{{ group.name }}">
+            <h5>{{ group.name }}</h5>
+            <div class="settings-body">
+              {% for field in group.fields %}
+              {% if field.input_type == "select" %}
+              <div class="field">
+                <label for="ops_{{ field.key }}">{{ field.label }}</label>
+                <select id="ops_{{ field.key }}" name="{{ field.key }}">
+                  {% for option in field.options %}
+                  <option value="{{ option.value }}" {% if option.value == field.value %}selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              {% elif field.input_type == "checkbox" %}
+              <label class="checkbox-line operational-checkbox" for="ops_{{ field.key }}">
+                <input id="ops_{{ field.key }}" type="checkbox" name="{{ field.key }}" value="true" {% if field.checked %}checked{% endif %}>
+                {{ field.label }}
+              </label>
+              {% else %}
+              <div class="field">
+                <label for="ops_{{ field.key }}">{{ field.label }}</label>
+                <input
+                  id="ops_{{ field.key }}"
+                  name="{{ field.key }}"
+                  type="{{ field.input_type }}"
+                  value="{{ field.value }}"
+                  {% if field.min is not none %}min="{{ field.min }}"{% endif %}
+                  {% if field.max is not none %}max="{{ field.max }}"{% endif %}
+                  {% if field.step %}step="{{ field.step }}"{% endif %}
+                >
+              </div>
+              {% endif %}
+              {% endfor %}
+            </div>
+          </section>
+          {% endfor %}
+        </div>
+        <div class="button-row operational-settings-actions">
+          <button type="submit" name="action" value="save">Salvar</button>
+          <button type="submit" name="action" value="reset" class="ghost">Restaurar .env</button>
+        </div>
+      </form>
+    </dialog>
     <script>
       (() => {
         const dialog = document.getElementById("ready-script-bank-modal");
         if (!dialog) return;
-        document.querySelector("[data-open-ready-script-bank]")?.addEventListener("click", () => dialog.showModal());
+        document.querySelectorAll("[data-open-ready-script-bank]").forEach((button) => {
+          button.addEventListener("click", () => dialog.showModal());
+        });
         dialog.querySelectorAll("[data-close-ready-script-bank]").forEach((button) => {
+          button.addEventListener("click", () => dialog.close());
+        });
+        dialog.addEventListener("click", (event) => {
+          if (event.target === dialog) dialog.close();
+        });
+      })();
+      (() => {
+        const dialog = document.getElementById("operational-settings-modal");
+        if (!dialog) return;
+        document.querySelectorAll("[data-open-operational-settings]").forEach((button) => {
+          button.addEventListener("click", () => dialog.showModal());
+        });
+        dialog.querySelectorAll("[data-close-operational-settings]").forEach((button) => {
           button.addEventListener("click", () => dialog.close());
         });
         dialog.addEventListener("click", (event) => {

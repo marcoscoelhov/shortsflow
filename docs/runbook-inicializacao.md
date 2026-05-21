@@ -46,6 +46,7 @@ YTS_DATA_DIR=data
 
 ```env
 YTS_USE_MOCK_PROVIDERS=false
+YTS_OPENAI_API_KEY=...
 YTS_MINIMAX_TEXT_API_KEY=...
 YTS_MINIMAX_IMAGE_API_KEY=...
 ```
@@ -55,14 +56,12 @@ Para imagem, a chave de texto MiniMax e usada primeiro. `YTS_MINIMAX_IMAGE_API_K
 ### Upload real no YouTube
 
 ```env
-YTS_YOUTUBE_PUBLISH_MODE=api
-YTS_YOUTUBE_API_ENABLED=true
 YTS_YOUTUBE_CLIENT_ID=...
 YTS_YOUTUBE_CLIENT_SECRET=...
 YTS_YOUTUBE_CHANNEL_ID=...
 ```
 
-Sempre reinicie o `uvicorn` depois de mudar `.env`.
+Depois de subir o hub, ajuste LLM principal, musica, automacao, modo de publicacao e API do YouTube no modal `Configurações`. Mudancas no Hub nao exigem editar `.env`; mudancas de segredos ou URLs de boot ainda exigem reiniciar o `uvicorn`.
 
 ## 4. Subir o hub
 

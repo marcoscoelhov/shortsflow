@@ -1,33 +1,52 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel hub-hero">
-  <div>
-    <p class="eyebrow">Operação</p>
-    <h2>Revisar, aprovar, programar</h2>
-    <p class="hero-copy">Comece pelo que exige decisão humana. Diagnósticos e publicação ficam depois da fila.</p>
+<section class="jobs-control-hero">
+  <div class="jobs-hero-copy">
+    <p class="eyebrow">Control center</p>
+    <h2>Gerenciador de Jobs</h2>
+    <p>Acompanhe execução, revisão humana, agendamento e publicação em uma fila única.</p>
   </div>
-  <div class="workflow-metrics">
-    <span><strong>{{ workflow_summary.awaiting_approval_count }}</strong> para aprovar</span>
-    <span><strong>{{ workflow_summary.unscheduled_approved_count }}</strong> para programar</span>
-    <span><strong>{{ workflow_summary.scheduled_count }}</strong> programados</span>
-  </div>
-  <div class="hub-action-bar">
-    <a class="button-link" href="#create-job">Criar job</a>
-    <a class="button-link ghost-link" href="#jobs-table">Revisar fila</a>
-    <a class="button-link ghost-link" href="/calendar">Abrir agenda</a>
+  <div class="jobs-hero-stats" aria-label="Resumo de operação">
+    <article>
+      <span>Jobs ativos</span>
+      <strong>{{ workflow_summary.awaiting_approval_count + workflow_summary.unscheduled_approved_count }}</strong>
+    </article>
+    <article>
+      <span>Renderizados</span>
+      <strong>{{ pagination.total }}</strong>
+    </article>
   </div>
 </section>
 
-<section class="hub-workbench">
-  <aside class="workbench-side" aria-label="Comandos do hub">
-    <section id="create-job" class="panel create-panel">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Entrada</p>
-          <h3>Criar job</h3>
-        </div>
-        <p class="section-note">Modo enxuto. Só aparece o que precisa preencher.</p>
-      </div>
+<section class="jobs-action-row" aria-label="Ações de jobs">
+  <div class="jobs-filter-pills" aria-label="Filtros rápidos">
+    <a class="{% if not filters.status %}active{% endif %}" href="/?per_page={{ pagination.per_page }}">Todos</a>
+    <a class="{% if filters.status == 'running' %}active{% endif %}" href="/?status=running&per_page={{ pagination.per_page }}">Renderizando</a>
+    <a class="{% if filters.status == 'approved_for_publish' %}active{% endif %}" href="/?status=approved_for_publish&per_page={{ pagination.per_page }}">Agendados</a>
+    <a class="{% if filters.status == 'failed' %}active{% endif %}" href="/?status=failed&per_page={{ pagination.per_page }}">Falhas</a>
+  </div>
+  <button type="button" class="jobs-sort-control" data-open-filters>
+    <span class="material-symbols-outlined" aria-hidden="true">filter_list</span>
+    Ordenar por data
+  </button>
+</section>
+
+<section class="panel jobs-table-panel" aria-label="Próximas ações">
+  <div class="jobs-table-title">
+    <div>
+      <p class="eyebrow">Fila</p>
+      <h3>Próximas ações</h3>
+    </div>
+    <p class="section-note">Prioridade operacional, não histórico completo.</p>
+  </div>
+  <div id="jobs-table" hx-get="/jobs?{{ pagination.current_query }}" hx-trigger="load, every 5s">
+    {% include "jobs_table.html" %}
+  </div>
+</section>
+
+<section class="jobs-drawers sr-only" aria-label="Comandos do hub">
+    <details id="create-job" class="panel utility-panel create-panel">
+      <summary>Criar job</summary>
       <form method="post" action="/jobs" class="job-form">
         <input type="hidden" name="niche_id" value="{{ hub_defaults.niche_id }}">
         <div class="field full">
@@ -86,16 +105,10 @@
         </div>
         <button type="submit">Criar job</button>
       </form>
-    </section>
+    </details>
 
-    <section class="panel filters-panel">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Busca</p>
-          <h3>Filtrar fila</h3>
-        </div>
-        <p class="section-note">Isole aprovação, programação ou falhas.</p>
-      </div>
+    <details id="filters-panel" class="panel utility-panel filters-panel">
+      <summary>Filtrar fila</summary>
       <form class="filters-grid" hx-get="/jobs" hx-target="#jobs-table" hx-trigger="change, keyup delay:300ms">
         <input type="hidden" name="niche" value="curiosidades">
         <input type="hidden" name="page" value="1">
@@ -129,31 +142,39 @@
           </select>
         </div>
       </form>
-    </section>
-
-  </aside>
-
-  <section class="panel queue-panel">
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">Fila de decisão</p>
-        <h3>Próximas ações</h3>
-      </div>
-      <p class="section-note">Abra o job que precisa de revisão, aprovação ou programação.</p>
-    </div>
-    <div id="jobs-table" hx-get="/jobs?{{ pagination.current_query }}" hx-trigger="load, every 5s">
-      {% include "jobs_table.html" %}
-    </div>
-  </section>
+    </details>
 </section>
 
-<section id="publication-hub" hx-get="/publication-hub" hx-trigger="load, every 15s" hx-swap="outerHTML">
-  <section class="panel">
-    <p>Carregando centro de publicação...</p>
-  </section>
+<section id="publication-hub" class="publication-overview">
+  <div>
+    <p class="eyebrow">Publicação</p>
+    <h3>Resumo</h3>
+  </div>
+  <div class="publication-metrics">
+    <span><strong>{{ workflow_summary.awaiting_approval_count }}</strong> aguardando aprovação</span>
+    <span><strong>{{ workflow_summary.unscheduled_approved_count }}</strong> aprovados sem agenda</span>
+    <span><strong>{{ workflow_summary.scheduled_count }}</strong> programados</span>
+  </div>
+  <a class="button-link ghost-link" href="/calendar">Abrir agenda</a>
 </section>
 
 <script>
+  (() => {
+    const revealDrawer = (selector) => {
+      const container = document.querySelector(".jobs-drawers");
+      const panel = document.querySelector(selector);
+      if (!container || !panel) return;
+      container.classList.remove("sr-only");
+      panel.setAttribute("open", "");
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    document.querySelectorAll("[data-open-create-job]").forEach((button) => {
+      button.addEventListener("click", () => revealDrawer("#create-job"));
+    });
+    document.querySelectorAll("[data-open-filters]").forEach((button) => {
+      button.addEventListener("click", () => revealDrawer("#filters-panel"));
+    });
+  })();
   (() => {
     const mode = document.querySelector("#input_mode");
     if (!mode) return;

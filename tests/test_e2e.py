@@ -33,9 +33,10 @@ from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.editorial.retention import EDITORIAL_PROMPT_VERSION, build_retention_map  # noqa: E402
 from app.editorial.repetition import build_channel_repetition_report  # noqa: E402
 from app.main import app, artifact_url  # noqa: E402
-from app.models import AutomationRun, ReadyScriptItem, BackgroundMusicAsset, Job, NarrationAsset, PerformanceMetric, PublicationSchedule, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest  # noqa: E402
+from app.models import AutomationAttempt, AutomationRun, ReadyScriptItem, BackgroundMusicAsset, Job, NarrationAsset, OperationalSetting, PerformanceMetric, PublicationSchedule, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest  # noqa: E402
+from app.music_bank import import_minimax_music_artifacts, populate_builtin_music_bank  # noqa: E402
 from app.orchestrator import JobOrchestrator, RecoverableStepError, StepDefinition, normalize_script_metrics, orchestrator  # noqa: E402
-from app.providers import DeepSeekCreativeProvider, LLMProviderRegistry, LocalSpeechFallbackProvider, MiniMaxBackgroundMusicProvider, MinimaxCreativeProvider, MinimaxImageProvider, MockCreativeProvider, OpenAICreativeProvider, ProviderFailure, ResilientCreativeProvider, ResilientMusicProvider  # noqa: E402
+from app.providers import DeepSeekCreativeProvider, LLMProviderRegistry, LocalMusicBankProvider, LocalSpeechFallbackProvider, MiniMaxBackgroundMusicProvider, MinimaxCreativeProvider, MinimaxImageProvider, MockCreativeProvider, OpenAICreativeProvider, ProviderFailure, ResilientCreativeProvider, ResilientMusicProvider  # noqa: E402
 from app.quality.asset_gate import AssetGate  # noqa: E402
 from app.quality.background_music_gate import BackgroundMusicGate  # noqa: E402
 from app.quality.render_gate import RenderGate  # noqa: E402
@@ -145,10 +146,29 @@ def _write_job_artifact(job_id: str, relative_path: str, content: str = "artifac
     return artifact_path
 
 
+def _write_test_wave(path: Path, *, duration_ms: int = 1000, amplitude: int = 2400, freq_hz: float = 146.8) -> None:
+    sample_rate = 24_000
+    frame_count = max(1, round(sample_rate * duration_ms / 1000))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        frames = bytearray()
+        for idx in range(frame_count):
+            sample = int(amplitude * math.sin(2 * math.pi * freq_hz * (idx / sample_rate)))
+            frames.extend(sample.to_bytes(2, "little", signed=True))
+        wav_file.writeframes(frames)
+
+
 def test_job_progress_is_exposed_in_detail_and_api() -> None:
     job_id = "job-progress-running"
     with SessionLocal() as session:
         _create_basic_job(session, job_id=job_id, status="running", current_step="script")
+        session.flush()
+        job = session.get(Job, job_id)
+        job.lease_owner = "test-progress"
+        job.lease_expires_at = utcnow() + timedelta(minutes=10)
         session.commit()
     _write_job_artifact(
         job_id,
@@ -233,7 +253,7 @@ def test_full_pipeline_reaches_monetization_review() -> None:
         assert any(step["step_name"] == "render" and step["duration_ms"] is not None for step in timeline["steps"])
     detail = client.get(f"/jobs/{job_id}")
     assert detail.status_code == 200
-    assert "Aprovar vídeo" in detail.text
+    assert "Aprovar job" in detail.text
     assert "Agendar no YouTube" in detail.text
 
 
@@ -410,6 +430,58 @@ Hashtags: #curiosidades #shorts"""
     assert "2 disponíveis" in page.text
 
 
+def test_operational_settings_route_saves_allowlisted_overrides() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/operations/settings",
+        data={
+            "return_to": "/",
+            "llm_primary_provider": "deepseek",
+            "llm_fallback_provider": "openai",
+            "llm_script_draft_provider": "deepseek",
+            "llm_repair_provider": "openai",
+            "llm_scene_provider": "deepseek",
+            "llm_enable_fallback": "true",
+            "background_music_provider": "local_bank",
+            "background_music_enabled": "true",
+            "music_bank_auto_populate": "true",
+            "youtube_publish_mode": "api",
+            "youtube_api_enabled": "true",
+            "automation_daily_timezone": "UTC",
+            "automation_daily_run_time": "03:30",
+            "automation_publish_time": "12:45",
+            "automation_fill_window_days": "7",
+            "automation_max_generation_attempts": "2",
+            "automation_max_publish_attempts_per_job": "2",
+            "automation_score_threshold": "0.9",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/?settings_saved=1"
+    assert main_module.settings.llm_primary_provider == "deepseek"
+    assert main_module.settings.youtube_publish_mode == "api"
+    assert main_module.settings.youtube_api_enabled is True
+    assert main_module.settings.allow_music_api_fallback is False
+    with SessionLocal() as session:
+        saved_keys = set(session.scalars(select(OperationalSetting.key)).all())
+
+    assert "llm_primary_provider" in saved_keys
+    assert "youtube_api_enabled" in saved_keys
+    assert "openai_api_key" not in saved_keys
+
+    reset = client.post("/operations/settings", data={"return_to": "/", "action": "reset"}, follow_redirects=False)
+    assert reset.status_code == 303
+
+
+def test_operational_settings_rejects_secret_fields() -> None:
+    from app.operational_settings import validate_operational_update
+
+    with pytest.raises(ValueError, match="desconhecida"):
+        validate_operational_update(main_module.settings, {"openai_api_key": "secret"})
+
+
 def test_automation_preflight_fails_before_consuming_ready_script() -> None:
     service = AutomationService(orchestrator)
     service.set_automation_enabled(True)
@@ -518,6 +590,152 @@ def test_autoapproval_score_blocks_high_repetition() -> None:
     assert report["eligible"] is False
     assert "high_narrative_similarity" in report["reasons"]
     assert report["score"] >= 0.82
+
+
+def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    service.set_automation_enabled(True)
+    job_id = "automation-cycle-success-job"
+    target_day = datetime(2099, 6, 10).date()
+
+    def fake_create_job(payload):
+        with SessionLocal() as session:
+            _create_basic_job(session, job_id=job_id, status="queued", seed_theme="Automacao sucesso")
+            session.commit()
+        return job_id
+
+    def fake_process_job(created_job_id: str) -> str:
+        assert created_job_id == job_id
+        with SessionLocal() as session:
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.status = "ready_for_upload"
+            job.quality_summary = {
+                "assets": {"asset_semantic_score_avg": 0.93},
+                "monetization": {"passed": True, "final_status": "ready_for_upload", "hard_blockers": [], "manual_required": []},
+            }
+            session.commit()
+        return "ready_for_upload"
+
+    def fake_review_job(payload: dict, reviewed_job_id: str) -> None:
+        assert reviewed_job_id == job_id
+        assert payload["action"] == "approve"
+        assert "automation_score_confirmed" in payload["reason_codes"]
+        with SessionLocal() as session:
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.status = "approved_for_publish"
+            job.review_state = "approved"
+            session.commit()
+
+    def fake_schedule_publication(scheduled_job_id: str, payload: dict) -> None:
+        assert scheduled_job_id == job_id
+        assert payload["scheduled_for_local"] == "2099-06-10T11:00"
+        assert payload["timezone"] == "America/Sao_Paulo"
+        assert payload["youtube_visibility"] == "public"
+        with SessionLocal() as session:
+            session.add(
+                PublicationSchedule(
+                    schedule_id=f"{job_id}-schedule",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"{job_id}-schedule",
+                    scheduled_for_utc=datetime(2099, 6, 10, 14, 0, tzinfo=UTC),
+                    timezone="America/Sao_Paulo",
+                    youtube_visibility="public",
+                    status="scheduled",
+                    youtube_video_id="yt-auto-scheduled",
+                    youtube_url="https://www.youtube.com/watch?v=yt-auto-scheduled",
+                    notes=payload["notes"],
+                )
+            )
+            session.commit()
+
+    monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
+    monkeypatch.setattr(service, "_first_vacant_day", lambda: target_day)
+    monkeypatch.setattr(service, "_select_ready_script_item", lambda: None)
+    monkeypatch.setattr(service, "_automatic_topic_payload", lambda: {"seed_theme": "Automacao sucesso"})
+    monkeypatch.setattr(orchestrator, "create_job", fake_create_job)
+    monkeypatch.setattr(orchestrator, "process_job", fake_process_job)
+    monkeypatch.setattr(service, "evaluate_autoapproval", lambda created_job_id: {"eligible": True, "score": 0.93, "threshold": 0.82, "reasons": [], "components": {}})
+    monkeypatch.setattr(orchestrator, "review_job", fake_review_job)
+    monkeypatch.setattr(orchestrator, "schedule_publication", fake_schedule_publication)
+
+    run_result = service.run_daily_cycle(force=True)
+
+    assert run_result["status"] == "succeeded"
+    assert run_result["result_job_id"] == job_id
+    assert run_result["attempts_used"] == 1
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        schedule = session.query(PublicationSchedule).filter_by(job_id=job_id).one()
+        attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.job_id == job_id))
+
+    assert job is not None
+    assert job.status == "approved_for_publish"
+    assert schedule.status == "scheduled"
+    assert schedule.youtube_visibility == "public"
+    assert schedule.youtube_video_id == "yt-auto-scheduled"
+    assert attempt is not None
+    assert attempt.status == "scheduled"
+    assert attempt.score == 0.93
+
+
+def test_ready_script_selection_clears_stale_similarity_skip() -> None:
+    service = AutomationService(orchestrator)
+    item_id = "ready-script-stale-skip"
+    with SessionLocal() as session:
+        session.add(
+            ReadyScriptItem(
+                script_item_id=item_id,
+                schema_version="1.0.0",
+                content_hash="ready-script-stale-skip",
+                status="available",
+                source="test",
+                title="Roteiro selecionavel sem repeticao",
+                raw_text="""Título: Roteiro selecionavel sem repeticao
+Hook: Um teste limpo precisa poder sair do banco.
+Loop: O estado antigo ainda deveria bloquear?
+Beats:
+- O roteiro está disponível.
+- A similaridade atual é baixa.
+Payoff: O skip antigo é limpo ao selecionar.
+Fechamento: Estado velho não deve travar o cron.
+Hashtags: #curiosidades #shorts""",
+                parsed_script={
+                    "title": "Roteiro selecionavel sem repeticao",
+                    "hook": "Um teste limpo precisa poder sair do banco.",
+                    "loop": "O estado antigo ainda deveria bloquear?",
+                    "body_beats": ["O roteiro está disponível.", "A similaridade atual é baixa."],
+                    "ending": "Estado velho não deve travar o cron.",
+                    "full_narration": "Um teste limpo precisa poder sair do banco. O roteiro está disponível. A similaridade atual é baixa. Estado velho não deve travar o cron.",
+                    "estimated_duration_sec": 32,
+                },
+                hashtags=["#curiosidades", "#shorts"],
+                fact_check_confirmed=True,
+                last_skip_reason="high_narrative_similarity",
+                last_similarity_score=0.9,
+            )
+        )
+        session.commit()
+
+    def fake_repetition_report(_session, item):
+        if item.script_item_id == item_id:
+            return {"repetition_risk": "low", "max_similarity": 0.1}
+        return {"repetition_risk": "high", "max_similarity": 0.99}
+
+    service._ready_script_repetition_report = fake_repetition_report
+
+    selected = service._select_ready_script_item()
+
+    assert selected is not None
+    assert selected.script_item_id == item_id
+    with SessionLocal() as session:
+        item = session.get(ReadyScriptItem, item_id)
+
+    assert item is not None
+    assert item.last_skip_reason is None
+    assert item.last_similarity_score is None
 
 
 def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: Path) -> None:
@@ -1547,7 +1765,13 @@ def test_resilient_creative_provider_disables_repair_fallback_in_strict_minimax_
 
 
 def test_resilient_music_provider_requires_minimax_success_in_real_mode(monkeypatch) -> None:
-    settings = SimpleNamespace(use_mock_providers=False, resolved_minimax_music_api_key="music-key", strict_minimax_validation=False)
+    settings = SimpleNamespace(
+        use_mock_providers=False,
+        background_music_provider="minimax",
+        allow_music_api_fallback=False,
+        resolved_minimax_music_api_key="music-key",
+        strict_minimax_validation=False,
+    )
 
     class FailingMusicProvider:
         def select_track(self, *args, **kwargs):
@@ -1561,10 +1785,240 @@ def test_resilient_music_provider_requires_minimax_success_in_real_mode(monkeypa
     try:
         provider.select_track({}, {}, Path("/tmp/out.wav"), 30_000)
     except ProviderFailure as exc:
-        assert "minimax music generation failed" in str(exc)
+        assert "background music selection failed" in str(exc)
         assert "minimax music unavailable" in str(exc)
     else:
         raise AssertionError("expected ProviderFailure")
+
+
+def test_local_music_bank_provider_selects_approved_track_and_records_license(monkeypatch, tmp_path: Path) -> None:
+    bank_dir = tmp_path / "music_bank"
+    track_path = bank_dir / "tracks" / "science.wav"
+    license_path = bank_dir / "licenses" / "science.txt"
+    _write_test_wave(track_path, duration_ms=700, amplitude=2600, freq_hz=110.0)
+    license_path.parent.mkdir(parents=True, exist_ok=True)
+    license_path.write_text("YouTube Audio Library license snapshot", encoding="utf-8")
+    (bank_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "tracks": [
+                    {
+                        "id": "blocked-track",
+                        "path": "tracks/blocked.wav",
+                        "title": "Blocked",
+                        "moods": ["technology"],
+                        "license": "Unknown",
+                        "source_url": "https://example.com/blocked",
+                        "approved_for_youtube": True,
+                        "content_id_registered": True,
+                    },
+                    {
+                        "id": "science-calm-01",
+                        "path": "tracks/science.wav",
+                        "title": "Science Calm",
+                        "artist": "Audio Library",
+                        "moods": ["technology", "documentary"],
+                        "tags": ["cafeina", "curiosidades"],
+                        "license": "YouTube Audio Library",
+                        "source_url": "https://youtube.com/audiolibrary",
+                        "license_file": "licenses/science.txt",
+                        "approved_for_youtube": True,
+                        "requires_attribution": False,
+                        "content_id_registered": False,
+                        "content_id_risk": "low",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.providers.get_settings", lambda: SimpleNamespace(music_bank_dir=bank_dir))
+
+    provider = LocalMusicBankProvider()
+    output_path = tmp_path / "out" / "background.wav"
+    result = provider.select_track(
+        {"canonical_topic": "cafeína", "angle": "tecnologia do cérebro"},
+        {"title": "Cafeína parece tecnologia", "hook": "Seu cérebro muda em minutos."},
+        output_path,
+        1500,
+    )
+
+    assert result["provider"] == "local_music_bank"
+    assert result["license_note"] == "YouTube Audio Library"
+    assert result["attribution"] is None
+    assert result["provider_metadata"]["track_id"] == "science-calm-01"
+    assert result["provider_metadata"]["license_file"] == str(license_path)
+    assert result["provider_metadata"]["content_id_registered"] is False
+    with wave.open(str(output_path), "rb") as wav_file:
+        assert wav_file.getframerate() == 24_000
+        assert wav_file.getnchannels() == 1
+        assert round(wav_file.getnframes() / wav_file.getframerate() * 1000) == 1500
+
+
+def test_resilient_music_provider_uses_local_bank_before_minimax(monkeypatch, tmp_path: Path) -> None:
+    bank_dir = tmp_path / "music_bank"
+    track_path = bank_dir / "tracks" / "doc.wav"
+    _write_test_wave(track_path)
+    (bank_dir / "manifest.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "doc-01",
+                    "path": "tracks/doc.wav",
+                    "moods": ["documentary"],
+                    "license": "YouTube Audio Library",
+                    "source_url": "https://youtube.com/audiolibrary",
+                    "approved_for_youtube": True,
+                    "content_id_registered": False,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        use_mock_providers=False,
+        background_music_provider="local_bank",
+        allow_music_api_fallback=False,
+        resolved_minimax_music_api_key="music-key",
+        music_bank_dir=bank_dir,
+    )
+    monkeypatch.setattr("app.providers.get_settings", lambda: settings)
+
+    def fail_if_minimax_is_used():
+        raise AssertionError("MiniMax should not be used when local bank succeeds")
+
+    monkeypatch.setattr("app.providers.MiniMaxBackgroundMusicProvider", fail_if_minimax_is_used)
+
+    provider = ResilientMusicProvider()
+    result = provider.select_track({"canonical_topic": "polvos"}, {"title": "Polvos", "hook": "Polvos somem."}, tmp_path / "music.wav", 1000)
+
+    assert result["provider"] == "local_music_bank"
+    assert result["provider_metadata"]["track_id"] == "doc-01"
+
+
+def test_builtin_music_bank_population_creates_manifest_and_tracks(tmp_path: Path) -> None:
+    bank_dir = tmp_path / "music_bank"
+
+    result = populate_builtin_music_bank(bank_dir, duration_seconds=1)
+
+    manifest_path = bank_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert result["track_count"] >= 8
+    assert len(manifest["tracks"]) >= 8
+    first_track = manifest["tracks"][0]
+    assert first_track["approved_for_youtube"] is True
+    assert first_track["content_id_registered"] is False
+    assert first_track["license"] == "local_synthetic_project_owned"
+    assert (bank_dir / first_track["path"]).exists()
+    assert (bank_dir / first_track["license_file"]).exists()
+
+
+def test_local_music_bank_provider_auto_populates_when_manifest_is_missing(monkeypatch, tmp_path: Path) -> None:
+    bank_dir = tmp_path / "music_bank"
+    settings = SimpleNamespace(music_bank_dir=bank_dir, music_bank_auto_populate=True)
+    monkeypatch.setattr("app.providers.get_settings", lambda: settings)
+
+    def fast_populate(target_bank_dir: Path, *args, **kwargs):
+        return populate_builtin_music_bank(target_bank_dir, duration_seconds=1)
+
+    monkeypatch.setattr("app.providers.populate_builtin_music_bank", fast_populate)
+
+    provider = LocalMusicBankProvider()
+    output_path = tmp_path / "music.wav"
+    result = provider.select_track({"canonical_topic": "universo"}, {"title": "O universo", "hook": "Algo estranho acontece."}, output_path, 1000)
+
+    assert result["provider"] == "local_music_bank"
+    assert result["provider_metadata"]["track_id"].startswith("local-")
+    assert (bank_dir / "manifest.json").exists()
+    assert output_path.exists()
+
+
+def test_import_minimax_music_artifacts_preserves_evidence_and_strips_signed_url(tmp_path: Path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    job_dir = artifacts_dir / "job-minimax-123456"
+    audio_path = job_dir / "audio" / "background_source.wav"
+    _write_test_wave(audio_path, duration_ms=1000)
+    (job_dir / "background_music.json").write_text(
+        json.dumps(
+            {
+                "provider": "minimax_music",
+                "mood": "cinematic",
+                "query": "universo curiosidade cinematic",
+                "source_url": "https://example.com/music.wav?Signature=secret&OSSAccessKeyId=key",
+                "audio_uri": audio_path.resolve().as_uri(),
+                "license_note": "Generated with MiniMax music_generation API.",
+                "provider_metadata": {
+                    "trace_id": "trace-123",
+                    "model": "music-2.6",
+                    "instrumental": True,
+                },
+                "duration_ms": 1000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (job_dir / "background_music_quality_report.json").write_text(
+        json.dumps(
+            {
+                "passed": True,
+                "reasons": [],
+                "metrics": {
+                    "music_source": {
+                        "duration_ms": 1000,
+                        "rms_dbfs": -14.0,
+                        "peak_dbfs": -3.0,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    bank_dir = tmp_path / "music_bank"
+
+    result = import_minimax_music_artifacts(artifacts_dir, bank_dir)
+
+    assert result["imported_count"] == 1
+    manifest = json.loads((bank_dir / "manifest.json").read_text(encoding="utf-8"))
+    track = manifest["tracks"][0]
+    assert track["bank_source"] == "minimax_artifact"
+    assert track["quality_tier"] == "primary"
+    assert track["source_job_id"] == "job-minimax-123456"
+    assert track["trace_id"] == "trace-123"
+    assert track["source_url"] == "https://example.com/music.wav"
+    assert "Signature" not in json.dumps(track)
+    assert (bank_dir / track["path"]).exists()
+    assert (bank_dir / track["license_file"]).read_text(encoding="utf-8").find("trace-123") >= 0
+
+
+def test_local_music_bank_provider_prefers_imported_minimax_over_synthetic(monkeypatch, tmp_path: Path) -> None:
+    bank_dir = tmp_path / "music_bank"
+    populate_builtin_music_bank(bank_dir, duration_seconds=1)
+    artifacts_dir = tmp_path / "artifacts"
+    job_dir = artifacts_dir / "job-minimax-preferred"
+    audio_path = job_dir / "audio" / "background_source.wav"
+    _write_test_wave(audio_path, duration_ms=1000, freq_hz=180.0)
+    (job_dir / "background_music.json").write_text(
+        json.dumps(
+            {
+                "provider": "minimax_music",
+                "mood": "cinematic",
+                "query": "tema sem palavra de mood",
+                "audio_uri": audio_path.resolve().as_uri(),
+                "license_note": "Generated with MiniMax music_generation API.",
+                "provider_metadata": {"trace_id": "trace-preferred", "model": "music-2.6", "instrumental": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (job_dir / "background_music_quality_report.json").write_text(json.dumps({"passed": True, "metrics": {"music_source": {"duration_ms": 1000}}}), encoding="utf-8")
+    import_minimax_music_artifacts(artifacts_dir, bank_dir)
+    monkeypatch.setattr("app.providers.get_settings", lambda: SimpleNamespace(music_bank_dir=bank_dir, music_bank_auto_populate=False))
+
+    provider = LocalMusicBankProvider()
+    result = provider.select_track({"canonical_topic": "x"}, {"title": "x", "hook": "x"}, tmp_path / "selected.wav", 1000)
+
+    assert result["provider_metadata"]["track_id"].startswith("minimax-")
+    assert result["provider_metadata"]["track_id"] == "minimax-job-mini"
 
 
 def test_resilient_music_provider_allows_mock_only_in_mock_mode(monkeypatch, tmp_path: Path) -> None:
@@ -3476,7 +3930,7 @@ def test_publication_dashboard_fragment_shows_ready_and_scheduled_items() -> Non
                     job_id=scheduled_job_id,
                     schema_version="1.0.0",
                     content_hash="dashboard-scheduled-row",
-                    scheduled_for_utc=datetime(2099, 6, 11, 17, 0, tzinfo=UTC),
+                    scheduled_for_utc=datetime(2099, 1, 2, 17, 0, tzinfo=UTC),
                     timezone="America/Sao_Paulo",
                     youtube_visibility="private",
                     status="scheduled",
