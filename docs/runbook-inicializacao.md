@@ -279,7 +279,7 @@ Fatiamento recomendado:
 .venv/bin/python -m pytest -q tests/test_providers_integrations.py
 ```
 
-Se mexer em hub, agenda, publicacao ou retencao, rode `tests/test_hub_publication.py` e a suite completa antes de commit. `tests/test_e2e.py` fica como ancora de compatibilidade, nao como unico lugar para novos testes.
+Se mexer em hub, agenda, publicacao ou retencao, rode `tests/test_hub_publication.py` e a suite completa antes de commit. Testes novos devem entrar na suite de dominio correspondente, nao em uma suite e2e monolitica.
 
 ## 14. Expor via Tailscale
 

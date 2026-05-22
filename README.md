@@ -224,7 +224,7 @@ A suite esta dividida por dominio. Use a suite completa antes de commit/push e r
 .venv/bin/python -m pytest -q tests/test_providers_integrations.py
 ```
 
-`tests/test_e2e.py` fica como ancora de compatibilidade. A cobertura principal inclui:
+A cobertura principal inclui:
 
 - pipeline completo ate review
 - UI do hub
@@ -232,6 +232,8 @@ A suite esta dividida por dominio. Use a suite completa antes de commit/push e r
 - publish manual e via API
 - OAuth do YouTube
 - retencao de artefatos
+
+Codigo legado que saiu do runtime ativo fica temporariamente em `legacy/` para auditoria e exclusao futura. Nada ali deve ser importado por app, testes, CLI ou scripts.
 
 ## Arquitetura e manutencao por IA
 

@@ -767,7 +767,7 @@ def test_topic_plan_normalization_fills_missing_required_fields() -> None:
     assert normalized["quality_metrics"]["topic_repair_used"] is True
 
 def test_scene_plan_normalization_accepts_dict_wrapped_scene_list() -> None:
-    from app.providers import MinimaxCreativeProvider
+    from app.providers.llm import MinimaxCreativeProvider
 
     provider = MinimaxCreativeProvider.__new__(MinimaxCreativeProvider)
     normalized = provider._normalize_scene_plan_payload({"scenes": [{"scene_id": "scene-1"}]})
@@ -776,7 +776,7 @@ def test_scene_plan_normalization_accepts_dict_wrapped_scene_list() -> None:
     assert normalized[0]["scene_id"] == "scene-1"
 
 def test_scene_plan_normalization_accepts_nested_scene_list() -> None:
-    from app.providers import MinimaxCreativeProvider
+    from app.providers.llm import MinimaxCreativeProvider
 
     provider = MinimaxCreativeProvider.__new__(MinimaxCreativeProvider)
     normalized = provider._normalize_scene_plan_payload({"data": {"plan": [{"scene_id": "scene-1", "narration_text": "abc"}]}})
@@ -785,7 +785,7 @@ def test_scene_plan_normalization_accepts_nested_scene_list() -> None:
     assert normalized[0]["scene_id"] == "scene-1"
 
 def test_plan_scenes_prefers_json_array_completion_when_available(monkeypatch) -> None:
-    from app.providers import MinimaxCreativeProvider
+    from app.providers.llm import MinimaxCreativeProvider
 
     provider = MinimaxCreativeProvider.__new__(MinimaxCreativeProvider)
     calls: list[str] = []

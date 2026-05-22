@@ -141,6 +141,7 @@ class HubContext:
         return self.orchestrator.build_job_progress(job)
 
     def _job_action_guide(
+        self,
         job: Job,
         monetization_report: dict[str, object] | None,
         schedule_display: dict[str, str | None] | None,
@@ -302,6 +303,7 @@ class HubContext:
         return urlencode(params)
 
     def _job_list_context(
+        self,
         *,
         status: str | None,
         search: str | None,

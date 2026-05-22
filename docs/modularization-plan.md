@@ -35,21 +35,22 @@ Ainda existem cortes incrementais possiveis, mas eles nao bloqueiam a manutencao
 - `app/pipelines/render_pipeline.py`: entrada da etapa `render`, retry de FFmpeg e mutacao segura do comando.
 - `app/pipelines/monetization_pipeline.py`: entrada da etapa `monetization_readiness_gate`, rights, disclosure, fact claims, repeticao, metadata, publish package, hashtags, readiness e auditoria de publish.
 - `app/pipelines/common.py`: exceptions de step e helper `model_payload`.
-- `app/providers/`: providers separados por dominio, mantendo `app.providers` como fachada publica compativel.
+- `app/providers/`: providers separados por dominio, com imports diretos pelos modulos donos.
 - `app/publication_ops.py`: dono de review, publicacao, agenda por canal, retencao de artifacts, sync YouTube e fila TikTok.
 - `app/hub_context.py`: dono dos context builders do hub, calendario, listas, status operacional e integracoes.
 - `app/routes/health.py`: router isolado para `/healthz`.
 - `tests/`: suites divididas por dominio, com `tests/e2e_support.py` e `tests/conftest.py` para fixtures/helpers compartilhados.
+- `legacy/`: quarentena temporaria para codigo removido do runtime ativo e mantido apenas ate a exclusao final.
 
 O `JobOrchestrator` continua expondo os mesmos metodos publicos e os mesmos step names. A compatibilidade foi preservada para UI, CLI, automacao, artifacts, estados e scripts operacionais.
 
 Os wrappers privados de dominio do `JobOrchestrator` nao sao API estavel. Testes e manutencao devem chamar o modulo dono diretamente, por exemplo `script_pipeline`, `asset_pipeline`, `scene_pipeline`, `render_pipeline` ou `monetization_pipeline`.
 
-`app.providers` e fachada de compatibilidade. Novas manutencoes devem preferir os modulos donos: `app.providers.llm`, `app.providers.image`, `app.providers.music`, `app.providers.tts` e `app.providers.registry`.
+`app/providers/__init__.py` nao reexporta classes antigas. Novas manutencoes devem importar dos modulos donos: `app.providers.llm`, `app.providers.image`, `app.providers.music`, `app.providers.tts` e `app.providers.registry`.
 
 `app.main` ainda concentra rotas SSR principais, mas query/contexto de hub ficam em `HubContext`. Mudancas em listas, calendario, status operacional e dashboard de publicacao devem comecar por `app/hub_context.py`.
 
-`tests/test_e2e.py` e apenas ancora de compatibilidade. Novos testes devem entrar na suite de dominio correspondente: `test_hub_publication.py`, `test_orchestrator_flow.py`, `test_pipeline_assets.py`, `test_pipeline_script.py` ou `test_providers_integrations.py`.
+O antigo `tests/test_e2e.py` vazio foi movido para `legacy/tests/`. Novos testes devem entrar na suite de dominio correspondente: `test_hub_publication.py`, `test_orchestrator_flow.py`, `test_pipeline_assets.py`, `test_pipeline_script.py` ou `test_providers_integrations.py`.
 
 ## Tasklist Mestre
 
@@ -63,7 +64,8 @@ Os wrappers privados de dominio do `JobOrchestrator` nao sao API estavel. Testes
 - [x] Fase 8: extrair publicacao, agenda por canal e retencao de artifacts do `JobOrchestrator`.
 - [x] Fase 9: dividir `script_pipeline.py` em fact pack, auditoria textual e repair.
 - [x] Fase 10: dividir `main.py` em routers e context builders.
-- [x] Fase 11: dividir `tests/test_e2e.py` em suites por modulo, mantendo poucos e2e reais.
+- [x] Fase 11: dividir `tests/test_e2e.py` em suites por modulo e arquivar a ancora vazia em `legacy/tests/`.
+- [x] Fase 12: mover codigo legado removivel para `legacy/` sem criar imports ativos para essa pasta.
 
 ## Evidencia de Validacao
 
@@ -87,6 +89,7 @@ O OAuth real do YouTube foi validado fora do diretorio isolado: `data/youtube_oa
 2. Avaliar se rotas de publicacao e jobs devem sair de `app/main.py` para routers completos, agora que `HubContext` ja isolou os builders.
 3. Criar testes unitarios menores para `PublicationOperations`, `HubContext` e dominios de script, reduzindo dependencia dos e2e longos.
 4. Validar upload nativo real no YouTube somente quando houver autorizacao explicita para criar ou agendar conteudo externo no canal.
+5. Excluir `legacy/` depois de um ciclo estavel sem rollback.
 
 ## Contratos Que Nao Devem Quebrar
 
@@ -100,3 +103,5 @@ O OAuth real do YouTube foi validado fora do diretorio isolado: `data/youtube_oa
 ## Regra Para Novas Mudancas
 
 Antes de editar, identifique o owner do dominio em `docs/app.md`. Se a mudanca exigir abrir `app/orchestrator.py`, `app/main.py` e varios pipelines ao mesmo tempo, provavelmente a fronteira esta vazando e deve ser corrigida com um helper pequeno no modulo dono.
+
+Nada em `legacy/` deve ser importado por runtime, testes, CLI ou scripts. Essa pasta e apenas uma quarentena para exclusao futura.

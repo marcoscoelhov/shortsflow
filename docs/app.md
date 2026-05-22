@@ -11,7 +11,8 @@ Blocos principais:
 - `app/orchestrator.py`: worker, maquina de estados do job, retries, lease, eventos e delegacao de steps.
 - `app/publication_ops.py`: review, publicacao, agenda por canal, sync YouTube/TikTok e sweep de retencao de artefatos.
 - `app/pipelines/`: etapas especializadas do pipeline.
-- `app/providers/`: providers de texto, imagem, TTS, musica e fallback, com `app.providers` como fachada publica de compatibilidade.
+- `app/providers/`: providers de texto, imagem, TTS, musica e fallback.
+- `legacy/`: quarentena temporaria de codigo removido do runtime ativo e mantido apenas para auditoria antes da exclusao.
 - `app/routes/`: routers isolados, hoje com `/healthz`.
 - `app/youtube_api.py`: integracao OAuth e upload real via YouTube Data API.
 - `app/models.py`: persistencia SQLAlchemy de jobs, agenda, review, erros, retries, telemetria e artefatos logicos.
@@ -32,13 +33,13 @@ Mapa de ownership para novas mudancas:
 | Monetizacao e pacote de publish | `app/pipelines/monetization_pipeline.py` | `app/main.py` |
 | Revisao, agenda, publish, performance, retencao e canais | `app/publication_ops.py` | `app/main.py` |
 | Listas, calendario, status operacional e contexto SSR | `app/hub_context.py` | queries inline em templates |
-| Providers | `app/providers/llm.py`, `image.py`, `music.py`, `tts.py`, `registry.py` | recriar `app/providers.py` |
+| Providers | `app/providers/llm.py`, `image.py`, `music.py`, `tts.py`, `registry.py` | recriar fachada de reexports em `app.providers` |
 
-`app.providers` e uma fachada de compatibilidade importavel. Novas implementacoes devem entrar no modulo dono dentro de `app/providers/`.
+`app/providers/__init__.py` e apenas marcador de package. Novas implementacoes devem entrar no modulo dono dentro de `app/providers/`, e consumidores devem importar diretamente desse modulo.
 
 `app/main.py` ainda concentra rotas SSR principais. Para manter o contexto pequeno, novas regras de consulta, agregacao ou apresentacao de estado devem ir para `HubContext` ou para `PublicationOperations`; a rota deve apenas validar formulario, chamar o dono e redirecionar.
 
-`tests/test_e2e.py` e ancora de compatibilidade. Testes novos devem preferir a suite de dominio correspondente: `test_pipeline_script.py`, `test_pipeline_assets.py`, `test_hub_publication.py`, `test_orchestrator_flow.py`, `test_providers_integrations.py` ou `test_deep_modules_unit.py`.
+Testes novos devem preferir a suite de dominio correspondente: `test_pipeline_script.py`, `test_pipeline_assets.py`, `test_hub_publication.py`, `test_orchestrator_flow.py`, `test_providers_integrations.py` ou `test_deep_modules_unit.py`.
 
 Persistencia local padrao:
 
@@ -359,7 +360,7 @@ Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, pa
 
 ## Testes
 
-A suite principal foi dividida por dominio. `tests/test_e2e.py` fica apenas como ancora de compatibilidade; os testes reais vivem em:
+A suite principal foi dividida por dominio. Os testes ativos vivem em:
 
 - `tests/test_hub_publication.py`: hub, calendario, agenda, publish, OAuth e automacao.
 - `tests/test_orchestrator_flow.py`: lifecycle, worker, estados, retries e fluxo completo.

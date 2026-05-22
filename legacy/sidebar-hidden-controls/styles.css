@@ -1,0 +1,118 @@
+.tailnet-box {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(2, 6, 23, 0.48);
+  color: var(--muted);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.global-automation,
+.sidebar-disclosure {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.48);
+}
+
+.sidebar-disclosure {
+  padding: 0;
+  overflow: hidden;
+}
+
+.global-automation-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.global-automation-head strong {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.global-automation-stats {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.sidebar-disclosure summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.8rem 1rem;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 800;
+  list-style: none;
+}
+
+.sidebar-disclosure summary::after {
+  content: "+";
+  color: var(--muted);
+}
+
+.sidebar-disclosure[open] summary::after {
+  content: "-";
+}
+
+.sidebar-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.sidebar-modal-button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.48);
+  color: var(--accent);
+  text-align: left;
+}
+
+.sidebar-modal-button span {
+  font-weight: 800;
+}
+
+.sidebar-modal-button small {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.sidebar-modal-button::after {
+  content: "Abrir";
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.sidebar-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.sidebar-form textarea {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.sidebar-form .button-row {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.sidebar-form.prompt-form textarea {
+  min-height: 8rem;
+}

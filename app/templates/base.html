@@ -81,53 +81,6 @@
             Sair
           </a>
         </nav>
-        <div class="sidebar-legacy-controls sr-only">
-          <section class="global-automation" aria-label="Automação global">
-          <div class="global-automation-head">
-            <div>
-              <p class="eyebrow">Automação</p>
-              <strong>{% if automation.metrics.enabled %}Ligada{% else %}Pausada{% endif %}</strong>
-            </div>
-            <form method="post" action="/automation/toggle">
-              <input type="hidden" name="return_to" value="{{ return_to }}">
-              <input type="hidden" name="enabled" value="{% if automation.metrics.enabled %}false{% else %}true{% endif %}">
-              <button type="submit" class="sidebar-button {% if automation.metrics.enabled %}ghost{% endif %}">
-                {% if automation.metrics.enabled %}Pausar{% else %}Ativar{% endif %}
-              </button>
-            </form>
-          </div>
-          <div class="global-automation-stats">
-            <span>{{ automation.metrics.available_ready_scripts }} roteiros</span>
-            <span>{{ automation.settings.run_time }} em {{ automation.settings.timezone }}</span>
-          </div>
-          </section>
-          <button type="button" class="sidebar-modal-button" data-open-ready-script-bank>
-            <span>Banco de roteiros</span>
-            <small>{{ automation.metrics.available_ready_scripts }} disponíveis</small>
-          </button>
-          <button type="button" class="sidebar-modal-button" data-open-operational-settings>
-            <span>Configurações</span>
-            <small>{{ operational_settings.saved_count }} no hub</small>
-          </button>
-          <details class="sidebar-disclosure hub-tools-disclosure">
-            <summary>Prompt viral avançado</summary>
-            <form method="post" action="/hub/prompt" class="sidebar-form prompt-form">
-              <input type="hidden" name="return_to" value="{{ return_to }}">
-              <div class="field full">
-                <label for="global_viral_prompt_template">Template</label>
-                <textarea id="global_viral_prompt_template" name="viral_prompt_template" rows="8">{{ viral_prompt_template }}</textarea>
-              </div>
-              <div class="button-row prompt-actions">
-                <button type="submit" name="action" value="save" class="sidebar-button">Salvar</button>
-                <button type="submit" name="action" value="reset" class="sidebar-button ghost">Restaurar</button>
-              </div>
-            </form>
-          </details>
-          <div class="tailnet-box">
-            <span>Local: {{ settings.app_host }}:{{ settings.app_port }}</span>
-            <span>Tailnet: https://{{ settings.tailscale_hostname }}.{{ settings.tailnet_domain }}</span>
-          </div>
-        </div>
       </aside>
       <nav class="mobile-bottom-nav" aria-label="Navegação mobile">
         <a href="/" class="active">
@@ -251,9 +204,9 @@
           <button type="button" class="ghost icon-button" data-close-ready-script-bank aria-label="Fechar banco de roteiros">X</button>
         </div>
         <div class="ready-script-bank-summary">
-          <span><strong>{{ automation.metrics.available_ready_scripts }}</strong> disponíveis</span>
-          <span><strong>{{ automation.metrics.needs_review_ready_scripts }}</strong> para revisar</span>
-          <span><strong>{{ automation.metrics.scheduled_ready_scripts }}</strong> agendados</span>
+          <span>{{ automation.metrics.available_ready_scripts }} disponíveis</span>
+          <span>{{ automation.metrics.needs_review_ready_scripts }} para revisar</span>
+          <span>{{ automation.metrics.scheduled_ready_scripts }} agendados</span>
         </div>
         <div class="ready-script-bank-layout">
           <section class="ready-script-list" aria-label="Roteiros importados">

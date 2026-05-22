@@ -42,7 +42,7 @@ Database state is stored in the SQLAlchemy models in `app/models.py`.
 
 This sprint established the implementation map. The current codebase has now applied the modularization:
 
-- Provider abstraction belongs in `app/providers/`, with `app.providers` kept as the compatibility facade.
+- Provider abstraction belongs in `app/providers/`, with direct imports from owner modules.
 - Script validation belongs in `app/quality/script_gate.py`, called by `app/pipelines/script_repair.py` through `ScriptPipeline`.
 - `JobOrchestrator` should delegate domain behavior to pipeline/operation modules instead of owning step internals.
 - Fallback should be provider-level, but quality validation must be deterministic app code.

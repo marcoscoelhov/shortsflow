@@ -156,11 +156,11 @@ def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: 
 
     page = client.get("/")
     assert page.status_code == 200
-    assert "Prompt viral avançado" in page.text
+    assert "Configurações do hub" in page.text
     assert "Banco de roteiros" in page.text
     assert 'data-open-ready-script-bank' in page.text
     assert "/automation/ready-scripts/import" in page.text
-    assert main_module.DEFAULT_VIRAL_PROMPT_TEMPLATE.splitlines()[0] in page.text
+    assert 'data-open-operational-settings' in page.text
 
     custom_prompt = "Priorize gancho contraintuitivo, titulo SEO e payoff visual."
     save = client.post(

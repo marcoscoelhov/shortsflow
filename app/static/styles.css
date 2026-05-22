@@ -101,130 +101,11 @@ a {
   color: var(--ink);
 }
 
-.tailnet-box {
-  display: grid;
-  gap: 0.35rem;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 1rem;
-  background: rgba(2, 6, 23, 0.48);
-  color: var(--muted);
-  font-size: 0.82rem;
-  overflow-wrap: anywhere;
-}
-
-.global-automation,
-.sidebar-disclosure {
-  display: grid;
-  gap: 0.6rem;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(2, 6, 23, 0.48);
-}
-
-.sidebar-disclosure {
-  padding: 0;
-  overflow: hidden;
-}
-
-.global-automation-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  align-items: start;
-}
-
-.global-automation-head strong {
-  display: block;
-  margin-top: 0.2rem;
-}
-
-.global-automation-stats {
-  display: grid;
-  gap: 0.35rem;
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
-.sidebar-disclosure summary {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.8rem 1rem;
-  cursor: pointer;
-  color: var(--accent);
-  font-weight: 800;
-  list-style: none;
-}
-
-.sidebar-disclosure summary::after {
-  content: "+";
-  color: var(--muted);
-}
-
-.sidebar-disclosure[open] summary::after {
-  content: "-";
-}
-
-.sidebar-disclosure summary::-webkit-details-marker {
-  display: none;
-}
-
-.sidebar-modal-button {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.75rem;
-  width: 100%;
-  padding: 0.8rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(2, 6, 23, 0.48);
-  color: var(--accent);
-  text-align: left;
-}
-
-.sidebar-modal-button span {
-  font-weight: 800;
-}
-
-.sidebar-modal-button small {
-  color: var(--muted);
-  font-weight: 600;
-}
-
-.sidebar-modal-button::after {
-  content: "Abrir";
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 700;
-}
-
-.sidebar-form {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.sidebar-form textarea {
-  min-height: 8rem;
-  resize: vertical;
-}
-
-.sidebar-form .button-row {
-  display: grid;
-  grid-template-columns: 1fr;
-}
-
 .sidebar-button {
   width: 100%;
   padding: 0.65rem 0.75rem;
   border-radius: 8px;
   font-size: 0.9rem;
-}
-
-.sidebar-form.prompt-form textarea {
-  min-height: 8rem;
 }
 
 .page-shell {
@@ -327,8 +208,7 @@ a {
 }
 
 .job-form,
-.filters-grid,
-.prompt-form {
+.filters-grid {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -359,30 +239,10 @@ a {
   width: auto;
 }
 
-.prompt-form {
-  margin-top: 1rem;
-}
-
 .settings-body {
   display: grid;
   gap: 1rem;
   margin-top: 1rem;
-}
-
-.sidebar-disclosure .settings-body,
-.sidebar-disclosure .prompt-form {
-  margin-top: 0;
-  padding: 0 1rem 1rem;
-}
-
-.prompt-form textarea {
-  min-height: 17rem;
-  resize: vertical;
-}
-
-.prompt-actions {
-  grid-column: 1 / -1;
-  justify-content: flex-start;
 }
 
 label {
@@ -1634,10 +1494,6 @@ pre {
   color: var(--muted);
 }
 
-.ready-script-bank-summary strong {
-  color: var(--ink);
-}
-
 .ready-script-bank-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
@@ -1854,11 +1710,7 @@ label {
   color: #c7b6b3;
 }
 
-.topnav a,
-.global-automation,
-.sidebar-disclosure,
-.sidebar-modal-button,
-.tailnet-box {
+.topnav a {
   background: rgba(31, 31, 34, 0.58);
   border-color: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(12px);
@@ -1871,30 +1723,9 @@ label {
   letter-spacing: 0.07em;
 }
 
-.topnav a:hover,
-.sidebar-modal-button:hover,
-.sidebar-disclosure summary:hover {
+.topnav a:hover {
   background: rgba(255, 85, 64, 0.1);
   border-color: rgba(255, 180, 168, 0.24);
-}
-
-.tailnet-box,
-.global-automation-stats,
-.sidebar-modal-button small {
-  color: var(--muted);
-}
-
-.sidebar-modal-button,
-.sidebar-disclosure summary {
-  color: #ffd7d1;
-  font-family: "JetBrains Mono", monospace;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.sidebar-modal-button::after,
-.sidebar-disclosure summary::after {
-  color: var(--muted);
 }
 
 .hub-command-strip,
@@ -2256,8 +2087,7 @@ a:focus-visible {
 
   .detail-grid,
   .job-form,
-  .filters-grid,
-  .prompt-form {
+  .filters-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2268,8 +2098,7 @@ a:focus-visible {
   }
 
   .field.wide,
-  .field.full,
-  .prompt-actions {
+  .field.full {
     grid-column: span 1;
   }
 
@@ -2832,11 +2661,7 @@ a:focus-visible {
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
-  .app-sidebar .brand-block,
-  .app-sidebar .global-automation,
-  .app-sidebar .sidebar-modal-button,
-  .app-sidebar .hub-tools-disclosure,
-  .app-sidebar .tailnet-box {
+  .app-sidebar .brand-block {
     display: none;
   }
 

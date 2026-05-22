@@ -51,7 +51,7 @@ from app.models import (
     TopicRequest,
 )
 from app.pipelines.common import FatalStepError, RecoverableStepError, model_payload
-from app.providers import ProviderRegistry
+from app.providers.registry import ProviderRegistry
 from app.quality.asset_gate import AssetGate
 from app.quality.render_gate import RenderGate
 from app.quality.scene_gate import ScenePlanGate
