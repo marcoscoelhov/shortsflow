@@ -387,6 +387,109 @@ def test_local_music_bank_provider_selects_approved_track_and_records_license(mo
         assert wav_file.getnchannels() == 1
         assert round(wav_file.getnframes() / wav_file.getframerate() * 1000) == 1500
 
+def test_background_music_mood_is_inferred_from_full_script() -> None:
+    from app.providers.music import infer_background_music_mood
+
+    cases = [
+        (
+            {"canonical_topic": "Erupção do Monte Tambora", "angle": "crise climática global"},
+            {
+                "title": "Vulcão Tambora roubou o verão do planeta",
+                "hook": "1816 teve neve quando deveria ter colheita.",
+                "ending": "Um vulcão gritou numa ilha, e o planeta inteiro sentiu frio.",
+                "full_narration": (
+                    "O Tambora explodiu na Indonésia em 1815. A luz solar foi parcialmente bloqueada. "
+                    "Temperaturas caíram, plantações falharam e a fome se espalhou."
+                ),
+            },
+            "cinematic",
+        ),
+        (
+            {"canonical_topic": "Shanay-timpishka", "angle": "rio quase fervente sem vulcão visível"},
+            {
+                "title": "Rio fervente da Amazônia queima o que cai nele",
+                "hook": "Água quase fervendo corre no meio da floresta.",
+                "ending": "Também esconde água que queima.",
+                "full_narration": "A água pode ficar quente o bastante para queimar pele. Animais pequenos podem não escapar.",
+            },
+            "suspense",
+        ),
+        (
+            {"canonical_topic": "Peixe-pescador abissal", "angle": "bioluminescência no fundo do mar"},
+            {
+                "title": "Peixe-pescador usa luz viva para atrair vítimas",
+                "hook": "Escuridão total vira isca quando esse peixe acende.",
+                "ending": "A luz no fim do túnel pode ser uma boca.",
+                "full_narration": "Presas se aproximam achando que encontraram comida. Quando chegam perto, o escuro abre dentes.",
+            },
+            "suspense",
+        ),
+        (
+            {"canonical_topic": "Chuva vermelha", "angle": "fenômeno natural que parece presságio"},
+            {
+                "title": "Chuva de sangue já pintou cidades de vermelho",
+                "hook": "O céu ficou vermelho e parecia sangrar sobre pessoas.",
+                "ending": "O céu não estava sangrando. Estava carregando terra.",
+                "full_narration": "Relatos antigos descrevem chuvas vermelhas como presságios terríveis. O susto parece sobrenatural.",
+            },
+            "suspense",
+        ),
+    ]
+
+    for topic_plan, script, expected_mood in cases:
+        assert infer_background_music_mood(topic_plan, script) == expected_mood
+
+def test_local_music_bank_provider_prefers_script_mood_over_generic_topic(monkeypatch, tmp_path: Path) -> None:
+    bank_dir = tmp_path / "music_bank"
+    suspense_path = bank_dir / "tracks" / "suspense.wav"
+    cinematic_path = bank_dir / "tracks" / "cinematic.wav"
+    _write_test_wave(suspense_path, duration_ms=700, amplitude=2600, freq_hz=92.5)
+    _write_test_wave(cinematic_path, duration_ms=700, amplitude=2600, freq_hz=130.8)
+    (bank_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "tracks": [
+                    {
+                        "id": "cinematic-01",
+                        "path": "tracks/cinematic.wav",
+                        "moods": ["cinematic"],
+                        "license": "Approved",
+                        "source_url": "https://example.com/cinematic",
+                        "approved_for_youtube": True,
+                        "content_id_registered": False,
+                    },
+                    {
+                        "id": "suspense-01",
+                        "path": "tracks/suspense.wav",
+                        "moods": ["suspense"],
+                        "license": "Approved",
+                        "source_url": "https://example.com/suspense",
+                        "approved_for_youtube": True,
+                        "content_id_registered": False,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.providers.music.get_settings", lambda: SimpleNamespace(music_bank_dir=bank_dir))
+
+    provider = LocalMusicBankProvider()
+    result = provider.select_track(
+        {"canonical_topic": "curiosidade natural", "angle": "explicação científica"},
+        {
+            "title": "Chuva de sangue já pintou cidades de vermelho",
+            "hook": "O céu ficou vermelho e parecia sangrar sobre pessoas.",
+            "ending": "O susto parecia sobrenatural, mas vinha da atmosfera.",
+            "full_narration": "Relatos antigos descrevem chuvas vermelhas como presságios terríveis.",
+        },
+        tmp_path / "out" / "background.wav",
+        1500,
+    )
+
+    assert result["mood"] == "suspense"
+    assert result["provider_metadata"]["track_id"] == "suspense-01"
+
 def test_resilient_music_provider_uses_local_bank_before_minimax(monkeypatch, tmp_path: Path) -> None:
     bank_dir = tmp_path / "music_bank"
     track_path = bank_dir / "tracks" / "doc.wav"

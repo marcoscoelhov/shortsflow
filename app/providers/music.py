@@ -17,6 +17,141 @@ from app.providers.errors import ProviderFailure
 from app.utils import word_tokens
 
 
+ALLOWED_BACKGROUND_MUSIC_MOODS = {"cinematic", "documentary", "suspense", "technology"}
+
+MUSIC_MOOD_TERMS: dict[str, tuple[tuple[str, int], ...]] = {
+    "suspense": (
+        ("assustador", 4),
+        ("assustadora", 4),
+        ("dentes", 4),
+        ("escuro", 4),
+        ("escuridão", 4),
+        ("escuridao", 4),
+        ("fervendo", 4),
+        ("misterio", 4),
+        ("mistério", 4),
+        ("morte", 4),
+        ("mortal", 4),
+        ("perigo", 4),
+        ("pressagio", 4),
+        ("presságio", 4),
+        ("queima", 4),
+        ("sangue", 4),
+        ("segredo", 4),
+        ("sobrenatural", 4),
+        ("terrível", 4),
+        ("terrivel", 4),
+        ("vítima", 4),
+        ("vitima", 4),
+        ("vítimas", 4),
+        ("vitimas", 4),
+        ("ameaça", 3),
+        ("ameaca", 3),
+        ("crime", 3),
+        ("desastre", 3),
+        ("isca", 3),
+        ("sombra", 3),
+    ),
+    "technology": (
+        ("adenosina", 4),
+        ("cafeina", 4),
+        ("cafeína", 4),
+        ("cérebro", 4),
+        ("cerebro", 4),
+        ("neuro", 4),
+        ("receptor", 4),
+        ("tecnologia", 4),
+        ("universo", 4),
+        ("buraco negro", 3),
+        ("cosmos", 3),
+        ("espaço", 3),
+        ("espaco", 3),
+        ("orbitar", 3),
+    ),
+    "documentary": (
+        ("animal", 4),
+        ("animais", 4),
+        ("bioluminescente", 4),
+        ("bactéria", 4),
+        ("bacteria", 4),
+        ("floresta", 4),
+        ("história", 4),
+        ("historia", 4),
+        ("natureza", 4),
+        ("oceano", 4),
+        ("peixe", 4),
+        ("polvo", 4),
+        ("cientistas", 3),
+        ("documentário", 3),
+        ("documentario", 3),
+        ("geológica", 3),
+        ("geologica", 3),
+    ),
+    "cinematic": (
+        ("atmosfera", 3),
+        ("climática", 4),
+        ("climatica", 4),
+        ("colheita", 4),
+        ("crise", 3),
+        ("erupção", 4),
+        ("erupcao", 4),
+        ("explodiu", 4),
+        ("explosão", 4),
+        ("explosao", 4),
+        ("fome", 4),
+        ("frio", 3),
+        ("planeta", 4),
+        ("temperaturas caíram", 4),
+        ("temperaturas cairam", 4),
+        ("verão", 3),
+        ("verao", 3),
+        ("vulcão", 4),
+        ("vulcao", 4),
+    ),
+}
+
+
+def infer_background_music_mood(topic_plan: dict[str, Any], script: dict[str, Any]) -> str:
+    explicit = str(script.get("music_mood") or script.get("mood") or topic_plan.get("music_mood") or "").strip().lower()
+    if explicit in ALLOWED_BACKGROUND_MUSIC_MOODS:
+        return explicit
+
+    title_candidates = topic_plan.get("title_candidates") or []
+    if isinstance(title_candidates, list):
+        title_candidates_text = " ".join(str(item) for item in title_candidates)
+    else:
+        title_candidates_text = str(title_candidates or "")
+    lead_surface = " ".join(
+        [
+            str(script.get("title") or ""),
+            str(script.get("hook") or ""),
+            str(script.get("ending") or ""),
+        ]
+    ).lower()
+    full_surface = " ".join(
+        [
+            str(topic_plan.get("canonical_topic") or ""),
+            str(topic_plan.get("angle") or ""),
+            title_candidates_text,
+            lead_surface,
+            str(script.get("full_narration") or ""),
+        ]
+    ).lower()
+    scores = {mood: 0 for mood in ("suspense", "technology", "documentary", "cinematic")}
+    for mood, terms in MUSIC_MOOD_TERMS.items():
+        for term, weight in terms:
+            if term in full_surface:
+                scores[mood] += weight * full_surface.count(term)
+            if term in lead_surface:
+                scores[mood] += weight
+
+    if scores["suspense"] >= 8 and scores["suspense"] >= scores["documentary"]:
+        return "suspense"
+    mood_priority = {"suspense": 3, "technology": 2, "documentary": 1, "cinematic": 0}
+    best_mood, best_score = max(scores.items(), key=lambda item: (item[1], mood_priority[item[0]]))
+    return best_mood if best_score > 0 else "cinematic"
+
+
 class MockBackgroundMusicProvider:
     provider_name = "mock_music"
 
@@ -41,21 +176,7 @@ class MockBackgroundMusicProvider:
         }
 
     def _infer_mood(self, topic_plan: dict[str, Any], script: dict[str, Any]) -> str:
-        surface = " ".join(
-            [
-                str(topic_plan.get("canonical_topic") or ""),
-                str(topic_plan.get("angle") or ""),
-                str(script.get("title") or ""),
-                str(script.get("hook") or ""),
-            ]
-        ).lower()
-        if any(term in surface for term in ["mist", "crime", "suspense", "mistério", "misterio", "segredo", "sombr"]):
-            return "suspense"
-        if any(term in surface for term in ["espaço", "espaco", "universo", "buraco negro", "tecnologia", "cafeína", "cafeina"]):
-            return "technology"
-        if any(term in surface for term in ["animal", "gato", "polvo", "oceano", "natureza", "flamingo"]):
-            return "documentary"
-        return "cinematic"
+        return infer_background_music_mood(topic_plan, script)
 
     def _query_hint(self, topic_plan: dict[str, Any], script: dict[str, Any], mood: str) -> str:
         topic = str(topic_plan.get("canonical_topic") or script.get("title") or "curiosidades").strip()
@@ -232,21 +353,7 @@ class LocalMusicBankProvider:
         return {token for value in values for token in word_tokens(value)}
 
     def _infer_mood(self, topic_plan: dict[str, Any], script: dict[str, Any]) -> str:
-        surface = " ".join(
-            [
-                str(topic_plan.get("canonical_topic") or ""),
-                str(topic_plan.get("angle") or ""),
-                str(script.get("title") or ""),
-                str(script.get("hook") or ""),
-            ]
-        ).lower()
-        if any(term in surface for term in ["mistério", "misterio", "segredo", "sombra", "buraco negro", "crime"]):
-            return "suspense"
-        if any(term in surface for term in ["cafeína", "cafeina", "neuro", "tecnologia", "universo", "espaço", "espaco"]):
-            return "technology"
-        if any(term in surface for term in ["polvo", "gato", "animal", "oceano", "natureza", "história", "historia"]):
-            return "documentary"
-        return "cinematic"
+        return infer_background_music_mood(topic_plan, script)
 
     def _query_hint(self, topic_plan: dict[str, Any], script: dict[str, Any], mood: str) -> str:
         topic = str(topic_plan.get("canonical_topic") or "").strip()
@@ -448,21 +555,7 @@ class MiniMaxBackgroundMusicProvider:
         }
 
     def _infer_mood(self, topic_plan: dict[str, Any], script: dict[str, Any]) -> str:
-        surface = " ".join(
-            [
-                str(topic_plan.get("canonical_topic") or ""),
-                str(topic_plan.get("angle") or ""),
-                str(script.get("title") or ""),
-                str(script.get("hook") or ""),
-            ]
-        ).lower()
-        if any(term in surface for term in ["mistério", "misterio", "segredo", "sombra", "buraco negro", "crime"]):
-            return "suspense"
-        if any(term in surface for term in ["cafeína", "cafeina", "neuro", "tecnologia", "universo", "espaço", "espaco"]):
-            return "technology"
-        if any(term in surface for term in ["polvo", "gato", "animal", "oceano", "natureza", "história", "historia"]):
-            return "documentary"
-        return "cinematic"
+        return infer_background_music_mood(topic_plan, script)
 
     def _query_hint(self, topic_plan: dict[str, Any], script: dict[str, Any], mood: str) -> str:
         topic = str(topic_plan.get("canonical_topic") or "").strip()
