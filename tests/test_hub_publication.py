@@ -54,6 +54,8 @@ def test_hub_create_job_sends_title_mode_tone_angle_and_seo_notes(monkeypatch) -
     assert response.headers["location"] == "/jobs/job-title-mode"
     assert captured["tone"] == "mito_vs_realidade"
     assert captured["requested_angle"] == "inteligencia biologica impossivel"
+    assert captured["job_origin"] == "manual_title"
+    assert captured["creation_via"] == "hub"
     assert "input_mode=title" in str(captured["notes"])
     assert "copywriting viral" in str(captured["notes"])
     assert "SEO otimizado" in str(captured["notes"])
@@ -232,15 +234,17 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     assert 'name="niche_id" value="curiosidades"' in page.text
     assert 'name="seed_theme" value=""' in page.text
     assert "Vazio = pesquisar tendências reais" in page.text
-    assert 'name="target_duration_sec" type="number" min="35" max="55" value="45"' in page.text
+    assert 'name="target_duration_sec" type="number" min="35" max="55" value="50"' in page.text
 
     response = client.post("/jobs", data={"seed_theme": "", "input_mode": "theme"}, follow_redirects=False)
     assert response.status_code == 303
     assert captured["seed_theme"] == "Por que flamingos estão em alta?"
     assert captured["requested_angle"] == "Transformar tendência real em curiosidade verificável."
+    assert captured["job_origin"] == "automatic_topic"
+    assert captured["creation_via"] == "hub"
     assert "trend_research=real_source" in str(captured["notes"])
     assert captured["niche_id"] == "curiosidades"
-    assert captured["target_duration_sec"] == 45
+    assert captured["target_duration_sec"] == 50
 
 def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
     client = TestClient(app)
@@ -294,6 +298,54 @@ def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
     assert "pagehub-job-0" in second_page.text
     assert "pagehub-job-2" not in second_page.text
     assert "Página 2 de 2" in second_page.text
+
+def test_hub_filters_jobs_by_origin_and_shows_portuguese_labels() -> None:
+    client = TestClient(app)
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id="origin-filter-bank-job", status="monetization_review", seed_theme="Origem filtro banco")
+        _create_basic_job(session, job_id="origin-filter-auto-job", status="monetization_review", seed_theme="Origem filtro automatico")
+        session.flush()
+        bank_job = session.get(Job, "origin-filter-bank-job")
+        auto_job = session.get(Job, "origin-filter-auto-job")
+        assert bank_job is not None
+        assert auto_job is not None
+        bank_job.job_origin = "ready_script_bank"
+        bank_job.creation_via = "daily_cycle"
+        auto_job.job_origin = "automatic_topic"
+        auto_job.creation_via = "daily_cycle"
+        session.commit()
+
+    response = client.get("/?origin=ready_script_bank")
+
+    assert response.status_code == 200
+    assert "Origem filtro banco" in response.text
+    assert "Origem filtro automatico" not in response.text
+    assert "Origem: Banco" in response.text
+    assert "Via: Ciclo diário" in response.text
+    assert "Banco de Roteiros Prontos" in response.text
+
+
+def test_create_job_persists_origin_and_audit_artifact() -> None:
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "Origem persistida por API",
+            "target_duration_sec": 35,
+            "job_origin": "manual_title",
+            "creation_via": "api",
+        }
+    )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.job_origin == "manual_title"
+        assert job.creation_via == "api"
+        assert (job.artifact_index or {}).get("job_origin") == "job_origin.json"
+
+    artifact = json.loads((Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "job_origin.json").read_text(encoding="utf-8"))
+    assert artifact["job_origin_label"] == "Título manual"
+    assert artifact["creation_via_label"] == "API"
+    assert artifact["inferred"] is False
 
 def test_jobs_queue_uses_publication_schedule_for_operational_state() -> None:
     client = TestClient(app)
@@ -1688,6 +1740,7 @@ def test_youtube_build_flow_enables_pkce(monkeypatch, tmp_path) -> None:
     assert captured["scopes"] == [
         "https://www.googleapis.com/auth/youtube.force-ssl",
         "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/youtube.readonly",
     ]
     assert captured["kwargs"]["state"] == "state-123"
     assert captured["kwargs"]["autogenerate_code_verifier"] is True
@@ -1920,10 +1973,10 @@ def test_publication_dashboard_fragment_shows_ready_and_scheduled_items() -> Non
     response = client.get("/publication-hub")
 
     assert response.status_code == 200
-    assert "Centro de publicação" in response.text
+    assert "Centro de Crescimento do Canal" in response.text
     assert "Morcegos enxergam com o som" in response.text
     assert "14:00" in response.text
-    assert "Canal" in response.text
+    assert "Analytics OAuth" in response.text
     assert "/automation/ready-scripts/import" not in response.text
 
 def test_record_performance_metrics_persists_artifact_and_learning_brief() -> None:
@@ -2005,6 +2058,102 @@ def test_record_performance_metrics_persists_artifact_and_learning_brief() -> No
     assert brief["sample_count"] >= 1
     assert brief["strong_patterns"]
     assert (Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "performance_metrics.json").exists()
+
+def test_sync_youtube_analytics_snapshot_persists_snapshot_and_updates_growth_center(monkeypatch) -> None:
+    job_id = "analytics-snapshot-job"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="published", seed_theme="Polvos que resolvem labirintos")
+        session.add(
+            TopicPlan(
+                topic_id="analytics-snapshot-topic",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="analytics-snapshot-topic",
+                canonical_topic="polvos",
+                angle="biologia curiosa",
+                hook_promise="o polvo aprende rápido demais",
+                entities=["polvos"],
+                search_terms=["polvos"],
+                title_candidates=["O polvo aprende rápido demais"],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id="analytics-snapshot-script",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="analytics-snapshot-script",
+                title="O polvo aprende rápido demais",
+                hook="O polvo aprende rápido demais.",
+                body_beats=["Ele testa uma saída.", "Depois muda de estratégia.", "E guarda a pista."],
+                ending="Esse é o tipo de loop que prende replay.",
+                cta=None,
+                full_narration="O polvo aprende rápido demais. Ele testa uma saída. Depois muda de estratégia.",
+                estimated_duration_sec=35,
+                key_facts=[],
+                token_count=20,
+                language="pt-BR",
+                qa_metrics={},
+                prompt_version="test",
+            )
+        )
+        session.add(
+            PublicationSchedule(
+                schedule_id="analytics-snapshot-schedule",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="analytics-snapshot-schedule",
+                scheduled_for_utc=datetime(2026, 5, 20, 14, 0, tzinfo=UTC),
+                timezone="America/Sao_Paulo",
+                youtube_visibility="public",
+                status="published",
+                published_at=datetime(2026, 5, 20, 14, 0, tzinfo=UTC),
+                youtube_video_id="yt-analytics-123",
+                youtube_url="https://www.youtube.com/watch?v=yt-analytics-123",
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(
+        orchestrator.youtube,
+        "fetch_video_analytics_snapshot",
+        lambda *, video_id, start_date, end_date: {
+            "video_id": video_id,
+            "youtube_url": f"https://www.youtube.com/watch?v={video_id}",
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "summary_metrics": {
+                "views": 240,
+                "averageViewPercentage": 86.5,
+                "averageViewDuration": 31.2,
+                "likes": 18,
+                "comments": 2,
+                "shares": 7,
+                "subscribersGained": 3,
+            },
+            "daily_rows": [{"day": end_date.isoformat(), "views": 240, "averageViewPercentage": 86.5}],
+            "raw_response": {"summary": {}, "daily": {}},
+            "fetched_at": datetime(2026, 5, 27, 12, 0, tzinfo=UTC).isoformat(),
+        },
+    )
+    client = TestClient(app)
+
+    response = client.post(f"/jobs/{job_id}/youtube-analytics/sync", data={"days": "28", "return_to": "/#publication-hub"}, follow_redirects=False)
+
+    assert response.status_code == 303
+    with SessionLocal() as session:
+        snapshot = session.query(YouTubeAnalyticsSnapshot).filter_by(job_id=job_id).one()
+        metric = session.query(PerformanceMetric).filter_by(job_id=job_id, source="youtube_analytics_api").one()
+        job = session.get(Job, job_id)
+
+    assert snapshot.summary_metrics["averageViewPercentage"] == 86.5
+    assert metric.retention_percent == 86.5
+    assert job and job.quality_summary["youtube_analytics"]["summary_metrics"]["views"] == 240
+    assert (Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "youtube_analytics_snapshot.json").exists()
+    dashboard = client.get("/publication-hub")
+    assert "Linhas editoriais por retenção" in dashboard.text
+    assert "86.5%" in dashboard.text
 
 def test_publish_package_skips_stopword_hashtags() -> None:
     tags = ["#shorts", "#curiosidades", "#ciencia"]

@@ -32,7 +32,7 @@ GOLDEN_SCRIPT_SAMPLES = {
 
 
 def build_retention_map(target_duration_sec: int) -> dict[str, Any]:
-    duration = max(35, min(55, int(target_duration_sec or 45)))
+    duration = max(35, min(55, int(target_duration_sec or 50)))
     return {
         "prompt_version": EDITORIAL_PROMPT_VERSION,
         "target_duration_sec": duration,
@@ -140,7 +140,7 @@ def attach_retention_metadata(script: dict[str, Any], plan_dict: dict[str, Any])
     metrics["recent_pattern_hash"] = stable_hash(plan_dict.get("recent_pattern_brief") or {})
     metrics["golden_sample_hash"] = stable_hash(plan_dict.get("golden_sample_brief") or {})
     enriched["qa_metrics"] = metrics
-    enriched.setdefault("retention_map", plan_dict.get("retention_map") or build_retention_map(int(enriched.get("estimated_duration_sec") or 45)))
+    enriched.setdefault("retention_map", plan_dict.get("retention_map") or build_retention_map(int(enriched.get("estimated_duration_sec") or 50)))
     enriched.setdefault("visual_opening", plan_dict.get("visual_opening") or build_visual_opening_brief(plan_dict))
     enriched["prompt_version"] = str(enriched.get("prompt_version") or plan_dict.get("editorial_prompt_version") or EDITORIAL_PROMPT_VERSION)
     return enriched

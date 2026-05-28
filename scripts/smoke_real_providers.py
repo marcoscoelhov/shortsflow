@@ -68,6 +68,7 @@ def main() -> int:
     _configure_environment(data_dir)
 
     from app.db import init_db
+    from app.job_origin import CREATION_VIA_CLI, JOB_ORIGIN_MANUAL_THEME
     from app.orchestrator import JobOrchestrator
     from app.schemas import TopicRequestCreate
 
@@ -79,6 +80,8 @@ def main() -> int:
             target_duration_sec=args.target_duration_sec,
             tone=args.tone,
             cta_style=args.cta_style,
+            job_origin=JOB_ORIGIN_MANUAL_THEME,
+            creation_via=CREATION_VIA_CLI,
         )
     )
     print(json.dumps({"event": "job_created", "job_id": job_id, "data_dir": str(data_dir)}, ensure_ascii=False), flush=True)

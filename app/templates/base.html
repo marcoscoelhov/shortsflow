@@ -1,3 +1,4 @@
+{% import "components.html" as ui %}
 <!doctype html>
 <html lang="pt-BR">
   <head>
@@ -14,12 +15,43 @@
           // Keep the default expanded layout when storage is unavailable.
         }
       })();
+      window.bindHubDialog = ({ dialog, openSelector, closeSelector, initialFocusSelector, beforeOpen } = {}) => {
+        if (!dialog || !openSelector || !closeSelector) return;
+        document.querySelectorAll(openSelector).forEach((button) => {
+          button.addEventListener("click", () => {
+            if (beforeOpen) beforeOpen(button, dialog);
+            dialog.showModal();
+            if (initialFocusSelector) {
+              window.setTimeout(() => dialog.querySelector(initialFocusSelector)?.focus(), 40);
+            }
+          });
+        });
+        dialog.querySelectorAll(closeSelector).forEach((button) => {
+          button.addEventListener("click", () => dialog.close());
+        });
+        dialog.addEventListener("click", (event) => {
+          if (event.target === dialog) dialog.close();
+        });
+      };
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <style>
+      label,
+      .badge,
+      .eyebrow,
+      .job-row-meta,
+      .inline-hint,
+      .section-note {
+        font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    {% block head_extra %}{% endblock %}
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
-    <script src="/static/htmx.min.js"></script>
+    <script src="/static/htmx.min.js" defer></script>
   </head>
   <body>
+    {% set active_path = request.url.path if request is defined else "/" %}
     <div class="app-frame">
       <header class="app-topbar" aria-label="Barra superior">
         <a class="topbar-product" href="/">
@@ -28,7 +60,8 @@
         </a>
         <form class="topbar-search" action="/" method="get">
           <span class="material-symbols-outlined" aria-hidden="true">search</span>
-          <input name="search" value="{{ filters.search if filters is defined else '' }}" placeholder="Buscar jobs por título...">
+          <label class="sr-only" for="topbar_search">Buscar por título, tema ou job_id</label>
+          <input id="topbar_search" name="search" value="{{ filters.search if filters is defined else '' }}" placeholder="Buscar por título, tema ou job_id">
         </form>
         <div class="topbar-actions" aria-label="Ações rápidas">
           <button type="button" class="topbar-icon topbar-search-trigger" data-open-search aria-label="Buscar jobs">
@@ -47,9 +80,9 @@
         <nav class="topnav" aria-label="Navegação principal">
           <a href="/">
             <span class="material-symbols-outlined" aria-hidden="true">dashboard</span>
-            Dashboard
+            Visão geral
           </a>
-          <a class="active" href="/">
+          <a class="{% if active_path == '/' %}active{% endif %}" href="/" {% if active_path == '/' %}aria-current="page"{% endif %}>
             <span class="material-symbols-outlined" aria-hidden="true">video_camera_back</span>
             Automação
           </a>
@@ -59,9 +92,9 @@
           </button>
           <a href="/#publication-hub">
             <span class="material-symbols-outlined" aria-hidden="true">bar_chart</span>
-            Analytics
+            Crescimento
           </a>
-          <a href="/calendar">
+          <a class="{% if active_path[:9] == '/calendar' %}active{% endif %}" href="/calendar" {% if active_path[:9] == '/calendar' %}aria-current="page"{% endif %}>
             <span class="material-symbols-outlined" aria-hidden="true">event_upcoming</span>
             Agendamento
           </a>
@@ -74,16 +107,16 @@
         <nav class="sidebar-footer-nav" aria-label="Suporte">
           <button type="button" data-open-operational-settings>
             <span class="material-symbols-outlined" aria-hidden="true">help</span>
-            Suporte
+            Configurações
           </button>
           <a href="/">
             <span class="material-symbols-outlined" aria-hidden="true">logout</span>
-            Sair
+            Voltar à fila
           </a>
         </nav>
       </aside>
       <nav class="mobile-bottom-nav" aria-label="Navegação mobile">
-        <a href="/" class="active">
+        <a href="/" class="{% if active_path == '/' %}active{% endif %}" {% if active_path == '/' %}aria-current="page"{% endif %}>
           <span class="material-symbols-outlined" aria-hidden="true">video_camera_back</span>
           <span>Fila</span>
         </a>
@@ -95,13 +128,13 @@
           <span class="material-symbols-outlined" aria-hidden="true">add</span>
           <span>Criar</span>
         </button>
-        <a href="/calendar">
+        <a href="/calendar" class="{% if active_path[:9] == '/calendar' %}active{% endif %}" {% if active_path[:9] == '/calendar' %}aria-current="page"{% endif %}>
           <span class="material-symbols-outlined" aria-hidden="true">event_upcoming</span>
           <span>Agenda</span>
         </a>
         <button type="button" data-open-operational-settings>
           <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-          <span>Ajustes</span>
+          <span>Config.</span>
         </button>
       </nav>
       <main class="page-shell">
@@ -110,13 +143,7 @@
     </div>
     <dialog id="hub-search-modal" class="schedule-picker-modal hub-search-modal" aria-labelledby="hub-search-title">
       <form class="schedule-picker-card hub-search-card" action="/" method="get">
-        <div class="schedule-picker-head">
-          <div>
-            <p class="eyebrow">Busca</p>
-            <h4 id="hub-search-title">Buscar jobs</h4>
-          </div>
-          <button type="button" class="ghost icon-button" data-close-search aria-label="Fechar busca">X</button>
-        </div>
+        {{ ui.dialog_head("Busca", "Buscar jobs", "hub-search-title", "search", "Fechar busca") }}
         <div class="field full">
           <label for="hub_search_query">Título, tema ou job_id</label>
           <input id="hub_search_query" name="search" value="{{ filters.search if filters is defined else '' }}" placeholder="Buscar na fila">
@@ -129,39 +156,33 @@
     </dialog>
     <dialog id="create-job-modal" class="schedule-picker-modal create-job-modal" aria-labelledby="create-job-title">
       <form method="post" action="/jobs" class="schedule-picker-card create-job-card job-form">
-        <div class="schedule-picker-head">
-          <div>
-            <p class="eyebrow">Entrada</p>
-            <h4 id="create-job-title">Criar job</h4>
-          </div>
-          <button type="button" class="ghost icon-button" data-close-create-job aria-label="Fechar criação">X</button>
-        </div>
+        {{ ui.dialog_head("Entrada", "Criar vídeo", "create-job-title", "create-job", "Fechar criação") }}
         <input type="hidden" name="niche_id" value="{{ hub_defaults.niche_id }}">
         <div class="field full">
-          <label for="input_mode">Entrada</label>
-          <select id="input_mode" name="input_mode">
+          <label for="input_mode">Tipo de entrada</label>
+          <select id="input_mode" name="input_mode" aria-describedby="input_mode_help_theme input_mode_help_title input_mode_help_script">
             <option value="theme" selected>Tema</option>
             <option value="title">Título completo</option>
             <option value="script">Roteiro pronto</option>
           </select>
-          <p class="field-help" data-mode-help="theme">Vazio = pesquisar tendências reais automaticamente.</p>
-          <p class="field-help hidden" data-mode-help="title">Cole um título completo; o app preserva a promessa.</p>
-          <p class="field-help hidden" data-mode-help="script">Cole o texto rotulado; o app não gera outro roteiro.</p>
+          <p id="input_mode_help_theme" class="field-help" data-mode-help="theme">Vazio = pesquisar tendências reais automaticamente. Preencha para partir de um tema específico.</p>
+          <p id="input_mode_help_title" class="field-help hidden" data-mode-help="title">Cole o título final; o app preserva a promessa e gera o roteiro a partir dele.</p>
+          <p id="input_mode_help_script" class="field-help hidden" data-mode-help="script">Cole um roteiro rotulado; o app usa esse texto e não cria outro roteiro.</p>
         </div>
         <div class="field wide" data-mode-section="theme title">
           <label for="seed_theme">Tema ou título</label>
-          <input id="seed_theme" name="seed_theme" value="{{ hub_defaults.seed_theme }}" placeholder="Ex.: Danakil, polvos, cafeína. Vazio = tendência real.">
+          <input id="seed_theme" name="seed_theme" value="{{ hub_defaults.seed_theme }}" placeholder="Ex.: Danakil, polvos, cafeína. Deixe vazio para usar tendência real.">
         </div>
         <div class="field wide hidden" data-mode-section="script">
           <label for="ready_script_text">Roteiro pronto em texto rotulado</label>
           <textarea id="ready_script_text" name="ready_script_text" rows="10" placeholder="Título: ...&#10;Hook: ...&#10;Loop: ...&#10;Beats: ...&#10;Payoff: ...&#10;Fechamento: ..."></textarea>
-          <label class="checkbox-line">
-            <input type="checkbox" name="ready_script_fact_check_confirmed" value="true">
+          <label class="checkbox-line" for="ready_script_fact_check_confirmed">
+            <input id="ready_script_fact_check_confirmed" type="checkbox" name="ready_script_fact_check_confirmed" value="true">
             Confirmo que os fatos deste roteiro pronto já foram revisados antes do envio.
           </label>
         </div>
         <div class="field">
-          <label for="target_duration_sec">Duração</label>
+          <label for="target_duration_sec">Duração alvo (s)</label>
           <input id="target_duration_sec" name="target_duration_sec" type="number" min="35" max="55" value="{{ hub_defaults.target_duration_sec }}">
         </div>
         <div class="field" data-mode-section="theme title">
@@ -178,7 +199,7 @@
         <div class="field" data-mode-section="theme title">
           <label for="requested_angle">Ângulo</label>
           <select id="requested_angle" name="requested_angle">
-            <option value="auto" selected>Automático</option>
+            <option value="auto" selected>Ângulo automático</option>
             <option value="habilidade biologica impossivel">Habilidade biológica impossível</option>
             <option value="mecanismo oculto">Mecanismo oculto</option>
             <option value="comparacao inesperada">Comparação inesperada</option>
@@ -188,21 +209,15 @@
           </select>
         </div>
         <div class="field wide" data-mode-section="theme title">
-          <label for="custom_angle">Ângulo customizado</label>
-          <input id="custom_angle" name="custom_angle" placeholder="Opcional; substitui o seletor.">
+          <label for="custom_angle">Ângulo manual</label>
+          <input id="custom_angle" name="custom_angle" placeholder="Opcional; substitui o ângulo escolhido acima.">
         </div>
-        <button type="submit">Criar job</button>
+        <button type="submit">Criar vídeo</button>
       </form>
     </dialog>
     <dialog id="ready-script-bank-modal" class="schedule-picker-modal ready-script-bank-modal" aria-labelledby="ready-script-bank-title">
       <div class="schedule-picker-card ready-script-bank-card">
-        <div class="schedule-picker-head">
-          <div>
-            <p class="eyebrow">Banco de roteiros</p>
-            <h4 id="ready-script-bank-title">Roteiros prontos</h4>
-          </div>
-          <button type="button" class="ghost icon-button" data-close-ready-script-bank aria-label="Fechar banco de roteiros">X</button>
-        </div>
+        {{ ui.dialog_head("Banco de roteiros", "Roteiros prontos", "ready-script-bank-title", "ready-script-bank", "Fechar banco de roteiros") }}
         <div class="ready-script-bank-summary">
           <span>{{ automation.metrics.available_ready_scripts }} disponíveis</span>
           <span>{{ automation.metrics.needs_review_ready_scripts }} para revisar</span>
@@ -231,24 +246,24 @@
             {% else %}
             <div class="empty-state-card">
               <strong>Nenhum roteiro importado.</strong>
-              <p>Importe um lote pelo formulário ao lado.</p>
+              <p>Cole um lote ou envie um arquivo para abastecer a automação.</p>
             </div>
             {% endfor %}
           </section>
           <form method="post" action="/automation/ready-scripts/import" enctype="multipart/form-data" class="sidebar-form ready-script-import-form ready-script-import-panel">
             <input type="hidden" name="return_to" value="{{ return_to }}">
             <div class="field full">
-              <label for="global_ready_script_batch">Texto colado</label>
-              <textarea id="global_ready_script_batch" name="ready_script_batch" rows="9" placeholder="Título: ...&#10;Hook: ...&#10;Loop: ...&#10;Beats: ...&#10;Payoff: ...&#10;Fechamento: ...&#10;Hashtags: ..."></textarea>
-              <p class="field-help">Use texto rotulado.</p>
+              <label for="global_ready_script_batch">Roteiros em texto</label>
+              <textarea id="global_ready_script_batch" name="ready_script_batch" rows="9" placeholder="Título: ...&#10;Hook: ...&#10;Loop: ...&#10;Beats: ...&#10;Payoff: ...&#10;Fechamento: ...&#10;Hashtags: ..." aria-describedby="global_ready_script_batch_help"></textarea>
+              <p id="global_ready_script_batch_help" class="field-help">Um roteiro por bloco, com rótulos como Título, Hook, Beats e Fechamento.</p>
             </div>
             <div class="field full">
-              <label for="global_ready_script_file">Arquivo</label>
+              <label for="global_ready_script_file">Arquivo .txt ou .md</label>
               <input id="global_ready_script_file" name="ready_script_file" type="file" accept=".txt,.md">
             </div>
-            <label class="checkbox-line">
-              <input type="checkbox" name="fact_check_confirmed" value="true" required>
-              Assumo a confirmação factual deste lote.
+            <label class="checkbox-line" for="global_fact_check_confirmed">
+              <input id="global_fact_check_confirmed" type="checkbox" name="fact_check_confirmed" value="true" required>
+              Confirmo que os fatos deste lote já foram revisados.
             </label>
             <button type="submit" class="sidebar-button">Importar lote</button>
           </form>
@@ -258,13 +273,7 @@
     <dialog id="operational-settings-modal" class="schedule-picker-modal operational-settings-modal" aria-labelledby="operational-settings-title">
       <form method="post" action="/operations/settings" class="schedule-picker-card operational-settings-card">
         <input type="hidden" name="return_to" value="{{ return_to }}">
-        <div class="schedule-picker-head">
-          <div>
-            <p class="eyebrow">Operação</p>
-            <h4 id="operational-settings-title">Configurações do hub</h4>
-          </div>
-          <button type="button" class="ghost icon-button" data-close-operational-settings aria-label="Fechar configurações">X</button>
-        </div>
+        {{ ui.dialog_head("Operação", "Configurações do hub", "operational-settings-title", "operational-settings", "Fechar configurações") }}
         <div class="operational-settings-grid">
           {% for group in operational_settings.groups %}
           <section class="operational-settings-group" aria-label="{{ group.name }}">
@@ -274,12 +283,12 @@
               {% if field.input_type == "select" %}
               <div class="field">
                 <label for="ops_{{ field.key }}">{{ field.label }}</label>
-                <select id="ops_{{ field.key }}" name="{{ field.key }}">
+                <select id="ops_{{ field.key }}" name="{{ field.key }}" {% if field.description %}aria-describedby="ops_{{ field.key }}_help"{% endif %}>
                   {% for option in field.options %}
                   <option value="{{ option.value }}" {% if option.value == field.value %}selected{% endif %}>{{ option.label }}</option>
                   {% endfor %}
                 </select>
-                {% if field.description %}<small>{{ field.description }}</small>{% endif %}
+                {% if field.description %}<small id="ops_{{ field.key }}_help">{{ field.description }}</small>{% endif %}
               </div>
               {% elif field.input_type == "checkbox" %}
               <label class="checkbox-line operational-checkbox" for="ops_{{ field.key }}">
@@ -303,8 +312,9 @@
                   {% if field.min is not none %}min="{{ field.min }}"{% endif %}
                   {% if field.max is not none %}max="{{ field.max }}"{% endif %}
                   {% if field.step %}step="{{ field.step }}"{% endif %}
+                  {% if field.description %}aria-describedby="ops_{{ field.key }}_help"{% endif %}
                 >
-                {% if field.description %}<small>{{ field.description }}</small>{% endif %}
+                {% if field.description %}<small id="ops_{{ field.key }}_help">{{ field.description }}</small>{% endif %}
               </div>
               {% endif %}
               {% endfor %}
@@ -341,62 +351,30 @@
         });
         sync();
       })();
-      (() => {
-        const dialog = document.getElementById("ready-script-bank-modal");
-        if (!dialog) return;
-        document.querySelectorAll("[data-open-ready-script-bank]").forEach((button) => {
-          button.addEventListener("click", () => dialog.showModal());
-        });
-        dialog.querySelectorAll("[data-close-ready-script-bank]").forEach((button) => {
-          button.addEventListener("click", () => dialog.close());
-        });
-        dialog.addEventListener("click", (event) => {
-          if (event.target === dialog) dialog.close();
-        });
-      })();
-      (() => {
-        const dialog = document.getElementById("hub-search-modal");
-        if (!dialog) return;
-        const input = dialog.querySelector("input[name='search']");
-        document.querySelectorAll("[data-open-search]").forEach((button) => {
-          button.addEventListener("click", () => {
-            dialog.showModal();
-            window.setTimeout(() => input && input.focus(), 40);
-          });
-        });
-        dialog.querySelectorAll("[data-close-search]").forEach((button) => {
-          button.addEventListener("click", () => dialog.close());
-        });
-        dialog.addEventListener("click", (event) => {
-          if (event.target === dialog) dialog.close();
-        });
-      })();
-      (() => {
-        const dialog = document.getElementById("create-job-modal");
-        if (!dialog) return;
-        document.querySelectorAll("[data-open-create-job]").forEach((button) => {
-          button.addEventListener("click", () => dialog.showModal());
-        });
-        dialog.querySelectorAll("[data-close-create-job]").forEach((button) => {
-          button.addEventListener("click", () => dialog.close());
-        });
-        dialog.addEventListener("click", (event) => {
-          if (event.target === dialog) dialog.close();
-        });
-      })();
-      (() => {
-        const dialog = document.getElementById("operational-settings-modal");
-        if (!dialog) return;
-        document.querySelectorAll("[data-open-operational-settings]").forEach((button) => {
-          button.addEventListener("click", () => dialog.showModal());
-        });
-        dialog.querySelectorAll("[data-close-operational-settings]").forEach((button) => {
-          button.addEventListener("click", () => dialog.close());
-        });
-        dialog.addEventListener("click", (event) => {
-          if (event.target === dialog) dialog.close();
-        });
-      })();
+      window.bindHubDialog({
+        dialog: document.getElementById("ready-script-bank-modal"),
+        openSelector: "[data-open-ready-script-bank]",
+        closeSelector: "[data-close-ready-script-bank]",
+        initialFocusSelector: "#global_ready_script_batch",
+      });
+      window.bindHubDialog({
+        dialog: document.getElementById("hub-search-modal"),
+        openSelector: "[data-open-search]",
+        closeSelector: "[data-close-search]",
+        initialFocusSelector: "input[name='search']",
+      });
+      window.bindHubDialog({
+        dialog: document.getElementById("create-job-modal"),
+        openSelector: "[data-open-create-job]",
+        closeSelector: "[data-close-create-job]",
+        initialFocusSelector: "#seed_theme",
+      });
+      window.bindHubDialog({
+        dialog: document.getElementById("operational-settings-modal"),
+        openSelector: "[data-open-operational-settings]",
+        closeSelector: "[data-close-operational-settings]",
+        initialFocusSelector: "input:not([type='hidden']), select, textarea",
+      });
       (() => {
         const mode = document.querySelector("#input_mode");
         if (!mode) return;

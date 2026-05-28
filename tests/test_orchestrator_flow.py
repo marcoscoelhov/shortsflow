@@ -43,12 +43,17 @@ def test_job_progress_is_exposed_in_detail_and_api() -> None:
     detail = client.get(f"/jobs/{job_id}")
     assert detail.status_code == 200
     assert "Progresso do job" in detail.text
+    assert 'role="progressbar"' in detail.text
+    assert 'aria-valuenow="' in detail.text
+    assert 'aria-live="polite"' in detail.text
     assert "Roteiro" in detail.text
     assert "script.started" in detail.text
 
     hub = client.get("/")
     assert hub.status_code == 200
     assert "Progresso do job" in hub.text
+    assert 'role="progressbar"' in hub.text
+    assert "Fila atualizada." in hub.text
 
 def test_full_pipeline_reaches_monetization_review() -> None:
     client = TestClient(app)
@@ -747,7 +752,7 @@ def test_review_page_no_longer_promises_partial_retry() -> None:
     assert 'name="retry_step"' not in detail.text
     assert 'value="retry_from_step"' not in detail.text
     assert 'value="retry"' not in detail.text
-    assert "Nenhuma ação de review disponível para o status atual." in detail.text
+    assert "Nenhuma ação de revisão disponível para o status atual." in detail.text
 
 def test_claim_next_job_is_atomic_under_concurrency() -> None:
     orchestrator.stop_worker()

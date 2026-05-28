@@ -17,6 +17,13 @@ from sqlalchemy import select
 from app.automation import AutomationService
 from app.config import get_settings
 from app.db import SessionLocal, init_db
+from app.job_origin import (
+    CREATION_VIA_HUB,
+    JOB_ORIGIN_AUTOMATIC_TOPIC,
+    JOB_ORIGIN_MANUAL_READY_SCRIPT,
+    JOB_ORIGIN_MANUAL_THEME,
+    JOB_ORIGIN_MANUAL_TITLE,
+)
 from app.manual_script import build_ready_script_notes, parse_ready_script
 from app.models import Job, Script, TopicPlan, TopicRequest
 from app.operational_settings import (
@@ -34,6 +41,7 @@ from pydantic import ValidationError
 from app.schemas import PerformanceMetricPayload, PublicationSchedulePayload, ReviewActionPayload, TopicRequestCreate
 from app.trends import TrendResearcher
 from app.utils import path_from_uri
+from app.youtube_api import YouTubeIntegrationError
 
 
 settings = get_settings()
@@ -64,7 +72,7 @@ def _shared_template_context(request: Request) -> dict[str, object]:
 templates = Jinja2Templates(directory=str(settings.templates_dir), context_processors=[_shared_template_context])
 
 HUB_DEFAULT_NICHE = "curiosidades"
-HUB_RETENTION_OPTIMIZED_DURATION_SEC = 45
+HUB_RETENTION_OPTIMIZED_DURATION_SEC = 50
 HUB_RANDOM_THEME_POOL = [
     "polvos",
     "gatos",
@@ -126,6 +134,8 @@ _job_flow_stage = hub_context._job_flow_stage
 _job_next_action = hub_context._job_next_action
 _publication_operational_status = hub_context._publication_operational_status
 _job_progress_snapshot = hub_context._job_progress_snapshot
+_job_origin_display = hub_context._job_origin_display
+_creation_via_display = hub_context._creation_via_display
 _job_action_guide = hub_context._job_action_guide
 _job_list_context = hub_context._job_list_context
 _schedule_display = hub_context._schedule_display
@@ -173,6 +183,8 @@ templates.env.globals["job_flow_stage"] = _job_flow_stage
 templates.env.globals["job_next_action"] = _job_next_action
 templates.env.globals["publication_operational_status"] = _publication_operational_status
 templates.env.globals["job_progress_snapshot"] = _job_progress_snapshot
+templates.env.globals["job_origin_display"] = _job_origin_display
+templates.env.globals["creation_via_display"] = _creation_via_display
 
 
 @asynccontextmanager
@@ -368,10 +380,12 @@ def jobs_page(
     search: str | None = Query(default=None),
     fallback: str | None = Query(default=None),
     review: str | None = Query(default=None),
+    origin: str | None = Query(default=None),
+    via: str | None = Query(default=None),
     page: int = Query(default=1),
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
 ):
-    list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, page=page, per_page=per_page)
+    list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
     publication_context = _publication_dashboard_context(request, limit=4)
     return templates.TemplateResponse(
         request,
@@ -429,10 +443,12 @@ def jobs_fragment(
     search: str | None = Query(default=None),
     fallback: str | None = Query(default=None),
     review: str | None = Query(default=None),
+    origin: str | None = Query(default=None),
+    via: str | None = Query(default=None),
     page: int = Query(default=1),
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
 ):
-    list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, page=page, per_page=per_page)
+    list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
     return templates.TemplateResponse(
         request,
         "jobs_table.html",
@@ -581,6 +597,7 @@ def create_job(
     trend_notes = None
     normalized_mode = "script" if input_mode == "script" else ("title" if input_mode == "title" else "theme")
     if normalized_mode == "script":
+        job_origin = JOB_ORIGIN_MANUAL_READY_SCRIPT
         if not ready_script_fact_check_confirmed:
             raise HTTPException(status_code=422, detail="ready_script_fact_check_confirmed is required for Roteiro Pronto")
         try:
@@ -591,9 +608,11 @@ def create_job(
         combined_notes = build_ready_script_notes(notes, ready_script.raw_text, ready_script_fact_check_confirmed)
         trend_report = None
     elif seed_theme.strip():
+        job_origin = JOB_ORIGIN_MANUAL_TITLE if normalized_mode == "title" else JOB_ORIGIN_MANUAL_THEME
         selected_seed_theme = seed_theme.strip()
         trend_report = None
     else:
+        job_origin = JOB_ORIGIN_AUTOMATIC_TOPIC
         selected_seed_theme, trend_angle, trend_notes, trend_report = _trend_seed_theme(selected_niche)
         selected_angle = selected_angle or trend_angle or ""
         combined_notes = "\n\n".join(part for part in [trend_notes, notes] if part)
@@ -609,6 +628,8 @@ def create_job(
             cta_style=cta_style,
             notes=_compose_hub_notes(normalized_mode, combined_notes),
             requested_angle=selected_angle or None,
+            job_origin=job_origin,
+            creation_via=CREATION_VIA_HUB,
         )
         job_id = orchestrator.create_job(payload.model_dump())
         if trend_report is not None:
@@ -843,3 +864,18 @@ def record_performance(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
     return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
+
+
+@app.post("/jobs/{job_id}/youtube-analytics/sync")
+def sync_job_youtube_analytics(
+    job_id: str,
+    days: int = Form(default=28),
+    return_to: str | None = Form(default=None),
+):
+    try:
+        orchestrator.sync_youtube_analytics_snapshot(job_id, days=days)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except YouTubeIntegrationError as exc:
+        return _redirect_back(return_to, {"analytics_error": str(exc)}, default=f"/jobs/{job_id}")
+    return _redirect_back(return_to, {"analytics_synced": "1"}, default=f"/jobs/{job_id}")

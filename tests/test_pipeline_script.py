@@ -32,6 +32,8 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
     assert response.status_code == 303
     assert response.headers["location"] == "/jobs/job-ready-script"
     assert captured["seed_theme"] == "Venus: o planeta onde um dia dura mais que um ano"
+    assert captured["job_origin"] == "manual_ready_script"
+    assert captured["creation_via"] == "hub"
     assert "input_mode=script" in str(captured["notes"])
     assert "[[YTS_READY_SCRIPT_BEGIN]]" in str(captured["notes"])
     assert "ready_script_fact_check_confirmed=true" in str(captured["notes"])

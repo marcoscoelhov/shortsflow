@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from app.config import get_settings
@@ -34,6 +34,24 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _ensure_job_metadata_columns()
+
+
+def _ensure_job_metadata_columns() -> None:
+    inspector = inspect(engine)
+    if "jobs" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("jobs")}
+    column_specs = {
+        "job_origin": "VARCHAR DEFAULT 'unknown'",
+        "creation_via": "VARCHAR DEFAULT 'unknown'",
+    }
+    missing = [(name, ddl) for name, ddl in column_specs.items() if name not in existing]
+    if not missing:
+        return
+    with engine.begin() as connection:
+        for name, ddl in missing:
+            connection.execute(text(f"ALTER TABLE jobs ADD COLUMN {name} {ddl}"))
 
 
 @contextmanager

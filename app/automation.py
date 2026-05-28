@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db import session_scope
 from app.editorial.repetition import build_channel_repetition_report
+from app.job_origin import CREATION_VIA_DAILY_CYCLE, JOB_ORIGIN_AUTOMATIC_TOPIC, JOB_ORIGIN_READY_SCRIPT_BANK
 from app.manual_script import build_ready_script_notes, parse_ready_script
 from app.models import (
     AutomationAttempt,
@@ -30,8 +31,8 @@ from app.utils import new_id, stable_hash, utcnow
 
 READY_SCRIPT_SPLIT_RE = re.compile(r"(?im)^\s*t[ií]tulo\s*:")
 AUTOMATION_ENABLED_KEY = "automation_enabled"
-AUTOMATION_SOURCE_READY_SCRIPT = "ready_script_bank"
-AUTOMATION_SOURCE_AUTO_TOPIC = "automatic_topic"
+AUTOMATION_SOURCE_READY_SCRIPT = JOB_ORIGIN_READY_SCRIPT_BANK
+AUTOMATION_SOURCE_AUTO_TOPIC = JOB_ORIGIN_AUTOMATIC_TOPIC
 AUTOMATION_SOURCE_RESUME = "resume_publish"
 ACTIVE_SCHEDULE_STATUSES = {"scheduled", "publishing", "published"}
 DEFAULT_AUTOMATION_TOPIC_POOL = [
@@ -492,6 +493,8 @@ class AutomationService:
             cta_style="none",
             notes=build_ready_script_notes(None, item.raw_text, item.fact_check_confirmed),
             requested_angle=None,
+            job_origin=JOB_ORIGIN_READY_SCRIPT_BANK,
+            creation_via=CREATION_VIA_DAILY_CYCLE,
         ).model_dump()
 
     def _automatic_topic_payload(self) -> dict[str, Any]:
@@ -513,6 +516,8 @@ class AutomationService:
             cta_style="none",
             notes=notes,
             requested_angle=requested_angle,
+            job_origin=JOB_ORIGIN_AUTOMATIC_TOPIC,
+            creation_via=CREATION_VIA_DAILY_CYCLE,
         ).model_dump()
 
     def evaluate_autoapproval(self, job_id: str) -> dict[str, Any]:

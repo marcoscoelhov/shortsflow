@@ -135,7 +135,7 @@ class ScriptRepairDomain(BasePipeline):
 
     def _sync_retention_map_to_script(self, script: dict[str, Any]) -> dict[str, Any]:
         updated = dict(script)
-        duration = int(round(float(updated.get("estimated_duration_sec") or 45)))
+        duration = int(round(float(updated.get("estimated_duration_sec") or 50)))
         retention_map = updated.get("retention_map") if isinstance(updated.get("retention_map"), dict) else {}
         segments = retention_map.get("segments") if isinstance(retention_map.get("segments"), list) else None
         synced_map = {**retention_map} if retention_map else build_retention_map(duration)

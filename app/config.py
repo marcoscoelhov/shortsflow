@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     niche_id: str = "curiosidades"
     language: str = "pt-BR"
-    target_duration_sec: int = 45
+    target_duration_sec: int = 50
     scene_target_count: int = 6
     simple_shorts_mode: bool = True
 

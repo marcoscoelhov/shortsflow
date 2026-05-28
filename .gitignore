@@ -1,12 +1,23 @@
 .env
 .claude/
 .serena/
+.impeccable/*
+!.impeccable/design.json
+!.impeccable/critique/
+!.impeccable/critique/ignore.md
+.firecrawl/
 .venv/
 node_modules/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 *.py[cod]
 *.egg-info/
+build/
+dist/
 
 # Runtime/generated data and media artifacts
 data/
@@ -20,3 +31,8 @@ uvicorn-*.log
 *.err.log
 *.out.log
 uv.lock
+
+# Browser/test artifacts
+.playwright/
+playwright-report/
+test-results/

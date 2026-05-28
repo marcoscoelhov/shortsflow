@@ -1,18 +1,19 @@
 {% extends "base.html" %}
+{% import "components.html" as ui %}
 {% block content %}
 <section class="jobs-control-hero">
   <div class="jobs-hero-copy">
-    <p class="eyebrow">Control center</p>
-    <h2>Gerenciador de Jobs</h2>
-    <p>Acompanhe execução, revisão humana, agendamento e publicação em uma fila única.</p>
+    <p class="eyebrow">Operação</p>
+    <h2>Fila de vídeos</h2>
+    <p>Acompanhe geração, revisão, agenda e publicação em uma fila única.</p>
   </div>
   <div class="jobs-hero-stats" aria-label="Resumo de operação">
     <article>
-      <span>Pedem ação</span>
+      <span>Precisam de ação</span>
       <strong>{{ workflow_summary.awaiting_approval_count + workflow_summary.unscheduled_approved_count }}</strong>
     </article>
     <article>
-      <span>Encontrados</span>
+      <span>Na fila</span>
       <strong>{{ pagination.total }}</strong>
     </article>
   </div>
@@ -20,44 +21,38 @@
 
 <section class="jobs-action-row" aria-label="Ações de jobs">
   <div class="jobs-filter-pills" aria-label="Filtros rápidos">
-    <a class="{% if not filters.status %}active{% endif %}" href="/?per_page={{ pagination.per_page }}">Todos</a>
-    <a class="{% if filters.status == 'running' %}active{% endif %}" href="/?status=running&per_page={{ pagination.per_page }}">Renderizando</a>
-    <a class="{% if filters.status == 'unscheduled_approved' %}active{% endif %}" href="/?status=unscheduled_approved&per_page={{ pagination.per_page }}">Sem agenda</a>
-    <a class="{% if filters.status == 'scheduled_publication' %}active{% endif %}" href="/?status=scheduled_publication&per_page={{ pagination.per_page }}">Agendados</a>
-    <a class="{% if filters.status == 'published' %}active{% endif %}" href="/?status=published&per_page={{ pagination.per_page }}">Publicados</a>
-    <a class="{% if filters.status == 'failed' %}active{% endif %}" href="/?status=failed&per_page={{ pagination.per_page }}">Falhas</a>
+    <a class="{% if not filters.status %}active{% endif %}" href="/?per_page={{ pagination.per_page }}" {% if not filters.status %}aria-current="page"{% endif %}>Todos</a>
+    <a class="{% if filters.status == 'running' %}active{% endif %}" href="/?status=running&per_page={{ pagination.per_page }}" {% if filters.status == 'running' %}aria-current="page"{% endif %}>Renderizando</a>
+    <a class="{% if filters.status == 'unscheduled_approved' %}active{% endif %}" href="/?status=unscheduled_approved&per_page={{ pagination.per_page }}" {% if filters.status == 'unscheduled_approved' %}aria-current="page"{% endif %}>Sem agenda</a>
+    <a class="{% if filters.status == 'scheduled_publication' %}active{% endif %}" href="/?status=scheduled_publication&per_page={{ pagination.per_page }}" {% if filters.status == 'scheduled_publication' %}aria-current="page"{% endif %}>Agendados</a>
+    <a class="{% if filters.status == 'published' %}active{% endif %}" href="/?status=published&per_page={{ pagination.per_page }}" {% if filters.status == 'published' %}aria-current="page"{% endif %}>Publicados</a>
+    <a class="{% if filters.status == 'failed' %}active{% endif %}" href="/?status=failed&per_page={{ pagination.per_page }}" {% if filters.status == 'failed' %}aria-current="page"{% endif %}>Falhas</a>
   </div>
   <button type="button" class="jobs-sort-control" data-open-filters>
     <span class="material-symbols-outlined" aria-hidden="true">filter_list</span>
-    Ordenar por data
+    Filtrar fila
   </button>
 </section>
 
-<section class="panel jobs-table-panel" aria-label="Próximas ações">
+<section class="panel jobs-table-panel" aria-label="Jobs com prioridade operacional">
   <div class="jobs-table-title">
     <div>
       <p class="eyebrow">Fila</p>
-      <h3>Próximas ações</h3>
+      <h3>Jobs prioritários</h3>
     </div>
-    <p class="section-note">Prioridade operacional, não histórico completo.</p>
+    <p class="section-note">Mostra o que precisa de decisão ou acompanhamento agora.</p>
   </div>
   {% include "jobs_table.html" %}
 </section>
 
 <dialog id="filters-modal" class="schedule-picker-modal filters-modal" aria-labelledby="filters-title">
   <form class="schedule-picker-card filters-card filters-grid" action="/" method="get" hx-get="/jobs" hx-target="#jobs-table" hx-swap="outerHTML" hx-trigger="change, keyup delay:300ms">
-    <div class="schedule-picker-head filters-head">
-      <div>
-        <p class="eyebrow">Fila</p>
-        <h4 id="filters-title">Filtrar fila</h4>
-      </div>
-      <button type="button" class="ghost icon-button" data-close-filters aria-label="Fechar filtros">X</button>
-    </div>
+    {{ ui.dialog_head("Fila", "Filtrar fila", "filters-title", "filters", "Fechar filtros", "filters-head") }}
         <input type="hidden" name="niche" value="curiosidades">
         <input type="hidden" name="page" value="1">
         <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
         <div class="field">
-          <label for="status">Status</label>
+          <label for="status">Status do job</label>
           <select id="status" name="status">
             <option value="">Todos</option>
             {% for value in ["queued","running","script_quality_failed","scene_plan_quality_failed","asset_quality_failed","subtitle_quality_failed","render_quality_failed","monetization_review","blocked_for_monetization","ready_for_upload","approved_for_publish","unscheduled_approved","scheduled_publication","awaiting_confirmation","publication_failed","published","approved","rejected","failed"] %}
@@ -70,18 +65,36 @@
           <input id="search" name="search" value="{{ filters.search }}" placeholder="Tema, título ou job_id">
         </div>
         <div class="field">
-          <label for="fallback">Fallback</label>
+          <label for="fallback">Uso de fallback</label>
           <select id="fallback" name="fallback">
             <option value="">Todos</option>
-            <option value="yes" {% if filters.fallback == "yes" %}selected{% endif %}>Com fallback</option>
+            <option value="yes" {% if filters.fallback == "yes" %}selected{% endif %}>Teve fallback</option>
           </select>
         </div>
         <div class="field">
-          <label for="review">Review</label>
+          <label for="review">Decisão de revisão</label>
           <select id="review" name="review">
             <option value="">Todos</option>
             <option value="approved" {% if filters.review == "approved" %}selected{% endif %}>Aprovado</option>
             <option value="rejected" {% if filters.review == "rejected" %}selected{% endif %}>Rejeitado</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="origin">Origem do job</label>
+          <select id="origin" name="origin">
+            <option value="">Todas</option>
+            {% for option in origin_options %}
+            <option value="{{ option.value }}" {% if filters.origin == option.value %}selected{% endif %}>{{ option.description }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="via">Via de criação</label>
+          <select id="via" name="via">
+            <option value="">Todas</option>
+            {% for option in creation_via_options %}
+            <option value="{{ option.value }}" {% if filters.via == option.value %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
           </select>
         </div>
         <button type="submit">Aplicar filtros</button>
@@ -90,8 +103,8 @@
 
 <section id="publication-hub" class="publication-overview">
   <div>
-    <p class="eyebrow">Publicação</p>
-    <h3>Resumo</h3>
+    <p class="eyebrow">Crescimento</p>
+    <h3>Status do canal</h3>
   </div>
   <div class="publication-metrics">
     <span><strong>{{ workflow_summary.awaiting_approval_count }}</strong> aguardando aprovação</span>
@@ -104,16 +117,11 @@
 
 <script>
   (() => {
-    const dialog = document.querySelector("#filters-modal");
-    if (!dialog) return;
-    document.querySelectorAll("[data-open-filters]").forEach((button) => {
-      button.addEventListener("click", () => dialog.showModal());
-    });
-    dialog.querySelectorAll("[data-close-filters]").forEach((button) => {
-      button.addEventListener("click", () => dialog.close());
-    });
-    dialog.addEventListener("click", (event) => {
-      if (event.target === dialog) dialog.close();
+    window.bindHubDialog({
+      dialog: document.querySelector("#filters-modal"),
+      openSelector: "[data-open-filters]",
+      closeSelector: "[data-close-filters]",
+      initialFocusSelector: "#status",
     });
   })();
 </script>

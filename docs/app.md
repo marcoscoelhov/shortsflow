@@ -91,6 +91,15 @@ Regras importantes desse modo:
 - fatos declarados entram a partir de `Beats` e `Payoff` sob responsabilidade da confirmacao humana.
 - desvios grandes de formato ou duracao bloqueiam antes de midia; o app nao reescreve automaticamente hook, beats, payoff ou fechamento.
 
+## Origem e via de criacao
+
+Cada `Job` persiste dois sinais separados:
+
+- `job_origin`: origem editorial do conteudo, como Banco, Roteiro manual, Auto, Tema manual ou Titulo manual.
+- `creation_via`: caminho operacional que criou o job, como Hub, Ciclo diario, CLI, API ou Recriacao.
+
+O Hub exibe esses sinais em portugues na fila, na pagina do job e nos filtros avancados. Jobs historicos sem os campos novos sao inferidos a partir de `TopicRequest.notes` e `AutomationAttempt.source` quando houver evidencia segura; caso contrario, aparecem como origem ou via incerta.
+
 ## Estados
 
 ### Job
@@ -159,6 +168,9 @@ Fluxo OAuth:
 - `GET /youtube/connect` cria a URL de autorizacao e persiste `youtube_oauth_state.json`.
 - `GET /youtube/oauth/callback` troca `code` por token e salva `youtube_oauth_token.json`.
 - `POST /youtube/disconnect` remove token e state locais.
+- O status de publicacao e o status de Analytics sao separados: publicar usa `youtube.force-ssl`/`youtube.upload`; Analytics usa `youtube.readonly`.
+
+O Centro de Crescimento do Canal usa `YouTubeAnalyticsSnapshot` para salvar leituras de `reports.query` por Job publicado. A primeira versao sincroniza manualmente a janela de 28 dias para Jobs com `youtube_video_id` e ordena linhas editoriais por retencao.
 
 ## Publicacao cruzada no TikTok
 
@@ -171,6 +183,9 @@ O contexto de integracao exposto no hub usa:
 - `publish_mode`
 - `api_enabled`
 - `connected`
+- `publish_connected`
+- `analytics_connected`
+- `analytics_missing_items`
 - `channel_id`
 - `missing_items`
 - `connected_at`
@@ -183,7 +198,7 @@ O contexto de integracao exposto no hub usa:
 | `GET` | `/` | Home do hub com formulario, jobs e resumo operacional. |
 | `POST` | `/hub/prompt` | Salva ou reseta o template viral do hub. |
 | `GET` | `/jobs` | Fragmento HTML da tabela paginada de jobs. |
-| `GET` | `/publication-hub` | Dashboard de publicacao, integracao YouTube e fila. |
+| `GET` | `/publication-hub` | Centro de Crescimento do Canal com performance, integracao YouTube e secao operacional de publicacao. |
 | `GET` | `/youtube/connect` | Inicia OAuth do YouTube. |
 | `GET` | `/youtube/oauth/callback` | Conclui OAuth do YouTube. |
 | `POST` | `/youtube/disconnect` | Remove token OAuth local. |
@@ -201,6 +216,7 @@ O contexto de integracao exposto no hub usa:
 | `POST` | `/jobs/{job_id}/schedule` | Salva ou limpa agenda local. |
 | `POST` | `/jobs/{job_id}/reopen-publication` | Reabre um publish para republicacao. |
 | `POST` | `/jobs/{job_id}/performance` | Registra metricas manuais do YouTube Studio. |
+| `POST` | `/jobs/{job_id}/youtube-analytics/sync` | Sincroniza snapshot de Analytics do YouTube para um job publicado com `youtube_video_id`. |
 | `GET` | `/healthz` | Healthcheck do app. |
 
 Arquivos sob `data/artifacts/` sao servidos por `/artifacts/...` quando ainda existem.
@@ -280,6 +296,7 @@ Modelos principais:
 - `ChannelPublication`
 - `ReviewRecord`
 - `PerformanceMetric`
+- `YouTubeAnalyticsSnapshot`
 - `FallbackEvent`
 - `ErrorLog`
 - `StepExecution`

@@ -31,6 +31,8 @@ class Job(Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     quality_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     artifact_index: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=dict)
+    job_origin: Mapped[str] = mapped_column(String, default="unknown")
+    creation_via: Mapped[str] = mapped_column(String, default="unknown")
     topic_summary: Mapped[str | None] = mapped_column(String, nullable=True)
     lease_owner: Mapped[str | None] = mapped_column(String, nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -283,6 +285,23 @@ class PerformanceMetric(Base):
     rpm_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     monetization_status: Mapped[str | None] = mapped_column(String, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class YouTubeAnalyticsSnapshot(Base):
+    __tablename__ = "youtube_analytics_snapshots"
+
+    snapshot_id: Mapped[str] = mapped_column(String, primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.job_id"), index=True)
+    schema_version: Mapped[str] = mapped_column(String, default="1.0.0")
+    content_hash: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    youtube_video_id: Mapped[str] = mapped_column(String, index=True)
+    start_date: Mapped[str] = mapped_column(String)
+    end_date: Mapped[str] = mapped_column(String)
+    summary_metrics: Mapped[dict] = mapped_column(JSON)
+    daily_rows: Mapped[list] = mapped_column(JSON)
+    raw_response: Mapped[dict] = mapped_column(JSON)
 
 
 class ReadyScriptItem(Base):

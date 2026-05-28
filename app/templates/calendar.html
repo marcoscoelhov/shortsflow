@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% import "components.html" as ui %}
 {% block content %}
 <section class="panel calendar-summary">
   <div>
     <p class="eyebrow">Agenda</p>
     <h2>Calendário de publicação</h2>
-    <p>Use o botão + em um dia para agendar um job aprovado e ainda não publicado.</p>
+    <p>Distribua vídeos aprovados em dias livres e acompanhe publicações já concluídas.</p>
   </div>
   <div class="calendar-metrics">
     <span><strong>{{ scheduled_count }}</strong> programados</span>
@@ -24,9 +25,9 @@
   </div>
 
   <div class="calendar-legend">
-    <span><span class="badge scheduled">Programado</span> slot salvo e aguardando horário</span>
+    <span><span class="badge scheduled">Programado</span> horário salvo e aguardando publicação</span>
     <span><span class="badge publishing">Publicando</span> upload em andamento</span>
-    <span><span class="badge publish_failed">Falhou no upload</span> precisa revisão</span>
+    <span><span class="badge publish_failed">Falha no upload</span> precisa revisão</span>
     <span><span class="badge published">Publicado</span> concluído</span>
   </div>
 
@@ -36,7 +37,7 @@
     {% endfor %}
   </datalist>
 
-  <div class="calendar-grid">
+  <div class="calendar-grid" aria-label="Calendário de {{ month_label }}">
     <div class="calendar-head">Seg</div>
     <div class="calendar-head">Ter</div>
     <div class="calendar-head">Qua</div>
@@ -49,7 +50,7 @@
       <article class="calendar-cell {% if not day.is_current_month %}muted{% endif %} {% if day.entries %}has-events{% endif %}">
         <header>
           <div class="calendar-day-label">
-            <span>{{ day.day_number }}</span>
+            <time datetime="{{ day.iso_date }}">{{ day.day_number }}</time>
             {% if day.entries %}
             <small>{{ day.entries|length }} item{% if day.entries|length != 1 %}s{% endif %}</small>
             {% endif %}
@@ -67,9 +68,9 @@
         </header>
         <div class="calendar-items" data-calendar-items>
           {% for entry in day.entries %}
-          <a class="calendar-card" href="/jobs/{{ entry.job_id }}">
+          <a class="calendar-card" href="/jobs/{{ entry.job_id }}" aria-label="Abrir job {{ entry.title }} agendado para {{ entry.local_time }}">
             <strong>{{ entry.title }}</strong>
-            <span>{{ entry.local_time }} · {{ entry.youtube_visibility }}</span>
+            <span>{{ entry.local_time }} · {{ ui.youtube_visibility_label(entry.youtube_visibility) }}</span>
             <small>{{ schedule_status_label(entry.schedule_status) }} · {{ job_status_label(entry.job_status) }}</small>
             <div class="calendar-badges">
               <span class="badge {{ entry.schedule_status }}">{{ schedule_status_label(entry.schedule_status) }}</span>
@@ -84,21 +85,15 @@
 
   <dialog id="calendar-schedule-modal" class="schedule-picker-modal calendar-schedule-modal" aria-labelledby="calendar-schedule-title">
     <div class="schedule-picker-card calendar-schedule-card">
-      <div class="schedule-picker-head">
-        <div>
-          <p class="eyebrow">Novo horário</p>
-          <h4 id="calendar-schedule-title">Agendar no calendário</h4>
-        </div>
-        <button type="button" class="ghost icon-button" data-close-calendar-schedule aria-label="Fechar modal">X</button>
-      </div>
+      {{ ui.dialog_head("Novo horário", "Agendar no calendário", "calendar-schedule-title", "calendar-schedule", "Fechar agendamento") }}
 
       <div class="calendar-schedule-layout">
         <aside class="calendar-schedule-day">
           <span>Dia escolhido</span>
           <strong data-calendar-selected-label>{{ month_label }}</strong>
-          <small>Confira os horários já ocupados antes de salvar.</small>
+          <small>Confira os horários ocupados antes de salvar.</small>
           <div class="calendar-schedule-existing" data-calendar-selected-items>
-            <p>Nenhuma publicação agendada neste dia.</p>
+            <p>Nenhum vídeo agendado neste dia.</p>
           </div>
         </aside>
 
@@ -106,35 +101,38 @@
           <input type="hidden" name="scheduled_date" data-calendar-selected-date>
           <input type="hidden" name="month" value="{{ month_value }}">
 
-          <label for="calendar_modal_job">Job aprovado</label>
+          <label for="calendar_modal_job">Vídeo aprovado</label>
           <select id="calendar_modal_job" name="job_id" required {% if not ready_to_schedule %}disabled{% endif %}>
             {% if ready_to_schedule %}
               {% for ready_job in ready_to_schedule %}
               <option value="{{ ready_job.job_id }}">{{ ready_job.title }}</option>
               {% endfor %}
             {% else %}
-            <option value="">Nenhum job aprovado livre</option>
+            <option value="">Nenhum vídeo aprovado disponível</option>
             {% endif %}
           </select>
 
-          <label>Atalhos de horário</label>
-          <div class="schedule-time-chips calendar-time-chips" data-calendar-time-chips></div>
+          <fieldset class="time-chip-group">
+            <legend>Atalhos de horário</legend>
+            <div class="schedule-time-chips calendar-time-chips" data-calendar-time-chips></div>
+          </fieldset>
 
           <label for="calendar_modal_time">Hora</label>
-          <input id="calendar_modal_time" name="scheduled_time" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" value="{{ default_schedule_time }}" required data-calendar-time>
+          <input id="calendar_modal_time" name="scheduled_time" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" value="{{ default_schedule_time }}" required data-calendar-time aria-describedby="calendar_modal_time_help">
+          <p id="calendar_modal_time_help" class="field-help">Formato de 24 horas, por exemplo 15:00.</p>
 
-          <label for="calendar_modal_timezone">Timezone</label>
+          <label for="calendar_modal_timezone">Fuso horário</label>
           <input id="calendar_modal_timezone" name="timezone" value="{{ default_schedule_timezone }}" list="calendar_timezones" required>
 
           <label for="calendar_modal_visibility">Visibilidade</label>
           <select id="calendar_modal_visibility" name="youtube_visibility">
             {% for visibility in ["private", "unlisted", "public"] %}
-            <option value="{{ visibility }}" {% if visibility == default_youtube_visibility %}selected{% endif %}>{{ visibility }}</option>
+            <option value="{{ visibility }}" {% if visibility == default_youtube_visibility %}selected{% endif %}>{{ ui.youtube_visibility_label(visibility) }}</option>
             {% endfor %}
           </select>
 
           <div class="calendar-schedule-actions">
-            <button type="submit" {% if not ready_to_schedule %}disabled{% endif %}>Agendar neste dia</button>
+            <button type="submit" {% if not ready_to_schedule %}disabled{% endif %}>Agendar vídeo</button>
             <button type="button" class="ghost" data-close-calendar-schedule>Cancelar</button>
           </div>
         </form>
@@ -162,6 +160,8 @@
         button.type = "button";
         button.textContent = time;
         button.className = timeInput.value === time ? "selected" : "";
+        button.setAttribute("aria-label", `Selecionar horário ${time}`);
+        button.setAttribute("aria-pressed", timeInput.value === time ? "true" : "false");
         button.addEventListener("click", () => {
           timeInput.value = time;
           renderTimeChips();
@@ -170,8 +170,12 @@
       });
     };
 
-    document.querySelectorAll("[data-open-calendar-schedule]").forEach((button) => {
-      button.addEventListener("click", () => {
+    window.bindHubDialog({
+      dialog,
+      openSelector: "[data-open-calendar-schedule]",
+      closeSelector: "[data-close-calendar-schedule]",
+      initialFocusSelector: "#calendar_modal_job:not(:disabled), #calendar_modal_time",
+      beforeOpen: (button) => {
         selectedDateInput.value = button.dataset.calendarDate || "";
         selectedLabel.textContent = button.dataset.calendarLabel || selectedDateInput.value;
 
@@ -183,19 +187,15 @@
           });
         } else {
           const empty = document.createElement("p");
-          empty.textContent = "Nenhuma publicação agendada neste dia.";
+          empty.textContent = "Nenhum vídeo agendado neste dia.";
           selectedItems.append(empty);
         }
 
         renderTimeChips();
-        dialog.showModal();
-      });
+      },
     });
 
     timeInput?.addEventListener("input", renderTimeChips);
-    dialog.querySelectorAll("[data-close-calendar-schedule]").forEach((button) => {
-      button.addEventListener("click", () => dialog.close());
-    });
   })();
 </script>
 {% endblock %}

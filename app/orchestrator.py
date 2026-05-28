@@ -31,7 +31,22 @@ from app.config import get_settings
 from app.db import SessionLocal, session_scope
 from app.editorial.retention import attach_retention_metadata, enrich_plan_for_script_generation
 from app.editorial.repetition import build_channel_repetition_report
+from app.job_origin import (
+    CREATION_VIA_API,
+    CREATION_VIA_RECREATION,
+    JOB_ORIGIN_MANUAL_THEME,
+    JOB_ORIGIN_UNKNOWN,
+    build_job_origin_artifact,
+    creation_via_display,
+    infer_job_origin_from_notes,
+    job_origin_display,
+    normalize_creation_via,
+    normalize_job_origin,
+    resolve_creation_via,
+    resolve_job_origin,
+)
 from app.models import (
+    AutomationAttempt,
     BackgroundMusicAsset,
     ChannelPublication,
     ErrorLog,
@@ -342,6 +357,14 @@ class JobOrchestrator:
 
     def create_job(self, payload: dict[str, Any], retry_of_job_id: str | None = None) -> str:
         payload = TopicRequestCreate.model_validate(payload).model_dump()
+        requested_job_origin = payload.pop("job_origin", None)
+        requested_creation_via = payload.pop("creation_via", None)
+        job_origin = normalize_job_origin(requested_job_origin) if requested_job_origin else infer_job_origin_from_notes(payload.get("notes"))
+        if job_origin == JOB_ORIGIN_UNKNOWN and payload.get("seed_theme"):
+            job_origin = JOB_ORIGIN_MANUAL_THEME
+        creation_via = normalize_creation_via(
+            requested_creation_via or (CREATION_VIA_RECREATION if retry_of_job_id else CREATION_VIA_API)
+        )
         now = utcnow()
         job_id = new_id()
         topic_request_id = new_id()
@@ -371,13 +394,32 @@ class JobOrchestrator:
                 target_duration_sec=payload["target_duration_sec"],
                 topic_request_id=topic_request_id,
                 retry_of_job_id=retry_of_job_id,
+                job_origin=job_origin,
+                creation_via=creation_via,
                 artifact_index={},
             )
             topic_request = TopicRequest(**request_data)
             session.add(job)
             session.add(topic_request)
-            self._append_event(job_id, "job.created", "succeeded", {"seed_theme": payload["seed_theme"]})
+            job.artifact_index = {"job_origin": "job_origin.json"}
+            self._append_event(
+                job_id,
+                "job.created",
+                "succeeded",
+                {"seed_theme": payload["seed_theme"], "job_origin": job_origin, "creation_via": creation_via},
+            )
             self.storage.persist_json(job_id, "request.json", self._serialize_for_json(request_data))
+            self.storage.persist_json(
+                job_id,
+                "job_origin.json",
+                build_job_origin_artifact(
+                    job_id=job_id,
+                    job_origin=job_origin,
+                    creation_via=creation_via,
+                    inferred=False,
+                    created_at=now,
+                ),
+            )
         return job_id
 
     def process_job(self, job_id: str) -> str:
@@ -445,6 +487,15 @@ class JobOrchestrator:
         background_music = session.scalar(select(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job_id))
         render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job_id))
         publication_schedule = session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job_id))
+        automation_attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.job_id == job_id).order_by(AutomationAttempt.created_at.desc()))
+        automation_source = automation_attempt.source if automation_attempt else None
+        resolved_origin = resolve_job_origin(job.job_origin, topic_request.notes if topic_request else None, automation_source=automation_source)
+        resolved_creation_via = resolve_creation_via(
+            job.creation_via,
+            retry_of_job_id=job.retry_of_job_id,
+            notes=topic_request.notes if topic_request else None,
+            automation_source=automation_source,
+        )
         assets = session.scalars(select(SceneAsset).where(SceneAsset.job_id == job_id).order_by(SceneAsset.scene_id, SceneAsset.provider)).all()
         fallbacks = session.scalars(select(FallbackEvent).where(FallbackEvent.job_id == job_id).order_by(FallbackEvent.created_at)).all()
         errors = session.scalars(select(ErrorLog).where(ErrorLog.job_id == job_id).order_by(ErrorLog.created_at)).all()
@@ -479,6 +530,9 @@ class JobOrchestrator:
             "background_music": background_music,
             "render": render,
             "publication_schedule": publication_schedule,
+            "automation_attempt": automation_attempt,
+            "job_origin": job_origin_display(resolved_origin),
+            "creation_via": creation_via_display(resolved_creation_via),
             "fallbacks": fallbacks,
             "errors": errors,
             "reviews": reviews,
@@ -630,6 +684,9 @@ class JobOrchestrator:
 
     def record_performance_metrics(self, job_id: str, payload: dict[str, Any]) -> None:
         self.publication_ops.record_performance_metrics(job_id, payload)
+
+    def sync_youtube_analytics_snapshot(self, job_id: str, *, days: int = 28) -> dict[str, Any]:
+        return self.publication_ops.sync_youtube_analytics_snapshot(job_id, days=days)
 
     def _steps(self) -> list[StepDefinition]:
         return [

@@ -1,4 +1,11 @@
 {% extends "base.html" %}
+{% import "components.html" as ui %}
+{% set render = details.render %}
+{% block head_extra %}
+{% if render and render.poster_uri %}
+    <link rel="preload" as="image" href="{{ artifact_url(render.poster_uri) }}" fetchpriority="high">
+{% endif %}
+{% endblock %}
 {% block content %}
 {% set job = details.job %}
 {% set request_data = details.topic_request %}
@@ -8,7 +15,6 @@
 {% set narration = details.narration %}
 {% set subtitles = details.subtitles %}
 {% set background_music = details.background_music %}
-{% set render = details.render %}
 {% set monetization = details.monetization_report or {} %}
 {% set publish_package = details.publish_package or {} %}
 {% set review_checklist = monetization.human_review_checklist or publish_package.human_review_checklist or {} %}
@@ -26,7 +32,10 @@
 {% set schedule_status = publication_schedule_display.status if publication_schedule_display else None %}
 {% set is_approved = job.status in ["approved_for_publish", "published"] %}
 {% set schedule_ready = publication_schedule_display and publication_schedule_display.status == "scheduled" %}
-<section class="detail-grid minimalist-detail" {% if job.status in ["queued", "running"] or (publication_schedule_display and publication_schedule_display.status == "publishing") %}hx-get="/jobs/{{ job.job_id }}" hx-trigger="every 2s" hx-select=".detail-grid" hx-swap="outerHTML"{% endif %}>
+<section class="detail-grid minimalist-detail" {% if job.status in ["queued", "running"] or (publication_schedule_display and publication_schedule_display.status == "publishing") %}hx-get="/jobs/{{ job.job_id }}" hx-trigger="every 4s" hx-select=".detail-grid" hx-swap="outerHTML"{% endif %}>
+  <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+    Job {{ job.job_id[:8] }} atualizado. Status {{ job_status_label(job.status) }}. Progresso {{ progress.percent }}%, {{ progress.current_label }}.
+  </p>
   <div class="main-column">
     {% if review_error %}
     <section class="panel status-banner error-banner">
@@ -80,6 +89,14 @@
           <strong>Progresso</strong>
           <span>{{ progress.percent }}% · {{ progress.current_label }}</span>
         </div>
+        <div class="focus-pill">
+          <strong>Origem</strong>
+          <span title="{{ details.job_origin.description }}">{{ details.job_origin.label }}</span>
+        </div>
+        <div class="focus-pill">
+          <strong>Via</strong>
+          <span title="{{ details.creation_via.description }}">{{ details.creation_via.label }}</span>
+        </div>
         {% if publication_schedule_display %}
         <div class="focus-pill">
           <strong>Agenda</strong>
@@ -104,7 +121,14 @@
         </div>
         <strong>{{ progress.percent }}%</strong>
       </div>
-      <div class="job-progress-bar" aria-label="{{ progress.percent }}% concluído">
+      <div
+        class="job-progress-bar"
+        role="progressbar"
+        aria-label="Progresso do job: {{ progress.current_label }}"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="{{ progress.percent }}"
+      >
         <span class="job-progress-fill {{ progress.state }}" style="width: {{ progress.percent }}%"></span>
       </div>
       <div class="job-progress-steps" aria-label="Etapas do pipeline">
@@ -132,7 +156,7 @@
     <section class="panel featured-render minimal-featured-render">
       <div class="featured-player-shell">
         {% if render %}
-        <video class="featured-player" controls preload="metadata" poster="{{ artifact_url(render.poster_uri) }}" src="{{ artifact_url(render.video_uri) }}"></video>
+        <video class="featured-player" controls preload="metadata" playsinline poster="{{ artifact_url(render.poster_uri) }}" src="{{ artifact_url(render.video_uri) }}"></video>
         {% elif artifacts_cleaned %}
         <div class="empty-state-card">
           <strong>Os arquivos de mídia deste job já foram removidos.</strong>
@@ -147,12 +171,12 @@
       </div>
       <div class="featured-copy">
         <p class="eyebrow">Revisão</p>
-        <h3>Assista e decida</h3>
+        <h3>Revise o vídeo final</h3>
         <div class="compact-checklist">
-          <span>1. Veja o arquivo final</span>
-          <span>2. Ajuste o título se quiser</span>
-          <span>3. Aprove</span>
-          <span>4. Escolha data e hora</span>
+          <span>1. Assista ao vídeo renderizado</span>
+          <span>2. Ajuste título e descrição, se precisar</span>
+          <span>3. Aprove ou rejeite o job</span>
+          <span>4. Agende a publicação</span>
         </div>
         {% if artifacts_cleaned %}
         <p class="publication-note">Os artefatos pesados já expiraram. Os metadados e o histórico do job continuam disponíveis abaixo.</p>
@@ -164,15 +188,15 @@
           <span>{{ (render.duration_ms / 1000)|round(1) }} s</span>
         </div>
         <div class="featured-actions">
-          <a class="button-link" href="{{ artifact_url(render.video_uri) }}" target="_blank" rel="noopener">Abrir arquivo</a>
-          <a class="button-link ghost-link" href="{{ artifact_url(render.poster_uri) }}" target="_blank" rel="noopener">Poster</a>
+          <a class="button-link" href="{{ artifact_url(render.video_uri) }}" target="_blank" rel="noopener">Abrir vídeo</a>
+          <a class="button-link ghost-link" href="{{ artifact_url(render.poster_uri) }}" target="_blank" rel="noopener">Abrir poster</a>
         </div>
         {% endif %}
       </div>
     </section>
 
     <details class="panel collapse-panel" {% if monetization.get("hard_blockers") %}open{% endif %}>
-      <summary>
+      <summary aria-label="Abrir qualidade e monetização">
         <span>Qualidade e monetização</span>
         <small>
           {% if monetization.hard_blockers %}
@@ -189,10 +213,10 @@
       <div class="collapse-body">
         {% if monetization %}
         <div class="stats-grid compact">
-          <div><strong>Status</strong><span>{{ monetization.final_status }}</span></div>
+          <div><strong>Status da avaliação</strong><span>{{ monetization.final_status }}</span></div>
           <div><strong>Bloqueios</strong><span>{{ monetization.hard_blockers|length }}</span></div>
           <div><strong>Confirmações</strong><span>{{ monetization.manual_required|length }}</span></div>
-          <div><strong>Pronto</strong><span>{{ monetization.passed }}</span></div>
+          <div><strong>Pode aprovar</strong><span>{{ monetization.passed }}</span></div>
         </div>
         {% if monetization.hard_blockers %}
         <pre>{{ monetization.hard_blockers }}</pre>
@@ -217,15 +241,15 @@
         </div>
         {% endif %}
         {% else %}
-        <p>Aguardando gate de monetização.</p>
+        <p>Aguardando avaliação de monetização.</p>
         {% endif %}
       </div>
     </details>
 
     <details class="panel collapse-panel">
-      <summary>
+      <summary aria-label="Abrir roteiro e cenas">
         <span>Roteiro e cenas</span>
-        <small>abra só se quiser revisar conteúdo</small>
+        <small>roteiro, hook, narração e prompts visuais</small>
       </summary>
       <div class="collapse-body">
         {% if topic_plan %}
@@ -257,9 +281,9 @@
     </details>
 
     <details class="panel collapse-panel">
-      <summary>
+      <summary aria-label="Abrir mídia e áudio">
         <span>Mídia e áudio</span>
-        <small>assets, narração, música e legendas</small>
+        <small>imagens, narração, trilha e legendas</small>
       </summary>
       <div class="collapse-body">
         {% if artifacts_cleaned %}
@@ -271,40 +295,40 @@
         <div class="asset-grid">
           {% for asset in details.assets %}
           <article class="asset-card {% if asset.selected %}selected{% endif %}">
-            <img src="{{ artifact_url(asset.uri) }}" alt="asset {{ asset.scene_id }}">
+            <img src="{{ artifact_url(asset.uri) }}" alt="Imagem gerada para {{ asset.scene_id }}" loading="lazy" decoding="async" fetchpriority="low" width="1080" height="1920">
             <div>
               <p><strong>{{ asset.scene_id }}</strong> · {{ asset.provider }}</p>
-              <p>semantic={{ asset.scores.semantic_match }} total={{ asset.scores.total_score }}</p>
-              {% if asset.fallback_used %}<span class="badge fallback">fallback</span>{% endif %}
+              <p>Similaridade={{ asset.scores.semantic_match }} · score total={{ asset.scores.total_score }}</p>
+              {% if asset.fallback_used %}<span class="badge fallback">imagem de fallback</span>{% endif %}
               {% if asset.attribution %}<p>{{ asset.attribution }}</p>{% endif %}
             </div>
           </article>
           {% else %}
-          <p>Nenhum asset ainda.</p>
+          <p>Nenhuma imagem gerada ainda.</p>
           {% endfor %}
         </div>
         {% if narration %}
         <div class="media-block">
           <strong>Narração</strong>
-          <audio controls src="{{ artifact_url(narration.audio_uri) }}"></audio>
+          <audio controls preload="metadata" src="{{ artifact_url(narration.audio_uri) }}"></audio>
         </div>
         {% endif %}
         {% if background_music %}
         <div class="media-block">
           <strong>Trilha</strong>
-          <audio controls src="{{ artifact_url(background_music.audio_uri) }}"></audio>
+          <audio controls preload="metadata" src="{{ artifact_url(background_music.audio_uri) }}"></audio>
         </div>
         {% if background_music.mixed_audio_uri %}
         <div class="media-block">
           <strong>Mix final</strong>
-          <audio controls src="{{ artifact_url(background_music.mixed_audio_uri) }}"></audio>
+          <audio controls preload="metadata" src="{{ artifact_url(background_music.mixed_audio_uri) }}"></audio>
         </div>
         {% endif %}
         {% endif %}
         {% if subtitles %}
         <div class="media-block">
           <strong>Legendas</strong>
-          <a href="{{ artifact_url(subtitles.ass_uri) }}">Baixar ASS</a>
+          <a href="{{ artifact_url(subtitles.ass_uri) }}" aria-label="Baixar arquivo de legendas ASS">Baixar ASS</a>
           <pre>{{ subtitles.items }}</pre>
         </div>
         {% endif %}
@@ -313,9 +337,9 @@
     </details>
 
     <details class="panel collapse-panel">
-      <summary>
+      <summary aria-label="Abrir dados técnicos">
         <span>Dados técnicos</span>
-        <small>logs, repair, artefatos e métricas</small>
+        <small>logs, reparos automáticos, artefatos e métricas</small>
       </summary>
       <div class="collapse-body">
         {% if details.performance_metrics %}
@@ -323,7 +347,7 @@
         <pre>{{ details.performance_metrics }}</pre>
         {% endif %}
         {% if repair.topic_plan or repair.script or repair.background_music or repair.render %}
-        <h4>Self-healing</h4>
+        <h4>Reparos automáticos</h4>
         <pre>{{ repair }}</pre>
         {% endif %}
         {% if publish_result %}
@@ -350,33 +374,35 @@
       <div class="focus-step">
         <p class="eyebrow">Passo 1</p>
         <h3>Aprovar job</h3>
-        <p class="publication-note">Se o arquivo final estiver bom, aprove aqui. A agenda libera em seguida.</p>
+        <p class="publication-note">Aprove somente se o vídeo final estiver publicável. A agenda aparece no passo seguinte.</p>
         <form method="post" action="/jobs/{{ job.job_id }}/review" class="review-form">
           <input type="hidden" name="reviewer_identity" value="tailscale:local-reviewer">
           {% if checklist_items %}
           <div class="review-checklist compact-checklist-form">
             {% for item in checklist_items %}
               {% if item.required and item.auto_completed %}
-              <label><input type="checkbox" checked disabled> {{ item.label }} <small>automático</small></label>
+              <label for="review_check_{{ loop.index }}"><input id="review_check_{{ loop.index }}" type="checkbox" checked disabled> {{ item.label }} <small>automático</small></label>
               {% elif item.required and item.completed %}
-              <label><input type="checkbox" checked disabled> {{ item.label }} <small>já confirmado</small></label>
+              <label for="review_check_{{ loop.index }}"><input id="review_check_{{ loop.index }}" type="checkbox" checked disabled> {{ item.label }} <small>já confirmado</small></label>
               {% elif item.required %}
-              <label><input type="checkbox" name="confirmation_codes" value="{{ item.confirmation_code }}"> {{ item.label }}</label>
+              <label for="review_check_{{ loop.index }}"><input id="review_check_{{ loop.index }}" type="checkbox" name="confirmation_codes" value="{{ item.confirmation_code }}"> {{ item.label }}</label>
               {% endif %}
             {% endfor %}
           </div>
           {% endif %}
           <details class="inline-disclosure">
-            <summary>Motivos para rejeitar ou refazer</summary>
-            <div class="review-checklist">
-              <label><input type="checkbox" name="reason_codes" value="weak_hook"> Hook fraco</label>
-              <label><input type="checkbox" name="reason_codes" value="visual_incoherence"> Visual incoerente</label>
-              <label><input type="checkbox" name="reason_codes" value="unsupported_claim"> Claim sem suporte</label>
-              <label><input type="checkbox" name="reason_codes" value="rights_missing"> Direitos pendentes</label>
-              <label><input type="checkbox" name="reason_codes" value="metadata_weak"> Metadados fracos</label>
-            </div>
+            <summary aria-label="Abrir motivos para rejeitar ou refazer">Motivos para rejeitar ou refazer</summary>
+            <fieldset class="review-checklist review-checklist-fieldset">
+              <legend class="sr-only">Motivos para rejeitar ou refazer</legend>
+              <label for="reason_weak_hook"><input id="reason_weak_hook" type="checkbox" name="reason_codes" value="weak_hook"> Hook fraco</label>
+              <label for="reason_visual_incoherence"><input id="reason_visual_incoherence" type="checkbox" name="reason_codes" value="visual_incoherence"> Visual incoerente</label>
+              <label for="reason_unsupported_claim"><input id="reason_unsupported_claim" type="checkbox" name="reason_codes" value="unsupported_claim"> Afirmação sem fonte</label>
+              <label for="reason_rights_missing"><input id="reason_rights_missing" type="checkbox" name="reason_codes" value="rights_missing"> Direitos pendentes</label>
+              <label for="reason_metadata_weak"><input id="reason_metadata_weak" type="checkbox" name="reason_codes" value="metadata_weak"> Metadados fracos</label>
+            </fieldset>
             <label for="notes">Observações</label>
-            <textarea id="notes" name="notes" rows="3"></textarea>
+            <textarea id="notes" name="notes" rows="3" aria-describedby="review_notes_help"></textarea>
+            <p id="review_notes_help" class="field-help">Use este campo para explicar a rejeição ou orientar o próximo reparo.</p>
           </details>
           <div class="button-row action-stack">
             {% if can_approve %}
@@ -390,7 +416,7 @@
             {% endif %}
           </div>
           {% if not can_approve and not can_reject and not can_retry %}
-          <p>Nenhuma ação de review disponível para o status atual.</p>
+          <p>Nenhuma ação de revisão disponível para o status atual.</p>
           {% endif %}
         </form>
       </div>
@@ -401,9 +427,9 @@
         {% if is_approved %}
         <p class="publication-note">
           {% if youtube_integration.publish_mode == "api" %}
-          Ao salvar, o arquivo final sobe agora como privado e fica programado no próprio YouTube para publicar no horário escolhido.
+          Ao salvar, o vídeo sobe agora como privado e fica programado no YouTube para o horário escolhido.
           {% else %}
-          Escolha a data, a hora e a visibilidade. O worker publica quando o horário chegar.
+          Escolha data, hora e visibilidade. O worker publica quando o horário chegar.
           {% endif %}
         </p>
         {% if schedule_ready %}
@@ -412,7 +438,7 @@
           <p>{{ publication_schedule_display.local_date }} às {{ publication_schedule_display.local_time }} · {{ publication_schedule_display.timezone }}</p>
           <small>
             {% if youtube_integration.publish_mode == "api" and publication_schedule_display.youtube_url %}
-            O arquivo final já está no YouTube e programado no canal. Use o link abaixo para conferir no Studio ou na watch page.
+            O vídeo já está no YouTube e programado no canal. Use o link abaixo para conferir no Studio ou na página do vídeo.
             {% else %}
             Não precisa clicar em mais nada. O worker publica automaticamente no horário salvo.
             {% endif %}
@@ -424,7 +450,7 @@
         {% endif %}
         {% if job.status != "published" %}
         <form method="post" action="/jobs/{{ job.job_id }}/schedule" class="review-form schedule-form" data-schedule-form>
-          <label for="scheduled_for_local">Data e hora</label>
+          <span id="schedule_picker_trigger_label" class="form-label">Data e hora</span>
           <input id="scheduled_for_local" name="scheduled_for_local" type="hidden" value="{{ publication_schedule_display.scheduled_for_local_form if publication_schedule_display else '' }}">
           <button
             type="button"
@@ -432,16 +458,18 @@
             data-open-schedule-picker
             aria-haspopup="dialog"
             aria-controls="schedule-picker-modal"
+            aria-labelledby="schedule_picker_trigger_label schedule_picker_value"
+            aria-describedby="schedule_picker_helper schedule_picker_error"
           >
             <span class="schedule-picker-trigger-copy">
-              <strong data-schedule-picker-label>
+              <strong id="schedule_picker_value" data-schedule-picker-label>
                 {% if publication_schedule_display %}
                 {{ publication_schedule_display.local_date }} às {{ publication_schedule_display.local_time }}
                 {% else %}
                 Escolher data e hora
                 {% endif %}
               </strong>
-              <small data-schedule-picker-helper>
+              <small id="schedule_picker_helper" data-schedule-picker-helper>
                 {% if publication_schedule_display %}
                 Clique para reagendar com calendário e atalhos de horário.
                 {% else %}
@@ -450,16 +478,10 @@
               </small>
             </span>
           </button>
-          <p class="inline-hint schedule-picker-error" data-schedule-picker-error hidden>Escolha data e hora antes de ativar a publicação.</p>
+          <p id="schedule_picker_error" class="inline-hint schedule-picker-error" data-schedule-picker-error role="alert" hidden>Escolha data e hora antes de ativar a publicação.</p>
           <dialog id="schedule-picker-modal" class="schedule-picker-modal" aria-labelledby="schedule-picker-title">
             <div class="schedule-picker-card">
-              <div class="schedule-picker-head">
-                <div>
-                  <p class="eyebrow">Horário de publicação</p>
-                  <h4 id="schedule-picker-title">Escolha quando publicar</h4>
-                </div>
-                <button type="button" class="ghost icon-button" data-close-schedule-picker aria-label="Fechar seletor">X</button>
-              </div>
+              {{ ui.dialog_head("Horário de publicação", "Escolha quando publicar", "schedule-picker-title", "schedule-picker", "Fechar seletor") }}
               <div class="schedule-picker-monthbar">
                 <button type="button" class="ghost" data-schedule-prev-month>Mês anterior</button>
                 <strong data-schedule-current-month></strong>
@@ -478,7 +500,8 @@
               <div class="schedule-picker-time">
                 <label for="schedule_picker_time">Hora</label>
                 <div class="schedule-time-chips" data-schedule-time-chips></div>
-                <input id="schedule_picker_time" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" placeholder="15:00" data-schedule-time>
+                <input id="schedule_picker_time" type="text" inputmode="numeric" pattern="[0-9]{2}:[0-9]{2}" placeholder="15:00" data-schedule-time aria-describedby="schedule_picker_time_help">
+                <p id="schedule_picker_time_help" class="field-help">Formato de 24 horas, por exemplo 15:00.</p>
               </div>
               <div class="schedule-picker-preview">
                 <span>Selecionado</span>
@@ -490,7 +513,7 @@
               </div>
             </div>
           </dialog>
-          <label for="publication_timezone">Timezone</label>
+          <label for="publication_timezone">Fuso horário</label>
           <input id="publication_timezone" name="timezone" value="{{ publication_schedule_display.timezone if publication_schedule_display else 'UTC' }}" data-has-existing="{{ 'true' if publication_schedule_display else 'false' }}" list="timezones" placeholder="UTC ou America/Sao_Paulo">
           <datalist id="timezones">
             {% for timezone_name in common_schedule_timezones %}
@@ -503,11 +526,11 @@
             <option
               value="{{ visibility }}"
               {% if publication_schedule_display and publication_schedule_display.youtube_visibility == visibility %}selected{% elif not publication_schedule_display and youtube_integration.publish_mode == "api" and visibility == "public" %}selected{% endif %}
-            >{{ visibility }}</option>
+            >{{ ui.youtube_visibility_label(visibility) }}</option>
             {% endfor %}
           </select>
           {% if youtube_integration.publish_mode == "api" %}
-          <p class="inline-hint">Para ficar programado no próprio YouTube, use visibilidade <strong>public</strong>.</p>
+          <p class="inline-hint">Para programar no próprio YouTube, escolha visibilidade <strong>Público</strong>.</p>
           {% endif %}
           <div class="button-row action-stack">
             <button type="submit" name="action" value="schedule">{% if schedule_ready %}Reagendar publicação{% else %}Ativar publicação automática{% endif %}</button>
@@ -532,11 +555,12 @@
       </div>
 
       <details class="inline-disclosure" {% if publish_package %}open{% endif %}>
-        <summary>Metadados do upload</summary>
+        <summary aria-label="Abrir metadados do upload">Metadados do upload</summary>
         {% if publish_package %}
         <form method="post" action="/jobs/{{ job.job_id }}/publish-metadata" class="review-form">
           <label for="publish_title">Título</label>
-          <input id="publish_title" name="title" value="{{ publish_package.title or '' }}" maxlength="100">
+          <input id="publish_title" name="title" value="{{ publish_package.title or '' }}" maxlength="100" aria-describedby="publish_title_help">
+          <p id="publish_title_help" class="field-help">Limite do YouTube: 100 caracteres.</p>
           <label for="publish_description">Descrição</label>
           <textarea id="publish_description" name="description" rows="5">{{ publish_package.description or '' }}</textarea>
           <label for="publish_hashtags">Hashtags</label>
@@ -544,18 +568,18 @@
           <button type="submit" class="ghost">Salvar metadados</button>
         </form>
         {% else %}
-        <p>Nenhum metadado disponível ainda.</p>
+        <p>Os metadados de upload ainda não foram gerados.</p>
         {% endif %}
       </details>
 
       {% if job.status == "approved_for_publish" and not schedule_ready %}
       <details class="inline-disclosure">
-        <summary>Publicar imediatamente</summary>
-        <p class="publication-note">Use isso só quando você quer subir o vídeo agora, sem esperar a agenda.</p>
+        <summary aria-label="Abrir publicação imediata">Publicar imediatamente</summary>
+        <p class="publication-note">Use apenas quando quiser publicar agora e ignorar qualquer agenda futura.</p>
         <form method="post" action="/jobs/{{ job.job_id }}/publish" class="review-form" onsubmit="return confirm('Isso publica imediatamente e ignora qualquer agenda futura. Deseja continuar?');">
-          <label for="youtube_video_id">YouTube video id</label>
+          <label for="youtube_video_id">ID do vídeo no YouTube</label>
           <input id="youtube_video_id" name="youtube_video_id" placeholder="{% if youtube_integration.publish_mode == 'api' %}opcional no modo API{% else %}obrigatório se URL não for informada{% endif %}">
-          <label for="youtube_url">YouTube URL</label>
+          <label for="youtube_url">URL do YouTube</label>
           <input id="youtube_url" name="youtube_url" placeholder="{% if youtube_integration.publish_mode == 'api' %}opcional no modo API{% else %}https://youtube.com/shorts/...{% endif %}">
           <button type="submit">{% if youtube_integration.publish_mode == "api" %}Publicar imediatamente e ignorar agenda{% else %}Marcar como publicado agora{% endif %}</button>
         </form>
@@ -563,13 +587,13 @@
       {% endif %}
 
       <details class="inline-disclosure">
-        <summary>Integração e métricas</summary>
+        <summary aria-label="Abrir integração e métricas">Integração e métricas</summary>
         <div class="stats-grid compact">
-          <div><strong>Modo</strong><span>{{ youtube_integration.publish_mode }}</span></div>
+          <div><strong>Modo de publicação</strong><span>{{ youtube_integration.publish_mode }}</span></div>
           <div><strong>Canal</strong><span>{{ youtube_integration.channel_id or "-" }}</span></div>
           {% if publication_schedule_display %}
           <div><strong>Status da agenda</strong><span>{{ schedule_status_label(publication_schedule_display.status) }}</span></div>
-          <div><strong>Visibilidade</strong><span>{{ publication_schedule_display.youtube_visibility }}</span></div>
+          <div><strong>Visibilidade</strong><span>{{ ui.youtube_visibility_label(publication_schedule_display.youtube_visibility) }}</span></div>
           {% endif %}
         </div>
         {% if youtube_integration.missing_items %}
@@ -589,7 +613,7 @@
           <input id="monetization_status" name="monetization_status" placeholder="monetized, limited, ineligible">
           <label for="performance_notes">Notas</label>
           <textarea id="performance_notes" name="notes" rows="3"></textarea>
-          <button type="submit" class="ghost">Registrar métricas</button>
+          <button type="submit" class="ghost" aria-label="Registrar métricas de performance">Registrar métricas</button>
         </form>
       </details>
     </section>
@@ -611,10 +635,10 @@
     const dialog = document.getElementById("schedule-picker-modal");
     if (!form || !input || !dialog) return;
 
-    const openButton = form.querySelector("[data-open-schedule-picker]");
     const label = form.querySelector("[data-schedule-picker-label]");
     const helper = form.querySelector("[data-schedule-picker-helper]");
     const error = form.querySelector("[data-schedule-picker-error]");
+    const trigger = form.querySelector("[data-open-schedule-picker]");
     const currentMonthLabel = dialog.querySelector("[data-schedule-current-month]");
     const daysEl = dialog.querySelector("[data-schedule-days]");
     const timeInput = dialog.querySelector("[data-schedule-time]");
@@ -647,6 +671,7 @@
       label.textContent = `${dateFormatter.format(date)} às ${parsedValue.time}`;
       helper.textContent = "Clique para reagendar com calendário e atalhos de horário.";
       if (error) error.hidden = true;
+      if (trigger) trigger.setAttribute("aria-invalid", "false");
     };
 
     const renderPreview = () => {
@@ -661,6 +686,8 @@
         button.type = "button";
         button.textContent = time;
         button.className = time === selectedTime ? "selected" : "";
+        button.setAttribute("aria-label", `Selecionar horário ${time}`);
+        button.setAttribute("aria-pressed", time === selectedTime ? "true" : "false");
         button.addEventListener("click", () => {
           selectedTime = time;
           timeInput.value = time;
@@ -688,6 +715,8 @@
         button.type = "button";
         button.textContent = date.getDate();
         button.dataset.date = dateKey;
+        button.setAttribute("aria-label", `Selecionar ${dateFormatter.format(date)}`);
+        button.setAttribute("aria-pressed", dateKey === selectedDateKey ? "true" : "false");
         if (date.getMonth() !== month) button.classList.add("muted");
         if (dateKey === selectedDateKey) button.classList.add("selected");
         if (dateKey === toDateKey(today)) button.classList.add("today");
@@ -701,7 +730,7 @@
       renderPreview();
     };
 
-    const openPicker = () => {
+    const preparePicker = () => {
       const parsedValue = parseLocalValue(input.value);
       if (parsedValue) {
         selectedDateKey = parsedValue.dateKey;
@@ -710,12 +739,19 @@
       }
       renderCalendar();
       renderTimes();
+    };
+
+    const openPicker = () => {
+      preparePicker();
       dialog.showModal();
     };
 
-    openButton?.addEventListener("click", openPicker);
-    dialog.querySelectorAll("[data-close-schedule-picker]").forEach((button) => {
-      button.addEventListener("click", () => dialog.close());
+    window.bindHubDialog({
+      dialog,
+      openSelector: "[data-open-schedule-picker]",
+      closeSelector: "[data-close-schedule-picker]",
+      initialFocusSelector: "[data-schedule-days] button.selected, [data-schedule-time]",
+      beforeOpen: preparePicker,
     });
     dialog.querySelector("[data-schedule-prev-month]")?.addEventListener("click", () => {
       visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1);
@@ -743,6 +779,7 @@
       if (input.value) return;
       event.preventDefault();
       if (error) error.hidden = false;
+      if (trigger) trigger.setAttribute("aria-invalid", "true");
       openPicker();
     });
     renderSummary();

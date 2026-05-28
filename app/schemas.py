@@ -14,11 +14,13 @@ class TopicRequestCreate(BaseModel):
     seed_theme: str = Field(min_length=3)
     niche_id: str = "curiosidades"
     language: str = "pt-BR"
-    target_duration_sec: int = 45
+    target_duration_sec: int = 50
     tone: str = "intrigante_direto"
     cta_style: Literal["none", "soft"] = "none"
     notes: str | None = None
     requested_angle: str | None = None
+    job_origin: Literal["ready_script_bank", "manual_ready_script", "automatic_topic", "manual_theme", "manual_title", "unknown"] | None = None
+    creation_via: Literal["hub", "daily_cycle", "cli", "api", "recreation", "unknown"] | None = None
 
     @field_validator("seed_theme")
     @classmethod

@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.compliance.review import build_human_review_checklist
 from app.db import session_scope
-from app.models import ChannelPublication, Job, PerformanceMetric, PublicationSchedule, ReviewRecord, Script, TopicPlan, TopicRequest
+from app.job_origin import CREATION_VIA_RECREATION, JOB_ORIGIN_UNKNOWN, infer_job_origin_from_notes, normalize_job_origin
+from app.models import ChannelPublication, Job, PerformanceMetric, PublicationSchedule, ReviewRecord, Script, TopicPlan, TopicRequest, YouTubeAnalyticsSnapshot
 from app.pipelines.common import FatalStepError, model_payload
 from app.schemas import PublicationSchedulePayload
 from app.tiktok_api import TikTokIntegrationError
@@ -48,6 +49,18 @@ def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _optional_float_value(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def _optional_int_value(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 class PublicationOperations:
@@ -934,6 +947,9 @@ class PublicationOperations:
             request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job_id))
             if not request:
                 raise KeyError("missing topic request")
+            retry_origin = normalize_job_origin(job.job_origin)
+            if retry_origin == JOB_ORIGIN_UNKNOWN:
+                retry_origin = infer_job_origin_from_notes(request.notes)
             clone_payload = {
                 "seed_theme": request.seed_theme,
                 "niche_id": request.niche_id,
@@ -943,6 +959,8 @@ class PublicationOperations:
                 "cta_style": request.cta_style or "none",
                 "notes": request.notes,
                 "requested_angle": request.requested_angle,
+                "job_origin": retry_origin,
+                "creation_via": CREATION_VIA_RECREATION,
             }
         new_job_id = self.owner.create_job(clone_payload, retry_of_job_id=job_id)
         self._append_event(
@@ -1452,3 +1470,83 @@ class PublicationOperations:
             quality_summary["performance"] = report["latest"] or {}
             job.quality_summary = quality_summary
         self._append_event(job_id, "youtube.performance_recorded", "succeeded", payload)
+
+    def sync_youtube_analytics_snapshot(self, job_id: str, *, days: int = 28) -> dict[str, Any]:
+        days = max(1, min(int(days), 90))
+        end_date = datetime.now(UTC).date()
+        start_date = end_date - timedelta(days=days - 1)
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            schedule = session.scalars(select(PublicationSchedule).where(PublicationSchedule.job_id == job_id)).first()
+            youtube_video_id = str(schedule.youtube_video_id or "").strip() if schedule else ""
+            if not youtube_video_id:
+                raise YouTubeIntegrationError("Job ainda não tem video_id do YouTube vinculado")
+        snapshot_payload = self.youtube.fetch_video_analytics_snapshot(video_id=youtube_video_id, start_date=start_date, end_date=end_date)
+        fetched_at = datetime.fromisoformat(str(snapshot_payload["fetched_at"]))
+        snapshot_id = new_id()
+        snapshot_record = {
+            "snapshot_id": snapshot_id,
+            "job_id": job_id,
+            "schema_version": self.settings.schema_version,
+            "created_at": utcnow(),
+            "fetched_at": fetched_at,
+            "youtube_video_id": youtube_video_id,
+            "start_date": snapshot_payload["start_date"],
+            "end_date": snapshot_payload["end_date"],
+            "summary_metrics": snapshot_payload.get("summary_metrics") or {},
+            "daily_rows": snapshot_payload.get("daily_rows") or [],
+            "raw_response": snapshot_payload.get("raw_response") or {},
+        }
+        snapshot_record["content_hash"] = stable_hash({key: value for key, value in snapshot_record.items() if key not in {"created_at", "fetched_at"}})
+        summary = dict(snapshot_record["summary_metrics"])
+        metric_payload = {
+            "source": "youtube_analytics_api",
+            "retention_percent": _optional_float_value(summary.get("averageViewPercentage")),
+            "likes": _optional_int_value(summary.get("likes")),
+            "shares": _optional_int_value(summary.get("shares")),
+            "comments": _optional_int_value(summary.get("comments")),
+            "notes": f"Snapshot YouTube Analytics {snapshot_record['start_date']} a {snapshot_record['end_date']}",
+        }
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            session.add(YouTubeAnalyticsSnapshot(**model_payload(YouTubeAnalyticsSnapshot, snapshot_record)))
+            metric_record = {
+                "metric_id": new_id(),
+                "job_id": job_id,
+                "schema_version": self.settings.schema_version,
+                "created_at": utcnow(),
+                **metric_payload,
+            }
+            metric_record["content_hash"] = stable_hash({key: value for key, value in metric_record.items() if key != "created_at"})
+            session.add(PerformanceMetric(**model_payload(PerformanceMetric, metric_record)))
+            session.flush()
+            metrics = session.scalars(
+                select(PerformanceMetric).where(PerformanceMetric.job_id == job_id).order_by(PerformanceMetric.created_at.desc())
+            ).all()
+            performance_report = self.monetization_pipeline.build_job_performance_report(metrics)
+            report_payload = {
+                "schema_version": self.settings.schema_version,
+                "snapshot": self._serialize_for_json(snapshot_payload),
+                "performance_report": self._serialize_for_json(performance_report),
+            }
+            self.storage.persist_json(job_id, "youtube_analytics_snapshot.json", report_payload)
+            artifact_index = dict(job.artifact_index or {})
+            artifact_index["youtube_analytics_snapshot"] = "youtube_analytics_snapshot.json"
+            artifact_index["performance_metrics"] = "performance_metrics.json"
+            job.artifact_index = artifact_index
+            self.storage.persist_json(job_id, "performance_metrics.json", self._serialize_for_json(performance_report))
+            quality_summary = dict(job.quality_summary or {})
+            quality_summary["youtube_analytics"] = {
+                "snapshot_id": snapshot_id,
+                "start_date": snapshot_record["start_date"],
+                "end_date": snapshot_record["end_date"],
+                "summary_metrics": summary,
+            }
+            quality_summary["performance"] = performance_report["latest"] or {}
+            job.quality_summary = quality_summary
+        self._append_event(job_id, "youtube.analytics_snapshot_synced", "succeeded", {"days": days, "youtube_video_id": youtube_video_id})
+        return self._serialize_for_json(snapshot_payload)

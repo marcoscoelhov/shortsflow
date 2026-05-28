@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,18 @@ from app.utils import ensure_dir, new_id
 
 YOUTUBE_WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
-YOUTUBE_OAUTH_SCOPES = [YOUTUBE_WRITE_SCOPE, YOUTUBE_UPLOAD_SCOPE]
+YOUTUBE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+YOUTUBE_OAUTH_SCOPES = [YOUTUBE_WRITE_SCOPE, YOUTUBE_UPLOAD_SCOPE, YOUTUBE_ANALYTICS_SCOPE]
+YOUTUBE_ANALYTICS_METRICS = [
+    "views",
+    "estimatedMinutesWatched",
+    "averageViewDuration",
+    "averageViewPercentage",
+    "likes",
+    "comments",
+    "shares",
+    "subscribersGained",
+]
 
 
 class YouTubeIntegrationError(RuntimeError):
@@ -29,6 +40,9 @@ class YouTubeConnectionStatus:
     token_expires_at: str | None
     granted_scopes: list[str]
     connected_at: str | None
+    publish_connected: bool = False
+    analytics_connected: bool = False
+    analytics_missing_items: list[str] | None = None
 
 
 def _iso_or_none(value: datetime | None) -> str | None:
@@ -54,6 +68,7 @@ class YouTubePublisher:
     def connection_status(self, redirect_uri: str | None = None) -> YouTubeConnectionStatus:
         payload = self._read_json(self.settings.youtube_token_path)
         missing_items: list[str] = []
+        analytics_missing_items: list[str] = []
         client_configured = bool(self.settings.youtube_client_id and self.settings.youtube_client_secret)
         dependencies_available = self._google_dependencies_available()
         if not self.settings.youtube_api_enabled:
@@ -66,17 +81,28 @@ class YouTubePublisher:
             missing_items.append("Dependências Google OAuth/API ainda não instaladas no ambiente")
         if not payload:
             missing_items.append("Canal ainda não conectado por OAuth")
+            analytics_missing_items.append("Canal ainda não conectado por OAuth")
         elif YOUTUBE_WRITE_SCOPE not in list(payload.get("scopes") or []):
             missing_items.append("OAuth atual não tem escopo para programar ou editar vídeos, reconecte o canal")
+        granted_scopes = list(payload.get("scopes") or []) if payload else []
+        if not dependencies_available:
+            analytics_missing_items.append("Dependências Google OAuth/API ainda não instaladas no ambiente")
+        if YOUTUBE_ANALYTICS_SCOPE not in granted_scopes:
+            analytics_missing_items.append("OAuth atual não tem escopo de Analytics, reconecte o canal")
+        publish_connected = bool(payload and YOUTUBE_WRITE_SCOPE in granted_scopes)
+        analytics_connected = bool(payload and YOUTUBE_ANALYTICS_SCOPE in granted_scopes and dependencies_available)
         return YouTubeConnectionStatus(
-            connected=bool(payload and YOUTUBE_WRITE_SCOPE in list(payload.get("scopes") or [])),
+            connected=publish_connected,
             client_configured=client_configured,
             dependencies_available=dependencies_available,
             missing_items=missing_items,
             redirect_uri=redirect_uri or self.settings.youtube_oauth_redirect_uri,
             token_expires_at=payload.get("expiry") if payload else None,
-            granted_scopes=list(payload.get("scopes") or []) if payload else [],
+            granted_scopes=granted_scopes,
             connected_at=payload.get("connected_at") if payload else None,
+            publish_connected=publish_connected,
+            analytics_connected=analytics_connected,
+            analytics_missing_items=analytics_missing_items,
         )
 
     def authorization_url(self, redirect_uri: str) -> str:
@@ -305,6 +331,55 @@ class YouTubePublisher:
         payload = self._serialize_response(items[0])
         payload["youtube_url"] = self.watch_url(normalized)
         return payload
+
+    def fetch_video_analytics_snapshot(self, *, video_id: str, start_date: date, end_date: date) -> dict[str, Any]:
+        normalized = str(video_id or "").strip()
+        if not normalized:
+            raise YouTubeIntegrationError("video_id do YouTube ausente")
+        credentials = self._load_credentials(refresh=True)
+        discovery, _ = self._google_upload_dependencies()
+        service = discovery.build("youtubeAnalytics", "v2", credentials=credentials, cache_discovery=False)
+        metrics = ",".join(YOUTUBE_ANALYTICS_METRICS)
+        summary_response = service.reports().query(
+            ids="channel==MINE",
+            startDate=start_date.isoformat(),
+            endDate=end_date.isoformat(),
+            metrics=metrics,
+            filters=f"video=={normalized}",
+        ).execute()
+        daily_response = service.reports().query(
+            ids="channel==MINE",
+            startDate=start_date.isoformat(),
+            endDate=end_date.isoformat(),
+            metrics=metrics,
+            dimensions="day",
+            filters=f"video=={normalized}",
+            sort="day",
+        ).execute()
+        return {
+            "video_id": normalized,
+            "youtube_url": self.watch_url(normalized),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "summary_metrics": self._analytics_metrics(summary_response),
+            "daily_rows": self._analytics_rows(daily_response),
+            "raw_response": {
+                "summary": self._serialize_response(summary_response),
+                "daily": self._serialize_response(daily_response),
+            },
+            "fetched_at": datetime.now(UTC).isoformat(),
+        }
+
+    def _analytics_metrics(self, response: dict[str, Any]) -> dict[str, Any]:
+        rows = list(response.get("rows") or [])
+        if not rows:
+            return {}
+        names = [str(header.get("name") or "") for header in response.get("columnHeaders") or []]
+        return dict(zip(names, rows[0], strict=False))
+
+    def _analytics_rows(self, response: dict[str, Any]) -> list[dict[str, Any]]:
+        names = [str(header.get("name") or "") for header in response.get("columnHeaders") or []]
+        return [dict(zip(names, row, strict=False)) for row in response.get("rows") or []]
 
     def _serialize_response(self, payload: dict[str, Any]) -> dict[str, Any]:
         return json.loads(json.dumps(payload))

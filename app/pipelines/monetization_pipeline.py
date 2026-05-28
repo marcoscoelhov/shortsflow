@@ -569,6 +569,7 @@ class MonetizationPipeline(BasePipeline):
         publish_package = self.build_publish_package(session, job)
         self.storage.persist_json(job.job_id, "publish_package.json", self._serialize_for_json(publish_package))
         artifact_index = {
+            "job_origin": "job_origin.json",
             "request": "request.json",
             "input_gate": "input_gate.json",
             "topic_plan": "topic_plan.json",

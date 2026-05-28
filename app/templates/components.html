@@ -1,0 +1,15 @@
+{% macro dialog_head(eyebrow, title, title_id, close_token, close_label, extra_class="") -%}
+<div class="schedule-picker-head{% if extra_class %} {{ extra_class }}{% endif %}">
+  <div>
+    <p class="eyebrow">{{ eyebrow }}</p>
+    <h4 id="{{ title_id }}">{{ title }}</h4>
+  </div>
+  <button type="button" class="ghost icon-button" data-close-{{ close_token }} aria-label="{{ close_label }}">
+    <span class="material-symbols-outlined" aria-hidden="true">close</span>
+  </button>
+</div>
+{%- endmacro %}
+
+{% macro youtube_visibility_label(value) -%}
+{% if value == "public" %}Público{% elif value == "private" %}Privado{% elif value == "unlisted" %}Não listado{% else %}{{ value }}{% endif %}
+{%- endmacro %}

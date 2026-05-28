@@ -10,7 +10,15 @@ from fastapi import HTTPException, Request
 from sqlalchemy import case, func, or_, select
 
 from app.db import SessionLocal
-from app.models import ChannelPublication, FallbackEvent, Job, PublicationSchedule, RenderOutput, SceneAsset, Script, TopicRequest
+from app.job_origin import (
+    creation_via_display,
+    creation_via_options,
+    job_origin_display,
+    job_origin_options,
+    resolve_creation_via,
+    resolve_job_origin,
+)
+from app.models import AutomationAttempt, ChannelPublication, FallbackEvent, Job, PublicationSchedule, RenderOutput, SceneAsset, Script, TopicPlan, TopicRequest, YouTubeAnalyticsSnapshot
 
 COMMON_SCHEDULE_TIMEZONES = [
     "UTC",
@@ -140,6 +148,29 @@ class HubContext:
     def _job_progress_snapshot(self, job: Job) -> dict[str, object]:
         return self.orchestrator.build_job_progress(job)
 
+    def _job_origin_display(
+        self,
+        job: Job,
+        topic_request: TopicRequest | None = None,
+        automation_source: str | None = None,
+    ) -> dict[str, str]:
+        return job_origin_display(resolve_job_origin(job.job_origin, topic_request.notes if topic_request else None, automation_source=automation_source))
+
+    def _creation_via_display(
+        self,
+        job: Job,
+        topic_request: TopicRequest | None = None,
+        automation_source: str | None = None,
+    ) -> dict[str, str]:
+        return creation_via_display(
+            resolve_creation_via(
+                job.creation_via,
+                retry_of_job_id=job.retry_of_job_id,
+                notes=topic_request.notes if topic_request else None,
+                automation_source=automation_source,
+            )
+        )
+
     def _job_action_guide(
         self,
         job: Job,
@@ -219,7 +250,17 @@ class HubContext:
     def _clamp_per_page(self, value: int | None) -> int:
         return max(1, min(100, int(value or HUB_JOBS_PER_PAGE)))
 
-    def _query_jobs(self, status: str | None, search: str | None, fallback: str | None, review: str | None, page: int = 1, per_page: int = HUB_JOBS_PER_PAGE):
+    def _query_jobs(
+        self,
+        status: str | None,
+        search: str | None,
+        fallback: str | None,
+        review: str | None,
+        origin: str | None,
+        via: str | None,
+        page: int = 1,
+        per_page: int = HUB_JOBS_PER_PAGE,
+    ):
         session = SessionLocal()
         try:
             normalized_page = self._clamp_page(page)
@@ -234,20 +275,28 @@ class HubContext:
                 .group_by(SceneAsset.job_id)
                 .subquery()
             )
+            automation_attempt = (
+                select(AutomationAttempt.job_id, func.max(AutomationAttempt.source).label("automation_source"))
+                .group_by(AutomationAttempt.job_id)
+                .subquery()
+            )
             stmt = (
                 select(
                     Job,
                     TopicRequest.seed_theme,
+                    TopicRequest.notes,
                     RenderOutput.duration_ms,
                     func.coalesce(fallback_count.c.fallback_count, 0),
                     func.coalesce(final_asset.c.asset_count, 0),
                     PublicationSchedule,
+                    automation_attempt.c.automation_source,
                 )
                 .join(TopicRequest, TopicRequest.job_id == Job.job_id)
                 .join(RenderOutput, RenderOutput.job_id == Job.job_id, isouter=True)
                 .join(fallback_count, fallback_count.c.job_id == Job.job_id, isouter=True)
                 .join(final_asset, final_asset.c.job_id == Job.job_id, isouter=True)
                 .join(PublicationSchedule, PublicationSchedule.job_id == Job.job_id, isouter=True)
+                .join(automation_attempt, automation_attempt.c.job_id == Job.job_id, isouter=True)
                 .order_by(Job.created_at.desc())
             )
             if status:
@@ -277,7 +326,29 @@ class HubContext:
                 stmt = stmt.where(func.coalesce(fallback_count.c.fallback_count, 0) > 0)
             if review:
                 stmt = stmt.where(Job.review_state == review)
-            all_rows = session.execute(stmt).all()
+            raw_rows = session.execute(stmt).all()
+            all_rows = []
+            for job, seed_theme, notes, duration_ms, fallback_count_value, asset_count, publication_schedule, automation_source in raw_rows:
+                origin_display = job_origin_display(resolve_job_origin(job.job_origin, notes, automation_source=automation_source))
+                via_display = creation_via_display(
+                    resolve_creation_via(job.creation_via, retry_of_job_id=job.retry_of_job_id, notes=notes, automation_source=automation_source)
+                )
+                if origin and origin_display["value"] != origin:
+                    continue
+                if via and via_display["value"] != via:
+                    continue
+                all_rows.append(
+                    {
+                        "job": job,
+                        "seed_theme": seed_theme,
+                        "duration_ms": duration_ms,
+                        "fallback_count": fallback_count_value,
+                        "asset_count": asset_count,
+                        "publication_schedule": publication_schedule,
+                        "job_origin": origin_display,
+                        "creation_via": via_display,
+                    }
+                )
             total = len(all_rows)
             total_pages = max(1, (total + normalized_per_page - 1) // normalized_per_page)
             normalized_page = min(normalized_page, total_pages)
@@ -309,15 +380,23 @@ class HubContext:
         search: str | None,
         fallback: str | None,
         review: str | None,
+        origin: str | None,
+        via: str | None,
         page: int,
         per_page: int,
     ) -> dict[str, object]:
-        filters = {"status": status or "", "search": search or "", "fallback": fallback or "", "review": review or ""}
-        pagination = self._query_jobs(status=status, search=search, fallback=fallback, review=review, page=page, per_page=per_page)
+        filters = {"status": status or "", "search": search or "", "fallback": fallback or "", "review": review or "", "origin": origin or "", "via": via or ""}
+        pagination = self._query_jobs(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
         pagination["previous_query"] = self._jobs_query_string(filters, max(1, int(pagination["page"]) - 1), int(pagination["per_page"]))
         pagination["next_query"] = self._jobs_query_string(filters, int(pagination["page"]) + 1, int(pagination["per_page"]))
         pagination["current_query"] = self._jobs_query_string(filters, int(pagination["page"]), int(pagination["per_page"]))
-        return {"rows": pagination["rows"], "pagination": pagination, "filters": filters}
+        return {
+            "rows": pagination["rows"],
+            "pagination": pagination,
+            "filters": filters,
+            "origin_options": job_origin_options(),
+            "creation_via_options": creation_via_options(),
+        }
 
     def _schedule_display(self, schedule: PublicationSchedule | None) -> dict[str, str | None] | None:
         if schedule is None:
@@ -402,6 +481,9 @@ class HubContext:
             "api_enabled": self.settings.youtube_api_enabled,
             "channel_id": self.settings.youtube_channel_id,
             "connected": status.connected,
+            "publish_connected": status.publish_connected,
+            "analytics_connected": status.analytics_connected,
+            "analytics_missing_items": status.analytics_missing_items or [],
             "client_configured": status.client_configured,
             "dependencies_available": status.dependencies_available,
             "redirect_uri": redirect_uri,
@@ -501,7 +583,50 @@ class HubContext:
             }
             for schedule, job, topic_request, script in published_rows
         ]
-
+        with SessionLocal() as session:
+            analytics_rows = session.execute(
+                select(YouTubeAnalyticsSnapshot, Job, TopicRequest, Script, TopicPlan)
+                .join(Job, Job.job_id == YouTubeAnalyticsSnapshot.job_id)
+                .join(TopicRequest, TopicRequest.job_id == Job.job_id, isouter=True)
+                .join(Script, Script.job_id == Job.job_id, isouter=True)
+                .join(TopicPlan, TopicPlan.job_id == Job.job_id, isouter=True)
+                .order_by(YouTubeAnalyticsSnapshot.fetched_at.desc())
+                .limit(100)
+            ).all()
+            analytics_snapshot_count = session.scalar(select(func.count()).select_from(YouTubeAnalyticsSnapshot)) or 0
+            jobs_missing_analytics = session.scalar(
+                select(func.count())
+                .select_from(PublicationSchedule)
+                .where(PublicationSchedule.youtube_video_id.is_not(None))
+                .where(~PublicationSchedule.job_id.in_(select(YouTubeAnalyticsSnapshot.job_id)))
+            ) or 0
+        latest_snapshots: dict[str, dict[str, object]] = {}
+        for snapshot, job, topic_request, script, topic_plan in analytics_rows:
+            if job.job_id in latest_snapshots:
+                continue
+            summary = dict(snapshot.summary_metrics or {})
+            latest_snapshots[job.job_id] = {
+                "job_id": job.job_id,
+                "title": self._publication_title(job, topic_request, script),
+                "canonical_topic": topic_plan.canonical_topic if topic_plan else topic_request.seed_theme if topic_request else None,
+                "hook": script.hook if script else None,
+                "fetched_at": snapshot.fetched_at.isoformat() if snapshot.fetched_at else None,
+                "start_date": snapshot.start_date,
+                "end_date": snapshot.end_date,
+                "youtube_video_id": snapshot.youtube_video_id,
+                "views": self._metric_number(summary.get("views"), as_int=True),
+                "retention_percent": self._metric_number(summary.get("averageViewPercentage")),
+                "average_view_duration": self._metric_number(summary.get("averageViewDuration")),
+                "shares": self._metric_number(summary.get("shares"), as_int=True),
+                "subscribers_gained": self._metric_number(summary.get("subscribersGained"), as_int=True),
+                "likes": self._metric_number(summary.get("likes"), as_int=True),
+                "comments": self._metric_number(summary.get("comments"), as_int=True),
+            }
+        top_performers = sorted(
+            latest_snapshots.values(),
+            key=lambda item: (float(item.get("retention_percent") or -1), int(item.get("views") or 0), int(item.get("shares") or 0)),
+            reverse=True,
+        )[:5]
         return {
             "integration": self._youtube_integration_context(request),
             "tiktok_integration": self._tiktok_integration_context(),
@@ -509,6 +634,14 @@ class HubContext:
             "ready_to_schedule": ready_to_schedule,
             "upcoming_schedule": upcoming_schedule,
             "recent_publications": recent_publications,
+            "growth": {
+                "window_days": 28,
+                "volume_minimum": 100,
+                "snapshot_count": analytics_snapshot_count,
+                "jobs_missing_analytics": jobs_missing_analytics,
+                "top_performers": top_performers,
+                "last_snapshot_at": next(iter(latest_snapshots.values()), {}).get("fetched_at") if latest_snapshots else None,
+            },
             "metrics": {
                 "unscheduled_approved_count": unscheduled_approved_count,
                 "scheduled_count": scheduled_count,
@@ -521,6 +654,17 @@ class HubContext:
                 "tiktok_failed_count": tiktok_failed_count,
             },
         }
+
+    def _metric_number(self, value: object, *, as_int: bool = False) -> int | float | None:
+        if value is None or value == "":
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if as_int:
+            return int(number)
+        return round(number, 2)
 
     def _parse_calendar_month(self, month: str | None) -> date:
         normalized = str(month or "").strip()

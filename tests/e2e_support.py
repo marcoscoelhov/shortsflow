@@ -62,7 +62,7 @@ from app.editorial.repetition import build_channel_repetition_report  # noqa: E4
 
 from app.main import app, artifact_url  # noqa: E402
 
-from app.models import AutomationAttempt, AutomationRun, ReadyScriptItem, BackgroundMusicAsset, ChannelPublication, Job, NarrationAsset, OperationalSetting, PerformanceMetric, PublicationSchedule, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest  # noqa: E402
+from app.models import AutomationAttempt, AutomationRun, ReadyScriptItem, BackgroundMusicAsset, ChannelPublication, Job, NarrationAsset, OperationalSetting, PerformanceMetric, PublicationSchedule, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest, YouTubeAnalyticsSnapshot  # noqa: E402
 
 from app.music_bank import import_minimax_music_artifacts, populate_builtin_music_bank  # noqa: E402
 

@@ -1,15 +1,23 @@
-<div id="jobs-table" hx-get="/jobs?{{ pagination.current_query }}" hx-trigger="every 5s" hx-swap="outerHTML">
+<div id="jobs-table" hx-get="/jobs?{{ pagination.current_query }}" hx-trigger="every 12s" hx-swap="outerHTML">
+<p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+  Fila atualizada. Exibindo {{ rows|length }} de {{ pagination.total }} jobs encontrados. Página {{ pagination.page }} de {{ pagination.total_pages }}.
+</p>
 <div class="job-list">
   {% if rows %}
   <div class="jobs-grid-head" aria-hidden="true">
-    <span>Thumbnail</span>
+    <span>Prévia</span>
     <span>Título do vídeo</span>
     <span>Status</span>
     <span>Progresso</span>
     <span>Data de criação</span>
   </div>
   {% endif %}
-  {% for job, seed_theme, duration_ms, fallback_count, asset_count, publication_schedule in rows %}
+  {% for row in rows %}
+  {% set job = row.job %}
+  {% set seed_theme = row.seed_theme %}
+  {% set duration_ms = row.duration_ms %}
+  {% set fallback_count = row.fallback_count %}
+  {% set publication_schedule = row.publication_schedule %}
   {% set row_progress = job_progress_snapshot(job) %}
   {% set publication_state = publication_operational_status(job, publication_schedule) %}
   {% set created_text = job.created_at|string %}
@@ -23,24 +31,33 @@
       <div class="job-row-meta">
         <span>{{ job.created_at }}</span>
         <span>{% if duration_ms %}{{ (duration_ms / 1000)|round(1) }} s{% else %}-{% endif %}</span>
-        <span>{{ fallback_count }} fallbacks</span>
+        <span>{{ fallback_count }} fallback{% if fallback_count != 1 %}s{% endif %}</span>
+        <span class="badge origin-badge" title="{{ row.job_origin.description }}">Origem: {{ row.job_origin.label }}</span>
+        <span class="badge origin-badge muted" title="{{ row.creation_via.description }}">Via: {{ row.creation_via.label }}</span>
       </div>
     </div>
-    <div class="job-status-cell">
+    <div class="job-status-cell" data-label="Status">
       <span class="badge {{ publication_state.class_name }}">{{ publication_state.label }}</span>
       <small>{{ publication_state.stage }}</small>
     </div>
-    <div class="job-progress-compact" aria-label="Progresso do job">
+    <div class="job-progress-compact" data-label="Progresso" aria-label="Progresso do job">
       <div>
         <strong>{{ row_progress.percent }}%</strong>
         <span>{{ row_progress.current_label }}</span>
       </div>
-      <div class="job-progress-bar compact" aria-hidden="true">
+      <div
+        class="job-progress-bar compact"
+        role="progressbar"
+        aria-label="Progresso do job {{ job.job_id[:8] }}: {{ row_progress.current_label }}"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="{{ row_progress.percent }}"
+      >
         <span class="job-progress-fill {{ row_progress.state }}" style="width: {{ row_progress.percent }}%"></span>
       </div>
       <p class="job-row-next">{{ publication_state.next_action }}</p>
     </div>
-    <div class="job-date-cell">
+    <div class="job-date-cell" data-label="Criado em">
       <time datetime="{{ created_text }}">{{ created_text[:10] }}</time>
       <span>{{ created_text[11:16] if created_text|length >= 16 else "" }}</span>
     </div>
@@ -48,7 +65,7 @@
   {% else %}
   <article class="job-row-card empty">
     <strong>Nenhum job encontrado.</strong>
-    <p>Altere os filtros ou crie um novo job.</p>
+    <p>Limpe os filtros ou crie um vídeo novo.</p>
   </article>
   {% endfor %}
 </div>

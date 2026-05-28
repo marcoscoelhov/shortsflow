@@ -8,6 +8,18 @@ Este contexto define a linguagem de dominio usada para gerar, revisar e preparar
 Uma unidade de trabalho que cobre a criacao de um Short desde o pedido editorial ate um resultado revisavel.
 _Avoid_: video, render, tarefa
 
+**Origem do Job**:
+A classificacao visivel de qual caminho editorial criou um **Job de Video**.
+_Avoid_: tag solta, status, provider, origem tecnica
+
+**Origem Desconhecida do Job**:
+A leitura usada quando nao ha evidencia confiavel para classificar a **Origem do Job** de um **Job de Video** historico.
+_Avoid_: chute, inferencia fraca, erro de origem
+
+**Via de Criacao do Job**:
+A classificacao visivel de qual caminho operacional criou um **Job de Video**.
+_Avoid_: origem editorial, provider, status, etapa do pipeline
+
 **Arquivo de Video Final**:
 O arquivo de midia produzido por um **Job de Video** para revisao humana.
 _Avoid_: video, output, render
@@ -23,6 +35,74 @@ _Avoid_: servidor, porta, painel
 **Console Operacional**:
 Uma apresentacao do **Hub de Revisao** orientada a fila, estado e proxima acao sobre **Jobs de Video**.
 _Avoid_: formulario administrativo, landing page, dashboard decorativo
+
+**Centro de Crescimento do Canal**:
+A superficie do **Hub de Revisao** onde uma pessoa acompanha publicacao, performance, aprendizado editorial e recomendacoes para proximos **Jobs de Video**.
+_Avoid_: centro de publicacao, centro de analises, dashboard generico, tutor solto
+
+**Secao Operacional de Publicacao**:
+A parte do **Centro de Crescimento do Canal** que mostra conexao, agenda, aprovados sem agenda e publicacoes recentes sem dominar a leitura de crescimento.
+_Avoid_: centro de publicacao isolado, agenda como tela principal, publicacao sem performance
+
+**Relatorio Automatizado de Performance**:
+Uma leitura recorrente dos resultados de **Jobs de Video** publicados para identificar o que funcionou, o que caiu e o que deve orientar proximos conteudos.
+_Avoid_: print do YouTube Studio, metricas soltas, relatorio manual
+
+**Pacote Editorial do Job**:
+O conjunto de tema, titulo, hook, loop, beats, payoff, duracao, metadados e sinais de qualidade usado para explicar a performance de um **Job de Video**.
+_Avoid_: olhar so views, analisar video sem roteiro, diagnostico sem contexto editorial
+
+**Snapshot Diario de Performance**:
+Uma coleta diaria de metricas dos **Jobs de Video** publicados, usada para atualizar rankings sem gerar interpretacao editorial pesada.
+_Avoid_: relatorio completo diario, consulta em tempo real na tela, decisao por dado stale invisivel
+
+**Relatorio Semanal de Crescimento**:
+Uma sintese interpretativa do **Assistente de Crescimento do Canal** que transforma snapshots recentes em diagnostico, **Linhas Editoriais Vencedoras** e **Propostas de Crescimento**.
+_Avoid_: alerta solto, dashboard de numero, opiniao sem periodo definido
+
+**Execucao de Relatorio de Crescimento**:
+Uma geracao persistida de **Relatorio Semanal de Crescimento**, iniciada por agenda automatica ou acao humana sem bloquear a navegacao no **Hub de Revisao**.
+_Avoid_: request longo na pagina, relatorio efemero, botao que trava a tela
+
+**Lote Semanal de Roteiros Sugeridos**:
+Um conjunto pequeno de **Roteiros Sugeridos por Crescimento** produzido junto ao **Relatorio Semanal de Crescimento** para tornar o diagnostico acionavel.
+_Avoid_: backlog massivo, sugestoes ilimitadas, ideias fora do formato de roteiro
+
+**Linha Editorial Vencedora**:
+Um padrao de tema, hook, ritmo, promessa, payoff ou formato que performou acima do restante e pode inspirar novos **Jobs de Video** sem virar copia.
+_Avoid_: copiar video, tema repetido, template fixo, viral por chute
+
+**Sinal Primario de Performance**:
+A metrica que mais pesa para identificar uma **Linha Editorial Vencedora**, priorizando retencao em vez de alcance bruto.
+_Avoid_: views como criterio unico, likes isolados, impressao subjetiva
+
+**Objetivo Primario de Crescimento**:
+A meta editorial do **Assistente de Crescimento do Canal**, priorizando retencao e replay em Shorts antes de alcance bruto ou monetizacao.
+_Avoid_: crescer por views isoladas, perseguir RPM primeiro, otimizar para vaidade
+
+**Volume Minimo de Confianca**:
+O patamar minimo de visualizacoes usado antes de tratar um resultado de performance como evidência confiavel.
+_Avoid_: premiar video com amostra pequena, ignorar volume, confiar em poucos views
+
+**Assistente de Crescimento do Canal**:
+A orientacao por IA baseada em metricas reais, historico editorial e objetivos do canal para recomendar melhorias acionaveis nos proximos **Jobs de Video**.
+_Avoid_: chatbot generico, opiniao sem dados, tutorial solto de YouTube
+
+**Proposta de Crescimento**:
+Uma sugestao acionavel do **Assistente de Crescimento do Canal** para criar ou melhorar um **Job de Video**, exigindo confirmacao humana antes de virar trabalho.
+_Avoid_: job automatico, ideia solta, recomendacao sem acao, geracao cega
+
+**Roteiro Sugerido por Crescimento**:
+Um **Roteiro Pronto** rascunhado por uma **Proposta de Crescimento**, aguardando revisao humana antes de entrar no **Banco de Roteiros Prontos** ou virar **Job de Video**.
+_Avoid_: job criado direto, roteiro aprovado automaticamente, sugestao sem formato editorial
+
+**Variacao de Linha Editorial**:
+Um novo **Job de Video** inspirado em uma **Linha Editorial Vencedora**, preservando padroes de performance sem copiar tema, texto, hook ou payoff.
+_Avoid_: republicacao, duplicata narrativa, reciclagem literal
+
+**Video Externo de Referencia**:
+Um video publicado no canal sem origem em **Job de Video**, usado apenas como referencia comparativa quando importado explicitamente.
+_Avoid_: job historico presumido, dado invisivel do canal, publicacao sem vinculo
 
 **Configuracao de Ambiente**:
 Um valor necessario para iniciar ou conectar o sistema, como caminho de dados, URL publica, segredo ou credencial de provedor.
@@ -347,7 +427,15 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 ## Relationships
 
 - Um **Job de Video** produz zero ou um **Arquivo de Video Final**.
+- Um **Job de Video** tem exatamente uma **Origem do Job**.
+- Um **Job de Video** tem exatamente uma **Via de Criacao do Job**.
+- A **Origem do Job** distingue criacao por **Banco de Roteiros Prontos**, **Roteiro Pronto** manual, **Tema Automatico**, tema manual e titulo manual.
+- A **Via de Criacao do Job** distingue criacao pelo **Hub de Revisao**, **Ciclo Diario de Automacao**, CLI, API e recriacao derivada de outro **Job de Video**.
+- Um **Job de Video** historico pode aparecer com **Origem Desconhecida do Job** quando a origem nao puder ser inferida com seguranca.
 - Um **Arquivo de Video Final** pertence a exatamente um **Job de Video**.
+- O **Hub de Revisao** deve tornar a **Origem do Job** visivel na fila, na revisao do job e em filtros de triagem.
+- A **Origem do Job** deve aparecer em portugues no **Hub de Revisao**, sem expor identificadores internos.
+- A **Via de Criacao do Job** deve ser exibida separada da **Origem do Job** para distinguir conteudo editorial de caminho operacional.
 - Um **Job de Video** pode chegar a **Revisao Humana** sem estar aprovado para publicacao.
 - Um **Hub de Revisao** apresenta um ou mais **Jobs de Video** para **Revisao Humana**.
 - Um **Hub de Revisao** pode se apresentar como **Console Operacional**.
