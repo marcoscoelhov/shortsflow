@@ -32,6 +32,7 @@ BAD_STARTS = {"a", "o", "as", "os", "um", "uma", "uns", "umas"}
 BAD_START_HEADS = BAD_ENDINGS | BAD_STARTS
 BAD_START_SECOND_TOKENS = {"a", "o", "as", "os", "um", "uma", "uns", "umas", "outro", "outra"}
 SEMANTIC_BAD_ENDINGS = BAD_ENDINGS | {"a", "o", "as", "os", "um", "uma", "uns", "umas", "outro", "outra"}
+GATE_WEAK_ENDINGS = BAD_ENDINGS | {"outro", "outra"}
 SUBTITLE_MAX_CHARS = 32
 SUBTITLE_MAX_LINES = 1
 SUBTITLE_MAX_WORDS = 8
@@ -77,7 +78,7 @@ class SubtitleGate:
                 item_reasons.append("subtitle_word_too_wide")
             if self._has_semantic_orphan_start(words):
                 item_reasons.append("semantic_orphan_start")
-            if words and words[-1].lower() in SEMANTIC_BAD_ENDINGS:
+            if words and words[-1].lower() in GATE_WEAK_ENDINGS:
                 item_reasons.append("weak_line_ending")
             start_ms = int(item.get("start_ms", 0))
             end_ms = int(item.get("end_ms", 0))
@@ -101,6 +102,6 @@ class SubtitleGate:
         normalized = [word.lower() for word in words]
         if not normalized:
             return False
-        if normalized[0] in BAD_STARTS:
+        if normalized[0] in BAD_STARTS and len(normalized) <= 2:
             return True
         return len(normalized) <= 2 and normalized[0] in BAD_START_HEADS and len(normalized) > 1 and normalized[1] in BAD_START_SECOND_TOKENS

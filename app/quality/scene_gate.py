@@ -187,7 +187,31 @@ def _contains_forbidden_term(corpus: str, term: str) -> bool:
         return False
     if normalized in corpus:
         return True
-    return _contains_simple_term(corpus, normalized, loose=False)
+    return _contains_forbidden_simple_term(corpus, normalized)
+
+
+def _contains_forbidden_simple_term(corpus: str, term: str) -> bool:
+    """Strict containment for visual-contract spoilers.
+
+    Forbidden reveal entries are often natural-language directives such as
+    "diagramas de osmose" or "explicação escrita dos mecanismos". Matching a
+    single surviving token ("osmose", "mecanismos") creates false positives
+    whenever the approved narration itself mentions that concept before the
+    payoff. For spoilers, require the complete directive or a near-complete set
+    of substantive terms, not just one keyword.
+    """
+    tokens = [token for token in term.split() if len(token) >= 4]
+    if not tokens:
+        return False
+    corpus_tokens = corpus.split()
+    matched = 0
+    for token in tokens:
+        aliases = VISUAL_TERM_ALIASES.get(token, {token})
+        if any(_alias_present_unnegated(corpus_tokens, alias) for alias in aliases):
+            matched += 1
+    if len(tokens) <= 4:
+        return matched == len(tokens)
+    return matched >= max(4, len(tokens) - 1)
 
 
 def _contains_simple_term(corpus: str, term: str, *, loose: bool) -> bool:
@@ -206,6 +230,8 @@ def _contains_simple_term(corpus: str, term: str, *, loose: bool) -> bool:
             matched += 1
     if loose and len(tokens) >= 4:
         return matched >= 2
+    if not loose and len(tokens) <= 2:
+        return matched >= len(tokens)
     return matched >= max(1, len(tokens) - 1)
 
 

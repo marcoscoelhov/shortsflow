@@ -54,6 +54,7 @@ class ScenePipeline(BasePipeline):
             if not scenes or scenes[0]["token_start"] != 0 or scenes[-1]["token_end"] != len(tokens) - 1:
                 raise RecoverableStepError("scene coverage invalid")
         scenes = [self.normalize_scene_semantics(scene, topic_plan.canonical_topic, visual_contract=visual_contract) for scene in scenes]
+        scenes = self.align_scenes_with_visual_contract(scenes, visual_contract)
         scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count, visual_contract=visual_contract)
         if not scene_gate.passed:
             fallback_planner = self.scene_fallback_planner()
@@ -63,6 +64,7 @@ class ScenePipeline(BasePipeline):
                 scenes = self.normalize_scene_token_coverage(scenes, script.full_narration)
                 scenes = self.annotate_scene_retention_roles(scenes, script_dict)
                 scenes = [self.normalize_scene_semantics(scene, topic_plan.canonical_topic, visual_contract=visual_contract) for scene in scenes]
+                scenes = self.align_scenes_with_visual_contract(scenes, visual_contract)
                 scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count, visual_contract=visual_contract)
             if not scene_gate.passed:
                 self.storage.persist_json(
@@ -202,6 +204,45 @@ class ScenePipeline(BasePipeline):
         normalized["fallback_queries"] = self.fallback_query_variants(topic_text, base_queries)
         normalized["image_prompt"] = self.owner.asset_pipeline.image_assets.semantic_english_image_prompt(normalized, topic_text, primary_subject)
         return normalized
+
+    def align_scenes_with_visual_contract(self, scenes: list[dict[str, Any]], visual_contract: dict[str, Any] | None) -> list[dict[str, Any]]:
+        if not scenes or not isinstance(visual_contract, dict) or not visual_contract:
+            return scenes
+        aligned = [dict(scene) for scene in scenes]
+        ordered_indexes = sorted(range(len(aligned)), key=lambda index: int(aligned[index].get("order", 0) or 0))
+        hook_frame = visual_contract.get("hook_frame") if isinstance(visual_contract.get("hook_frame"), dict) else {}
+        payoff_frame = visual_contract.get("payoff_frame") if isinstance(visual_contract.get("payoff_frame"), dict) else {}
+
+        first = aligned[ordered_indexes[0]]
+        first["retention_role"] = "visual_hook"
+        hook_intent = str(hook_frame.get("recommended_visual_intent") or "").strip()
+        if hook_intent:
+            first["visual_intent"] = hook_intent.replace(" ", "_")
+        hook_requirements = [str(item).strip() for item in hook_frame.get("must_show") or [] if str(item or "").strip()]
+        if hook_requirements:
+            directive = "Visual contract hook requirements: " + "; ".join(hook_requirements[:3])
+            prompt = str(first.get("image_prompt") or "")
+            if directive.lower() not in prompt.lower():
+                first["image_prompt"] = f"{prompt}, {directive}".strip(", ")
+            subject = str(first.get("primary_subject") or "")
+            if not any(item.lower() in subject.lower() for item in hook_requirements):
+                first["primary_subject"] = f"{subject}; {'; '.join(hook_requirements[:2])}".strip("; ")
+        aligned[ordered_indexes[0]] = first
+
+        payoff_intent = str(payoff_frame.get("recommended_visual_intent") or "").strip()
+        if payoff_intent:
+            payoff_indexes = [
+                index
+                for index in ordered_indexes
+                if str(aligned[index].get("retention_role") or "").strip().lower() in {"turn_or_payoff", "loop_close"}
+            ]
+            target_index = payoff_indexes[-1] if payoff_indexes else ordered_indexes[-1]
+            payoff_scene = aligned[target_index]
+            payoff_scene["visual_intent"] = payoff_intent.replace(" ", "_")
+            if not str(payoff_scene.get("retention_role") or "").strip():
+                payoff_scene["retention_role"] = "loop_close"
+            aligned[target_index] = payoff_scene
+        return aligned
 
     def fallback_query_variants(self, topic_text: str, base_queries: list[str]) -> list[str]:
         queries = [query for query in base_queries if query]
