@@ -915,3 +915,15 @@ def sync_job_youtube_analytics(
     except YouTubeIntegrationError as exc:
         return _redirect_back(return_to, {"analytics_error": str(exc)}, default=f"/jobs/{job_id}")
     return _redirect_back(return_to, {"analytics_synced": "1"}, default=f"/jobs/{job_id}")
+
+
+@app.post("/youtube-analytics/sync-due")
+def sync_due_youtube_analytics(
+    days: int = Form(default=28),
+    limit: int | None = Form(default=None),
+    return_to: str | None = Form(default=None),
+):
+    result = orchestrator.sync_due_youtube_analytics_snapshots(days=days, limit=limit)
+    if result.get("status") == "skipped":
+        return _redirect_back(return_to, {"analytics_error": result.get("reason") or "sync_skipped"}, default="/publication-hub")
+    return _redirect_back(return_to, {"analytics_synced": str(len(result.get("synced") or []))}, default="/publication-hub")

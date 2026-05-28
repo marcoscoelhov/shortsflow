@@ -87,13 +87,7 @@ class MonetizationPipeline(BasePipeline):
         script_artifact = self.read_job_json(job.job_id, "script.json")
         ready_script_fact_check_confirmed = self._ready_script_fact_check_confirmed(fact_pack, script_artifact)
         tags = self.build_publish_hashtags(topic_plan, script)
-        checklist = {
-            "script_gate_pass": bool((job.quality_summary or {}).get("script", {}).get("script_quality_gate_pass")),
-            "scene_plan_gate_pass": bool((job.quality_summary or {}).get("scene_plan", {}).get("scene_plan_gate_pass")),
-            "asset_gate_pass": bool((job.quality_summary or {}).get("assets", {}).get("semantic_threshold_pass")),
-            "subtitle_gate_pass": bool((job.quality_summary or {}).get("subtitles", {}).get("subtitle_gate_pass")),
-            "render_gate_pass": bool((job.quality_summary or {}).get("render", {}).get("render_gate_pass")),
-        }
+        checklist = self.build_quality_checklist(job)
         if self._simple_mode_fact_skip(fact_pack):
             checklist["script_gate_pass"] = True
         confirmations = self.manual_monetization_confirmations(session, job.job_id)
@@ -217,9 +211,26 @@ class MonetizationPipeline(BasePipeline):
             "invented_source_fact_ids",
             "fact_pack_missing_for_factual_topic",
             "quality_checklist_failed",
+            "asset_visual_gate_not_passed",
             "placeholder_source_language",
         }
         return [reason for reason in publish_readiness.get("reasons") or [] if reason in automatic_reasons]
+
+    def build_quality_checklist(self, job: Job) -> dict[str, bool]:
+        quality_summary = job.quality_summary or {}
+        asset_summary = quality_summary.get("assets", {}) if isinstance(quality_summary.get("assets"), dict) else {}
+        asset_visual_gate_known = "asset_visual_gate_pass" in asset_summary or "asset_visual_gate_checked" in asset_summary
+        asset_visual_gate_pass = True
+        if asset_visual_gate_known:
+            asset_visual_gate_pass = bool(asset_summary.get("asset_visual_gate_pass")) and bool(asset_summary.get("asset_visual_gate_checked"))
+        return {
+            "script_gate_pass": bool((quality_summary.get("script") or {}).get("script_quality_gate_pass")),
+            "scene_plan_gate_pass": bool((quality_summary.get("scene_plan") or {}).get("scene_plan_gate_pass")),
+            "asset_gate_pass": bool(asset_summary.get("semantic_threshold_pass")),
+            "asset_visual_gate_pass": asset_visual_gate_pass,
+            "subtitle_gate_pass": bool((quality_summary.get("subtitles") or {}).get("subtitle_gate_pass")),
+            "render_gate_pass": bool((quality_summary.get("render") or {}).get("render_gate_pass")),
+        }
 
     def build_human_review_checklist(
         self,
@@ -510,7 +521,7 @@ class MonetizationPipeline(BasePipeline):
         )
 
     def build_metadata_review(self, topic_plan: TopicPlan | None, script: Script | None, tags: list[str]) -> dict[str, Any]:
-        weak_tags = [tag for tag in tags if tag.lower() not in {"#shorts"} and (tag.lstrip("#") in self.weak_hashtag_terms() or len(tag.lstrip("#")) < 4)]
+        weak_tags = self.weak_publish_hashtags(tags, script)
         title = script.title if script else ""
         title_words = len(word_tokens(title))
         reasons = []
@@ -644,24 +655,19 @@ class MonetizationPipeline(BasePipeline):
         script_artifact = self.read_job_json(job.job_id, "script.json")
         monetization_report = self.read_job_json(job.job_id, "monetization_report.json")
         tags = self.build_publish_hashtags(topic_plan, script)
-        if monetization_report.get("metadata_review", {}).get("suggested_hashtags"):
+        declared_hashtags = dict(getattr(script, "qa_metrics", None) or {}).get("declared_hashtags") if script else None
+        if not declared_hashtags and monetization_report.get("metadata_review", {}).get("suggested_hashtags"):
             tags = list(monetization_report["metadata_review"]["suggested_hashtags"])
         ai_notice = monetization_report.get("ai_disclosure", {}).get("description_notice")
-        description = self.build_publish_description(topic_plan, script, title, tags, ai_notice)
         overrides = self.read_publish_metadata_overrides(job.job_id)
         if overrides.get("title"):
             title = str(overrides["title"])
-        if overrides.get("description"):
-            description = str(overrides["description"])
         if overrides.get("hashtags"):
             tags = list(overrides["hashtags"])
-        checklist = {
-            "script_gate_pass": bool((job.quality_summary or {}).get("script", {}).get("script_quality_gate_pass")),
-            "scene_plan_gate_pass": bool((job.quality_summary or {}).get("scene_plan", {}).get("scene_plan_gate_pass")),
-            "asset_gate_pass": bool((job.quality_summary or {}).get("assets", {}).get("semantic_threshold_pass")),
-            "subtitle_gate_pass": bool((job.quality_summary or {}).get("subtitles", {}).get("subtitle_gate_pass")),
-            "render_gate_pass": bool((job.quality_summary or {}).get("render", {}).get("render_gate_pass")),
-        }
+        description = self.build_publish_description(topic_plan, script, title, tags, ai_notice)
+        if overrides.get("description"):
+            description = str(overrides["description"])
+        checklist = self.build_quality_checklist(job)
         if self.settings.simple_shorts_mode:
             checklist["script_gate_pass"] = True
         minimax_audit = self.provider_publish_audit(script_artifact, fact_pack, tags, job.job_id)
@@ -831,6 +837,8 @@ class MonetizationPipeline(BasePipeline):
 
     def read_publish_metadata_overrides(self, job_id: str) -> dict[str, Any]:
         raw = self.read_job_json(job_id, "publish_metadata_overrides.json")
+        if not raw:
+            return {"title": None, "description": None, "hashtags": []}
         return self.normalize_publish_metadata_overrides(
             raw.get("title"),
             raw.get("description"),
@@ -855,6 +863,9 @@ class MonetizationPipeline(BasePipeline):
         return list(dict.fromkeys(normalized_tags))[:5]
 
     def build_publish_hashtags(self, topic_plan: TopicPlan | None, script: Script | None) -> list[str]:
+        declared_hashtags = dict(getattr(script, "qa_metrics", None) or {}).get("declared_hashtags") if script else None
+        if declared_hashtags:
+            return self.normalize_publish_hashtag_list(declared_hashtags)
         tags = ["#shorts", "#fatos"]
         weak = self.weak_hashtag_terms()
         blocked_terms = weak | {"lugar", "lugares", "mais", "mundo", "terra", "aqui", "ainda", "vive", "vivem", "segredo", "extremo", "extrema", "tinha", "tinham", "seus", "suas"}
@@ -911,6 +922,22 @@ class MonetizationPipeline(BasePipeline):
             "video", "short", "shorts", "curiosidade", "curiosidades",
         }
 
+    def weak_publish_hashtags(self, tags: list[str], script: Script | dict[str, Any] | None) -> list[str]:
+        qa_metrics = _qa_metrics(script)
+        declared_tags = set(self.normalize_publish_hashtag_list(qa_metrics.get("declared_hashtags") or []))
+        ready_script_declared = bool(qa_metrics.get("ready_script")) and bool(declared_tags)
+        allowed_declared_broad_tags = {"#curiosidades", "#facts", "#didyouknow"}
+        weak_tags = []
+        for tag in tags:
+            normalized = tag.lower()
+            if normalized == "#shorts":
+                continue
+            if ready_script_declared and normalized in declared_tags and normalized in allowed_declared_broad_tags:
+                continue
+            if tag.lstrip("#") in self.weak_hashtag_terms() or len(tag.lstrip("#")) < 4:
+                weak_tags.append(tag)
+        return weak_tags
+
     def normalize_hashtag_text(self, text: str) -> str:
         normalized = unicodedata.normalize("NFKD", text.lower())
         normalized = "".join(char for char in normalized if not unicodedata.combining(char))
@@ -934,8 +961,11 @@ class MonetizationPipeline(BasePipeline):
         editorial_mode = resolve_editorial_mode(topic_plan, None) if topic_plan else "viral_curiosidades"
         factual_topic = editorial_mode == "factual_strict"
         reasons: list[str] = []
-        if not all(checklist.values()):
+        failed_quality_items = [key for key, passed in checklist.items() if not passed]
+        if failed_quality_items:
             reasons.append("quality_checklist_failed")
+            if "asset_visual_gate_pass" in failed_quality_items:
+                reasons.append("asset_visual_gate_not_passed")
         if self._simple_mode_fact_skip(fact_pack):
             claim_trace = script_dict.get("claim_trace") or script_dict.get("qa_metrics", {}).get("claim_trace") or []
             if not isinstance(claim_trace, list):
@@ -965,7 +995,7 @@ class MonetizationPipeline(BasePipeline):
             reasons.append("invented_source_fact_ids")
         if factual_topic and fact_pack.get("status") != "verified" and (fact_risk.get("claim_count", 0) > 0 or len(word_tokens(script_dict.get("full_narration", ""))) >= 45):
             reasons.append("fact_pack_missing_for_factual_topic")
-        weak_tags = [tag for tag in tags if tag.lower() != "#shorts" and (tag.lstrip("#") in self.weak_hashtag_terms() or len(tag.lstrip("#")) < 4)]
+        weak_tags = self.weak_publish_hashtags(tags, script_dict)
         if weak_tags or len(tags) < 3:
             reasons.append("weak_hashtags")
         ending = str(script_dict.get("ending") or "").strip()
@@ -1002,3 +1032,11 @@ class MonetizationPipeline(BasePipeline):
             "qa_metrics": script.qa_metrics or {},
             "source_fact_ids": (script.qa_metrics or {}).get("source_fact_ids", []),
         }
+
+
+def _qa_metrics(script: Script | dict[str, Any] | None) -> dict[str, Any]:
+    if isinstance(script, dict):
+        raw = script.get("qa_metrics")
+    else:
+        raw = getattr(script, "qa_metrics", None)
+    return dict(raw) if isinstance(raw, dict) else {}

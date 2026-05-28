@@ -28,8 +28,16 @@ class BasePipeline:
         return self.owner.scene_gate
 
     @property
+    def visual_contract_gate(self) -> Any:
+        return self.owner.visual_contract_gate
+
+    @property
     def asset_gate(self) -> Any:
         return self.owner.asset_gate
+
+    @property
+    def asset_visual_gate(self) -> Any:
+        return self.owner.asset_visual_gate
 
     @property
     def subtitle_gate(self) -> Any:

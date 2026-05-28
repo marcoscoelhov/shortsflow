@@ -64,6 +64,15 @@ ALLOWED_NON_PT_TERMS = {
     "shorts",
 }
 
+INTERNAL_SCRIPT_TEXT_KEYS = {
+    "claim_trace",
+    "prompt_version",
+    "qa_metrics",
+    "retention_map",
+    "source_fact_ids",
+    "visual_opening",
+}
+
 FOREIGN_LANGUAGE_MARKERS = {
     "right",
     "giving",
@@ -75,6 +84,9 @@ FOREIGN_LANGUAGE_MARKERS = {
     "heard",
     "mini-cerebro independiente",
     "independiente",
+    "forced",
+    "forced perspective",
+    "perspective",
 }
 
 MARKUP_PATTERN = re.compile(r"</?[a-zA-Z][^>\s]*(?:\s[^>]*)?>?|&(?:lt|gt|amp|quot|apos);")
@@ -135,7 +147,8 @@ BROKEN_VIRAL_CLOSING_PATTERN = re.compile(
     re.IGNORECASE,
 )
 TRUNCATED_OR_BROKEN_LOGIC_PATTERN = re.compile(
-    r"(?:\b[A-ZÁÀÃÂÉÊÍÓÕÔÚÇ][^.!?]{0,80}\.\s+quando\b|\bpara\s+[A-ZÁÀÃÂÉÊÍÓÕÔÚÇ]|apontava\s+para\s+[A-ZÁÀÃÂÉÊÍÓÕÔÚÇ])",
+    r"(?:\b[A-ZÁÀÃÂÉÊÍÓÕÔÚÇ][^.!?]{0,80}\.\s+quando\b|\bpara\s+[A-ZÁÀÃÂÉÊÍÓÕÔÚÇ]|apontava\s+para\s+[A-ZÁÀÃÂÉÊÍÓÕÔÚÇ]|"
+    r"(?i:apontava\s+para\s+(?:outro|outra|um|uma)\s+\w+|primeir[ao]\s+frase\s+j[aá]\s+apontava\s+para))",
 )
 
 OVERCONFIDENT_FACT_MARKERS = {
@@ -178,7 +191,8 @@ FACT_CONSERVATIVE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 FACT_DOMAIN_PATTERN = re.compile(
-    r"\b(?:cérebro|cerebro|neur[oô]nios?|dopamina|sangue|coração|coracao|dna|gene|bactéria|bacteria|vírus|virus|célula|celula|hormônio|hormonio|cura|doença|doenca|sono|memória|memoria|gravidade|física|fisica|solo|argila|fundação|fundacao|engenharia|terremoto|vulc[aã]o|planeta|estrela|buraco negro|oceano|espécie|especie|evolução|evolucao|temperatura|pressão|pressao|energia|radiação|radiacao)\b",
+    r"\b(?:cérebro|cerebro|neur[oô]nios?|dopamina|sangue|coração|coracao|cora[cç][oõ]es|br[aâ]nquias?|hemocianina|oxig[eê]nio|polvo|polvos|octopus|"
+    r"dna|gene|bactéria|bacteria|vírus|virus|célula|celula|hormônio|hormonio|cura|doença|doenca|sono|memória|memoria|gravidade|física|fisica|solo|argila|fundação|fundacao|engenharia|terremoto|vulc[aã]o|planeta|estrela|buraco negro|oceano|espécie|especie|evolução|evolucao|temperatura|pressão|pressao|energia|radiação|radiacao)\b",
     re.IGNORECASE,
 )
 FACT_ABSOLUTE_PATTERN = re.compile(
@@ -332,7 +346,7 @@ class ScriptQualityGate:
         if isinstance(value, dict):
             texts = []
             for key, item in value.items():
-                if key in {"image_prompt", "prompt_snapshot"}:
+                if key in INTERNAL_SCRIPT_TEXT_KEYS or key in {"image_prompt", "prompt_snapshot"}:
                     continue
                 texts.extend(self._collect_text(item))
             return texts

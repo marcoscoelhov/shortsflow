@@ -19,6 +19,13 @@ HIGH_RISK_TOPIC_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+SCIENCE_TOPIC_PATTERN = re.compile(
+    r"\b(?:biologia|biol[oó]gic[oa]s?|cient[ií]fic[oa]s?|anatomia|fisiologia|esp[eé]cie|esp[eé]cies|evolu[cç][aã]o|"
+    r"animal|animais|polvo|polvos|octopus|cora[cç][aã]o|cora[cç][oõ]es|br[aâ]nquias?|hemocianina|sangue\s+azul|"
+    r"oxig[eê]nio|c[eé]lulas?|neur[oô]nios?|c[eé]rebro|dna|gene|bact[eé]ria|v[ií]rus)\b",
+    re.IGNORECASE,
+)
+
 
 def _read_field(source: Any, field: str, default: Any = None) -> Any:
     if isinstance(source, Mapping):
@@ -34,14 +41,14 @@ def resolve_editorial_mode(topic_plan: Any | None = None, request: Any | None = 
     angle = str(_read_field(topic_plan, "angle", "") or "")
     hook_promise = str(_read_field(topic_plan, "hook_promise", "") or "")
     quality_metrics = _read_field(topic_plan, "quality_metrics", {}) or {}
-    if isinstance(quality_metrics, Mapping):
-        existing_mode = str(quality_metrics.get("editorial_mode") or "").strip()
-        if existing_mode in {"viral_curiosidades", "factual_strict"}:
-            return existing_mode
     override_text = " ".join(part for part in [notes, requested_angle] if part).strip()
     if override_text and STRICT_OVERRIDE_PATTERN.search(override_text):
         return "factual_strict"
     source_text = " ".join(part for part in [seed_theme, canonical_topic, angle, hook_promise] if part).strip()
-    if source_text and HIGH_RISK_TOPIC_PATTERN.search(source_text):
+    if source_text and (HIGH_RISK_TOPIC_PATTERN.search(source_text) or SCIENCE_TOPIC_PATTERN.search(source_text)):
         return "factual_strict"
+    if isinstance(quality_metrics, Mapping):
+        existing_mode = str(quality_metrics.get("editorial_mode") or "").strip()
+        if existing_mode in {"viral_curiosidades", "factual_strict"}:
+            return existing_mode
     return "viral_curiosidades"

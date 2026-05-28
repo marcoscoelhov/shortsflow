@@ -13,7 +13,7 @@ from app.utils import path_from_uri
 
 
 NO_TEXT_IMAGE_CONSTRAINT = (
-    "clean vertical cinematic scientific image, natural objects only, no readable text anywhere, "
+    "clean vertical cinematic image, no readable text anywhere, "
     "no letters, no words, no numbers, no symbols, no logo, no watermark, no captions, "
     "no subtitles, no title card, no poster, no signs, no labels, no UI, no infographic, "
     "no typography, no diagrams with labels, no text printed on objects, no text on packages, "
@@ -158,17 +158,18 @@ class ImageAssetDomain:
         primary_subject = str(scene.get("primary_subject") or scene.get("topic_hint") or "")
         base_prompt = self.semantic_english_image_prompt(scene, topic_text, primary_subject)
         english_subject = self.english_subject_hint(topic_text, primary_subject)
-        scene_hint = self.english_scene_visual_hint(scene, english_subject)
+        scene_hint = self.remove_incompatible_scientific_style(self.english_scene_visual_hint(scene, english_subject), scene)
+        domain_style = self.visual_domain_style(scene)
         if self.is_visual_hook_scene(scene):
             variant_prompts = [
                 base_prompt,
                 self.with_no_text_image_constraints(
                     f"high-impact vertical first-frame hook for YouTube Shorts, {scene_hint}, "
                     "instant visual contrast, one unmistakable central subject, close composition, strong depth, "
-                    "concrete factual consequence visible immediately, documentary realism, no later-payoff reveal"
+                    f"concrete visual consequence visible immediately, {domain_style}, no later-payoff reveal"
                 ),
                 self.with_no_text_image_constraints(
-                    f"stop-the-scroll scientific documentary frame, {english_subject} as the unmistakable central subject, "
+                    f"stop-the-scroll {domain_style} frame, {english_subject} as the unmistakable central subject, "
                     f"{scene_hint}, visible tension or paradox in the first glance, natural dramatic lighting, "
                     "no calm establishing shot, no abstract ambience, no irrelevant props"
                 ),
@@ -178,12 +179,12 @@ class ImageAssetDomain:
                 base_prompt,
                 self.with_no_text_image_constraints(
                     f"vertical documentary close shot of {english_subject}, {scene_hint}, "
-                    "visually illustrate this exact narration beat with scientific documentary realism, "
+                    f"visually illustrate this exact narration beat with {domain_style}, "
                     "natural lighting, one clear subject, no symbolic poster, no irrelevant props"
                 ),
                 self.with_no_text_image_constraints(
                     f"realistic vertical YouTube Shorts visual, {english_subject} as the unmistakable central subject, "
-                    f"{scene_hint}, cinematic science documentary frame, concrete factual detail, clean relevant background"
+                    f"{scene_hint}, {domain_style}, concrete visual detail, clean relevant background"
                 ),
             ]
         variants: list[dict[str, Any]] = []
@@ -204,15 +205,20 @@ class ImageAssetDomain:
     def semantic_english_image_prompt(self, scene: dict[str, Any], topic_text: str, primary_subject: str) -> str:
         prompt = str(scene.get("image_prompt", "")).replace("_", " ")
         english_subject = self.english_subject_hint(topic_text, primary_subject)
-        scene_hint = self.english_scene_visual_hint(scene, english_subject)
+        scene_hint = self.remove_incompatible_scientific_style(self.english_scene_visual_hint(scene, english_subject), scene)
         semantic_directive = self.semantic_scene_directive(scene, scene_hint)
+        domain_style = self.visual_domain_style(scene)
         if self.should_rebuild_image_prompt(prompt):
-            visual_intent = str(scene.get("visual_intent") or "scientific documentary scene").replace("_", " ")
-            prompt = scene_hint or f"vertical cinematic scientific image of {english_subject}, {visual_intent}"
+            visual_intent = str(scene.get("visual_intent") or "documentary scene").replace("_", " ")
+            prompt = scene_hint or f"vertical cinematic {domain_style} of {english_subject}, {visual_intent}"
         else:
             prompt = self.replace_subject_aliases(prompt)
+        prompt = self.remove_incompatible_scientific_style(prompt, scene)
         if semantic_directive.lower() not in prompt.lower():
             prompt = f"{prompt}, {semantic_directive}".strip(", ")
+        conservative_science_directive = self.conservative_science_visual_directive(scene)
+        if conservative_science_directive and conservative_science_directive.lower() not in prompt.lower():
+            prompt = f"{prompt}, {conservative_science_directive}".strip(", ")
         if self.is_visual_hook_scene(scene):
             hook_directive = self.visual_hook_directive(scene, scene_hint)
             if hook_directive.lower() not in prompt.lower():
@@ -221,9 +227,45 @@ class ImageAssetDomain:
             prompt = f"{scene_hint}, {prompt}".strip(", ")
         elif english_subject and english_subject.lower() not in prompt.lower():
             prompt = f"{prompt}, central subject: {english_subject}".strip(", ")
+        style_directive = self.domain_style_directive(scene)
+        if style_directive.lower() not in prompt.lower():
+            prompt = f"{prompt}, {style_directive}".strip(", ")
         if "no movie poster" not in prompt.lower():
-            prompt += ", scientific visualization, documentary realism, no movie poster, no typography, no stock-photo generic scene"
+            prompt += ", no movie poster, no typography, no stock-photo generic scene"
         return self.with_no_text_image_constraints(prompt)
+
+    def conservative_science_visual_directive(self, scene: dict[str, Any]) -> str:
+        source_text = " ".join(
+            str(scene.get(key) or "")
+            for key in ("narration_text", "primary_subject", "image_prompt", "topic_hint", "visual_intent")
+        ).lower()
+        science_terms = {
+            "anatomia",
+            "fisiologia",
+            "coração",
+            "coracao",
+            "corações",
+            "coracoes",
+            "brânquia",
+            "branquia",
+            "brânquias",
+            "branquias",
+            "sangue",
+            "oxigênio",
+            "oxigenio",
+            "hemocianina",
+            "systemic heart",
+            "branchial hearts",
+            "gills",
+            "blood",
+            "oxygen",
+        }
+        if not any(term in source_text for term in science_terms):
+            return ""
+        return (
+            "conservative science visual, prefer external documentary evidence or a simple unlabeled cutaway, "
+            "avoid invented organs, fantasy anatomy, glowing tubes, exaggerated transparent body, and unsupported medical-diagram detail"
+        )
 
     def is_visual_hook_scene(self, scene: dict[str, Any]) -> bool:
         if str(scene.get("retention_role") or "").strip().lower() == "visual_hook":
@@ -289,7 +331,8 @@ class ImageAssetDomain:
         for terms, hint in SCENE_VISUAL_HINTS:
             if all(term in narration or term in normalized for term in terms):
                 return hint
-        return f"vertical cinematic scientific image of {english_subject}"
+        domain_style = self.visual_domain_style(scene)
+        return f"vertical cinematic {domain_style} of {english_subject}"
 
     def semantic_scene_directive(self, scene: dict[str, Any], scene_hint: str) -> str:
         narration = str(scene.get("narration_text") or "").strip()
@@ -300,6 +343,60 @@ class ImageAssetDomain:
                 f"not a generic symbolic background, visual focus: {scene_hint}, scene role: {visual_intent}"
             )
         return "depict the specific narration beat with concrete cause-and-effect visual evidence, not a generic symbolic background"
+
+    def visual_domain_style(self, scene: dict[str, Any]) -> str:
+        domain = self.normalized_visual_domain(scene)
+        if self.is_science_visual_domain(scene):
+            return "scientific documentary realism"
+        if any(term in domain for term in ("miniature", "diorama", "maquete", "model", "craft", "artesanal")):
+            return "miniature craft documentary realism"
+        if any(term in domain for term in ("urban", "urbano", "cidade", "city", "street", "rua")):
+            return "urban documentary realism"
+        if any(term in domain for term in ("historical", "histórico", "historico", "cultural", "culture")):
+            return "cultural documentary realism"
+        if "documentary realism" in domain:
+            return "documentary realism"
+        return "documentary realism"
+
+    def domain_style_directive(self, scene: dict[str, Any]) -> str:
+        style = self.visual_domain_style(scene)
+        if self.is_science_visual_domain(scene):
+            return f"{style}, scientific visualization where appropriate"
+        return f"{style}, domain-compatible visual style, avoid lab-diagram styling unless explicitly required by the narration"
+
+    def remove_incompatible_scientific_style(self, prompt: str, scene: dict[str, Any]) -> str:
+        if self.is_science_visual_domain(scene):
+            return prompt
+        style = self.visual_domain_style(scene)
+        updated = prompt
+        replacements = {
+            "vertical cinematic scientific image": f"vertical cinematic {style}",
+            "clean vertical cinematic scientific image": f"clean vertical cinematic {style}",
+            "scientific visualization": style,
+            "scientific documentary realism": style,
+            "scientific documentary": style,
+            "science documentary frame": style,
+            "cinematic science documentary frame": style,
+            "scientific image": style,
+            "natural/scientific objects": "domain-relevant objects",
+        }
+        for source, target in replacements.items():
+            updated = re.sub(re.escape(source), target, updated, flags=re.IGNORECASE)
+        return " ".join(updated.split())
+
+    def normalized_visual_domain(self, scene: dict[str, Any]) -> str:
+        return " ".join(str(scene.get("visual_domain") or "").replace("_", " ").lower().split())
+
+    def is_science_visual_domain(self, scene: dict[str, Any]) -> bool:
+        domain = self.normalized_visual_domain(scene)
+        if any(term in domain for term in ("science", "scientific", "biology", "biologia", "physics", "fisica", "física", "medical", "anatomy", "anatomia")):
+            return True
+        source_text = " ".join(
+            str(scene.get(key) or "")
+            for key in ("narration_text", "primary_subject", "image_prompt", "topic_hint", "visual_intent")
+        ).lower()
+        science_terms = {"anatomia", "sangue", "hemocianina", "receptores", "adenosina", "neuron", "caffeine", "blood", "oxygen"}
+        return any(term in source_text for term in science_terms)
 
     def visual_hook_directive(self, scene: dict[str, Any], scene_hint: str) -> str:
         return (

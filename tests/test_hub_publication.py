@@ -1,4 +1,5 @@
 from tests.e2e_support import *  # noqa: F403
+from app.publication_ops import build_growth_score
 
 
 def test_artifact_url_maps_file_uri_to_static_route() -> None:
@@ -1414,6 +1415,88 @@ def test_publish_metadata_form_persists_overrides_into_publish_package() -> None
     assert package["description"].startswith("Na Depressão de Danakil")
     assert package["hashtags"] == ["#shorts", "#curiosidades", "#danakil", "#etiopia", "#geografia"]
 
+def test_publish_package_description_uses_metadata_review_hashtags(monkeypatch) -> None:
+    job_id = "publish-package-metadata-review-job"
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="ready_for_upload",
+            seed_theme="Polvos tres coracoes",
+            quality_summary={
+                "script": {"script_quality_gate_pass": True},
+                "scene_plan": {"scene_plan_gate_pass": True},
+                "assets": {"semantic_threshold_pass": True},
+                "subtitles": {"subtitle_gate_pass": True},
+                "render": {"render_gate_pass": True},
+            },
+        )
+        session.add(
+            TopicPlan(
+                topic_id=f"{job_id}-topic",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-topic",
+                canonical_topic="Polvos: tres coracoes e sangue azul",
+                angle="biologia animal",
+                hook_promise="explicar a circulacao do polvo",
+                entities=["polvos"],
+                search_terms=["polvos coracoes"],
+                title_candidates=["Polvos tem tres coracoes"],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"{job_id}-script",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-script",
+                title="Polvos tem tres coracoes",
+                hook="Polvos tem tres coracoes por causa da circulacao.",
+                body_beats=["Dois empurram sangue para as branquias."],
+                ending="O outro ajuda a levar oxigenio pelo corpo.",
+                cta=None,
+                full_narration="Polvos tem tres coracoes por causa da circulacao.",
+                estimated_duration_sec=35,
+                key_facts=["Polvos tem tres coracoes."],
+                token_count=14,
+                language="pt-BR",
+                qa_metrics={},
+                prompt_version="test",
+            )
+        )
+        session.flush()
+        job = session.get(Job, job_id)
+        assert job is not None
+        session.commit()
+
+    metadata_tags = ["#shorts", "#polvos", "#biologia", "#oceano"]
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "passed": False,
+            "final_status": "monetization_review",
+            "hard_blockers": [],
+            "manual_required": ["metadata_review_required"],
+            "metadata_review": {"suggested_hashtags": metadata_tags},
+            "ai_disclosure": {},
+        },
+    )
+    orchestrator.storage.persist_json(job_id, "fact_pack.json", {"status": "verified", "facts": [{"fact_id": "F1"}]})
+    orchestrator.storage.persist_json(job_id, "script.json", {"title": "Polvos tem tres coracoes"})
+    monkeypatch.setattr(orchestrator.monetization_pipeline, "provider_publish_audit", lambda *args, **kwargs: {"passed": True, "reasons": []})
+    monkeypatch.setattr(orchestrator.monetization_pipeline, "publish_readiness_report", lambda *args, **kwargs: {"passed": False, "reasons": []})
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        package = orchestrator.monetization_pipeline.build_publish_package(session, job)
+
+    assert package["hashtags"] == metadata_tags
+    assert "#shorts #polvos #biologia #oceano" in package["description"]
+
 def test_schedule_publication_requires_connected_youtube_in_api_mode(monkeypatch) -> None:
     client = TestClient(app)
     job_id = "scheduled-api-needs-oauth"
@@ -1973,7 +2056,8 @@ def test_publication_dashboard_fragment_focuses_on_growth_analytics() -> None:
     assert response.status_code == 200
     assert "Centro de Crescimento do Canal" in response.text
     assert "Linhas editoriais por retenção" in response.text
-    assert "Base de análise" in response.text
+    assert "Recomendações rápidas" in response.text
+    assert "Dados insuficientes" in response.text
     assert "Polvos prendem atenção até o fim" in response.text
     assert "Sincronizar Analytics" in response.text
     assert "Morcegos enxergam com o som" not in response.text
@@ -2001,6 +2085,96 @@ def test_home_growth_menu_links_to_separate_growth_center() -> None:
     assert 'id="publication-hub" class="publication-shell"' in growth_response.text
     assert "Centro de Crescimento do Canal" in growth_response.text
     assert "Linhas editoriais por retenção" in growth_response.text
+
+def test_growth_score_prioritizes_retention_and_marks_confidence() -> None:
+    score = build_growth_score(
+        {
+            "views": 240,
+            "averageViewPercentage": 86.5,
+            "averageViewDuration": 31.2,
+            "shares": 7,
+            "subscribersGained": 3,
+            "likes": 18,
+            "comments": 2,
+        },
+        fetched_at=datetime(2026, 5, 28, 12, 0, tzinfo=UTC),
+        now=datetime(2026, 5, 28, 13, 0, tzinfo=UTC),
+    )
+
+    assert score["score"] == 86
+    assert score["confidence"] == "confiavel"
+    assert score["confidence_label"] == "confiável"
+    assert score["stale"] is False
+    assert score["sort_key"] == (86, 1, 3, 7, 240)
+
+    low_volume = build_growth_score(
+        {"views": 42, "averageViewPercentage": 91.2, "shares": 12, "subscribersGained": 2},
+        fetched_at=datetime(2026, 5, 25, 12, 0, tzinfo=UTC),
+        now=datetime(2026, 5, 28, 13, 0, tzinfo=UTC),
+    )
+
+    assert low_volume["score"] == 91
+    assert low_volume["confidence"] == "baixa_confianca"
+    assert low_volume["stale"] is True
+
+def test_youtube_analytics_sync_candidates_respect_active_and_archive_windows(monkeypatch) -> None:
+    now = datetime(2026, 5, 28, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(orchestrator.settings, "performance_sync_active_window_days", 45)
+    monkeypatch.setattr(orchestrator.settings, "performance_sync_archive_window_days", 180)
+    monkeypatch.setattr(orchestrator.settings, "performance_sync_batch_limit", 100)
+    rows = [
+        ("growth-candidate-recent", "yt-recent", now - timedelta(days=5), None),
+        ("growth-candidate-fresh", "yt-fresh", now - timedelta(days=8), now - timedelta(hours=2)),
+        ("growth-candidate-weekly", "yt-weekly", now - timedelta(days=60), now - timedelta(days=8)),
+        ("growth-candidate-old", "yt-old", now - timedelta(days=220), None),
+        ("growth-candidate-missing-video", None, now - timedelta(days=4), None),
+    ]
+    with SessionLocal() as session:
+        for job_id, youtube_video_id, published_at, snapshot_at in rows:
+            _create_basic_job(session, job_id=job_id, status="published", seed_theme=job_id)
+            session.add(
+                PublicationSchedule(
+                    schedule_id=f"{job_id}-schedule",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"{job_id}-schedule",
+                    scheduled_for_utc=published_at,
+                    timezone="America/Sao_Paulo",
+                    youtube_visibility="public",
+                    status="published",
+                    published_at=published_at,
+                    youtube_video_id=youtube_video_id,
+                    youtube_url=f"https://www.youtube.com/watch?v={youtube_video_id}" if youtube_video_id else None,
+                )
+            )
+            if snapshot_at:
+                session.add(
+                    YouTubeAnalyticsSnapshot(
+                        snapshot_id=f"{job_id}-snapshot",
+                        job_id=job_id,
+                        schema_version="1.0.0",
+                        content_hash=f"{job_id}-snapshot",
+                        fetched_at=snapshot_at,
+                        youtube_video_id=str(youtube_video_id),
+                        start_date="2026-05-01",
+                        end_date="2026-05-28",
+                        summary_metrics={"views": 120, "averageViewPercentage": 70},
+                        daily_rows=[],
+                        raw_response={},
+                    )
+                )
+        session.commit()
+
+    candidates = orchestrator.publication_ops.youtube_analytics_sync_candidates(now=now, limit=100)
+    by_job = {candidate["job_id"]: candidate for candidate in candidates}
+
+    assert by_job["growth-candidate-recent"]["cadence"] == "daily"
+    assert by_job["growth-candidate-recent"]["reason"] == "no_snapshot"
+    assert by_job["growth-candidate-weekly"]["cadence"] == "weekly"
+    assert by_job["growth-candidate-weekly"]["reason"] == "stale_snapshot"
+    assert "growth-candidate-fresh" not in by_job
+    assert "growth-candidate-old" not in by_job
+    assert "growth-candidate-missing-video" not in by_job
 
 def test_record_performance_metrics_persists_artifact_and_learning_brief() -> None:
     job_id = orchestrator.create_job(
@@ -2463,6 +2637,18 @@ def test_publish_hashtags_use_entities_not_weak_words() -> None:
     assert "#biologia" in tags
     assert "#ficam" not in tags
     assert "#cor" not in tags
+
+def test_publish_hashtags_preserve_ready_script_declared_tags() -> None:
+    script = SimpleNamespace(
+        title="Dioramas: cidades falsas que parecem reais",
+        key_facts=["Uma janela quebrada basta para o cérebro imaginar um prédio inteiro."],
+        qa_metrics={"declared_hashtags": ["#curiosidades", "#shorts", "#diorama", "#miniature", "#facts"]},
+    )
+
+    tags = orchestrator.monetization_pipeline.build_publish_hashtags(None, script)
+
+    assert tags == ["#curiosidades", "#shorts", "#diorama", "#miniature", "#facts"]
+    assert "#cerebro" not in tags
 
 def test_publish_hashtags_use_history_tags_for_templarios() -> None:
     topic_plan = SimpleNamespace(

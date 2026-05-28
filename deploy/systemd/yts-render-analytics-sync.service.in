@@ -1,0 +1,10 @@
+[Unit]
+Description=YTS Render daily YouTube Analytics performance collection
+After=network-online.target tailscaled.service yts-render-hub.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+Environment=YTS_REPO_ROOT=__REPO_ROOT__
+ExecStart=__REPO_ROOT__/.venv/bin/python -m app.cli analytics-sync-run

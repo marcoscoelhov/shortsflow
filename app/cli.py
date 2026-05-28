@@ -18,6 +18,10 @@ def main() -> None:
     run_parser = subparsers.add_parser("automation-run", help="Executa um ciclo diario de automacao")
     run_parser.add_argument("--force", action="store_true", help="Reabre o ciclo da data local atual")
 
+    analytics_parser = subparsers.add_parser("analytics-sync-run", help="Executa a coleta diaria de performance do YouTube")
+    analytics_parser.add_argument("--days", type=int, default=28, help="Janela de Analytics por job, entre 1 e 90 dias")
+    analytics_parser.add_argument("--limit", type=int, default=None, help="Limite de jobs processados nesta execucao")
+
     import_parser = subparsers.add_parser("import-ready-scripts", help="Importa lote de roteiros prontos")
     import_parser.add_argument("path", type=Path, help="Arquivo txt/md com roteiros rotulados")
     import_parser.add_argument("--fact-check-confirmed", action="store_true", help="Assume a confirmacao factual do lote")
@@ -31,6 +35,13 @@ def main() -> None:
         result = service.run_daily_cycle(force=args.force)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if result.get("status") == "failed":
+            sys.exit(1)
+        return
+
+    if args.command == "analytics-sync-run":
+        result = orchestrator.sync_due_youtube_analytics_snapshots(days=args.days, limit=args.limit)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result.get("status") == "partial":
             sys.exit(1)
         return
 

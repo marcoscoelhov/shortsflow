@@ -5,11 +5,37 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.quality.script_gate import MARKUP_PATTERN
-from app.utils import word_tokens
+from app.utils import split_caption_chunks, word_tokens
 
 
-BAD_ENDINGS = {"de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas", "por", "para", "que", "e"}
-P95_DRIFT_THRESHOLD_MS = 900
+BAD_ENDINGS = {
+    "de",
+    "do",
+    "da",
+    "dos",
+    "das",
+    "em",
+    "no",
+    "na",
+    "nos",
+    "nas",
+    "por",
+    "para",
+    "que",
+    "e",
+    "ao",
+    "aos",
+    "à",
+    "às",
+}
+BAD_STARTS = {"a", "o", "as", "os", "um", "uma", "uns", "umas"}
+BAD_START_HEADS = BAD_ENDINGS | BAD_STARTS
+BAD_START_SECOND_TOKENS = {"a", "o", "as", "os", "um", "uma", "uns", "umas", "outro", "outra"}
+SEMANTIC_BAD_ENDINGS = BAD_ENDINGS | {"a", "o", "as", "os", "um", "uma", "uns", "umas", "outro", "outra"}
+SUBTITLE_MAX_CHARS = 32
+SUBTITLE_MAX_LINES = 1
+SUBTITLE_MAX_WORDS = 8
+P95_DRIFT_THRESHOLD_MS = 1200
 MAX_DRIFT_THRESHOLD_MS = 1800
 
 
@@ -43,9 +69,15 @@ class SubtitleGate:
             if re.search(r"\b[a-záàãâéêíóõôúç]$", text, re.IGNORECASE) and text.lower()[-1] not in {"a", "à", "á", "ã", "â", "e", "é", "ê", "o", "ó", "õ", "ô"}:
                 item_reasons.append("possible_truncated_word")
             words = word_tokens(text)
-            if len(words) > 14:
+            if len(words) > SUBTITLE_MAX_WORDS:
                 item_reasons.append("subtitle_too_long")
-            if words and words[-1].lower() in BAD_ENDINGS:
+            if len(split_caption_chunks(text, max_chars=SUBTITLE_MAX_CHARS, max_lines=SUBTITLE_MAX_LINES)) > 1:
+                item_reasons.append("subtitle_wraps_multiple_lines")
+            if any(len(word) > SUBTITLE_MAX_CHARS for word in text.split()):
+                item_reasons.append("subtitle_word_too_wide")
+            if self._has_semantic_orphan_start(words):
+                item_reasons.append("semantic_orphan_start")
+            if words and words[-1].lower() in SEMANTIC_BAD_ENDINGS:
                 item_reasons.append("weak_line_ending")
             start_ms = int(item.get("start_ms", 0))
             end_ms = int(item.get("end_ms", 0))
@@ -64,3 +96,11 @@ class SubtitleGate:
                 "items": item_results,
             },
         )
+
+    def _has_semantic_orphan_start(self, words: list[str]) -> bool:
+        normalized = [word.lower() for word in words]
+        if not normalized:
+            return False
+        if normalized[0] in BAD_STARTS:
+            return True
+        return len(normalized) <= 2 and normalized[0] in BAD_START_HEADS and len(normalized) > 1 and normalized[1] in BAD_START_SECOND_TOKENS

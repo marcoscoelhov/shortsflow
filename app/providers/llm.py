@@ -12,11 +12,20 @@ from openai import OpenAI
 from app.config import get_settings
 from app.editorial.research_brief import build_research_brief
 from app.editorial.retention import EDITORIAL_PROMPT_VERSION, build_retention_map, build_visual_opening_brief
+from app.editorial.visual_contract import build_mock_visual_contract, normalize_visual_contract_payload
 from app.providers.errors import ProviderFailure
 from app.utils import avg_words_per_sentence, max_words_single_sentence, sentence_split, tokenize, word_tokens
 
 
 VISUAL_INTENTS = [
+    "deceptive_establishing",
+    "visual_contrast",
+    "visual_evidence",
+    "mechanism_proof",
+    "scale_deception",
+    "scale_reveal",
+    "payoff_reveal",
+    "loop_close_reframe",
     "subject_closeup",
     "subject_in_context",
     "process_or_mechanism",
@@ -41,6 +50,9 @@ class LLMProvider(Protocol):
         ...
 
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+    def generate_visual_contract(self, script: dict[str, Any]) -> dict[str, Any]:
         ...
 
     def repair_script(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any]:
@@ -248,6 +260,9 @@ class MockCreativeProvider:
         repaired["qa_metrics"] = metrics
         return repaired
 
+    def generate_visual_contract(self, script: dict[str, Any]) -> dict[str, Any]:
+        return build_mock_visual_contract(script, self.settings.schema_version)
+
     def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {"passed": True, "reasons": [], "retention_score": 0.85, "metadata_score": 0.85, "factual_score": 0.85, "provider": "mock"}
 
@@ -264,6 +279,11 @@ class MockCreativeProvider:
         )
         scenes: list[dict[str, Any]] = []
         cursor = 0
+        visual_contract = script.get("visual_contract") if isinstance(script.get("visual_contract"), dict) else {}
+        hook_frame = visual_contract.get("hook_frame") if isinstance(visual_contract.get("hook_frame"), dict) else {}
+        payoff_frame = visual_contract.get("payoff_frame") if isinstance(visual_contract.get("payoff_frame"), dict) else {}
+        hook_visual_intent = str(hook_frame.get("recommended_visual_intent") or "deceptive_establishing")
+        payoff_visual_intent = str(payoff_frame.get("recommended_visual_intent") or "loop_close_reframe")
         for idx in range(scene_count):
             start = cursor
             end = min(total_words, start + chunk_size)
@@ -271,6 +291,12 @@ class MockCreativeProvider:
                 end = total_words
             chunk_words = words[start:end]
             sentence = " ".join(chunk_words) or script["full_narration"]
+            if idx == 0 and visual_contract:
+                visual_intent = hook_visual_intent
+            elif idx == scene_count - 1 and visual_contract:
+                visual_intent = payoff_visual_intent
+            else:
+                visual_intent = VISUAL_INTENTS[idx % len(VISUAL_INTENTS)]
             scenes.append(
                 {
                     "scene_id": f"scene-{idx + 1}",
@@ -279,12 +305,12 @@ class MockCreativeProvider:
                     "token_start": start,
                     "token_end": max(end - 1, start),
                     "estimated_duration_sec": round(script["estimated_duration_sec"] / scene_count, 2),
-                    "visual_intent": VISUAL_INTENTS[idx % len(VISUAL_INTENTS)],
+                    "visual_intent": visual_intent,
                     "primary_subject": subject,
                     "topic_hint": subject,
                     "image_prompt": (
-                        f"vertical cinematic scientific illustration of {subject}, "
-                        f"showing {VISUAL_INTENTS[idx % len(VISUAL_INTENTS)]}, "
+                        f"vertical cinematic documentary illustration of {subject}, "
+                        f"showing {visual_intent}, "
                         "focused on the described phenomenon, no random people, no readable text, no watermark, no collage"
                     ),
                     "fallback_queries": [subject, f"{subject} fenomeno", f"{subject} espaco"],
@@ -454,6 +480,7 @@ Mapeamento editorial obrigatório:
 - body_beats equivale aos Beats em escalada; mantenha o loop aberto nos beats iniciais e entregue o payoff no último beat ou no último terço da narração
 - ending equivale ao Fechamento; ele deve recontextualizar o hook e provocar replay mental
 - hashtags não fazem parte deste JSON e não devem aparecer nos campos narrados
+- se Entrada JSON.structured_viral_contract existir, trate esse contrato como obrigatório: o JSON interno deve satisfazer Título, Hook, Loop, Beats, Payoff, Fechamento e Hashtags conforme os internal_target descritos no contrato
 
 Regras:
 - 35 a 55 segundos
@@ -515,6 +542,49 @@ Regras:
         payload = self._json_completion(prompt)
         payload["qa_metrics"] = {**payload.get("qa_metrics", {}), "source_provider": self.provider_name}
         return payload
+
+    def generate_visual_contract(self, script: dict[str, Any]) -> dict[str, Any]:
+        prompt = f"""
+Crie um Contrato Visual do Roteiro para orientar o plano de cenas de um YouTube Short.
+Entrada JSON do roteiro aprovado: {json.dumps(script, ensure_ascii=False)}
+
+Fonte da verdade:
+- O roteiro aprovado nao pode ser reescrito.
+- O contrato deve interpretar visualmente hook, loop, beats, payoff e fechamento.
+- O contrato deve evitar regra deterministica por palavra; use leitura semantica do roteiro.
+- A Imagem de Hook Visual precisa funcionar sem audio em menos de um segundo.
+- Nao revele payoff visual antes do ultimo terco quando o roteiro depender de surpresa.
+- Se o tema nao for cientifico, nao force linguagem de scientific visualization.
+
+Responda JSON estrito com exatamente estes campos:
+visual_thesis, visual_domain, visual_world,
+hook_frame, loop_policy, beat_progression, payoff_frame
+
+Schema:
+- visual_thesis: frase curta com a ideia visual central do Short
+- visual_domain: dominio visual apropriado ao roteiro, ex: science documentary realism, craft documentary realism, urban miniature realism
+- visual_world: continuidade visual leve que une as cenas
+- hook_frame: objeto com promise, positive_read, recommended_visual_intent, must_show, must_hide, negative_reads, readability_test
+- loop_policy: objeto com open_question, forbidden_early_reveal
+- beat_progression: lista de objetos com role, source_text, visual_job, recommended_visual_intent, must_show, must_hide
+- payoff_frame: objeto com reveal, recommended_visual_intent, must_connect_to_hook
+
+Regras:
+- recommended_visual_intent deve usar um destes valores quando aplicavel: {json.dumps(VISUAL_INTENTS, ensure_ascii=False)}
+- must_show, must_hide, negative_reads, forbidden_early_reveal devem ser listas de strings.
+- positive_read diz qual leitura visual correta o primeiro frame precisa provocar.
+- negative_reads lista leituras visuais erradas que devem ser evitadas.
+- beat_progression deve cobrir os body_beats principais.
+- Todos os textos devem estar em pt-BR, exceto nomes proprios, termos tecnicos ou nomes de dominios visuais consolidados.
+- Sem markdown.
+"""
+        payload = self._json_completion(prompt)
+        return normalize_visual_contract_payload(
+            payload,
+            script=script,
+            schema_version=get_settings().schema_version,
+            source_provider=self.provider_name,
+        )
 
     def repair_script(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any]:
         prompt = f"""
@@ -601,6 +671,7 @@ Roteiro JSON: {json.dumps(script, ensure_ascii=False)}
 Fonte da verdade editorial:
 - O prompt viral do hub orienta a geração do roteiro.
 - A partir daqui, a fonte da verdade é full_narration + key_facts + hook/body_beats/ending do roteiro já aprovado.
+- Se visual_contract existir no Roteiro JSON, ele é a fonte da verdade visual para hook, loop, beats, payoff, domínio visual e Intenção Visual.
 - Não reescreva, aumente, encurte, dramatize ou invente novos beats narrativos.
 - Cenas, imagens e legendas devem apenas segmentar e visualizar o roteiro aprovado.
 
@@ -612,6 +683,10 @@ Retention roles permitidos: visual_hook, proof_or_tension, escalation, turn_or_p
 Cobertura total dos tokens.
 Regras de segmentação obrigatórias:
 - scene order=1 deve ter retention_role="visual_hook" e usar visual_opening como brief visual sem inventar novo beat.
+- se visual_contract.hook_frame.recommended_visual_intent existir, scene order=1 deve usar esse visual_intent.
+- scene order=1 deve respeitar visual_contract.hook_frame.must_show, must_hide, negative_reads e positive_read.
+- cenas antes do payoff nao podem revelar itens de visual_contract.loop_policy.forbidden_early_reveal.
+- a ultima cena deve respeitar visual_contract.payoff_frame.reveal e recommended_visual_intent quando existirem.
 - a ultima cena deve ter retention_role="loop_close" quando cobrir o fechamento.
 - narration_text deve corresponder ao trecho de full_narration coberto por token_start/token_end.
 - cada cena deve ter pelo menos 5 palavras em narration_text, exceto se for a última CTA curta.
@@ -624,8 +699,9 @@ Excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas e nomes d
 
 Regras obrigatorias para image_prompt:
 - image_prompt MUST be written in English only, even when the narration is pt-BR
-- describe only a vertical cinematic visual scene with natural/scientific objects
+- describe only a vertical cinematic visual scene with objects that fit visual_contract.visual_domain when present
 - every image_prompt must depict the concrete fact in that scene's narration_text, not just the generic visual_intent
+- if visual_contract exists, every image_prompt must obey the scene's visual_intent and the visual contract; do not override it with generic scientific styling
 - scene with order=1 is the visual hook frame: make it instantly legible in under one second, with a concrete result, movement, contrast, threat, paradox, or impossible-looking factual consequence tied to the hook and its own narration_text
 - for scene order=1, avoid calm establishing shots, generic beauty shots, neutral portraits, abstract ambience, or vague scientific background
 - for scene order=1, do not reveal a later payoff unless that payoff is already present in its narration_text
@@ -914,6 +990,33 @@ class ResilientCreativeProvider:
                     raise
         raise ProviderFailure("llm_registry", f"script generation failed across providers: {'; '.join(failures)}")
 
+    def generate_visual_contract(self, script: dict[str, Any]) -> dict[str, Any]:
+        candidates = self._visual_contract_candidates()
+        if not candidates:
+            raise ProviderFailure("llm_registry", "no visual contract llm provider is available")
+        failures: list[str] = []
+        for index, (role, provider, timeout_sec) in enumerate(candidates):
+            try:
+                payload = self._run_primary_with_timeout(
+                    lambda provider=provider: provider.generate_visual_contract(script),
+                    timeout_sec=timeout_sec,
+                )
+                payload["source_provider_role"] = role
+                payload["visual_contract_fallback_used"] = index > 0
+                if failures:
+                    payload["visual_contract_fallback_reasons"] = failures
+                return payload
+            except concurrent.futures.TimeoutError as exc:
+                message = f"{getattr(provider, 'provider_name', role)} visual contract timed out after {timeout_sec}s"
+                failures.append(message)
+                if self.strict_minimax_validation and provider is self.primary:
+                    raise ProviderFailure(getattr(provider, "failure_provider_name", role), message) from exc
+            except ProviderFailure as exc:
+                failures.append(str(exc))
+                if self.strict_minimax_validation and provider is self.primary:
+                    raise
+        raise ProviderFailure("llm_registry", f"visual contract generation failed across providers: {'; '.join(failures)}")
+
     def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self.primary:
             timeout_sec = float(getattr(self.settings, "llm_publish_audit_timeout_sec", self.settings.minimax_text_timeout_sec))
@@ -1065,6 +1168,24 @@ class ResilientCreativeProvider:
             ("draft", getattr(self, "script_draft_provider", None), draft_timeout),
         ]:
             if not provider or id(provider) in seen:
+                continue
+            seen.add(id(provider))
+            candidates.append((role, provider, timeout_sec))
+        return candidates
+
+    def _visual_contract_candidates(self) -> list[tuple[str, LLMProvider, float]]:
+        primary_timeout = float(getattr(self.settings, "llm_scene_plan_timeout_sec", self.settings.minimax_scene_plan_timeout_sec))
+        fallback_timeout = primary_timeout
+        if self.strict_minimax_validation:
+            return [("primary", self.primary, primary_timeout)] if self.primary else []
+        candidates: list[tuple[str, LLMProvider, float]] = []
+        seen: set[int] = set()
+        for role, provider, timeout_sec in [
+            ("primary", self.primary, primary_timeout),
+            ("scene", getattr(self, "scene_provider", None), fallback_timeout),
+            ("fallback", self.fallback, self._provider_timeout_sec(self.fallback, fallback_timeout) if self.fallback else fallback_timeout),
+        ]:
+            if not provider or id(provider) in seen or not hasattr(provider, "generate_visual_contract"):
                 continue
             seen.add(id(provider))
             candidates.append((role, provider, timeout_sec))

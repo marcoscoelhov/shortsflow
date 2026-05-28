@@ -20,6 +20,10 @@ from app.utils import file_uri, iso_now, new_id, path_from_uri, read_json, stabl
 from app.youtube_api import YouTubeIntegrationError
 
 
+GROWTH_MIN_CONFIDENT_VIEWS = 100
+GROWTH_STALE_AFTER_HOURS = 48
+
+
 RETENTION_HARD_FAILURE_STATUSES = {
     "failed",
     "script_quality_failed",
@@ -61,6 +65,65 @@ def _optional_int_value(value: Any) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _metric_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _metric_int(value: Any) -> int | None:
+    number = _metric_float(value)
+    if number is None:
+        return None
+    return int(number)
+
+
+def build_growth_score(
+    summary_metrics: dict[str, Any],
+    *,
+    fetched_at: datetime | None = None,
+    now: datetime | None = None,
+    minimum_views: int = GROWTH_MIN_CONFIDENT_VIEWS,
+) -> dict[str, Any]:
+    views = _metric_int(summary_metrics.get("views")) or 0
+    retention_percent = _metric_float(summary_metrics.get("averageViewPercentage"))
+    shares = _metric_int(summary_metrics.get("shares")) or 0
+    subscribers_gained = _metric_int(summary_metrics.get("subscribersGained")) or 0
+    likes = _metric_int(summary_metrics.get("likes")) or 0
+    comments = _metric_int(summary_metrics.get("comments")) or 0
+    average_view_duration = _metric_float(summary_metrics.get("averageViewDuration"))
+    score = round(retention_percent) if retention_percent is not None else None
+    fetched_at_utc = _as_utc(fetched_at)
+    stale = False
+    if fetched_at_utc is not None:
+        stale = (_as_utc(now or utcnow()) or utcnow()) - fetched_at_utc > timedelta(hours=GROWTH_STALE_AFTER_HOURS)
+    confidence = "confiavel" if views >= minimum_views else "baixa_confianca"
+    return {
+        "score": score,
+        "confidence": confidence,
+        "confidence_label": "confiável" if confidence == "confiavel" else "baixa confiança",
+        "minimum_views": minimum_views,
+        "stale": stale,
+        "views": views,
+        "retention_percent": round(retention_percent, 2) if retention_percent is not None else None,
+        "average_view_duration": round(average_view_duration, 2) if average_view_duration is not None else None,
+        "shares": shares,
+        "subscribers_gained": subscribers_gained,
+        "likes": likes,
+        "comments": comments,
+        "sort_key": (
+            score if score is not None else -1,
+            1 if views >= minimum_views else 0,
+            subscribers_gained,
+            shares,
+            views,
+        ),
+    }
 
 
 class PublicationOperations:
@@ -1550,3 +1613,96 @@ class PublicationOperations:
             job.quality_summary = quality_summary
         self._append_event(job_id, "youtube.analytics_snapshot_synced", "succeeded", {"days": days, "youtube_video_id": youtube_video_id})
         return self._serialize_for_json(snapshot_payload)
+
+    def youtube_analytics_sync_candidates(
+        self,
+        *,
+        now: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        now_utc = _as_utc(now or utcnow()) or utcnow()
+        active_window_days = int(self.settings.performance_sync_active_window_days)
+        archive_window_days = int(self.settings.performance_sync_archive_window_days)
+        batch_limit = int(limit or self.settings.performance_sync_batch_limit)
+        candidates: list[dict[str, Any]] = []
+        with session_scope() as session:
+            schedules = session.scalars(
+                select(PublicationSchedule)
+                .where(PublicationSchedule.status == "published")
+                .where(PublicationSchedule.youtube_video_id.is_not(None))
+                .order_by(PublicationSchedule.published_at.desc(), PublicationSchedule.updated_at.desc())
+            ).all()
+            for schedule in schedules:
+                youtube_video_id = str(schedule.youtube_video_id or "").strip()
+                if not youtube_video_id:
+                    continue
+                published_at = _as_utc(schedule.published_at) or _as_utc(schedule.scheduled_for_utc) or _as_utc(schedule.created_at) or now_utc
+                age_days = max(0, (now_utc - published_at).days)
+                if age_days > archive_window_days:
+                    continue
+                if age_days <= active_window_days:
+                    stale_after = timedelta(hours=24)
+                    cadence = "daily"
+                else:
+                    stale_after = timedelta(days=7)
+                    cadence = "weekly"
+                latest_snapshot = session.scalars(
+                    select(YouTubeAnalyticsSnapshot)
+                    .where(YouTubeAnalyticsSnapshot.job_id == schedule.job_id)
+                    .order_by(YouTubeAnalyticsSnapshot.fetched_at.desc())
+                    .limit(1)
+                ).first()
+                latest_fetched_at = _as_utc(latest_snapshot.fetched_at) if latest_snapshot else None
+                if latest_fetched_at and now_utc - latest_fetched_at < stale_after:
+                    continue
+                candidates.append(
+                    {
+                        "job_id": schedule.job_id,
+                        "youtube_video_id": youtube_video_id,
+                        "published_at": published_at.isoformat(),
+                        "age_days": age_days,
+                        "cadence": cadence,
+                        "latest_snapshot_at": latest_fetched_at.isoformat() if latest_fetched_at else None,
+                        "reason": "no_snapshot" if latest_fetched_at is None else "stale_snapshot",
+                    }
+                )
+                if len(candidates) >= batch_limit:
+                    break
+        return candidates
+
+    def sync_due_youtube_analytics_snapshots(self, *, days: int = 28, limit: int | None = None) -> dict[str, Any]:
+        if not self.settings.performance_collection_enabled:
+            return {
+                "status": "skipped",
+                "reason": "performance_collection_disabled",
+                "synced": [],
+                "failed": [],
+                "candidates": [],
+            }
+        status = self.youtube.connection_status(None)
+        if not status.analytics_connected:
+            return {
+                "status": "skipped",
+                "reason": "youtube_analytics_not_connected",
+                "missing_items": status.analytics_missing_items or status.missing_items,
+                "synced": [],
+                "failed": [],
+                "candidates": [],
+            }
+        candidates = self.youtube_analytics_sync_candidates(limit=limit)
+        synced: list[dict[str, Any]] = []
+        failed: list[dict[str, Any]] = []
+        for candidate in candidates:
+            job_id = str(candidate["job_id"])
+            try:
+                self.sync_youtube_analytics_snapshot(job_id, days=days)
+            except Exception as exc:  # keep one bad video from stopping the daily collection batch
+                failed.append({"job_id": job_id, "error": str(exc), "reason": candidate.get("reason")})
+                continue
+            synced.append({"job_id": job_id, "reason": candidate.get("reason"), "cadence": candidate.get("cadence")})
+        return {
+            "status": "completed" if not failed else "partial",
+            "synced": synced,
+            "failed": failed,
+            "candidates": candidates,
+        }

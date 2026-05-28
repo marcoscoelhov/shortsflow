@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     automation_max_generation_attempts: int = 3
     automation_max_publish_attempts_per_job: int = 3
     automation_score_threshold: float = 0.82
+    performance_collection_enabled: bool = True
+    performance_sync_active_window_days: int = 45
+    performance_sync_archive_window_days: int = 180
+    performance_sync_batch_limit: int = 10
     minimax_commercial_rights_confirmed: bool = False
     edge_tts_commercial_rights_confirmed: bool = False
     minimax_rights_evidence_url: str | None = None
@@ -244,6 +248,26 @@ class Settings(BaseSettings):
         if not 0 <= value <= 1:
             raise ValueError("automation_score_threshold must be between 0 and 1")
         return value
+
+    @field_validator("performance_sync_active_window_days", "performance_sync_archive_window_days")
+    @classmethod
+    def validate_performance_sync_windows(cls, value: int) -> int:
+        if not 1 <= value <= 365:
+            raise ValueError("performance sync windows must be between 1 and 365")
+        return value
+
+    @field_validator("performance_sync_batch_limit")
+    @classmethod
+    def validate_performance_sync_batch_limit(cls, value: int) -> int:
+        if not 1 <= value <= 100:
+            raise ValueError("performance_sync_batch_limit must be between 1 and 100")
+        return value
+
+    @model_validator(mode="after")
+    def validate_performance_sync_window_order(self) -> "Settings":
+        if self.performance_sync_active_window_days > self.performance_sync_archive_window_days:
+            raise ValueError("performance_sync_active_window_days must be <= performance_sync_archive_window_days")
+        return self
 
     @field_validator("tiktok_privacy_level")
     @classmethod

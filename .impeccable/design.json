@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-27T23:30:45Z",
+  "title": "Design System: YTS Render",
+  "extensions": {
+    "colorMeta": {
+      "obsidian-bg": {
+        "role": "neutral",
+        "displayName": "Obsidian Background",
+        "canonical": "#09090b",
+        "tonalRamp": ["#09090b", "#111114", "#1f1f22"]
+      },
+      "slate-chrome": {
+        "role": "neutral",
+        "displayName": "Slate Chrome",
+        "canonical": "#0f172a",
+        "tonalRamp": ["#0f172a", "#1e293b", "#334155"]
+      },
+      "ember-accent": {
+        "role": "primary",
+        "displayName": "Ember Accent",
+        "canonical": "#ff5540",
+        "tonalRamp": ["#7f1d1d", "#ff5540", "#ffb4a8"]
+      },
+      "muted-rose": {
+        "role": "neutral",
+        "displayName": "Muted Rose",
+        "canonical": "#b8a5a2",
+        "tonalRamp": ["#7b6b69", "#b8a5a2", "#e4d3d0"]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Major app and surface titles only."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel, row, and compact section titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Readable operational prose and form content."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Compact metadata, field labels, and eyebrow text."
+      }
+    },
+    "elevation": {
+      "sidebar-cast": "10px 0 44px rgba(0, 0, 0, 0.16)",
+      "panel-depth": "0 24px 80px rgba(0, 0, 0, 0.36)",
+      "dialog-depth": "0 30px 90px rgba(0, 0, 0, 0.58)",
+      "action-lift": "0 12px 38px rgba(255, 85, 64, 0.18)"
+    },
+    "motion": {
+      "durationFast": "160ms",
+      "durationBase": "240ms",
+      "easing": "ease-out",
+      "rule": "Motion conveys state only. Avoid decorative page-load choreography."
+    },
+    "breakpoints": {
+      "desktopToTablet": "980px",
+      "mobile": "520px"
+    },
+    "rules": [
+      "Decision first: next action beats diagnostics.",
+      "Visible UI copy stays in Portuguese.",
+      "No internal slugs in operator-facing labels.",
+      "No gradient text, glassmorphism, purple-blue AI styling, or thick side-stripe accents.",
+      "Use modals only for focused interruption or compact global tools."
+    ]
+  }
+}

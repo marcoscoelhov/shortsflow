@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -14,6 +16,31 @@ GENERIC_PROMPT_MARKERS = {
     "showing process or mechanism",
 }
 
+NEGATION_TOKENS = {"no", "not", "without", "sem", "nao", "nunca", "avoid", "evitar"}
+
+VISUAL_TERM_ALIASES = {
+    "arvore": {"arvore", "arvores", "tree", "trees"},
+    "arvores": {"arvore", "arvores", "tree", "trees"},
+    "building": {"building", "buildings", "predio", "predios", "edificio", "edificios"},
+    "buildings": {"building", "buildings", "predio", "predios", "edificio", "edificios"},
+    "edificio": {"building", "buildings", "predio", "predios", "edificio", "edificios"},
+    "edificios": {"building", "buildings", "predio", "predios", "edificio", "edificios"},
+    "human": {"human", "humano", "humana", "mao", "maos", "hand", "hands"},
+    "humana": {"human", "humano", "humana", "mao", "maos", "hand", "hands"},
+    "mao": {"human", "humano", "humana", "mao", "maos", "hand", "hands"},
+    "maos": {"human", "humano", "humana", "mao", "maos", "hand", "hands"},
+    "predio": {"building", "buildings", "predio", "predios", "edificio", "edificios"},
+    "predios": {"building", "buildings", "predio", "predios", "edificio", "edificios"},
+    "quadra": {"quadra", "quadras", "quarteirao", "quarteiroes", "block", "blocks", "cityblock", "cityblocks"},
+    "quadras": {"quadra", "quadras", "quarteirao", "quarteiroes", "block", "blocks", "cityblock", "cityblocks"},
+    "quarteirao": {"quadra", "quadras", "quarteirao", "quarteiroes", "block", "blocks", "cityblock", "cityblocks"},
+    "quarteiroes": {"quadra", "quadras", "quarteirao", "quarteiroes", "block", "blocks", "cityblock", "cityblocks"},
+    "rua": {"rua", "ruas", "street", "streets", "road", "roads"},
+    "ruas": {"rua", "ruas", "street", "streets", "road", "roads"},
+    "street": {"rua", "ruas", "street", "streets", "road", "roads"},
+    "streets": {"rua", "ruas", "street", "streets", "road", "roads"},
+}
+
 
 @dataclass(frozen=True)
 class SceneGateResult:
@@ -23,13 +50,20 @@ class SceneGateResult:
 
 
 class ScenePlanGate:
-    def validate(self, scenes: list[dict[str, Any]], expected_scene_count: int) -> SceneGateResult:
+    def validate(
+        self,
+        scenes: list[dict[str, Any]],
+        expected_scene_count: int,
+        visual_contract: dict[str, Any] | None = None,
+    ) -> SceneGateResult:
         reasons: list[str] = []
         scene_results: list[dict[str, Any]] = []
         if not scenes:
             reasons.append("missing_scenes")
         if scenes and len(scenes) != expected_scene_count:
             reasons.append("scene_count_mismatch")
+        contract_report = self._validate_visual_contract_alignment(scenes, visual_contract or {})
+        reasons.extend(contract_report["reasons"])
         for scene in scenes:
             scene_id = str(scene.get("scene_id") or "unknown")
             scene_reasons: list[str] = []
@@ -60,5 +94,141 @@ class ScenePlanGate:
         return SceneGateResult(
             passed=not reasons,
             reasons=reasons,
-            metrics={"scene_count": len(scenes), "expected_scene_count": expected_scene_count, "scenes": scene_results},
+            metrics={
+                "scene_count": len(scenes),
+                "expected_scene_count": expected_scene_count,
+                "scenes": scene_results,
+                "visual_contract_alignment": contract_report,
+            },
         )
+
+    def _validate_visual_contract_alignment(self, scenes: list[dict[str, Any]], visual_contract: dict[str, Any]) -> dict[str, Any]:
+        if not scenes or not visual_contract:
+            return {"checked": False, "reasons": []}
+        reasons: list[str] = []
+        ordered = sorted(scenes, key=lambda scene: int(scene.get("order", 0) or 0))
+        first = ordered[0]
+        hook_frame = visual_contract.get("hook_frame") if isinstance(visual_contract.get("hook_frame"), dict) else {}
+        loop_policy = visual_contract.get("loop_policy") if isinstance(visual_contract.get("loop_policy"), dict) else {}
+        payoff_frame = visual_contract.get("payoff_frame") if isinstance(visual_contract.get("payoff_frame"), dict) else {}
+        expected_hook_intent = _normalized_text(hook_frame.get("recommended_visual_intent"))
+        first_intent = _normalized_text(first.get("visual_intent"))
+        if str(first.get("retention_role") or "").strip().lower() != "visual_hook":
+            reasons.append("scene-1:visual_contract_hook_role_mismatch")
+        if expected_hook_intent and first_intent != expected_hook_intent:
+            reasons.append("scene-1:visual_contract_hook_intent_mismatch")
+        first_corpus = _scene_corpus(first)
+        must_show = _text_list(hook_frame.get("must_show"))
+        if must_show and not any(_contains_required_term(first_corpus, item) for item in must_show):
+            reasons.append("scene-1:visual_contract_hook_must_show_missing")
+        for item in _text_list(hook_frame.get("must_hide")):
+            if _contains_forbidden_term(first_corpus, item):
+                reasons.append("scene-1:visual_contract_hook_reveals_hidden_element")
+                break
+        early_scenes = [scene for scene in ordered[:-1] if str(scene.get("retention_role") or "").strip().lower() not in {"turn_or_payoff", "loop_close"}]
+        for item in _text_list(loop_policy.get("forbidden_early_reveal")):
+            if any(_contains_forbidden_term(_scene_corpus(scene), item) for scene in early_scenes):
+                reasons.append("visual_contract_forbidden_early_reveal")
+                break
+        expected_payoff_intent = _normalized_text(payoff_frame.get("recommended_visual_intent"))
+        if expected_payoff_intent:
+            payoff_candidates = [
+                scene
+                for scene in ordered
+                if str(scene.get("retention_role") or "").strip().lower() in {"turn_or_payoff", "loop_close"}
+            ]
+            if payoff_candidates and not any(_normalized_text(scene.get("visual_intent")) == expected_payoff_intent for scene in payoff_candidates):
+                reasons.append("visual_contract_payoff_intent_mismatch")
+        return {
+            "checked": True,
+            "reasons": reasons,
+            "hook_expected_visual_intent": expected_hook_intent,
+            "hook_actual_visual_intent": first_intent,
+            "hook_must_show_count": len(must_show),
+            "forbidden_early_reveal_count": len(_text_list(loop_policy.get("forbidden_early_reveal"))),
+        }
+
+
+def _scene_corpus(scene: dict[str, Any]) -> str:
+    return _normalized_text(
+        " ".join(
+            str(scene.get(key) or "")
+            for key in ("narration_text", "primary_subject", "topic_hint", "image_prompt", "visual_intent")
+        )
+    )
+
+
+def _text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item or "").strip()]
+
+
+def _contains_required_term(corpus: str, term: str) -> bool:
+    normalized = _normalized_text(term)
+    if not normalized:
+        return False
+    if normalized in corpus:
+        return True
+    parts = [
+        part
+        for part in re.split(r"\s*(?:,|;|\be\b|\band\b|\bou\b|\bor\b)\s*", normalized)
+        if part.strip()
+    ]
+    if len(parts) > 1:
+        matches = sum(1 for part in parts if _contains_simple_term(corpus, part, loose=True))
+        return matches >= min(2, len(parts))
+    return _contains_simple_term(corpus, normalized, loose=True)
+
+
+def _contains_forbidden_term(corpus: str, term: str) -> bool:
+    normalized = _normalized_text(term)
+    if not normalized:
+        return False
+    if normalized in corpus:
+        return True
+    return _contains_simple_term(corpus, normalized, loose=False)
+
+
+def _contains_simple_term(corpus: str, term: str, *, loose: bool) -> bool:
+    if term in corpus:
+        return True
+    tokens = [token for token in term.split() if len(token) >= 4]
+    if not tokens:
+        return False
+    matched = 0
+    corpus_tokens = corpus.split()
+    for token in tokens:
+        aliases = VISUAL_TERM_ALIASES.get(token, {token})
+        if loose and any(alias in corpus for alias in aliases):
+            matched += 1
+        elif not loose and any(_alias_present_unnegated(corpus_tokens, alias) for alias in aliases):
+            matched += 1
+    if loose and len(tokens) >= 4:
+        return matched >= 2
+    return matched >= max(1, len(tokens) - 1)
+
+
+def _contains_term(corpus: str, term: str) -> bool:
+    return _contains_required_term(corpus, term)
+
+
+def _alias_present_unnegated(corpus_tokens: list[str], alias: str) -> bool:
+    alias_tokens = alias.split()
+    if not alias_tokens:
+        return False
+    for index in range(0, len(corpus_tokens) - len(alias_tokens) + 1):
+        if corpus_tokens[index : index + len(alias_tokens)] != alias_tokens:
+            continue
+        before = corpus_tokens[max(0, index - 5) : index]
+        if any(token in NEGATION_TOKENS for token in before):
+            continue
+        return True
+    return False
+
+
+def _normalized_text(value: Any) -> str:
+    text = str(value or "").replace("_", " ").lower()
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())

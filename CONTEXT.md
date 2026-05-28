@@ -24,6 +24,22 @@ _Avoid_: origem editorial, provider, status, etapa do pipeline
 O arquivo de midia produzido por um **Job de Video** para revisao humana.
 _Avoid_: video, output, render
 
+**Pauta Viral Estruturada**:
+O contrato editorial de entrada usado para transformar um tema ou titulo em roteiro de Short, organizado em Titulo, Hook, Loop, Beats, Payoff, Fechamento e Hashtags.
+_Avoid_: prompt solto, instrucoes livres, formato opcional
+
+**Legenda de Uma Linha**:
+A apresentacao de legenda em que cada bloco visivel no **Arquivo de Video Final** ocupa uma unica linha visual sem perder o alinhamento com a narracao.
+_Avoid_: legenda quebrada, legenda em duas linhas, texto comprimido sem sincronizacao
+
+**Sincronia Temporal da Legenda**:
+A relacao entre o momento em que a legenda aparece no **Arquivo de Video Final** e o trecho correspondente da narracao.
+_Avoid_: corte legivel, estetica da legenda, cobertura textual
+
+**Corte Semantico da Legenda**:
+A divisao da legenda em blocos que preservam unidades legiveis de fala, evitando fragmentos soltos que prejudicam a compreensao.
+_Avoid_: drift temporal, quebra puramente por caractere, legenda tecnicamente alinhada mas ruim de ler
+
 **Revisao Humana**:
 A avaliacao feita por uma pessoa antes de aprovar, rejeitar, agendar ou publicar um **Job de Video**.
 _Avoid_: aprovado, publicavel, upload pronto
@@ -56,6 +72,14 @@ _Avoid_: olhar so views, analisar video sem roteiro, diagnostico sem contexto ed
 Uma coleta diaria de metricas dos **Jobs de Video** publicados, usada para atualizar rankings sem gerar interpretacao editorial pesada.
 _Avoid_: relatorio completo diario, consulta em tempo real na tela, decisao por dado stale invisivel
 
+**Coleta de Performance Ativa**:
+A permissao operacional para executar **Snapshot Diario de Performance** recorrente independentemente da pausa de criacao ou publicacao automatizada.
+_Avoid_: automacao de criacao, upload automatico, pausar aprendizado junto com geracao
+
+**Janela Ativa de Performance**:
+O periodo recente em que **Jobs de Video** publicados continuam elegiveis para **Snapshot Diario de Performance** recorrente.
+_Avoid_: sincronizar todo historico todo dia, tratar video antigo como prioridade diaria, coleta sem limite
+
 **Relatorio Semanal de Crescimento**:
 Uma sintese interpretativa do **Assistente de Crescimento do Canal** que transforma snapshots recentes em diagnostico, **Linhas Editoriais Vencedoras** e **Propostas de Crescimento**.
 _Avoid_: alerta solto, dashboard de numero, opiniao sem periodo definido
@@ -76,6 +100,10 @@ _Avoid_: copiar video, tema repetido, template fixo, viral por chute
 A metrica que mais pesa para identificar uma **Linha Editorial Vencedora**, priorizando retencao em vez de alcance bruto.
 _Avoid_: views como criterio unico, likes isolados, impressao subjetiva
 
+**Score de Crescimento**:
+Uma pontuacao comparativa de performance que prioriza retencao, usa volume como confianca e usa compartilhamentos e inscritos ganhos como desempate.
+_Avoid_: ranking por views, nota de vaidade, score de monetizacao
+
 **Objetivo Primario de Crescimento**:
 A meta editorial do **Assistente de Crescimento do Canal**, priorizando retencao e replay em Shorts antes de alcance bruto ou monetizacao.
 _Avoid_: crescer por views isoladas, perseguir RPM primeiro, otimizar para vaidade
@@ -84,6 +112,10 @@ _Avoid_: crescer por views isoladas, perseguir RPM primeiro, otimizar para vaida
 O patamar minimo de visualizacoes usado antes de tratar um resultado de performance como evidência confiavel.
 _Avoid_: premiar video com amostra pequena, ignorar volume, confiar em poucos views
 
+**Base Minima de Crescimento**:
+O conjunto minimo de snapshots e **Jobs de Video** com volume confiavel necessario antes de gerar um **Relatorio Semanal de Crescimento** por IA.
+_Avoid_: relatorio com amostra fraca, diagnostico por poucos videos, IA opinando sem dados
+
 **Assistente de Crescimento do Canal**:
 A orientacao por IA baseada em metricas reais, historico editorial e objetivos do canal para recomendar melhorias acionaveis nos proximos **Jobs de Video**.
 _Avoid_: chatbot generico, opiniao sem dados, tutorial solto de YouTube
@@ -91,6 +123,10 @@ _Avoid_: chatbot generico, opiniao sem dados, tutorial solto de YouTube
 **Proposta de Crescimento**:
 Uma sugestao acionavel do **Assistente de Crescimento do Canal** para criar ou melhorar um **Job de Video**, exigindo confirmacao humana antes de virar trabalho.
 _Avoid_: job automatico, ideia solta, recomendacao sem acao, geracao cega
+
+**Recomendacao Rapida de Crescimento**:
+Uma orientacao deterministica e imediata do **Centro de Crescimento do Canal** baseada em metricas recentes, sem interpretacao generativa por IA.
+_Avoid_: relatorio por IA, opiniao editorial pesada, conselho recalculado por LLM a cada refresh
 
 **Roteiro Sugerido por Crescimento**:
 Um **Roteiro Pronto** rascunhado por uma **Proposta de Crescimento**, aguardando revisao humana antes de entrar no **Banco de Roteiros Prontos** ou virar **Job de Video**.
@@ -176,6 +212,10 @@ _Avoid_: acao da fila, roteiro pronto, instrucao por job
 Um roteiro gerado pelo sistema que deve seguir a estrutura editorial canonica de Titulo, Hook, Loop, Beats, Payoff, Fechamento e Hashtags, com hook forte, loop mental, escalada, payoff tardio e fechamento de replay.
 _Avoid_: texto livre, lista plana de fatos, aula curta, resumo enciclopedico
 
+**Contrato Visual do Roteiro**:
+A leitura semantica visual de um **Roteiro Viral Estruturado** ou **Roteiro Pronto**, usada para preservar promessa de hook, tensao de loop, escalada de beats, payoff tardio e fechamento de replay nas cenas.
+_Avoid_: prompt de imagem solto, regra deterministica por palavra, estilo visual generico
+
 **Janela Alvo de Duracao do Short**:
 A duracao desejada do **Arquivo de Video Final** para Shorts gerados automaticamente, entre 35 e 55 segundos.
 _Avoid_: duracao fora de 35-55 segundos, duracao minima tecnica sem contexto editorial, video curto demais para validar retencao
@@ -215,6 +255,18 @@ _Avoid_: fato declarado, fonte factual, CTA
 **Imagem de Hook Visual**:
 A primeira imagem de um **Job de Video**, criada para tornar o hook visualmente compreensivel antes do espectador depender do audio.
 _Avoid_: thumbnail, capa, poster, imagem generica de abertura
+
+**Plano de Cenas**:
+A divisao visual de um roteiro aprovado em cenas ordenadas, cada uma com funcao narrativa, trecho de narracao e orientacao visual.
+_Avoid_: prompt de imagem isolado, storyboard livre, roteiro reescrito
+
+**Intencao Visual**:
+A funcao editorial que uma cena cumpre visualmente dentro de um **Plano de Cenas**.
+_Avoid_: estilo de camera, categoria tecnica solta, descricao estetica
+
+**Validacao Visual de Asset**:
+A avaliacao de uma imagem gerada contra o **Contrato Visual do Roteiro** e a funcao narrativa da cena que ela representa.
+_Avoid_: score semantico generico, qualidade estetica isolada, aprovacao por provider
 
 **Fato Declarado**:
 Uma afirmacao factual em um **Roteiro Pronto** cuja revisao e assumida por quem enviou o roteiro.
@@ -455,6 +507,13 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Um **Banco de Roteiros Prontos** pode ser apresentado como **Controle Recolhido de Banco de Roteiros** na **Barra Lateral Global do Hub**.
 - Uma **Configuracao Global de Prompt Viral** deve ser acessada pela **Barra Lateral Global do Hub**.
 - **Roteiro Viral Estruturado** deve tratar a **Configuracao Global de Prompt Viral** como contrato de estrutura e gate, nao apenas como sugestao de estilo.
+- Um **Contrato Visual do Roteiro** deriva do roteiro aprovado, nao do tema inicial isolado.
+- Um **Contrato Visual do Roteiro** orienta a **Imagem de Hook Visual** sem reescrever o roteiro aprovado.
+- O **Planejador de Cenas** deve respeitar o **Contrato Visual do Roteiro** ao produzir o **Plano de Cenas**.
+- Um **Plano de Cenas** deve atribuir **Intencao Visual** coerente com o **Contrato Visual do Roteiro**.
+- Um **Plano de Cenas** deve passar por validacao antes de orientar o **Gerador de Imagens**.
+- Um asset visual deve passar por **Validacao Visual de Asset** antes de sustentar a **Elegibilidade Automatizada**.
+- A **Imagem de Hook Visual** deve ser avaliada pela **Validacao Visual de Asset** com mais rigor que cenas intermediarias.
 - **Janela Alvo de Duracao do Short** deve orientar roteiro, TTS e render de **Jobs de Video** automaticos.
 - Uma **Barra Lateral Global do Hub** pode exibir **Status Compacto da Automacao**.
 - **Status Compacto da Automacao** pode alternar a **Pausa Global da Automacao**.
@@ -520,6 +579,9 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Uma **Trilha Aprovada** deve ter origem e licenca rastreaveis antes de entrar em um **Job de Video**.
 - **Populacao Automatizada do Banco de Trilhas** deve criar trilhas locais, nao baixar musicas de catalogos externos.
 - **Fallback de Musica por API** nao deve ocorrer sem configuracao explicita.
+- Uma **Proposta de Crescimento** pode produzir um **Roteiro Sugerido por Crescimento**.
+- Um **Roteiro Sugerido por Crescimento** exige revisao humana antes de entrar no **Banco de Roteiros Prontos** ou virar **Job de Video**.
+- Uma **Proposta de Crescimento** nao deve criar **Job de Video** diretamente.
 
 ## Example dialogue
 

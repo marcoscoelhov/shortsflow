@@ -1,16 +1,16 @@
 {% set growth_return_to = growth_return_to|default('/publication-hub') %}
 <section id="publication-hub" class="publication-shell" hx-get="/publication-hub/fragment" hx-trigger="every 30s" hx-swap="outerHTML">
-  <section class="panel publication-hero">
+  <section class="panel publication-hero growth-hero">
     <div>
-      <p class="eyebrow">YouTube</p>
+      <p class="eyebrow">YouTube Analytics</p>
       <h2>Centro de Crescimento do Canal</h2>
-      <p class="publication-note">Retenção e replay guiam as próximas decisões; publicação fica como operação de suporte.</p>
+      <p class="publication-note">Score por retenção, confiança por volume e ações para o próximo lote editorial.</p>
     </div>
-    <div class="publication-metrics">
-      <span><strong>{{ growth.top_performers|length }}</strong> linhas com snapshot</span>
-      <span><strong>{{ growth.snapshot_count }}</strong> coletas salvas</span>
+    <div class="publication-metrics growth-data-strip">
+      <span><strong>{{ growth.reliable_snapshot_count }}</strong> confiáveis</span>
+      <span><strong>{{ growth.low_confidence_count }}</strong> baixa confiança</span>
+      <span><strong>{{ growth.sync_candidates_count }}</strong> para coletar</span>
       <span><strong>{{ growth.jobs_missing_analytics }}</strong> sem Analytics</span>
-      <span><strong>{{ metrics.published_count }}</strong> publicados</span>
     </div>
   </section>
   {% if request.query_params.get("analytics_error") %}
@@ -21,48 +21,50 @@
   {% elif request.query_params.get("analytics_synced") %}
   <section class="panel status-banner">
     <strong>Analytics sincronizado</strong>
-    <p>O snapshot foi salvo e já entra no ranking por retenção.</p>
+    <p>{{ request.query_params.get("analytics_synced") }} snapshot(s) entraram na base de crescimento.</p>
   </section>
   {% endif %}
 
   <section class="publication-grid growth-grid">
-    <article class="panel publication-panel growth-focus-panel">
-      <p class="eyebrow">Assistente de crescimento</p>
-      <h3>Linhas editoriais por retenção</h3>
-      <p class="publication-note">Janela de {{ growth.window_days }} dias. Volume mínimo de confiança: {{ growth.volume_minimum }} views.</p>
-      <div class="publication-list">
-        {% for entry in growth.top_performers %}
-        <a class="publication-item publication-link growth-performer" href="/jobs/{{ entry.job_id }}">
-          <div>
-            <strong>{{ entry.title }}</strong>
-            <small>{{ entry.canonical_topic or "tema sem classificação" }}</small>
-          </div>
-          <div class="growth-score-strip">
-            <span><strong>{{ entry.retention_percent if entry.retention_percent is not none else "-" }}%</strong><small>retenção</small></span>
-            <span><strong>{{ entry.views if entry.views is not none else "-" }}</strong><small>views</small></span>
-            <span><strong>{{ entry.shares if entry.shares is not none else "-" }}</strong><small>shares</small></span>
-            <span><strong>{{ entry.subscribers_gained if entry.subscribers_gained is not none else "-" }}</strong><small>inscritos</small></span>
-          </div>
-          {% if entry.hook %}<p>{{ entry.hook }}</p>{% endif %}
-        </a>
+    <article class="panel publication-panel growth-action-panel">
+      <div class="panel-heading-row">
+        <div>
+          <p class="eyebrow">O que fazer agora</p>
+          <h3>Recomendações rápidas</h3>
+        </div>
+        <form method="post" action="/youtube-analytics/sync-due" class="inline-form">
+          <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+          <input type="hidden" name="days" value="{{ growth.window_days }}">
+          <button type="submit" class="ghost" {% if not growth.collection_enabled or growth.sync_candidates_count == 0 %}disabled{% endif %}>Coletar pendentes</button>
+        </form>
+      </div>
+      <div class="growth-recommendations">
+        {% for item in growth.recommendations %}
+        <div class="growth-recommendation">
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.body }}</p>
+          <small>{{ item.impact }}</small>
+          {% if item.action_kind == "open_job" and item.job_id %}
+          <a class="text-link" href="/jobs/{{ item.job_id }}">{{ item.action_label }}</a>
+          {% endif %}
+        </div>
         {% else %}
         <div class="publication-item empty">
-          <strong>Nenhum snapshot de Analytics ainda.</strong>
-          <p>Sincronize um Job publicado para começar o ranking por retenção.</p>
+          <strong>Nenhuma recomendação rápida ainda.</strong>
+          <p>Sincronize publicações recentes para formar a primeira base confiável.</p>
         </div>
         {% endfor %}
       </div>
     </article>
 
     <article class="panel publication-panel growth-action-panel">
-      <p class="eyebrow">Próxima ação</p>
-      <h3>Coletar dados confiáveis</h3>
-      <p class="publication-note">O relatório por IA entra depois que houver snapshots suficientes. Neste corte, o centro separa Analytics de publicação e salva a base factual.</p>
+      <p class="eyebrow">Estado dos dados</p>
+      <h3>Coleta de performance</h3>
       <div class="stats-grid compact">
-        <div><strong>Fonte de dados</strong><span>{% if integration.analytics_connected %}Analytics conectado{% else %}Analytics pendente{% endif %}</span></div>
-        <div><strong>Sem leitura</strong><span>{{ growth.jobs_missing_analytics }} vídeos</span></div>
-        <div><strong>Última coleta</strong><span>{{ growth.last_snapshot_at[:16] if growth.last_snapshot_at else "-" }}</span></div>
-        <div><strong>Janela</strong><span>{{ growth.window_days }} dias</span></div>
+        <div><strong>Fonte</strong><span>{% if integration.analytics_connected %}Analytics conectado{% else %}Analytics pendente{% endif %}</span></div>
+        <div><strong>Coleta</strong><span>{% if growth.collection_enabled %}ativa{% else %}pausada{% endif %}</span></div>
+        <div><strong>Última leitura</strong><span>{{ growth.last_snapshot_at[:16] if growth.last_snapshot_at else "-" }}</span></div>
+        <div><strong>Janela ativa</strong><span>{{ growth.active_window_days }} dias</span></div>
       </div>
       {% if integration.analytics_missing_items %}
       <div class="publication-list">
@@ -82,11 +84,53 @@
     </article>
   </section>
 
+  <section class="panel publication-panel growth-focus-panel">
+    <div class="panel-heading-row">
+      <div>
+        <p class="eyebrow">Ranking editorial</p>
+        <h3>Linhas editoriais por retenção</h3>
+      </div>
+      <p class="publication-note">Score = retenção média. Volume mínimo de confiança: {{ growth.volume_minimum }} views.</p>
+    </div>
+    <div class="growth-ranking">
+      {% for entry in growth.top_performers %}
+      <a class="publication-item publication-link growth-performer" href="/jobs/{{ entry.job_id }}">
+        <div class="growth-performer-main">
+          <div>
+            <strong>{{ entry.title }}</strong>
+            <small>{{ entry.canonical_topic or "tema sem classificação" }}</small>
+          </div>
+          <span class="growth-confidence {% if entry.confidence == 'confiavel' %}is-reliable{% else %}is-low{% endif %}">{{ entry.confidence_label }}</span>
+        </div>
+        <div class="growth-score-strip">
+          <span><strong>{{ entry.score if entry.score is not none else "-" }}</strong><small>score</small></span>
+          <span><strong>{{ entry.retention_percent if entry.retention_percent is not none else "-" }}%</strong><small>retenção</small></span>
+          <span><strong>{{ entry.views if entry.views is not none else "-" }}</strong><small>views</small></span>
+          <span><strong>{{ entry.shares if entry.shares is not none else "-" }}</strong><small>shares</small></span>
+          <span><strong>{{ entry.subscribers_gained if entry.subscribers_gained is not none else "-" }}</strong><small>inscritos</small></span>
+          <span><strong>{% if entry.stale %}sim{% else %}não{% endif %}</strong><small>desatualizado</small></span>
+        </div>
+        {% if entry.hook %}<p>{{ entry.hook }}</p>{% endif %}
+      </a>
+      {% else %}
+      <div class="publication-item empty">
+        <strong>Nenhum snapshot de Analytics ainda.</strong>
+        <p>Sincronize um Job publicado para começar o ranking por retenção.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
   <section class="publication-grid growth-grid">
     <article class="panel publication-panel">
-      <p class="eyebrow">Base de análise</p>
-      <h3>Vídeos publicados para sincronizar</h3>
-      <p class="publication-note">Esta lista alimenta o ranking e as recomendações; agenda, conexão do canal e publicação ficam nas áreas operacionais.</p>
+      <p class="eyebrow">Dados insuficientes</p>
+      <h3>Pendências que não são performance ruim</h3>
+      <div class="stats-grid compact">
+        <div><strong>Sem Analytics</strong><span>{{ growth.jobs_missing_analytics }}</span></div>
+        <div><strong>Baixa confiança</strong><span>{{ growth.low_confidence_count }}</span></div>
+        <div><strong>Desatualizados</strong><span>{{ growth.stale_snapshot_count }}</span></div>
+        <div><strong>Coletas salvas</strong><span>{{ growth.snapshot_count }}</span></div>
+      </div>
       <div class="publication-list">
         {% for entry in recent_publications %}
         <div class="publication-item">
@@ -98,7 +142,7 @@
           {% if entry.schedule.youtube_video_id %}
           <form method="post" action="/jobs/{{ entry.job_id }}/youtube-analytics/sync" class="inline-form">
             <input type="hidden" name="return_to" value="{{ growth_return_to }}">
-            <input type="hidden" name="days" value="28">
+            <input type="hidden" name="days" value="{{ growth.window_days }}">
             <button type="submit" class="ghost">Sincronizar Analytics</button>
           </form>
           {% endif %}
@@ -109,6 +153,22 @@
           <p>Quando houver vídeos publicados, eles entram aqui para coleta de Analytics.</p>
         </div>
         {% endfor %}
+      </div>
+    </article>
+
+    <article class="panel publication-panel">
+      <p class="eyebrow">Relatório semanal</p>
+      <h3>Assistente de crescimento</h3>
+      <p class="publication-note">A geração por IA fica bloqueada até existir base mínima de crescimento.</p>
+      <div class="stats-grid compact">
+        <div><strong>Status</strong><span>{{ growth.weekly_report.status_label }}</span></div>
+        <div><strong>Snapshots</strong><span>{{ growth.snapshot_count }}/{{ growth.weekly_report.minimum_snapshots }}</span></div>
+        <div><strong>Confiáveis</strong><span>{{ growth.reliable_snapshot_count }}/{{ growth.weekly_report.minimum_reliable_jobs }}</span></div>
+        <div><strong>Janela</strong><span>{{ growth.window_days }} dias</span></div>
+      </div>
+      <div class="publication-item empty">
+        <strong>Próxima etapa preparada</strong>
+        <p>O relatório semanal vai transformar a base em diagnóstico, linhas vencedoras e roteiros sugeridos revisáveis.</p>
       </div>
     </article>
   </section>

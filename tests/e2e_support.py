@@ -77,6 +77,7 @@ from app.providers.music import LocalMusicBankProvider, MiniMaxBackgroundMusicPr
 from app.providers.tts import LocalSpeechFallbackProvider  # noqa: E402
 
 from app.quality.asset_gate import AssetGate  # noqa: E402
+from app.quality.asset_visual_gate import AssetVisualGate  # noqa: E402
 
 from app.quality.background_music_gate import BackgroundMusicGate  # noqa: E402
 
@@ -86,7 +87,7 @@ from app.quality.scene_gate import ScenePlanGate  # noqa: E402
 
 from app.quality.script_gate import ScriptQualityGate  # noqa: E402
 
-from app.quality.subtitle_gate import SubtitleGate  # noqa: E402
+from app.quality.subtitle_gate import SUBTITLE_MAX_CHARS, SUBTITLE_MAX_LINES, SUBTITLE_MAX_WORDS, SubtitleGate  # noqa: E402
 
 from app.utils import parse_srt, split_caption_chunks, utcnow, word_tokens, wrap_caption  # noqa: E402
 

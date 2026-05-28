@@ -19,6 +19,7 @@ from app.job_origin import (
     resolve_job_origin,
 )
 from app.models import AutomationAttempt, ChannelPublication, FallbackEvent, Job, PublicationSchedule, RenderOutput, SceneAsset, Script, TopicPlan, TopicRequest, YouTubeAnalyticsSnapshot
+from app.publication_ops import build_growth_score
 
 COMMON_SCHEDULE_TIMEZONES = [
     "UTC",
@@ -31,6 +32,7 @@ JOB_STATUS_LABELS = {
     "queued": "Na fila",
     "running": "Gerando vídeo",
     "script_quality_failed": "Falhou no roteiro",
+    "visual_contract_quality_failed": "Falhou no contrato visual",
     "scene_plan_quality_failed": "Falhou nas cenas",
     "asset_quality_failed": "Falhou nos assets",
     "subtitle_quality_failed": "Falhou nas legendas",
@@ -605,6 +607,7 @@ class HubContext:
             if job.job_id in latest_snapshots:
                 continue
             summary = dict(snapshot.summary_metrics or {})
+            score = build_growth_score(summary, fetched_at=snapshot.fetched_at)
             latest_snapshots[job.job_id] = {
                 "job_id": job.job_id,
                 "title": self._publication_title(job, topic_request, script),
@@ -614,19 +617,42 @@ class HubContext:
                 "start_date": snapshot.start_date,
                 "end_date": snapshot.end_date,
                 "youtube_video_id": snapshot.youtube_video_id,
-                "views": self._metric_number(summary.get("views"), as_int=True),
-                "retention_percent": self._metric_number(summary.get("averageViewPercentage")),
-                "average_view_duration": self._metric_number(summary.get("averageViewDuration")),
-                "shares": self._metric_number(summary.get("shares"), as_int=True),
-                "subscribers_gained": self._metric_number(summary.get("subscribersGained"), as_int=True),
-                "likes": self._metric_number(summary.get("likes"), as_int=True),
-                "comments": self._metric_number(summary.get("comments"), as_int=True),
+                "score": score["score"],
+                "confidence": score["confidence"],
+                "confidence_label": score["confidence_label"],
+                "stale": score["stale"],
+                "views": score["views"],
+                "retention_percent": score["retention_percent"],
+                "average_view_duration": score["average_view_duration"],
+                "shares": score["shares"],
+                "subscribers_gained": score["subscribers_gained"],
+                "likes": score["likes"],
+                "comments": score["comments"],
+                "_sort_key": score["sort_key"],
             }
         top_performers = sorted(
             latest_snapshots.values(),
-            key=lambda item: (float(item.get("retention_percent") or -1), int(item.get("views") or 0), int(item.get("shares") or 0)),
+            key=lambda item: item.get("_sort_key") or (-1, 0, 0, 0, 0),
             reverse=True,
         )[:5]
+        for item in top_performers:
+            item.pop("_sort_key", None)
+        all_snapshot_items = list(latest_snapshots.values())
+        reliable_snapshot_count = sum(1 for item in all_snapshot_items if item.get("confidence") == "confiavel")
+        low_confidence_count = sum(1 for item in all_snapshot_items if item.get("confidence") != "confiavel")
+        stale_snapshot_count = sum(1 for item in all_snapshot_items if item.get("stale"))
+        try:
+            sync_candidates = self.orchestrator.youtube_analytics_sync_candidates()
+        except Exception:
+            sync_candidates = []
+        recommendations = self._growth_quick_recommendations(
+            top_performers=top_performers,
+            jobs_missing_analytics=jobs_missing_analytics,
+            reliable_snapshot_count=reliable_snapshot_count,
+            low_confidence_count=low_confidence_count,
+            stale_snapshot_count=stale_snapshot_count,
+            sync_candidates_count=len(sync_candidates),
+        )
         return {
             "integration": self._youtube_integration_context(request),
             "tiktok_integration": self._tiktok_integration_context(),
@@ -637,10 +663,24 @@ class HubContext:
             "growth": {
                 "window_days": 28,
                 "volume_minimum": 100,
+                "active_window_days": self.settings.performance_sync_active_window_days,
+                "archive_window_days": self.settings.performance_sync_archive_window_days,
+                "collection_enabled": self.settings.performance_collection_enabled,
+                "sync_candidates_count": len(sync_candidates),
                 "snapshot_count": analytics_snapshot_count,
                 "jobs_missing_analytics": jobs_missing_analytics,
+                "reliable_snapshot_count": reliable_snapshot_count,
+                "low_confidence_count": low_confidence_count,
+                "stale_snapshot_count": stale_snapshot_count,
                 "top_performers": top_performers,
+                "recommendations": recommendations,
                 "last_snapshot_at": next(iter(latest_snapshots.values()), {}).get("fetched_at") if latest_snapshots else None,
+                "weekly_report": {
+                    "ready": reliable_snapshot_count >= 3 and analytics_snapshot_count >= 5,
+                    "minimum_snapshots": 5,
+                    "minimum_reliable_jobs": 3,
+                    "status_label": "base suficiente" if reliable_snapshot_count >= 3 and analytics_snapshot_count >= 5 else "dados insuficientes",
+                },
             },
             "metrics": {
                 "unscheduled_approved_count": unscheduled_approved_count,
@@ -665,6 +705,92 @@ class HubContext:
         if as_int:
             return int(number)
         return round(number, 2)
+
+    def _growth_quick_recommendations(
+        self,
+        *,
+        top_performers: list[dict[str, object]],
+        jobs_missing_analytics: int,
+        reliable_snapshot_count: int,
+        low_confidence_count: int,
+        stale_snapshot_count: int,
+        sync_candidates_count: int,
+    ) -> list[dict[str, object]]:
+        recommendations: list[dict[str, object]] = []
+        if sync_candidates_count:
+            recommendations.append(
+                {
+                    "title": "Atualizar coleta pendente",
+                    "body": f"{sync_candidates_count} publicação(ões) já podem receber novo snapshot de performance.",
+                    "impact": "Base mais fresca para ranking e recomendações.",
+                    "action_label": "Rodar coleta",
+                    "action_kind": "manual_sync_batch",
+                }
+            )
+        if jobs_missing_analytics:
+            recommendations.append(
+                {
+                    "title": "Fechar vínculos sem Analytics",
+                    "body": f"{jobs_missing_analytics} publicação(ões) ainda não têm snapshot salvo.",
+                    "impact": "Aumenta cobertura antes do relatório semanal.",
+                    "action_label": "Ver pendências",
+                    "action_kind": "review_missing_analytics",
+                }
+            )
+        best = top_performers[0] if top_performers else None
+        if best and best.get("confidence") == "confiavel":
+            recommendations.append(
+                {
+                    "title": "Criar variação da linha vencedora",
+                    "body": str(best.get("canonical_topic") or best.get("title") or "linha com melhor retenção"),
+                    "impact": f"Score {best.get('score') or '-'} com amostra confiável.",
+                    "action_label": "Abrir referência",
+                    "action_kind": "open_job",
+                    "job_id": best.get("job_id"),
+                }
+            )
+        elif best:
+            recommendations.append(
+                {
+                    "title": "Aguardar volume antes de repetir",
+                    "body": str(best.get("canonical_topic") or best.get("title") or "linha ainda sem amostra suficiente"),
+                    "impact": "Evita tratar poucos views como padrão vencedor.",
+                    "action_label": "Acompanhar",
+                    "action_kind": "open_job",
+                    "job_id": best.get("job_id"),
+                }
+            )
+        if reliable_snapshot_count < 3:
+            recommendations.append(
+                {
+                    "title": "Coletar mais base confiável",
+                    "body": f"{reliable_snapshot_count} de 3 Jobs confiáveis para liberar relatório semanal.",
+                    "impact": "Reduz chance de diagnóstico por amostra fraca.",
+                    "action_label": "Continuar coleta",
+                    "action_kind": "collect_more",
+                }
+            )
+        if low_confidence_count and len(recommendations) < 5:
+            recommendations.append(
+                {
+                    "title": "Separar baixa confiança",
+                    "body": f"{low_confidence_count} snapshot(s) abaixo do volume mínimo de 100 views.",
+                    "impact": "Mantém views baixos fora do ranking decisivo.",
+                    "action_label": "Ver ranking",
+                    "action_kind": "review_low_confidence",
+                }
+            )
+        if stale_snapshot_count and len(recommendations) < 5:
+            recommendations.append(
+                {
+                    "title": "Revisar snapshots desatualizados",
+                    "body": f"{stale_snapshot_count} leitura(s) têm mais de 48h.",
+                    "impact": "Evita decidir com dado antigo dentro da janela ativa.",
+                    "action_label": "Atualizar",
+                    "action_kind": "manual_sync_batch",
+                }
+            )
+        return recommendations[:5]
 
     def _parse_calendar_month(self, month: str | None) -> date:
         normalized = str(month or "").strip()

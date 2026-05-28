@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "impeccable:detect": "CI=1 npx impeccable detect --json http://127.0.0.1:8080/ http://127.0.0.1:8080/publication-hub http://127.0.0.1:8080/library http://127.0.0.1:8080/settings http://127.0.0.1:8080/calendar"
+  },
   "dependencies": {
     "playwright": "^1.59.1"
   }

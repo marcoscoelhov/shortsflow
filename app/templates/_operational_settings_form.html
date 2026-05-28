@@ -12,10 +12,17 @@
     <p class="section-note">Ajustes operacionais não secretos. Segredos e boot continuam na configuração de ambiente.</p>
   </div>
   {% endif %}
+  <div class="operational-settings-intro">
+    <strong>{{ operational_settings.saved_count }} ajuste{% if operational_settings.saved_count != 1 %}s{% endif %} salvo{% if operational_settings.saved_count != 1 %}s{% endif %} no hub</strong>
+    <span>Abra somente a área que precisa alterar agora.</span>
+  </div>
   <div class="operational-settings-grid">
     {% for group in operational_settings.groups %}
-    <section class="operational-settings-group" aria-label="{{ group.name }}">
-      <h5>{{ group.name }}</h5>
+    <details class="operational-settings-group" {% if group.name == "Publicacao" %}open{% endif %}>
+      <summary>
+        <span>{{ group.name }}</span>
+        <small>{{ group.fields|length }} controle{% if group.fields|length != 1 %}s{% endif %}</small>
+      </summary>
       <div class="settings-body">
         {% for field in group.fields %}
         {% if field.input_type == "select" %}
@@ -57,7 +64,7 @@
         {% endif %}
         {% endfor %}
       </div>
-    </section>
+    </details>
     {% endfor %}
   </div>
   <div class="button-row operational-settings-actions">

@@ -20,6 +20,7 @@ class ScenePipeline(BasePipeline):
         assert script and topic_plan
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
         script_artifact = self._script_artifact_payload(job.job_id)
+        visual_contract = self._visual_contract_artifact_payload(job.job_id)
         script_dict = {
             "title": script.title,
             "hook": script.hook,
@@ -32,6 +33,7 @@ class ScenePipeline(BasePipeline):
             "qa_metrics": script.qa_metrics,
             "retention_map": script_artifact.get("retention_map") if isinstance(script_artifact.get("retention_map"), dict) else {},
             "visual_opening": script_artifact.get("visual_opening") if isinstance(script_artifact.get("visual_opening"), dict) else {},
+            "visual_contract": visual_contract,
             "canonical_topic": topic_plan.canonical_topic,
             "angle": topic_plan.angle,
             "hub_viral_prompt_source": request.notes if request else None,
@@ -51,8 +53,8 @@ class ScenePipeline(BasePipeline):
                 scenes = self.annotate_scene_retention_roles(scenes, script_dict)
             if not scenes or scenes[0]["token_start"] != 0 or scenes[-1]["token_end"] != len(tokens) - 1:
                 raise RecoverableStepError("scene coverage invalid")
-        scenes = [self.normalize_scene_semantics(scene, topic_plan.canonical_topic) for scene in scenes]
-        scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count)
+        scenes = [self.normalize_scene_semantics(scene, topic_plan.canonical_topic, visual_contract=visual_contract) for scene in scenes]
+        scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count, visual_contract=visual_contract)
         if not scene_gate.passed:
             fallback_planner = self.scene_fallback_planner()
             if fallback_planner is not None:
@@ -60,8 +62,8 @@ class ScenePipeline(BasePipeline):
                 self.storage.persist_json(job.job_id, "scene_plan_raw.json", self._serialize_for_json({"scenes": scenes}))
                 scenes = self.normalize_scene_token_coverage(scenes, script.full_narration)
                 scenes = self.annotate_scene_retention_roles(scenes, script_dict)
-                scenes = [self.normalize_scene_semantics(scene, topic_plan.canonical_topic) for scene in scenes]
-                scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count)
+                scenes = [self.normalize_scene_semantics(scene, topic_plan.canonical_topic, visual_contract=visual_contract) for scene in scenes]
+                scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count, visual_contract=visual_contract)
             if not scene_gate.passed:
                 self.storage.persist_json(
                     job.job_id,
@@ -90,6 +92,16 @@ class ScenePipeline(BasePipeline):
 
     def _script_artifact_payload(self, job_id: str) -> dict[str, Any]:
         path = self.storage.job_dir(job_id, create=False) / "script.json"
+        if not path.exists():
+            return {}
+        try:
+            payload = read_json(path)
+        except Exception:  # noqa: BLE001
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _visual_contract_artifact_payload(self, job_id: str) -> dict[str, Any]:
+        path = self.storage.job_dir(job_id, create=False) / "visual_contract.json"
         if not path.exists():
             return {}
         try:
@@ -164,19 +176,31 @@ class ScenePipeline(BasePipeline):
             normalized.append(updated)
         return normalized
 
-    def normalize_scene_semantics(self, scene: dict[str, Any], canonical_topic: str) -> dict[str, Any]:
+    def normalize_scene_semantics(
+        self,
+        scene: dict[str, Any],
+        canonical_topic: str,
+        visual_contract: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         topic_text = canonical_topic.replace("_", " ").strip()
         normalized = dict(scene)
+        contract = visual_contract if isinstance(visual_contract, dict) else {}
         normalized["scene_id"] = str(scene.get("scene_id") or normalized.get("scene_id") or "scene-1")
         primary_subject = str(scene.get("primary_subject") or topic_text).replace("_", " ").strip()
         normalized["primary_subject"] = primary_subject or topic_text
         normalized["topic_hint"] = str(scene.get("topic_hint") or topic_text).replace("_", " ").strip() or topic_text
+        visual_domain = str(scene.get("visual_domain") or contract.get("visual_domain") or "").strip()
+        if visual_domain:
+            normalized["visual_domain"] = visual_domain
+        visual_world = str(scene.get("visual_world") or contract.get("visual_world") or "").strip()
+        if visual_world:
+            normalized["visual_world"] = visual_world
         base_queries = [
             query.replace("_", " ").strip()
             for query in scene.get("fallback_queries", [topic_text, f"{topic_text} astronomia", f"{topic_text} espaco"])
         ]
         normalized["fallback_queries"] = self.fallback_query_variants(topic_text, base_queries)
-        normalized["image_prompt"] = self.owner.asset_pipeline.image_assets.semantic_english_image_prompt(scene, topic_text, primary_subject)
+        normalized["image_prompt"] = self.owner.asset_pipeline.image_assets.semantic_english_image_prompt(normalized, topic_text, primary_subject)
         return normalized
 
     def fallback_query_variants(self, topic_text: str, base_queries: list[str]) -> list[str]:

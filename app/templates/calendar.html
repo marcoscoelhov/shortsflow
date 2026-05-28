@@ -21,7 +21,17 @@
       <p class="eyebrow">Mês exibido</p>
       <h3>{{ month_label }}</h3>
     </div>
-    <a class="button-link ghost-link" href="/calendar?month={{ next_month }}">Próximo mês</a>
+    <div class="calendar-toolbar-actions">
+      <button
+        type="button"
+        class="calendar-selected-action"
+        data-open-calendar-schedule
+        data-calendar-date=""
+        data-calendar-label=""
+        disabled
+      >Escolha um dia</button>
+      <a class="button-link ghost-link" href="/calendar?month={{ next_month }}">Próximo mês</a>
+    </div>
   </div>
 
   <div class="calendar-legend">
@@ -47,10 +57,24 @@
     <div class="calendar-head">Dom</div>
     {% for week in weeks %}
       {% for day in week %}
-      <article class="calendar-cell {% if not day.is_current_month %}muted{% endif %} {% if day.entries %}has-events{% endif %}">
+      <article class="calendar-cell {% if not day.is_current_month %}muted{% endif %} {% if day.entries %}has-events{% endif %}" data-calendar-date-cell="{{ day.iso_date }}">
         <header>
           <div class="calendar-day-label">
+            {% if day.is_current_month %}
+            <button
+              type="button"
+              class="calendar-day-button"
+              data-select-calendar-day
+              data-calendar-date="{{ day.iso_date }}"
+              data-calendar-label="{{ day.day_number }} de {{ month_label }}"
+              aria-label="Selecionar {{ day.iso_date }} para agendar"
+              aria-pressed="false"
+            >
+              <time datetime="{{ day.iso_date }}">{{ day.day_number }}</time>
+            </button>
+            {% else %}
             <time datetime="{{ day.iso_date }}">{{ day.day_number }}</time>
+            {% endif %}
             {% if day.entries %}
             <small>{{ day.entries|length }} item{% if day.entries|length != 1 %}s{% endif %}</small>
             {% endif %}
@@ -58,12 +82,12 @@
           {% if day.is_current_month %}
           <button
             type="button"
-            class="calendar-add-button"
+            class="calendar-cell-action ghost"
             data-open-calendar-schedule
             data-calendar-date="{{ day.iso_date }}"
             data-calendar-label="{{ day.day_number }} de {{ month_label }}"
-            aria-label="Agendar job em {{ day.iso_date }}"
-          >+</button>
+            hidden
+          >Agendar</button>
           {% endif %}
         </header>
         <div class="calendar-items" data-calendar-items>
@@ -150,6 +174,9 @@
     const selectedItems = dialog.querySelector("[data-calendar-selected-items]");
     const timeInput = dialog.querySelector("[data-calendar-time]");
     const chipsEl = dialog.querySelector("[data-calendar-time-chips]");
+    const selectedAction = document.querySelector("[data-open-calendar-schedule].calendar-selected-action");
+    const dayButtons = Array.from(document.querySelectorAll("[data-select-calendar-day]"));
+    const cellActions = Array.from(document.querySelectorAll(".calendar-cell-action"));
     const quickTimes = ["09:00", "11:00", "13:00", "15:00", "18:00", "20:00", "22:00"];
 
     const renderTimeChips = () => {
@@ -170,6 +197,30 @@
       });
     };
 
+    const selectDay = (button) => {
+      if (!selectedAction || !button) return;
+      const date = button.dataset.calendarDate || "";
+      const label = button.dataset.calendarLabel || date;
+
+      dayButtons.forEach((dayButton) => {
+        const isSelected = dayButton === button;
+        dayButton.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        dayButton.closest(".calendar-cell")?.classList.toggle("selected", isSelected);
+      });
+      cellActions.forEach((action) => {
+        action.hidden = action.dataset.calendarDate !== date;
+      });
+
+      selectedAction.disabled = !date;
+      selectedAction.dataset.calendarDate = date;
+      selectedAction.dataset.calendarLabel = label;
+      selectedAction.textContent = date ? `Agendar em ${label}` : "Escolha um dia";
+    };
+
+    dayButtons.forEach((button) => {
+      button.addEventListener("click", () => selectDay(button));
+    });
+
     window.bindHubDialog({
       dialog,
       openSelector: "[data-open-calendar-schedule]",
@@ -179,7 +230,8 @@
         selectedDateInput.value = button.dataset.calendarDate || "";
         selectedLabel.textContent = button.dataset.calendarLabel || selectedDateInput.value;
 
-        const items = button.closest(".calendar-cell")?.querySelector("[data-calendar-items]");
+        const cell = button.closest(".calendar-cell") || document.querySelector(`[data-calendar-date-cell="${selectedDateInput.value}"]`);
+        const items = cell?.querySelector("[data-calendar-items]");
         selectedItems.innerHTML = "";
         if (items && items.children.length) {
           items.querySelectorAll(".calendar-card").forEach((card) => {

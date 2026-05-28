@@ -6,6 +6,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.editorial.retention import enrich_plan_for_script_generation
+from app.editorial.visual_contract import normalize_visual_contract_payload
 from app.manual_script import extract_ready_script_from_notes
 from app.models import Job, Script, TopicPlan, TopicRequest
 from app.pipelines.common import FatalStepError, RecoverableStepError, model_payload
@@ -23,6 +24,8 @@ class ScriptPipeline(BasePipeline):
         stage_timings_ms: dict[str, float] = {}
         self._remove_stale_quality_report(job.job_id, "script_rejected.json")
         self._remove_stale_quality_report(job.job_id, "script_generation_debug.json")
+        self._remove_stale_quality_report(job.job_id, "visual_contract.json")
+        self._remove_stale_quality_report(job.job_id, "visual_contract_gate.json")
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
         assert topic_plan and request
@@ -88,6 +91,12 @@ class ScriptPipeline(BasePipeline):
                 error=error,
             )
             raise error
+        structured_contract_file: str | None = None
+        if ready_script is None:
+            structured_contract = self._structured_viral_contract(plan_dict, job.target_duration_sec)
+            plan_dict["structured_viral_contract"] = structured_contract
+            self.storage.persist_json(job.job_id, "structured_viral_contract.json", self._serialize_for_json(structured_contract))
+            structured_contract_file = "structured_viral_contract.json"
         generation_started = time.monotonic()
         if ready_script is not None:
             script = ready_script.script
@@ -155,6 +164,31 @@ class ScriptPipeline(BasePipeline):
             )
             self._persist_script_rejection(job.job_id, script, metrics, audit_reasons)
             raise RecoverableStepError(f"text publish audit failed: {', '.join(audit_reasons)}")
+        visual_contract_started = time.monotonic()
+        try:
+            visual_contract, visual_contract_metrics = self._generate_and_validate_visual_contract(job.job_id, script)
+        except Exception as exc:  # noqa: BLE001
+            stage_timings_ms["visual_contract_ms"] = round((time.monotonic() - visual_contract_started) * 1000, 1)
+            self._persist_script_generation_debug(
+                job_id=job.job_id,
+                attempt=attempt,
+                plan_dict=plan_dict,
+                fact_pack=fact_pack,
+                phase="visual_contract_failed",
+                elapsed_ms=generation_elapsed_ms,
+                script=script,
+                metrics=metrics,
+                stage_timings_ms={
+                    **stage_timings_ms,
+                    "total_step_ms": round((time.monotonic() - step_started) * 1000, 1),
+                },
+                error=exc,
+            )
+            if isinstance(exc, RecoverableStepError):
+                raise
+            raise RecoverableStepError(f"visual contract generation failed: {exc}") from exc
+        stage_timings_ms["visual_contract_ms"] = round((time.monotonic() - visual_contract_started) * 1000, 1)
+        metrics = {**metrics, "visual_contract": visual_contract_metrics}
         self._persist_script_generation_debug(
             job_id=job.job_id,
             attempt=attempt,
@@ -184,6 +218,7 @@ class ScriptPipeline(BasePipeline):
         session.execute(delete(Script).where(Script.job_id == job.job_id))
         session.add(Script(**model_payload(Script, payload)))
         self.storage.persist_json(job.job_id, "script.json", self._serialize_for_json(payload))
+        self.storage.persist_json(job.job_id, "visual_contract.json", self._serialize_for_json(visual_contract))
         script_telemetry_file = self._persist_repair_telemetry(
             job.job_id,
             "script",
@@ -199,8 +234,11 @@ class ScriptPipeline(BasePipeline):
         job.quality_summary = quality_summary
         self._append_event(job.job_id, "script.generated", "succeeded", metrics)
         artifacts = ["fact_pack.json", "script.json", "script_generation_debug.json", "text_publish_audit.json", script_telemetry_file]
+        artifacts.append("visual_contract.json")
         if ready_script is not None:
             artifacts.append("ready_script_input.json")
+        if structured_contract_file is not None:
+            artifacts.append(structured_contract_file)
         return artifacts
 
     def __init__(self, owner: Any) -> None:
@@ -208,6 +246,85 @@ class ScriptPipeline(BasePipeline):
         self.fact_pack_domain = ScriptFactPackDomain(self)
         self.audit_domain = ScriptAuditDomain(self)
         self.repair_domain = ScriptRepairDomain(self)
+
+    def _structured_viral_contract(self, plan_dict: dict[str, Any], target_duration_sec: int) -> dict[str, Any]:
+        return {
+            "schema_version": self.settings.schema_version,
+            "contract_name": "Pauta Viral Estruturada",
+            "source": "hub_viral_prompt",
+            "topic": {
+                "canonical_topic": plan_dict.get("canonical_topic"),
+                "angle": plan_dict.get("angle"),
+                "hook_promise": plan_dict.get("hook_promise"),
+                "original_input": plan_dict.get("original_input"),
+                "requested_angle": plan_dict.get("requested_angle"),
+                "editorial_mode": plan_dict.get("editorial_mode"),
+            },
+            "target_duration_sec": target_duration_sec,
+            "word_count_range": [80, 120],
+            "max_words_per_sentence": 15,
+            "field_order": ["title", "hook", "loop", "beats", "payoff", "closing", "hashtags"],
+            "fields": {
+                "title": {
+                    "source_label": "Título",
+                    "internal_target": "title",
+                    "rule": "45-75 caracteres, palavra-chave no início quando natural, promessa específica e verificável",
+                },
+                "hook": {
+                    "source_label": "Hook",
+                    "internal_target": "hook",
+                    "rule": "0-2s, primeira palavra forte, contraste, paradoxo ou fato impossível-mas-verdadeiro",
+                },
+                "loop": {
+                    "source_label": "Loop",
+                    "internal_target": "retention_map.proof_or_tension",
+                    "rule": "pergunta mental de tensão respondida apenas no payoff",
+                },
+                "beats": {
+                    "source_label": "Beats",
+                    "internal_target": "body_beats",
+                    "rule": "3-5 frases em escalada: fato, implicação, consequência, imagem visual e virada",
+                },
+                "payoff": {
+                    "source_label": "Payoff",
+                    "internal_target": "last_body_beat_or_turn_or_payoff",
+                    "rule": "revelação mais surpreendente no último terço, prova o hook e fecha o loop",
+                },
+                "closing": {
+                    "source_label": "Fechamento",
+                    "internal_target": "ending",
+                    "rule": "recontextualiza o hook com frase curta que provoca replay mental",
+                },
+                "hashtags": {
+                    "source_label": "Hashtags",
+                    "internal_target": "publish_package.hashtags",
+                    "rule": "5 tags mix pt-BR/en com alcance amplo e nicho de curiosidades; não entram na narração",
+                },
+            },
+            "prohibited_openings": ["você sabia", "voce sabia", "já imaginou", "ja imaginou", "nesse vídeo", "nesse video"],
+            "output_rule": "O provider retorna JSON interno do app, mas deve satisfazer semanticamente estes campos.",
+        }
+
+    def _generate_and_validate_visual_contract(self, job_id: str, script: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        self._remove_stale_quality_report(job_id, "visual_contract_gate.json")
+        raw_contract = self.providers.creative.generate_visual_contract(script)
+        raw_dict = raw_contract if isinstance(raw_contract, dict) else {}
+        contract = normalize_visual_contract_payload(
+            raw_contract,
+            script=script,
+            schema_version=self.settings.schema_version,
+            source_provider=str(raw_dict.get("source_provider") or raw_dict.get("provider") or ""),
+        )
+        gate = self.visual_contract_gate.validate(contract)
+        metrics = gate.metrics
+        if not gate.passed:
+            self.storage.persist_json(
+                job_id,
+                "visual_contract_gate.json",
+                {"reasons": gate.reasons, "metrics": gate.metrics, "visual_contract": contract},
+            )
+            raise RecoverableStepError(f"visual contract quality gate failed: {', '.join(gate.reasons[:6])}")
+        return contract, metrics
 
     def _requires_verified_fact_pack(self, *args: Any, **kwargs: Any) -> Any:
         return self.fact_pack_domain._requires_verified_fact_pack(*args, **kwargs)
@@ -411,6 +528,16 @@ class ScriptPipeline(BasePipeline):
             "claim_trace": self._serialize_for_json({"claim_trace": (script or {}).get("claim_trace") or []})["claim_trace"],
             "script_title": (script or {}).get("title"),
             "script_hook": (script or {}).get("hook"),
+            "script_snapshot": self._serialize_for_json(
+                {
+                    "title": (script or {}).get("title"),
+                    "hook": (script or {}).get("hook"),
+                    "body_beats": (script or {}).get("body_beats"),
+                    "ending": (script or {}).get("ending"),
+                    "full_narration": (script or {}).get("full_narration"),
+                    "key_facts": (script or {}).get("key_facts"),
+                }
+            ),
             "script_language": (script or {}).get("language"),
             "script_estimated_duration_sec": (script or {}).get("estimated_duration_sec"),
             "script_provider": ((script or {}).get("qa_metrics") or {}).get("generation_provider")

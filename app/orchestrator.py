@@ -68,10 +68,12 @@ from app.models import (
 from app.pipelines.common import FatalStepError, RecoverableStepError, model_payload
 from app.providers.registry import ProviderRegistry
 from app.quality.asset_gate import AssetGate
+from app.quality.asset_visual_gate import AssetVisualGate
 from app.quality.render_gate import RenderGate
 from app.quality.scene_gate import ScenePlanGate
 from app.quality.script_gate import ScriptQualityGate
 from app.quality.subtitle_gate import BAD_ENDINGS, SubtitleGate
+from app.quality.visual_contract_gate import VisualContractGate
 from app.schemas import PublicationSchedulePayload, SUPPORTED_LANGUAGES, SUPPORTED_NICHES, TopicRequestCreate
 from app.storage import StorageManager
 from app.utils import (
@@ -219,6 +221,7 @@ SCENE_VISUAL_HINTS = [
 RETENTION_HARD_FAILURE_STATUSES = {
     "failed",
     "script_quality_failed",
+    "visual_contract_quality_failed",
     "scene_plan_quality_failed",
     "asset_quality_failed",
     "subtitle_quality_failed",
@@ -264,6 +267,7 @@ PROGRESS_COMPLETE_STATUSES = {
 PROGRESS_FAILED_STATUSES = {
     "failed",
     "script_quality_failed",
+    "visual_contract_quality_failed",
     "scene_plan_quality_failed",
     "asset_quality_failed",
     "subtitle_quality_failed",
@@ -310,8 +314,10 @@ class JobOrchestrator:
         self.render_pipeline = RenderPipeline(self)
         self.monetization_pipeline = MonetizationPipeline(self)
         self.script_gate = ScriptQualityGate()
+        self.visual_contract_gate = VisualContractGate()
         self.scene_gate = ScenePlanGate()
         self.asset_gate = AssetGate()
+        self.asset_visual_gate = AssetVisualGate()
         self.subtitle_gate = SubtitleGate()
         self.render_gate = RenderGate(min_bitrate=self.settings.render_min_bitrate)
         self.worker_id = f"worker-{new_id()[:8]}"
@@ -436,6 +442,7 @@ class JobOrchestrator:
                 "published",
                 "failed",
                 "script_quality_failed",
+                "visual_contract_quality_failed",
                 "scene_plan_quality_failed",
                 "asset_quality_failed",
                 "subtitle_quality_failed",
@@ -544,6 +551,7 @@ class JobOrchestrator:
             "progress": progress,
             "monetization_report": self._read_job_json(job_id, "monetization_report.json") or cleanup_snapshots.get("monetization_report", {}),
             "publish_package": self._read_job_json(job_id, "publish_package.json") or cleanup_snapshots.get("publish_package", {}),
+            "asset_visual_gate": self._read_job_json(job_id, "asset_visual_gate.json"),
             "publish_result": self._read_job_json(job_id, "publish_result.json") or cleanup_snapshots.get("publish_result", {}),
             "publication_attempts": self._read_job_json(job_id, "youtube_publish_attempts.json").get("attempts", []) or cleanup_snapshots.get("publication_attempts", []),
             "retention_cleanup": retention_cleanup,
@@ -687,6 +695,12 @@ class JobOrchestrator:
 
     def sync_youtube_analytics_snapshot(self, job_id: str, *, days: int = 28) -> dict[str, Any]:
         return self.publication_ops.sync_youtube_analytics_snapshot(job_id, days=days)
+
+    def youtube_analytics_sync_candidates(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        return self.publication_ops.youtube_analytics_sync_candidates(limit=limit)
+
+    def sync_due_youtube_analytics_snapshots(self, *, days: int = 28, limit: int | None = None) -> dict[str, Any]:
+        return self.publication_ops.sync_due_youtube_analytics_snapshots(days=days, limit=limit)
 
     def _steps(self) -> list[StepDefinition]:
         return [
@@ -880,6 +894,8 @@ class JobOrchestrator:
 
     def _failure_status_for_step(self, step_name: str, message: str) -> str:
         if "quality gate" in message or "gate failed" in message:
+            if "visual contract" in message:
+                return "visual_contract_quality_failed"
             return {
                 "script": "script_quality_failed",
                 "scene_plan": "scene_plan_quality_failed",

@@ -16,6 +16,7 @@
 {% set subtitles = details.subtitles %}
 {% set background_music = details.background_music %}
 {% set monetization = details.monetization_report or {} %}
+{% set asset_visual_gate = details.asset_visual_gate or {} %}
 {% set publish_package = details.publish_package or {} %}
 {% set review_checklist = monetization.human_review_checklist or publish_package.human_review_checklist or {} %}
 {% set checklist_items = review_checklist.get("items", []) %}
@@ -224,6 +225,19 @@
         {% if monetization.manual_required %}
         <pre>{{ monetization.manual_required }}</pre>
         {% endif %}
+        {% if asset_visual_gate %}
+        <div class="review-checklist-status">
+          <div class="review-status-row">
+            <span><strong>Validação visual de asset</strong><br><small>asset_visual_gate.json</small></span>
+            <span class="badge {% if asset_visual_gate.metrics and asset_visual_gate.metrics.asset_visual_gate_pass %}approved{% else %}asset_quality_failed{% endif %}">
+              {% if asset_visual_gate.metrics and asset_visual_gate.metrics.asset_visual_gate_pass %}aprovado{% else %}bloqueado{% endif %}
+            </span>
+          </div>
+        </div>
+        {% if asset_visual_gate.reasons %}
+        <pre>{{ asset_visual_gate.reasons }}</pre>
+        {% endif %}
+        {% endif %}
         {% if checklist_items %}
         <div class="review-checklist-status">
           {% for item in checklist_items %}
@@ -371,10 +385,10 @@
 
   <aside class="side-column">
     <section class="panel sticky workflow-focus">
-      <div class="focus-step">
+      <div class="focus-step {% if is_approved %}completed{% elif can_approve or can_reject or can_retry %}active{% endif %}">
         <p class="eyebrow">Passo 1</p>
-        <h3>Aprovar job</h3>
-        <p class="publication-note">Aprove somente se o vídeo final estiver publicável. A agenda aparece no passo seguinte.</p>
+        <h3>Decidir revisão</h3>
+        <p class="publication-note">Aprovar libera a agenda. Rejeitar ou refazer exige motivo para orientar o próximo reparo.</p>
         <form method="post" action="/jobs/{{ job.job_id }}/review" class="review-form">
           <input type="hidden" name="reviewer_identity" value="tailscale:local-reviewer">
           {% if checklist_items %}
@@ -390,6 +404,11 @@
             {% endfor %}
           </div>
           {% endif %}
+          {% if can_approve %}
+          <div class="button-row action-stack review-primary-action">
+            <button type="submit" name="action" value="approve">Aprovar e liberar agenda</button>
+          </div>
+          {% endif %}
           <details class="inline-disclosure">
             <summary aria-label="Abrir motivos para rejeitar ou refazer">Motivos para rejeitar ou refazer</summary>
             <fieldset class="review-checklist review-checklist-fieldset">
@@ -403,25 +422,22 @@
             <label for="notes">Observações</label>
             <textarea id="notes" name="notes" rows="3" aria-describedby="review_notes_help"></textarea>
             <p id="review_notes_help" class="field-help">Use este campo para explicar a rejeição ou orientar o próximo reparo.</p>
+            <div class="button-row action-stack review-secondary-actions">
+              {% if can_reject %}
+              <button type="submit" name="action" value="reject" class="secondary">Rejeitar com motivo</button>
+              {% endif %}
+              {% if can_retry %}
+              <button type="submit" name="action" value="retry" class="ghost">Refazer job</button>
+              {% endif %}
+            </div>
           </details>
-          <div class="button-row action-stack">
-            {% if can_approve %}
-            <button type="submit" name="action" value="approve">Aprovar</button>
-            {% endif %}
-            {% if can_reject %}
-            <button type="submit" name="action" value="reject" class="secondary">Rejeitar</button>
-            {% endif %}
-            {% if can_retry %}
-            <button type="submit" name="action" value="retry" class="ghost">Refazer job</button>
-            {% endif %}
-          </div>
           {% if not can_approve and not can_reject and not can_retry %}
           <p>Nenhuma ação de revisão disponível para o status atual.</p>
           {% endif %}
         </form>
       </div>
 
-      <div class="focus-step">
+      <div class="focus-step {% if is_approved and not schedule_ready and job.status != "published" %}active{% elif schedule_ready or job.status == "published" %}completed{% else %}locked{% endif %}">
         <p class="eyebrow">Passo 2</p>
         <h3>Agendar no YouTube</h3>
         {% if is_approved %}
@@ -513,25 +529,28 @@
               </div>
             </div>
           </dialog>
-          <label for="publication_timezone">Fuso horário</label>
-          <input id="publication_timezone" name="timezone" value="{{ publication_schedule_display.timezone if publication_schedule_display else 'UTC' }}" data-has-existing="{{ 'true' if publication_schedule_display else 'false' }}" list="timezones" placeholder="UTC ou America/Sao_Paulo">
-          <datalist id="timezones">
-            {% for timezone_name in common_schedule_timezones %}
-            <option value="{{ timezone_name }}"></option>
-            {% endfor %}
-          </datalist>
-          <label for="youtube_visibility">Visibilidade</label>
-          <select id="youtube_visibility" name="youtube_visibility">
-            {% for visibility in ["private", "unlisted", "public"] %}
-            <option
-              value="{{ visibility }}"
-              {% if publication_schedule_display and publication_schedule_display.youtube_visibility == visibility %}selected{% elif not publication_schedule_display and youtube_integration.publish_mode == "api" and visibility == "public" %}selected{% endif %}
-            >{{ ui.youtube_visibility_label(visibility) }}</option>
-            {% endfor %}
-          </select>
-          {% if youtube_integration.publish_mode == "api" %}
-          <p class="inline-hint">Para programar no próprio YouTube, escolha visibilidade <strong>Público</strong>.</p>
-          {% endif %}
+          <details class="inline-disclosure schedule-options">
+            <summary aria-label="Abrir opções da publicação">Opções da publicação <small>fuso e visibilidade</small></summary>
+            <label for="publication_timezone">Fuso horário</label>
+            <input id="publication_timezone" name="timezone" value="{{ publication_schedule_display.timezone if publication_schedule_display else 'UTC' }}" data-has-existing="{{ 'true' if publication_schedule_display else 'false' }}" list="timezones" placeholder="UTC ou America/Sao_Paulo">
+            <datalist id="timezones">
+              {% for timezone_name in common_schedule_timezones %}
+              <option value="{{ timezone_name }}"></option>
+              {% endfor %}
+            </datalist>
+            <label for="youtube_visibility">Visibilidade</label>
+            <select id="youtube_visibility" name="youtube_visibility">
+              {% for visibility in ["private", "unlisted", "public"] %}
+              <option
+                value="{{ visibility }}"
+                {% if publication_schedule_display and publication_schedule_display.youtube_visibility == visibility %}selected{% elif not publication_schedule_display and youtube_integration.publish_mode == "api" and visibility == "public" %}selected{% endif %}
+              >{{ ui.youtube_visibility_label(visibility) }}</option>
+              {% endfor %}
+            </select>
+            {% if youtube_integration.publish_mode == "api" %}
+            <p class="inline-hint">Para programar no próprio YouTube, escolha visibilidade <strong>Público</strong>.</p>
+            {% endif %}
+          </details>
           <div class="button-row action-stack">
             <button type="submit" name="action" value="schedule">{% if schedule_ready %}Reagendar publicação{% else %}Ativar publicação automática{% endif %}</button>
             {% if schedule_ready %}
@@ -554,8 +573,8 @@
         {% endif %}
       </div>
 
-      <details class="inline-disclosure" {% if publish_package %}open{% endif %}>
-        <summary aria-label="Abrir metadados do upload">Metadados do upload</summary>
+      <details class="inline-disclosure">
+        <summary aria-label="Abrir metadados do upload">Ajustar metadados do upload <small>título, descrição e hashtags</small></summary>
         {% if publish_package %}
         <form method="post" action="/jobs/{{ job.job_id }}/publish-metadata" class="review-form">
           <label for="publish_title">Título</label>

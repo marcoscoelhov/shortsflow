@@ -89,6 +89,40 @@ OPERATIONAL_SETTING_SPECS = (
     OperationalSettingSpec("automation_max_generation_attempts", "Tentativas de geracao", "Automacao", "number", min_value=1, max_value=10, step="1"),
     OperationalSettingSpec("automation_max_publish_attempts_per_job", "Tentativas de upload", "Automacao", "number", min_value=1, max_value=10, step="1"),
     OperationalSettingSpec("automation_score_threshold", "Score minimo", "Automacao", "number", min_value=0, max_value=1, step="0.01"),
+    OperationalSettingSpec(
+        "performance_collection_enabled",
+        "Coleta de performance",
+        "Crescimento",
+        "checkbox",
+        description="Controla apenas a leitura recorrente de Analytics; nao pausa criacao nem publicacao automatizada.",
+    ),
+    OperationalSettingSpec(
+        "performance_sync_active_window_days",
+        "Janela ativa",
+        "Crescimento",
+        "number",
+        min_value=1,
+        max_value=365,
+        step="1",
+    ),
+    OperationalSettingSpec(
+        "performance_sync_archive_window_days",
+        "Janela semanal",
+        "Crescimento",
+        "number",
+        min_value=1,
+        max_value=365,
+        step="1",
+    ),
+    OperationalSettingSpec(
+        "performance_sync_batch_limit",
+        "Lote de coleta",
+        "Crescimento",
+        "number",
+        min_value=1,
+        max_value=100,
+        step="1",
+    ),
 )
 
 OPERATIONAL_INFO_SPECS = (
@@ -123,7 +157,7 @@ def build_operational_settings_context(settings: Settings) -> dict[str, Any]:
     with SessionLocal() as session:
         saved_keys = set(load_operational_settings(session))
     groups: list[dict[str, Any]] = []
-    for group_name in ("LLM", "Imagem", "Musica", "Publicacao", "Automacao"):
+    for group_name in ("LLM", "Imagem", "Musica", "Publicacao", "Automacao", "Crescimento"):
         fields = []
         for spec in OPERATIONAL_SETTING_SPECS:
             if spec.group != group_name:
@@ -259,6 +293,10 @@ def _validate_operational_semantics(values: dict[str, Any]) -> None:
     for key in ("automation_daily_run_time", "automation_publish_time"):
         if key in values:
             _validate_time_string(key, str(values[key]))
+    active_window = values.get("performance_sync_active_window_days")
+    archive_window = values.get("performance_sync_archive_window_days")
+    if active_window is not None and archive_window is not None and int(active_window) > int(archive_window):
+        raise ValueError("janela ativa de performance nao pode ser maior que a janela semanal")
 
 
 def _validate_time_string(key: str, value: str) -> None:

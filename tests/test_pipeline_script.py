@@ -288,6 +288,39 @@ def test_script_quality_gate_blocks_mixed_language_markup_and_glued_words() -> N
     assert "markup_or_ssml_leaked" in result.reasons
     assert "suspicious_glued_words" in result.reasons
 
+def test_script_quality_gate_ignores_internal_retention_map_codes_for_language() -> None:
+    script = _base_script(
+        "Não é uma foto aérea. É uma maquete. "
+        "As miniaturas são pintadas à mão com detalhes minúsculos. "
+        "Da próxima vez que vir uma foto aérea, desconfie."
+    )
+    script["retention_map"] = {
+        "segments": [
+            {"code": "visual_hook", "goal": "high impact first frame", "mapped_text": "Não é uma foto aérea."},
+            {"code": "loop_close", "goal": "second chance replay", "mapped_text": "Da próxima vez, desconfie."},
+        ]
+    }
+    script["qa_metrics"] = {
+        **script["qa_metrics"],
+        "generation_provider": "deepseek",
+        "generation_provider_role": "fallback",
+    }
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert "foreign_language_detected" not in result.reasons
+
+def test_script_quality_gate_blocks_visible_english_visual_jargon() -> None:
+    script = _base_script(
+        "Isso não é uma foto aérea. É uma maquete. "
+        "O segredo aparece cedo: forced perspective. "
+        "No final, a cidade inteira cabe na palma da mão."
+    )
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert "foreign_language_detected" in result.reasons
+
 def test_script_quality_gate_blocks_ai_punctuation_and_non_latin_text() -> None:
     script = {
         "title": "Polvo muda de cor rápido",
@@ -628,18 +661,62 @@ def test_script_pipeline_requires_verified_fact_pack_for_factual_real_topics(mon
     assert pipeline._requires_verified_fact_pack(topic_plan, request, {"status": "limited", "facts": []}) is True
     assert pipeline._requires_verified_fact_pack(topic_plan, request, {"status": "verified", "facts": [{"fact_id": "F1"}]}) is False
 
-def test_script_pipeline_defaults_curiosidades_to_viral_mode() -> None:
+def test_script_pipeline_defaults_non_scientific_curiosidades_to_viral_mode() -> None:
     pipeline = orchestrator.script_pipeline
     topic_plan = SimpleNamespace(
-        canonical_topic="Por que os polvos mudam de cor",
-        angle="o truque visual que parece impossível",
-        hook_promise="o detalhe que faz a pele do polvo sumir no cenário",
+        canonical_topic="Lugares abandonados que parecem cenários de filme",
+        angle="o contraste visual que prende a atenção",
+        hook_promise="mostrar uma imagem que parece impossível sem virar aula",
         quality_metrics={},
     )
-    request = SimpleNamespace(seed_theme="Como os polvos mudam de cor", notes=None, requested_angle=None)
+    request = SimpleNamespace(seed_theme="lugares abandonados curiosos", notes=None, requested_angle=None)
 
     assert pipeline._editorial_mode(topic_plan, request) == "viral_curiosidades"
     assert pipeline._topic_requires_verified_fact_pack(topic_plan, request) is False
+
+def test_script_pipeline_promotes_biological_curiosidades_to_factual_mode() -> None:
+    pipeline = orchestrator.script_pipeline
+    topic_plan = SimpleNamespace(
+        canonical_topic="Polvos: três corações e sangue azul",
+        angle="curiosidade biologica sobre branquias e oxigenio",
+        hook_promise="explicar por que nadar muda a circulação do polvo",
+        quality_metrics={"editorial_mode": "viral_curiosidades"},
+    )
+    request = SimpleNamespace(seed_theme="polvos curiosidades biologicas", notes=None, requested_angle=None)
+
+    assert pipeline._editorial_mode(topic_plan, request) == "factual_strict"
+    assert pipeline._topic_requires_verified_fact_pack(topic_plan, request) is True
+
+def test_script_pipeline_uses_verified_fact_pack_deterministic_fallback(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "llm_script_repair_attempts", 0)
+    monkeypatch.setattr(
+        orchestrator.providers.creative,
+        "repair_script_with_fallback",
+        lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError()),
+    )
+    bad_script = _base_script("Texto provisório com detalhe verificável repetido. Texto provisório com detalhe verificável repetido.")
+    bad_script["qa_metrics"] = {}
+    fact_pack = {
+        "status": "verified",
+        "facts": [
+            {"fact_id": "F1", "claim": "Octopus arms have many degrees of freedom."},
+            {"fact_id": "F2", "claim": "Researchers studied principles of octopus movement."},
+            {"fact_id": "F3", "claim": "Video records of Octopus vulgaris reaching toward a target were studied."},
+            {"fact_id": "F4", "claim": "The arm extends by a bend traveling from base to tip."},
+            {"fact_id": "F5", "claim": "Similar bend propagation appears in locomotion and searching."},
+        ],
+    }
+
+    script, metrics = pipeline._validate_or_repair_script(
+        bad_script,
+        {"fact_pack": fact_pack, "canonical_topic": "Polvos e movimento dos braços"},
+        target_duration_sec=35,
+    )
+
+    assert metrics["script_quality_gate_pass"] is True
+    assert metrics["script_repair_fact_pack_fallback_used"] is True
+    assert script["source_fact_ids"] == ["F3", "F4", "F5"]
 
 def test_step_script_disables_simple_prompt_rules_when_fact_pack_is_required(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
@@ -717,6 +794,19 @@ def test_step_script_disables_simple_prompt_rules_when_fact_pack_is_required(mon
 
     assert captured["simple_shorts_mode"] is False
     assert captured["editorial_mode"] == "factual_strict"
+    contract = captured["structured_viral_contract"]
+    assert contract["contract_name"] == "Pauta Viral Estruturada"
+    assert contract["fields"]["title"]["source_label"] == "Título"
+    assert contract["fields"]["hook"]["internal_target"] == "hook"
+    assert contract["fields"]["loop"]["internal_target"] == "retention_map.proof_or_tension"
+    assert contract["fields"]["payoff"]["source_label"] == "Payoff"
+    artifact = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "structured_viral_contract.json"
+    assert artifact.exists()
+    visual_contract = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "visual_contract.json"
+    assert visual_contract.exists()
+    contract_payload = json.loads(visual_contract.read_text(encoding="utf-8"))
+    assert contract_payload["contract_name"] == "Contrato Visual do Roteiro"
+    assert contract_payload["hook_frame"]["must_show"]
 
 def test_step_script_uses_ready_script_without_llm_generation(monkeypatch) -> None:
     from app.manual_script import build_ready_script_notes
@@ -782,6 +872,95 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
     assert not script.full_narration.startswith(script.title)
     assert "243 dias para girar" in script.full_narration
     assert "ready_script_input.json" in artifacts
+    assert "visual_contract.json" in artifacts
+    assert "structured_viral_contract.json" not in artifacts
+    visual_contract = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "visual_contract.json"
+    assert visual_contract.exists()
+
+def test_visual_contract_gate_blocks_incomplete_hook_contract() -> None:
+    from app.quality.visual_contract_gate import VisualContractGate
+
+    result = VisualContractGate().validate(
+        {
+            "visual_thesis": "Mostrar a promessa visual.",
+            "visual_domain": "documentary realism",
+            "visual_world": "um mundo visual coerente",
+            "hook_frame": {
+                "promise": "imagem forte",
+                "positive_read": "",
+                "must_show": [],
+                "must_hide": [],
+                "negative_reads": [],
+                "readability_test": "",
+            },
+            "loop_policy": {"open_question": "por que isso muda?", "forbidden_early_reveal": []},
+            "beat_progression": [{"role": "escalation", "visual_job": "provar a tensao"}],
+            "payoff_frame": {"reveal": "a virada", "must_connect_to_hook": "volta ao começo"},
+        }
+    )
+
+    assert result.passed is False
+    assert "hook_frame_missing_must_show" in result.reasons
+    assert "hook_frame_too_generic" in result.reasons
+
+def test_step_script_fails_closed_when_visual_contract_invalid(monkeypatch) -> None:
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "maquetes urbanas",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 35,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste",
+            "requested_angle": None,
+        }
+    )
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic",
+                canonical_topic="maquetes urbanas",
+                angle="ilusao de cidade real",
+                hook_promise="uma maquete parece cidade real antes da escala aparecer",
+                entities=["maquetes"],
+                search_terms=["maquetes urbanas"],
+                title_candidates=["Maquetes urbanas parecem cidades reais"],
+                quality_metrics={"editorial_mode": "viral_curiosidades"},
+            )
+        )
+        session.commit()
+        job = session.get(Job, job_id)
+        assert job is not None
+        script = _base_script(
+            "Olhe rapido: isso parece uma cidade abandonada de verdade. A sombra engana o olho. "
+            "A poeira vira neblina. Na segunda olhada, tudo cabe numa mesa."
+        )
+
+        monkeypatch.setattr(pipeline := orchestrator.script_pipeline, "_build_fact_pack", lambda *_args, **_kwargs: {"status": "skipped", "facts": []})
+        monkeypatch.setattr(orchestrator.providers.creative, "generate_script", lambda _plan: script)
+        monkeypatch.setattr(
+            pipeline,
+            "_validate_or_repair_script",
+            lambda script, *_args, **_kwargs: (script, {"script_quality_gate_pass": True, "fact_pack_consistency_pass": True}),
+        )
+        monkeypatch.setattr(pipeline, "_text_publish_audit", lambda *_args, **_kwargs: {"passed": True, "reasons": []})
+        monkeypatch.setattr(orchestrator.providers.creative, "generate_visual_contract", lambda _script: {"visual_thesis": "fraco"})
+
+        try:
+            pipeline.step_script(session, job, 1)
+        except RecoverableStepError as exc:
+            assert "visual contract quality gate failed" in str(exc)
+        else:
+            raise AssertionError("expected visual contract gate failure")
+
+    gate_path = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "visual_contract_gate.json"
+    assert gate_path.exists()
+    gate_payload = json.loads(gate_path.read_text(encoding="utf-8"))
+    assert "hook_frame_missing_must_show" in gate_payload["reasons"]
 
 def test_ready_script_declared_fact_check_accepts_grounded_precise_numbers(monkeypatch) -> None:
     from app.manual_script import parse_ready_script
@@ -1092,6 +1271,48 @@ def test_simple_shorts_mode_publish_readiness_requires_manual_publish_audit(monk
 
     assert readiness["passed"] is False
     assert readiness["reasons"] == ["text_publish_audit_skipped"]
+
+def test_publish_readiness_blocks_asset_visual_gate_failure() -> None:
+    readiness = orchestrator.monetization_pipeline.publish_readiness_report(
+        None,
+        SimpleNamespace(canonical_topic="maquete urbana", angle="curiosidade visual", quality_metrics={"editorial_mode": "viral_curiosidades"}),
+        {"status": "verified", "facts": []},
+        ["#shorts", "#curiosidades", "#maquetes"],
+        {
+            "script_gate_pass": True,
+            "scene_plan_gate_pass": True,
+            "asset_gate_pass": True,
+            "asset_visual_gate_pass": False,
+            "subtitle_gate_pass": True,
+            "render_gate_pass": True,
+        },
+        _base_script("Isso parece uma cidade real, mas o final revela uma maquete."),
+        {"passed": True, "reasons": [], "provider": "test"},
+    )
+
+    assert readiness["passed"] is False
+    assert "quality_checklist_failed" in readiness["reasons"]
+    assert "asset_visual_gate_not_passed" in readiness["reasons"]
+
+def test_quality_checklist_requires_executed_asset_visual_gate_to_pass() -> None:
+    checklist = orchestrator.monetization_pipeline.build_quality_checklist(
+        SimpleNamespace(
+            quality_summary={
+                "script": {"script_quality_gate_pass": True},
+                "scene_plan": {"scene_plan_gate_pass": True},
+                "assets": {
+                    "semantic_threshold_pass": True,
+                    "asset_visual_gate_pass": True,
+                    "asset_visual_gate_checked": False,
+                },
+                "subtitles": {"subtitle_gate_pass": True},
+                "render": {"render_gate_pass": True},
+            }
+        )
+    )
+
+    assert checklist["asset_gate_pass"] is True
+    assert checklist["asset_visual_gate_pass"] is False
 
 def test_simple_shorts_mode_publish_readiness_blocks_factual_topic_without_grounding(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
@@ -1456,6 +1677,43 @@ def test_script_gate_blocks_generic_high_risk_precision_and_causality() -> None:
     assert not result.passed
     assert "factual_risk_requires_conservative_rewrite" in result.reasons
     assert result.metrics["fact_risk"]["high_risk_claim_count"] >= 1
+
+def test_script_gate_blocks_broken_loop_closing_from_audit_job() -> None:
+    script = _base_script(
+        "Polvo nadando vira um paradoxo vivo: fugir pode desligar parte do motor. "
+        "Dois corações empurram sangue para as brânquias. "
+        "Na segunda olhada, a primeira frase já apontava para outro manda oxigênio."
+    )
+    script["ending"] = "Na segunda olhada, a primeira frase já apontava para outro manda oxigênio."
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert not result.passed
+    assert "truncated_ending_logic" in result.reasons
+
+def test_loop_closure_repair_does_not_generate_audit_job_fragment() -> None:
+    sentence = orchestrator.script_pipeline._loop_closure_sentence(
+        "polvo",
+        "3 corações, sangue azul e braços que quase pensam sozinhos.",
+        "outro manda oxigênio",
+        0,
+    )
+
+    result = ScriptQualityGate().validate(_base_script(sentence), target_duration_sec=35)
+
+    assert "apontava para outro" not in sentence
+    assert "truncated_ending_logic" not in result.reasons
+
+def test_script_gate_allows_lowercase_prepositional_science_phrases() -> None:
+    script = _base_script(
+        "O polvo usa dois corações para mandar sangue para as brânquias. "
+        "O sangue leva oxigênio para o resto do corpo. "
+        "Na segunda olhada, esse circuito muda o começo da história."
+    )
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert "truncated_ending_logic" not in result.reasons
 
 def test_script_gate_allows_conservative_factual_language() -> None:
     script = _base_script(

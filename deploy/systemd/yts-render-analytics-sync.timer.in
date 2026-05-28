@@ -1,0 +1,10 @@
+[Unit]
+Description=Run YTS Render performance collection daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 America/Sao_Paulo
+Persistent=true
+Unit=yts-render-analytics-sync.service
+
+[Install]
+WantedBy=timers.target

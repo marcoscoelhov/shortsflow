@@ -3,7 +3,15 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from app.quality.subtitle_gate import BAD_ENDINGS
+from app.quality.subtitle_gate import (
+    BAD_START_HEADS,
+    BAD_START_SECOND_TOKENS,
+    BAD_STARTS,
+    SEMANTIC_BAD_ENDINGS,
+    SUBTITLE_MAX_CHARS,
+    SUBTITLE_MAX_LINES,
+    SUBTITLE_MAX_WORDS,
+)
 from app.utils import split_caption_chunks, word_tokens, wrap_caption
 
 
@@ -51,23 +59,60 @@ class SubtitleDomain:
         split_items[-1]["token_end"] = token_end
         return split_items
 
-    def split_caption_by_subtitle_limits(self, text: str, max_words: int = 14, max_chars: int = 42, max_lines: int = 2) -> list[str]:
-        initial_chunks = split_caption_chunks(text, max_chars=max_chars, max_lines=max_lines)
+    def split_caption_by_subtitle_limits(
+        self,
+        text: str,
+        max_words: int = SUBTITLE_MAX_WORDS,
+        max_chars: int = SUBTITLE_MAX_CHARS,
+        max_lines: int = SUBTITLE_MAX_LINES,
+    ) -> list[str]:
+        words = str(text).split()
+        if not words:
+            return []
         chunks: list[str] = []
-        for chunk in initial_chunks:
-            words = chunk.split()
-            if len(word_tokens(chunk)) <= max_words:
-                chunks.append(chunk)
-                continue
-            group_count = math.ceil(len(words) / max_words)
-            group_size = math.ceil(len(words) / group_count)
-            for start in range(0, len(words), group_size):
-                candidate = " ".join(words[start : start + group_size])
-                if len(word_tokens(candidate)) <= max_words and self.subtitle_chunk_fits(candidate, max_chars=max_chars, max_lines=max_lines):
-                    chunks.append(candidate)
+        cursor = 0
+        while cursor < len(words):
+            max_end = min(len(words), cursor + max_words)
+            best_end = cursor + 1
+            for end in range(cursor + 1, max_end + 1):
+                candidate = " ".join(words[cursor:end])
+                if not self.subtitle_chunk_fits(candidate, max_chars=max_chars, max_lines=max_lines, max_words=max_words):
+                    if end > cursor + 1:
+                        break
                     continue
-                chunks.extend(split_caption_chunks(candidate, max_chars=max_chars, max_lines=max_lines))
+                best_end = end
+            if best_end < len(words):
+                while best_end > cursor + 1:
+                    if not self.subtitle_boundary_is_semantically_weak(words, cursor, best_end):
+                        break
+                    best_end -= 1
+            chunks.append(" ".join(words[cursor:best_end]))
+            cursor = best_end
         return chunks
+
+    def subtitle_boundary_is_semantically_weak(self, words: list[str], start: int, end: int) -> bool:
+        if end <= start or end >= len(words):
+            return False
+        current_tokens = word_tokens(words[end - 1])
+        current_ending = current_tokens[-1] if current_tokens else ""
+        if current_ending in SEMANTIC_BAD_ENDINGS:
+            return True
+        if self.subtitle_start_is_semantically_orphan(words, end):
+            return True
+        return False
+
+    def subtitle_start_is_semantically_orphan(self, words: list[str], index: int) -> bool:
+        if index >= len(words):
+            return False
+        start_tokens = word_tokens(words[index])
+        first = start_tokens[0] if start_tokens else ""
+        if first in BAD_STARTS:
+            return True
+        if index + 1 >= len(words):
+            return False
+        second_tokens = word_tokens(words[index + 1])
+        second = second_tokens[0] if second_tokens else ""
+        return first in BAD_START_HEADS and second in BAD_START_SECOND_TOKENS
 
     def avoid_weak_subtitle_endings(self, chunks: list[str]) -> list[str]:
         repaired = [chunk for chunk in chunks if chunk.strip()]
@@ -81,7 +126,13 @@ class SubtitleDomain:
                 repaired[index + 1] = ""
         return [chunk for chunk in repaired if chunk.strip()]
 
-    def subtitle_chunk_fits(self, text: str, max_chars: int = 42, max_lines: int = 2, max_words: int = 14) -> bool:
+    def subtitle_chunk_fits(
+        self,
+        text: str,
+        max_chars: int = SUBTITLE_MAX_CHARS,
+        max_lines: int = SUBTITLE_MAX_LINES,
+        max_words: int = SUBTITLE_MAX_WORDS,
+    ) -> bool:
         normalized = str(text).strip()
         if not normalized:
             return False
@@ -93,9 +144,9 @@ class SubtitleDomain:
         self,
         current_text: str,
         next_text: str,
-        max_chars: int = 42,
-        max_lines: int = 2,
-        max_words: int = 14,
+        max_chars: int = SUBTITLE_MAX_CHARS,
+        max_lines: int = SUBTITLE_MAX_LINES,
+        max_words: int = SUBTITLE_MAX_WORDS,
     ) -> tuple[str, str, int]:
         current_words = str(current_text).split()
         next_words = str(next_text).split()
@@ -103,7 +154,7 @@ class SubtitleDomain:
             return str(current_text).strip(), str(next_text).strip(), 0
         ending_tokens = word_tokens(current_words[-1])
         ending = ending_tokens[0] if ending_tokens else ""
-        if ending not in BAD_ENDINGS:
+        if ending not in SEMANTIC_BAD_ENDINGS and not self.subtitle_start_is_semantically_orphan(next_words, 0):
             return " ".join(current_words), " ".join(next_words), 0
 
         for moved_count in range(1, len(next_words) + 1):
@@ -111,7 +162,7 @@ class SubtitleDomain:
             candidate_next = " ".join(next_words[moved_count:])
             candidate_tokens = word_tokens(candidate_current)
             candidate_ending = candidate_tokens[-1] if candidate_tokens else ""
-            if candidate_ending in BAD_ENDINGS:
+            if candidate_ending in SEMANTIC_BAD_ENDINGS or self.subtitle_start_is_semantically_orphan(candidate_next.split(), 0):
                 continue
             if not self.subtitle_chunk_fits(candidate_current, max_chars=max_chars, max_lines=max_lines, max_words=max_words):
                 continue
@@ -126,7 +177,7 @@ class SubtitleDomain:
                 continue
             candidate_tokens = word_tokens(candidate_current)
             candidate_ending = candidate_tokens[-1] if candidate_tokens else ""
-            if candidate_ending in BAD_ENDINGS:
+            if candidate_ending in SEMANTIC_BAD_ENDINGS or self.subtitle_start_is_semantically_orphan(candidate_next.split(), 0):
                 continue
             if not self.subtitle_chunk_fits(candidate_current, max_chars=max_chars, max_lines=max_lines, max_words=max_words):
                 continue
@@ -137,7 +188,17 @@ class SubtitleDomain:
         return " ".join(current_words), " ".join(next_words), 0
 
     def repair_subtitle_item_boundaries(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        repaired = [dict(item) for item in items if str(item.get("text") or "").strip()]
+        repaired: list[dict[str, Any]] = []
+        for item in items:
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            if self.subtitle_chunk_fits(text):
+                repaired.append(dict(item))
+                continue
+            token_start = int(item.get("token_start", 0))
+            token_end = int(item.get("token_end", max(token_start, token_start + len(word_tokens(text)) - 1)))
+            repaired.extend(self.split_subtitle_cue({**item, "text": text}, token_start, max(token_end, token_start)))
         for index in range(len(repaired) - 1):
             current = repaired[index]
             following = repaired[index + 1]
@@ -230,6 +291,7 @@ class SubtitleDomain:
     def render_ass(self, items: list[dict[str, Any]]) -> str:
         header = """[Script Info]
 ScriptType: v4.00+
+WrapStyle: 2
 PlayResX: 1080
 PlayResY: 1920
 
@@ -244,7 +306,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for item in items:
             start = self.ms_to_ass(item["start_ms"])
             end = self.ms_to_ass(item["end_ms"])
-            text = wrap_caption(item["text"]).replace("\n", "\\N")
+            text = wrap_caption(item["text"], max_chars=SUBTITLE_MAX_CHARS, max_lines=SUBTITLE_MAX_LINES).replace("\n", "\\N")
             lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
         return "\n".join(lines) + "\n"
 

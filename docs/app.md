@@ -65,9 +65,24 @@ Persistencia local padrao:
 
 `POST /jobs` recebe tres modos operacionais pelo campo `input_mode`:
 
-- `theme`: assunto bruto. Quando `seed_theme` vem vazio, o hub tenta resolver um tema automatico por tendencias e registra fallback quando nao encontra candidato vivo.
-- `title`: titulo completo fornecido pelo operador. O app preserva a promessa central e ainda passa pelo fluxo normal de pauta, roteiro e gates.
+- `theme`: assunto bruto. Quando `seed_theme` vem vazio, o hub tenta resolver um tema automatico por tendencias e registra fallback quando nao encontra candidato vivo. O roteiro e gerado por IA a partir da **Pauta Viral Estruturada** persistida em `structured_viral_contract.json`.
+- `title`: titulo completo fornecido pelo operador. O app preserva a promessa central, aplica a **Pauta Viral Estruturada** e ainda passa pelo fluxo normal de pauta, roteiro e gates.
 - `script`: **Roteiro Pronto** em texto rotulado. O app preserva o texto como fonte editorial e nao chama LLM para gerar outro roteiro.
+
+A **Pauta Viral Estruturada** e o contrato usado para tema/titulo:
+
+```text
+Titulo: ...
+Hook: ...
+Loop: ...
+Beats:
+- ...
+Payoff: ...
+Fechamento: ...
+Hashtags: ...
+```
+
+O provider de roteiro ainda retorna o JSON interno do app, mas esse JSON precisa satisfazer semanticamente os campos do contrato: `title`, `hook`, `body_beats`, `ending`, `retention_map` e os metadados de publicacao.
 
 O `Roteiro Pronto` exige estes rotulos:
 
@@ -170,7 +185,18 @@ Fluxo OAuth:
 - `POST /youtube/disconnect` remove token e state locais.
 - O status de publicacao e o status de Analytics sao separados: publicar usa `youtube.force-ssl`/`youtube.upload`; Analytics usa `youtube.readonly`.
 
-O Centro de Crescimento do Canal usa `YouTubeAnalyticsSnapshot` para salvar leituras de `reports.query` por Job publicado. A primeira versao sincroniza manualmente a janela de 28 dias para Jobs com `youtube_video_id` e ordena linhas editoriais por retencao.
+O Centro de Crescimento do Canal usa `YouTubeAnalyticsSnapshot` para salvar leituras de `reports.query` por Job publicado. A coleta automatica roda fora do request da pagina, via CLI/timer dedicado, e atualiza Jobs publicados com `youtube_video_id` conforme a janela ativa de performance.
+
+O Score de Crescimento e deliberadamente simples: `averageViewPercentage` vira o score principal, `views >= 100` marca confianca, e `subscribersGained`, `shares` e `views` servem como desempate. Likes e comentarios aparecem como contexto, mas nao guiam o ranking principal.
+
+A politica de coleta recorrente e:
+
+- Jobs publicados dentro de `performance_sync_active_window_days` sao candidatos diarios quando o snapshot esta ausente ou velho.
+- Jobs entre a janela ativa e `performance_sync_archive_window_days` sao candidatos semanais.
+- Jobs sem `youtube_video_id` ficam como pendencia operacional, nao como performance ruim.
+- A pausa de criacao/publicacao automatizada nao pausa a coleta de performance; use `performance_collection_enabled` para esse controle.
+
+As recomendacoes rapidas do Centro de Crescimento sao deterministicas e auditaveis. O relatorio semanal por IA fica separado e so deve rodar quando houver base minima de crescimento suficiente.
 
 ## Publicacao cruzada no TikTok
 
@@ -220,6 +246,7 @@ O contexto de integracao exposto no hub usa:
 | `POST` | `/jobs/{job_id}/reopen-publication` | Reabre um publish para republicacao. |
 | `POST` | `/jobs/{job_id}/performance` | Registra metricas manuais do YouTube Studio. |
 | `POST` | `/jobs/{job_id}/youtube-analytics/sync` | Sincroniza snapshot de Analytics do YouTube para um job publicado com `youtube_video_id`. |
+| `POST` | `/youtube-analytics/sync-due` | Sincroniza o lote de Jobs publicados que ja estao elegiveis para nova coleta. |
 | `GET` | `/healthz` | Healthcheck do app. |
 
 Arquivos sob `data/artifacts/` sao servidos por `/artifacts/...` quando ainda existem.
@@ -243,15 +270,19 @@ Defaults importantes:
 - `automation_daily_timezone=America/Sao_Paulo`
 - `automation_daily_run_time=02:00`
 - `automation_publish_time=11:00`
+- `performance_collection_enabled=true`
+- `performance_sync_active_window_days=45`
+- `performance_sync_archive_window_days=180`
+- `performance_sync_batch_limit=10`
 - `artifact_retention_enabled=true`
 
 Camadas de configuracao:
 
 - `.env`: boot, infraestrutura e segredos. Inclui `YTS_APP_URL`, `YTS_HUB_AUTH_TOKEN`, `YTS_DATABASE_URL`, chaves de provedores, OAuth do YouTube, token do TikTok e exposicao Tailnet.
-- Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, planejador de cenas, fonte de musica, autopopulacao do banco local, modo de publicacao, API do YouTube, publicacao cruzada no TikTok, horario do ciclo diario, horario padrao de publicacao, janela da agenda e score minimo. O gerador de imagens aparece como informacao operacional; hoje, em execucao real, ele e MiniMax.
+- Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, planejador de cenas, fonte de musica, autopopulacao do banco local, modo de publicacao, API do YouTube, publicacao cruzada no TikTok, horario do ciclo diario, horario padrao de publicacao, janela da agenda, score minimo e coleta de performance. O gerador de imagens aparece como informacao operacional; hoje, em execucao real, ele e MiniMax.
 - defaults do codigo: valores seguros usados quando nem `.env` nem Hub definem uma sobreposicao.
 
-As sobreposicoes do Hub ficam na tabela `operational_settings`. Elas sao aplicadas no startup do FastAPI e no comando `yts-render automation-run`. Segredos nunca devem ser adicionados a essa tabela; novos campos editaveis precisam entrar pela allowlist em `app/operational_settings.py`.
+As sobreposicoes do Hub ficam na tabela `operational_settings`. Elas sao aplicadas no startup do FastAPI e nos comandos `yts-render automation-run` e `yts-render analytics-sync-run`. Segredos nunca devem ser adicionados a essa tabela; novos campos editaveis precisam entrar pela allowlist em `app/operational_settings.py`.
 
 Terminologia do painel:
 
@@ -375,12 +406,25 @@ A primeira versao roda por CLI e systemd timer, nao por scheduler interno do Fas
 
 ```bash
 python -m app.cli automation-run
+python -m app.cli analytics-sync-run
 scripts/install_automation_timer.sh
+scripts/install_analytics_sync_timer.sh
 ```
 
 O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de 14 dias a partir de amanha. Quando encontra dia vago na agenda interna, tenta primeiro consumir um roteiro pronto aleatorio do banco, filtrado por similaridade narrativa. Se o banco estiver vazio ou saturado por similaridade, usa Tema Automatico.
 
 Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` para 11h em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
+
+## Coleta de performance
+
+A coleta de performance e separada da automacao de criacao/publicacao. O comando abaixo busca apenas snapshots de Analytics para Jobs publicados elegiveis:
+
+```bash
+python -m app.cli analytics-sync-run
+scripts/install_analytics_sync_timer.sh
+```
+
+O timer roda as 03h em `America/Sao_Paulo`, depois do ciclo diario principal. A rotina respeita `performance_collection_enabled`, exige OAuth com escopo de Analytics e limita o lote por `performance_sync_batch_limit`.
 
 ## Testes
 

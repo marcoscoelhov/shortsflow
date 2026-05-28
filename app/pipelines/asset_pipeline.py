@@ -95,6 +95,7 @@ class AssetPipeline(BasePipeline):
 
     def step_assets(self, session: Session, job: Job, attempt: int) -> list[str]:
         self._remove_stale_quality_report(job.job_id, "asset_quality_report.json")
+        self._remove_stale_quality_report(job.job_id, "asset_visual_gate.json")
         if hasattr(self.providers.image, "begin_job"):
             self.providers.image.begin_job(job.job_id)
         scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job.job_id))
@@ -129,11 +130,39 @@ class AssetPipeline(BasePipeline):
         if not asset_gate.passed:
             self.storage.persist_json(job.job_id, "asset_quality_report.json", {"reasons": asset_gate.reasons, "metrics": asset_gate.metrics})
             raise RecoverableStepError(f"asset quality gate failed: {', '.join(asset_gate.reasons[:6])}")
+        visual_contract = self._visual_contract_artifact_payload(job.job_id)
+        asset_visual_gate = self.asset_visual_gate.validate(selected_assets, scene_plan.scenes, visual_contract=visual_contract)
+        self.storage.persist_json(
+            job.job_id,
+            "asset_visual_gate.json",
+            {
+                "reasons": asset_visual_gate.reasons,
+                "metrics": asset_visual_gate.metrics,
+                "selected_assets": selected_assets,
+            },
+        )
+        if not asset_visual_gate.passed:
+            raise RecoverableStepError(f"asset visual quality gate failed: {', '.join(asset_visual_gate.reasons[:6])}")
         quality_summary = dict(job.quality_summary or {})
-        quality_summary["assets"] = {**asset_gate.metrics, "semantic_threshold_pass": True}
+        quality_summary["assets"] = {
+            **asset_gate.metrics,
+            "semantic_threshold_pass": True,
+            "asset_visual_gate_pass": asset_visual_gate.metrics.get("asset_visual_gate_pass", True),
+            "asset_visual_gate_checked": asset_visual_gate.metrics.get("checked", False),
+        }
         job.quality_summary = quality_summary
         self._append_event(job.job_id, "asset.selected", "succeeded", quality_summary["assets"])
         return asset_refs
+
+    def _visual_contract_artifact_payload(self, job_id: str) -> dict[str, Any]:
+        path = self.storage.job_dir(job_id, create=False) / "visual_contract.json"
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _generate_assets_for_scene(self, job_id: str, scene: dict[str, Any], attempt: int) -> dict[str, Any]:
         scene_dir = self.storage.job_dir(job_id) / "assets" / scene["scene_id"]
@@ -299,7 +328,15 @@ class AssetPipeline(BasePipeline):
             "events": events,
             "fallback_events": fallback_events,
             "asset_rows": asset_rows,
-            "selected_asset": {"scene_id": scene["scene_id"], "provider": winner_asset["provider"], **winner_scores},
+            "selected_asset": {
+                "scene_id": scene["scene_id"],
+                "provider": winner_asset["provider"],
+                "uri": winner_asset.get("uri"),
+                "prompt_snapshot": winner_asset.get("prompt_snapshot"),
+                "width": winner_asset.get("width"),
+                "height": winner_asset.get("height"),
+                **winner_scores,
+            },
             "asset_refs": [path_from_uri(asset["uri"]).name for asset, _ in candidates],
         }
 

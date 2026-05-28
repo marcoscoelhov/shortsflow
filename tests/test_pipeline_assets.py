@@ -60,6 +60,85 @@ def test_scene_plan_gate_rejects_generic_prompt_without_no_text_constraint() -> 
     assert not result.passed
     assert any("missing_no_text_constraint" in reason for reason in result.reasons)
 
+def test_scene_plan_gate_rejects_hook_intent_that_violates_visual_contract() -> None:
+    visual_contract = {
+        "hook_frame": {
+            "recommended_visual_intent": "deceptive_establishing",
+            "must_show": ["cidade", "rua"],
+            "must_hide": ["mesa"],
+        },
+        "loop_policy": {"forbidden_early_reveal": ["cidade inteira cabe numa mesa"]},
+        "payoff_frame": {"recommended_visual_intent": "loop_close_reframe"},
+    }
+    result = ScenePlanGate().validate(
+        [
+            {
+                "scene_id": "scene-1",
+                "order": 1,
+                "retention_role": "visual_hook",
+                "visual_intent": "subject_closeup",
+                "narration_text": "Isso parece uma cidade abandonada de verdade.",
+                "token_start": 0,
+                "token_end": 7,
+                "primary_subject": "cidade abandonada",
+                "image_prompt": "miniature abandoned city street, no readable text anywhere",
+            }
+        ],
+        expected_scene_count=1,
+        visual_contract=visual_contract,
+    )
+
+    assert not result.passed
+    assert "scene-1:visual_contract_hook_intent_mismatch" in result.reasons
+
+def test_scene_plan_gate_matches_visual_contract_hook_terms_semantically() -> None:
+    visual_contract = {
+        "hook_frame": {
+            "recommended_visual_intent": "deceptive establishing",
+            "must_show": [
+                "Quarteirões, edifícios, ruas, árvores em escala urbana",
+                "Iluminação que sugere luz natural de drone",
+            ],
+            "must_hide": ["mãos", "régua"],
+        },
+        "loop_policy": {"forbidden_early_reveal": ["Mostrar a escala real"]},
+        "payoff_frame": {"recommended_visual_intent": "scale reveal"},
+    }
+    result = ScenePlanGate().validate(
+        [
+            {
+                "scene_id": "scene-1",
+                "order": 1,
+                "retention_role": "visual_hook",
+                "visual_intent": "deceptive_establishing",
+                "narration_text": "Isso não é uma foto aérea. É uma maquete.",
+                "token_start": 0,
+                "token_end": 7,
+                "primary_subject": "Vista aérea de uma maquete urbana que parece real",
+                "image_prompt": (
+                    "Aerial view of a miniature city model with realistic buildings, streets, "
+                    "and trees, shot from above like a drone photograph, no visible borders or hands, "
+                    "no readable text anywhere"
+                ),
+            },
+            {
+                "scene_id": "scene-2",
+                "order": 2,
+                "retention_role": "loop_close",
+                "visual_intent": "scale_reveal",
+                "narration_text": "Agora a escala aparece.",
+                "token_start": 8,
+                "token_end": 12,
+                "primary_subject": "maquete pequena",
+                "image_prompt": "tiny model city in a hand, no readable text anywhere",
+            },
+        ],
+        expected_scene_count=2,
+        visual_contract=visual_contract,
+    )
+
+    assert result.passed
+
 def test_asset_gate_rejects_low_semantic_scene_asset() -> None:
     result = AssetGate().validate_selected(
         [
@@ -74,6 +153,116 @@ def test_asset_gate_rejects_low_semantic_scene_asset() -> None:
     )
     assert not result.passed
     assert "scene-1:semantic_match_below_threshold" in result.reasons
+
+def test_asset_visual_gate_accepts_hook_asset_aligned_with_visual_contract() -> None:
+    scenes = [
+        {
+            "scene_id": "scene-1",
+            "order": 1,
+            "retention_role": "visual_hook",
+            "visual_intent": "deceptive_establishing",
+            "narration_text": "Isso parece uma cidade abandonada de verdade.",
+            "primary_subject": "cidade abandonada com rua vazia",
+            "image_prompt": "cidade abandonada com rua vazia em maquete realista, no readable text anywhere",
+        },
+        {
+            "scene_id": "scene-2",
+            "order": 2,
+            "retention_role": "loop_close",
+            "visual_intent": "loop_close_reframe",
+            "narration_text": "No final, a cidade inteira cabe em uma mesa.",
+            "primary_subject": "maquete urbana sobre uma mesa",
+            "image_prompt": "maquete urbana sobre uma mesa revelando a escala, no readable text anywhere",
+        },
+    ]
+    selected_assets = [
+        {
+            "scene_id": "scene-1",
+            "provider": "minimax",
+            "semantic_match": 0.91,
+            "total_score": 0.88,
+            "prompt_snapshot": "miniature abandoned city street, documentary realism, no readable text anywhere",
+        },
+        {
+            "scene_id": "scene-2",
+            "provider": "minimax",
+            "semantic_match": 0.90,
+            "total_score": 0.87,
+            "prompt_snapshot": "miniature city on a table payoff reveal, no readable text anywhere",
+        },
+    ]
+    visual_contract = {
+        "hook_frame": {
+            "recommended_visual_intent": "deceptive_establishing",
+            "must_show": ["cidade", "rua"],
+            "must_hide": ["mesa"],
+            "negative_reads": ["imagem abstrata"],
+        },
+        "loop_policy": {"forbidden_early_reveal": ["cidade inteira cabe em uma mesa"]},
+        "payoff_frame": {"recommended_visual_intent": "loop_close_reframe"},
+    }
+
+    result = AssetVisualGate().validate(selected_assets, scenes, visual_contract=visual_contract)
+
+    assert result.passed
+    assert result.metrics["asset_visual_gate_pass"] is True
+    assert result.metrics["checked"] is True
+
+def test_asset_visual_gate_rejects_weak_hook_asset_against_visual_contract() -> None:
+    scenes = [
+        {
+            "scene_id": "scene-1",
+            "order": 1,
+            "retention_role": "visual_hook",
+            "visual_intent": "deceptive_establishing",
+            "narration_text": "Isso parece uma cidade abandonada de verdade.",
+            "primary_subject": "textura generica",
+            "image_prompt": "imagem abstrata generica, no readable text anywhere",
+        },
+        {
+            "scene_id": "scene-2",
+            "order": 2,
+            "retention_role": "loop_close",
+            "visual_intent": "loop_close_reframe",
+            "narration_text": "No final, a cidade inteira cabe em uma mesa.",
+            "primary_subject": "maquete urbana sobre uma mesa",
+            "image_prompt": "maquete urbana sobre uma mesa revelando a escala, no readable text anywhere",
+        },
+    ]
+    selected_assets = [
+        {
+            "scene_id": "scene-1",
+            "provider": "minimax",
+            "semantic_match": 0.78,
+            "total_score": 0.74,
+            "prompt_snapshot": "imagem abstrata generica sem rua reconhecivel",
+        },
+        {
+            "scene_id": "scene-2",
+            "provider": "minimax",
+            "semantic_match": 0.90,
+            "total_score": 0.87,
+            "prompt_snapshot": "maquete urbana sobre uma mesa revelando a escala",
+        },
+    ]
+    visual_contract = {
+        "hook_frame": {
+            "recommended_visual_intent": "deceptive_establishing",
+            "must_show": ["fachadas reconheciveis"],
+            "must_hide": ["mesa"],
+            "negative_reads": ["imagem abstrata"],
+        },
+        "loop_policy": {"forbidden_early_reveal": ["cidade inteira cabe em uma mesa"]},
+        "payoff_frame": {"recommended_visual_intent": "loop_close_reframe"},
+    }
+
+    result = AssetVisualGate().validate(selected_assets, scenes, visual_contract=visual_contract)
+
+    assert not result.passed
+    assert "scene-1:hook_semantic_match_below_visual_threshold" in result.reasons
+    assert "scene-1:hook_total_score_below_visual_threshold" in result.reasons
+    assert "scene-1:hook_must_show_missing_from_asset_prompt" in result.reasons
+    assert "scene-1:hook_negative_read_present_in_asset_prompt" in result.reasons
 
 def test_subtitle_gate_blocks_markup_leakage() -> None:
     result = SubtitleGate().validate(
@@ -95,7 +284,7 @@ def test_subtitle_gate_rejects_large_timing_drift() -> None:
     result = SubtitleGate().validate(
         [{"idx": 1, "start_ms": 0, "end_ms": 1000, "text": "Texto bom"}],
         coverage_ratio=1.0,
-        p95_drift_ms=1200,
+        p95_drift_ms=1300,
         max_drift_ms=2200,
     )
     assert not result.passed
@@ -220,6 +409,89 @@ def test_minimax_scene_prompt_requires_first_scene_visual_hook(monkeypatch) -> N
     assert "retention_role" in prompt
     assert 'scene order=1 deve ter retention_role="visual_hook"' in prompt
     assert "usar visual_opening como brief visual" in prompt
+
+def test_minimax_scene_prompt_uses_visual_contract(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_json_completion(self, prompt: str) -> list[dict[str, object]]:
+        captured["prompt"] = prompt
+        return [
+            {
+                "scene_id": "scene-1",
+                "order": 1,
+                "narration_text": "Cena em pt-BR com cidade falsa.",
+                "token_start": 0,
+                "token_end": 5,
+                "estimated_duration_sec": 5,
+                "retention_role": "visual_hook",
+                "visual_intent": "deceptive_establishing",
+                "primary_subject": "cidade falsa",
+                "image_prompt": "abandoned miniature city street, no readable text anywhere",
+                "fallback_queries": ["cidade falsa"],
+            }
+        ]
+
+    monkeypatch.setattr(MinimaxCreativeProvider, "_json_completion", fake_json_completion)
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.plan_scenes(
+        {
+            "title": "Teste",
+            "hook": "Isso parece uma cidade real.",
+            "full_narration": "Cena em pt-BR com cidade falsa.",
+            "estimated_duration_sec": 5,
+            "visual_contract": {
+                "hook_frame": {
+                    "recommended_visual_intent": "deceptive_establishing",
+                    "must_show": ["rua", "fachadas"],
+                    "must_hide": ["mesa", "mão humana"],
+                },
+                "loop_policy": {"forbidden_early_reveal": ["cabe numa mesa"]},
+            },
+        },
+        1,
+    )
+
+    prompt = captured["prompt"]
+    assert "fonte da verdade visual" in prompt
+    assert "recommended_visual_intent" in prompt
+    assert "forbidden_early_reveal" in prompt
+    assert "nao force linguagem de scientific visualization" in prompt or "generic scientific styling" in prompt
+
+def test_scientific_mechanism_image_prompt_uses_conservative_visual_directive() -> None:
+    prompt = orchestrator.asset_pipeline.image_assets.semantic_english_image_prompt(
+        {
+            "narration_text": "dois corações empurram sangue para as brânquias",
+            "primary_subject": "dois corações do polvo ligados às brânquias",
+            "visual_intent": "process_or_mechanism",
+            "image_prompt": "Vertical cinematic close-up with semi-transparent anatomical view revealing organs.",
+        },
+        "polvos biologia",
+        "polvo",
+    )
+
+    assert "conservative science visual" in prompt
+    assert "avoid invented organs" in prompt
+
+def test_non_science_visual_domain_removes_scientific_prompt_style() -> None:
+    prompt = orchestrator.asset_pipeline.image_assets.semantic_english_image_prompt(
+        {
+            "scene_id": "scene-1",
+            "order": 1,
+            "retention_role": "visual_hook",
+            "visual_domain": "miniature urban diorama / craft documentary realism",
+            "narration_text": "Isso parece uma cidade abandonada de verdade.",
+            "primary_subject": "diorama de cidade abandonada",
+            "visual_intent": "deceptive_establishing",
+            "image_prompt": "vertical cinematic scientific image of a miniature abandoned city street, scientific visualization",
+        },
+        "diorama de cidade abandonada",
+        "diorama de cidade abandonada",
+    ).lower()
+
+    assert "miniature craft documentary realism" in prompt
+    assert "scientific visualization" not in prompt
+    assert "scientific image" not in prompt
+    assert "clean vertical cinematic scientific image" not in prompt
 
 def test_minimax_image_provider_prefers_text_key_before_dedicated_key(monkeypatch) -> None:
     captured: dict[str, str] = {}
@@ -1079,6 +1351,22 @@ def test_subtitle_boundary_repair_can_pull_words_from_next_chunk() -> None:
     assert repaired[1]["text"] == "em segundos."
     assert SubtitleGate().validate(repaired, 1.0).passed
 
+def test_subtitle_split_avoids_semantic_orphan_fragments_from_audit_job() -> None:
+    cue = {
+        "idx": 7,
+        "start_ms": 18_000,
+        "end_ms": 25_200,
+        "text": "Dois corações empurram sangue para as brânquias. O outro manda oxigênio para o resto do corpo.",
+    }
+
+    items = orchestrator.asset_pipeline.subtitles.split_subtitle_cue(cue, token_start=0, token_end=15)
+    texts = [item["text"] for item in items]
+
+    assert "para as" not in texts
+    assert "oxigênio para o" not in texts
+    assert all(not text.endswith((" para o", " para as", " olhada, a", " para outro")) for text in texts)
+    assert SubtitleGate().validate(items, 1.0).passed
+
 def test_tts_duration_fit_compresses_audio_and_subtitle_timings(tmp_path: Path) -> None:
     audio_path = tmp_path / "voice.wav"
     srt_path = tmp_path / "voice.srt"
@@ -1161,6 +1449,27 @@ def test_scene_semantics_keeps_image_prompt_in_english() -> None:
     assert "no text printed on objects" in prompt
     assert "blank packages" in prompt
     assert "sem texto" not in prompt
+
+def test_scene_semantics_uses_visual_contract_domain_for_non_science_prompt() -> None:
+    normalized = orchestrator.scene_pipeline.normalize_scene_semantics(
+        {
+            "scene_id": "scene-1",
+            "order": 1,
+            "retention_role": "visual_hook",
+            "primary_subject": "diorama de cidade abandonada",
+            "narration_text": "Isso parece uma cidade abandonada de verdade.",
+            "visual_intent": "deceptive_establishing",
+            "image_prompt": "vertical cinematic scientific image of an abandoned miniature street, scientific visualization, no readable text anywhere",
+            "fallback_queries": ["diorama cidade"],
+        },
+        "diorama de cidade abandonada",
+        visual_contract={"visual_domain": "miniature urban diorama / craft documentary realism"},
+    )
+    prompt = normalized["image_prompt"].lower()
+    assert normalized["visual_domain"] == "miniature urban diorama / craft documentary realism"
+    assert "miniature craft documentary realism" in prompt
+    assert "scientific visualization" not in prompt
+    assert "scientific image" not in prompt
 
 def test_scene_semantics_rebuilds_generic_portuguese_prompt_from_narration() -> None:
     normalized = orchestrator.scene_pipeline.normalize_scene_semantics(
@@ -1302,6 +1611,124 @@ def test_mock_scene_planner_uses_canonical_topic_as_subject() -> None:
     assert scenes[0]["primary_subject"] == "buracos negros"
     assert scenes[0]["topic_hint"] == "buracos negros"
     assert scenes[0]["fallback_queries"][0] == "buracos negros"
+
+def test_scene_pipeline_passes_visual_contract_to_planner(monkeypatch) -> None:
+    from app.models import ScenePlan
+
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "maquetes urbanas",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 35,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste",
+            "requested_angle": None,
+        }
+    )
+    script_payload = _base_script(
+        "Isso parece uma cidade abandonada de verdade. A rua pequena engana o olho. "
+        "A poeira vira neblina. Na segunda olhada, a cidade inteira cabe numa mesa."
+    )
+    visual_contract = {
+        "contract_name": "Contrato Visual do Roteiro",
+        "hook_frame": {
+            "recommended_visual_intent": "deceptive_establishing",
+            "must_show": ["cidade", "rua"],
+            "must_hide": ["mesa", "mão humana"],
+            "negative_reads": ["entulho abstrato"],
+        },
+        "loop_policy": {"forbidden_early_reveal": ["cidade inteira cabe numa mesa"]},
+        "payoff_frame": {"recommended_visual_intent": "loop_close_reframe"},
+    }
+    artifact_dir = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "script.json").write_text(json.dumps(script_payload), encoding="utf-8")
+    (artifact_dir / "visual_contract.json").write_text(json.dumps(visual_contract), encoding="utf-8")
+
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic",
+                canonical_topic="maquetes urbanas",
+                angle="ilusao de cidade real",
+                hook_promise="uma maquete parece cidade real antes da escala aparecer",
+                entities=["maquetes"],
+                search_terms=["maquetes urbanas"],
+                title_candidates=["Maquetes urbanas parecem cidades reais"],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"script-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="script",
+                title=str(script_payload["title"]),
+                hook=str(script_payload["hook"]),
+                body_beats=script_payload["body_beats"],
+                ending=str(script_payload["ending"]),
+                cta=None,
+                full_narration=str(script_payload["full_narration"]),
+                estimated_duration_sec=float(script_payload["estimated_duration_sec"]),
+                key_facts=script_payload["key_facts"],
+                token_count=int(script_payload["token_count"]),
+                language="pt-BR",
+                qa_metrics=script_payload["qa_metrics"],
+            )
+        )
+        session.commit()
+
+    captured: dict[str, object] = {}
+    scene_count = orchestrator.settings.scene_target_count
+
+    def fake_plan_scenes(script: dict[str, object], target_scene_count: int) -> list[dict[str, object]]:
+        captured["visual_contract"] = script.get("visual_contract")
+        scenes: list[dict[str, object]] = []
+        for index in range(target_scene_count):
+            is_first = index == 0
+            is_last = index == target_scene_count - 1
+            scenes.append(
+                {
+                    "scene_id": f"scene-{index + 1}",
+                    "order": index + 1,
+                    "retention_role": "visual_hook" if is_first else "loop_close" if is_last else "escalation",
+                    "visual_intent": "deceptive_establishing" if is_first else "loop_close_reframe" if is_last else "visual_evidence",
+                    "narration_text": f"Trecho visual {index + 1} com detalhe concreto.",
+                    "token_start": index,
+                    "token_end": index,
+                    "estimated_duration_sec": 5,
+                    "primary_subject": "cidade abandonada com rua" if is_first else "cidade em miniatura revelada" if is_last else "detalhe urbano",
+                    "image_prompt": (
+                        "abandoned miniature city street with facades, no readable text anywhere"
+                        if is_first
+                        else "miniature city on a table payoff reveal, no readable text anywhere"
+                        if is_last
+                        else "urban miniature detail, no readable text anywhere"
+                    ),
+                    "fallback_queries": ["cidade em miniatura"],
+                }
+            )
+        assert target_scene_count == scene_count
+        return scenes
+
+    monkeypatch.setattr(orchestrator.providers.creative, "plan_scenes", fake_plan_scenes)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        artifacts = orchestrator.scene_pipeline.step_scene_plan(session, job, 1)
+        session.flush()
+        scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job_id))
+
+    assert captured["visual_contract"] == visual_contract
+    assert "scene_plan.json" in artifacts
+    assert scene_plan is not None
 
 def test_asset_extension_is_normalized_to_actual_file_format(tmp_path: Path) -> None:
     wrong_path = tmp_path / "ai.png"

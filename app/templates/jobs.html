@@ -7,16 +7,16 @@
     <h2>Fila de vídeos</h2>
     <p>Acompanhe geração, revisão, agenda e publicação em uma fila única.</p>
   </div>
-  <div class="jobs-hero-stats" aria-label="Resumo de operação">
-    <article>
+  <ul class="jobs-operation-summary" aria-label="Resumo de operação">
+    <li>
       <span>Precisam de ação</span>
       <strong>{{ workflow_summary.awaiting_approval_count + workflow_summary.unscheduled_approved_count }}</strong>
-    </article>
-    <article>
+    </li>
+    <li>
       <span>Na fila</span>
       <strong>{{ pagination.total }}</strong>
-    </article>
-  </div>
+    </li>
+  </ul>
 </section>
 
 <section class="jobs-action-row" aria-label="Ações de jobs">
