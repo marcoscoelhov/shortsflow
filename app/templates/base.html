@@ -90,7 +90,7 @@
             <span class="material-symbols-outlined" aria-hidden="true">video_library</span>
             Biblioteca
           </button>
-          <a href="/#publication-hub">
+          <a class="{% if active_path[:16] == '/publication-hub' %}active{% endif %}" href="/publication-hub" {% if active_path[:16] == '/publication-hub' %}aria-current="page"{% endif %}>
             <span class="material-symbols-outlined" aria-hidden="true">bar_chart</span>
             Crescimento
           </a>
@@ -132,10 +132,10 @@
           <span class="material-symbols-outlined" aria-hidden="true">event_upcoming</span>
           <span>Agenda</span>
         </a>
-        <button type="button" data-open-operational-settings>
-          <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-          <span>Config.</span>
-        </button>
+        <a href="/publication-hub" class="{% if active_path[:16] == '/publication-hub' %}active{% endif %}" {% if active_path[:16] == '/publication-hub' %}aria-current="page"{% endif %}>
+          <span class="material-symbols-outlined" aria-hidden="true">bar_chart</span>
+          <span>Crescer</span>
+        </a>
       </nav>
       <main class="page-shell">
         {% block content %}{% endblock %}

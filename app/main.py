@@ -392,7 +392,6 @@ def jobs_page(
         "jobs.html",
         {
             **list_context,
-            **publication_context,
             "workflow_summary": publication_context["metrics"],
             "youtube_integration": publication_context["integration"],
             "automation": publication_context["automation"],
@@ -458,12 +457,26 @@ def jobs_fragment(
 
 
 @app.get("/publication-hub", response_class=HTMLResponse)
+def publication_dashboard_page(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "growth.html",
+        {
+            **_publication_dashboard_context(request),
+            "growth_return_to": "/publication-hub",
+            "settings": settings,
+        },
+    )
+
+
+@app.get("/publication-hub/fragment", response_class=HTMLResponse)
 def publication_dashboard_fragment(request: Request):
     return templates.TemplateResponse(
         request,
         "publication_dashboard.html",
         {
             **_publication_dashboard_context(request),
+            "growth_return_to": "/publication-hub",
             "settings": settings,
         },
     )
@@ -472,15 +485,15 @@ def publication_dashboard_fragment(request: Request):
 @app.post("/automation/toggle")
 def toggle_automation(enabled: bool = Form(default=False), return_to: str | None = Form(default=None)):
     automation_service.set_automation_enabled(enabled)
-    return _redirect_back(return_to, default="/#publication-hub")
+    return _redirect_back(return_to, default="/publication-hub")
 
 
 @app.post("/automation/run")
 def run_automation_now(force: bool = Form(default=False), return_to: str | None = Form(default=None)):
     result = automation_service.run_daily_cycle(force=force)
     if result and result.get("status") == "failed":
-        return _redirect_back(return_to, {"automation_error": result.get("error") or "failed"}, default="/#publication-hub")
-    return _redirect_back(return_to, default="/#publication-hub")
+        return _redirect_back(return_to, {"automation_error": result.get("error") or "failed"}, default="/publication-hub")
+    return _redirect_back(return_to, default="/publication-hub")
 
 
 @app.post("/automation/ready-scripts/import")

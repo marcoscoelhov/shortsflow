@@ -1,5 +1,6 @@
 {% import "components.html" as ui %}
-<section id="publication-hub" class="publication-shell" hx-get="/publication-hub" hx-trigger="every 30s" hx-swap="outerHTML">
+{% set growth_return_to = growth_return_to|default('/publication-hub') %}
+<section id="publication-hub" class="publication-shell" hx-get="/publication-hub/fragment" hx-trigger="every 30s" hx-swap="outerHTML">
   <section class="panel publication-hero">
     <div>
       <p class="eyebrow">YouTube</p>
@@ -89,7 +90,7 @@
         <h3>Ciclo diário</h3>
       </div>
       <form method="post" action="/automation/toggle" class="inline-form">
-        <input type="hidden" name="return_to" value="/#publication-hub">
+        <input type="hidden" name="return_to" value="{{ growth_return_to }}">
         <input type="hidden" name="enabled" value="{% if automation.metrics.enabled %}false{% else %}true{% endif %}">
         <button type="submit" class="{% if automation.metrics.enabled %}ghost{% endif %}">
           {% if automation.metrics.enabled %}Pausar{% else %}Ativar{% endif %}
@@ -127,7 +128,7 @@
     {% endif %}
     <div class="button-row">
       <form method="post" action="/automation/run">
-        <input type="hidden" name="return_to" value="/#publication-hub">
+        <input type="hidden" name="return_to" value="{{ growth_return_to }}">
         <input type="hidden" name="force" value="true">
         <button type="submit" class="ghost">Rodar ciclo agora</button>
       </form>
@@ -247,7 +248,7 @@
           </a>
           {% if entry.schedule.youtube_video_id %}
           <form method="post" action="/jobs/{{ entry.job_id }}/youtube-analytics/sync" class="inline-form">
-            <input type="hidden" name="return_to" value="/#publication-hub">
+            <input type="hidden" name="return_to" value="{{ growth_return_to }}">
             <input type="hidden" name="days" value="28">
             <button type="submit" class="ghost">Sincronizar Analytics</button>
           </form>

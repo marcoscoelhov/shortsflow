@@ -199,6 +199,7 @@ O contexto de integracao exposto no hub usa:
 | `POST` | `/hub/prompt` | Salva ou reseta o template viral do hub. |
 | `GET` | `/jobs` | Fragmento HTML da tabela paginada de jobs. |
 | `GET` | `/publication-hub` | Centro de Crescimento do Canal com performance, integracao YouTube e secao operacional de publicacao. |
+| `GET` | `/publication-hub/fragment` | Fragmento HTMX do Centro de Crescimento do Canal. |
 | `GET` | `/youtube/connect` | Inicia OAuth do YouTube. |
 | `GET` | `/youtube/oauth/callback` | Conclui OAuth do YouTube. |
 | `POST` | `/youtube/disconnect` | Remove token OAuth local. |

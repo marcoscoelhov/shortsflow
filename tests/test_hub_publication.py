@@ -1970,7 +1970,7 @@ def test_publication_dashboard_fragment_shows_ready_and_scheduled_items() -> Non
         )
         session.commit()
 
-    response = client.get("/publication-hub")
+    response = client.get("/publication-hub/fragment")
 
     assert response.status_code == 200
     assert "Centro de Crescimento do Canal" in response.text
@@ -1979,16 +1979,22 @@ def test_publication_dashboard_fragment_shows_ready_and_scheduled_items() -> Non
     assert "Analytics OAuth" in response.text
     assert "/automation/ready-scripts/import" not in response.text
 
-def test_home_growth_menu_anchor_renders_full_growth_center() -> None:
+def test_home_growth_menu_links_to_separate_growth_center() -> None:
     client = TestClient(app)
 
     response = client.get("/")
 
     assert response.status_code == 200
-    assert 'href="/#publication-hub"' in response.text
-    assert 'id="publication-hub" class="publication-shell"' in response.text
-    assert "Centro de Crescimento do Canal" in response.text
-    assert "Linhas editoriais por retenção" in response.text
+    assert 'href="/publication-hub"' in response.text
+    assert 'id="publication-hub" class="publication-shell"' not in response.text
+    assert "Fila de vídeos" in response.text
+    assert "Linhas editoriais por retenção" not in response.text
+
+    growth_response = client.get("/publication-hub")
+    assert growth_response.status_code == 200
+    assert 'id="publication-hub" class="publication-shell"' in growth_response.text
+    assert "Centro de Crescimento do Canal" in growth_response.text
+    assert "Linhas editoriais por retenção" in growth_response.text
 
 def test_record_performance_metrics_persists_artifact_and_learning_brief() -> None:
     job_id = orchestrator.create_job(
@@ -2150,7 +2156,7 @@ def test_sync_youtube_analytics_snapshot_persists_snapshot_and_updates_growth_ce
     )
     client = TestClient(app)
 
-    response = client.post(f"/jobs/{job_id}/youtube-analytics/sync", data={"days": "28", "return_to": "/#publication-hub"}, follow_redirects=False)
+    response = client.post(f"/jobs/{job_id}/youtube-analytics/sync", data={"days": "28", "return_to": "/publication-hub"}, follow_redirects=False)
 
     assert response.status_code == 303
     with SessionLocal() as session:
