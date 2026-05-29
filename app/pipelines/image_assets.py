@@ -12,12 +12,13 @@ from app.pipelines.common import RecoverableStepError
 from app.utils import path_from_uri
 
 
+MINIMAX_IMAGE_PROMPT_MAX_CHARS = 1500
+MINIMAX_IMAGE_PROMPT_TARGET_CHARS = 1200
+
 NO_TEXT_IMAGE_CONSTRAINT = (
-    "clean vertical cinematic image, no readable text anywhere, "
-    "no letters, no words, no numbers, no symbols, no logo, no watermark, no captions, "
-    "no subtitles, no title card, no poster, no signs, no labels, no UI, no infographic, "
-    "no typography, no diagrams with labels, no text printed on objects, no text on packages, "
-    "no text on cups, no text on screens, no text on charts, no readable brand marks"
+    "clean vertical cinematic image, no readable text anywhere, no letters, no words, "
+    "no numbers, no symbols, no logo, no watermark, no captions, no subtitles, "
+    "no typography, no labels, no UI, no signs, no text printed on objects"
 )
 
 ENGLISH_SUBJECT_ALIASES = {
@@ -43,6 +44,11 @@ ENGLISH_SUBJECT_ALIASES = {
     "torre inclinada de pisa": "Leaning Tower of Pisa",
     "por que a torre de pisa não cai?": "Leaning Tower of Pisa",
     "por que a torre de pisa nao cai?": "Leaning Tower of Pisa",
+    "diorama de cidade abandonada": "abandoned miniature city diorama",
+    "maquete de cidade": "miniature city diorama",
+    "maquete urbana": "miniature urban diorama",
+    "cidade em miniatura": "miniature city",
+    "cidade falsa": "miniature city illusion",
 }
 
 SCENE_VISUAL_HINTS = [
@@ -85,6 +91,27 @@ SCENE_VISUAL_HINTS = [
     (("tentáculo", "cortado"), "detached octopus arm moving reflexively on the seabed, natural biology, non-graphic"),
     (("tentaculo", "cortado"), "detached octopus arm moving reflexively on the seabed, natural biology, non-graphic"),
     (("cor", "textura", "predadores"), "octopus rapidly changing skin color and texture while camouflaging from a predator"),
+    (("cidade", "palma"), "hyper realistic miniature city block resting in an open palm, tiny streets, cars, trees and apartment buildings clearly visible"),
+    (("cidade", "inteira"), "hyper realistic miniature city block with tiny streets, cars, trees and apartment buildings, convincing real-city scale illusion"),
+    (("maquete", "mesa"), "top-down miniature urban diorama on a craft table, tiny streets and buildings lit like a real aerial photo"),
+    (("detalhes", "minuciosos"), "macro view of an outdoor miniature city street model, tiny painted building facades, toy cars, street lamps and asphalt road markings"),
+    (("detalhes", "minucioso"), "macro view of an outdoor miniature city street model, tiny painted building facades, toy cars, street lamps and asphalt road markings"),
+    (("detalhes", "dioramas"), "macro view of an outdoor miniature city street model, tiny painted building facades, toy cars, street lamps and asphalt road markings"),
+    (("obturador", "borrão"), "close-up of a toy car on a miniature asphalt road with motion blur streaks, camera shutter implied by lens reflection, outdoor city diorama"),
+    (("obturador", "borrao"), "close-up of a toy car on a miniature asphalt road with motion blur streaks, camera shutter implied by lens reflection, outdoor city diorama"),
+    (("carrinhos", "movimento"), "close-up of a toy car on a miniature asphalt road with motion blur streaks, outdoor city diorama"),
+    (("computação", "gráfica"), "miniature city street practical-effects comparison, same toy car shown sharp and with a motion blur trail on an outdoor model road"),
+    (("computacao", "grafica"), "miniature city street practical-effects comparison, same toy car shown sharp and with a motion blur trail on an outdoor model road"),
+    (("led", "fumaca"), "macro view of a miniature city building facade with warm LED window lights and subtle artificial smoke from a tiny chimney"),
+    (("led", "fumaça"), "macro view of a miniature city building facade with warm LED window lights and subtle artificial smoke from a tiny chimney"),
+    (("camera", "lente"), "side view of a camera lens aimed at a miniature city diorama, lens-distance perspective trick clearly visible"),
+    (("câmera", "lente"), "side view of a camera lens aimed at a miniature city diorama, lens-distance perspective trick clearly visible"),
+    (("lente", "distancia"), "side view of a camera lens aimed at a miniature city diorama, lens-distance perspective trick clearly visible"),
+    (("lente", "distância"), "side view of a camera lens aimed at a miniature city diorama, lens-distance perspective trick clearly visible"),
+    (("filmes", "games"), "miniature city diorama used as a practical-effects test, two tiny cars on the same model street, one blurred and one sharp"),
+    (("filmes", "jogos"), "miniature city diorama used as a practical-effects test, two tiny cars on the same model street, one blurred and one sharp"),
+    (("games", "borrao"), "miniature city diorama used as a practical-effects test, two tiny cars on the same model street, one blurred and one sharp"),
+    (("jogos", "borrao"), "miniature city diorama used as a practical-effects test, two tiny cars on the same model street, one blurred and one sharp"),
 ]
 
 
@@ -199,7 +226,7 @@ class ImageAssetDomain:
             if normalized.lower() in seen:
                 continue
             seen.add(normalized.lower())
-            variants.append({**scene, "image_prompt": normalized, "regeneration_round": regeneration_round})
+            variants.append({**scene, "image_prompt": self.minimax_safe_image_prompt(normalized, scene), "regeneration_round": regeneration_round})
         return variants
 
     def semantic_english_image_prompt(self, scene: dict[str, Any], topic_text: str, primary_subject: str) -> str:
@@ -208,7 +235,7 @@ class ImageAssetDomain:
         scene_hint = self.remove_incompatible_scientific_style(self.english_scene_visual_hint(scene, english_subject), scene)
         semantic_directive = self.semantic_scene_directive(scene, scene_hint)
         domain_style = self.visual_domain_style(scene)
-        if self.should_rebuild_image_prompt(prompt):
+        if self.should_rebuild_image_prompt(prompt) or self.prompt_conflicts_with_visual_domain(prompt, scene):
             visual_intent = str(scene.get("visual_intent") or "documentary scene").replace("_", " ")
             prompt = scene_hint or f"vertical cinematic {domain_style} of {english_subject}, {visual_intent}"
         else:
@@ -232,7 +259,7 @@ class ImageAssetDomain:
             prompt = f"{prompt}, {style_directive}".strip(", ")
         if "no movie poster" not in prompt.lower():
             prompt += ", no movie poster, no typography, no stock-photo generic scene"
-        return self.with_no_text_image_constraints(prompt)
+        return self.minimax_safe_image_prompt(self.with_no_text_image_constraints(prompt), scene)
 
     def conservative_science_visual_directive(self, scene: dict[str, Any]) -> str:
         source_text = " ".join(
@@ -310,6 +337,14 @@ class ImageAssetDomain:
                 return "caffeine"
             if "cafe" in normalized_ascii:
                 return "coffee"
+            if ("diorama" in normalized_ascii or "maquete" in normalized_ascii or "miniatura" in normalized_ascii) and (
+                "cidade" in normalized_ascii or "urbana" in normalized_ascii or "urbano" in normalized_ascii
+            ):
+                return "miniature urban diorama"
+            if "cidade" in normalized_ascii and ("falsa" in normalized_ascii or "miniatura" in normalized_ascii):
+                return "miniature city illusion"
+            if "cidade" in normalized_ascii:
+                return "city"
         return primary_subject or topic_text or "the subject"
 
     def english_scene_visual_hint(self, scene: dict[str, Any], english_subject: str) -> str:
@@ -339,10 +374,10 @@ class ImageAssetDomain:
         visual_intent = str(scene.get("visual_intent") or "documentary evidence").replace("_", " ")
         if narration:
             return (
-                "depict the specific narration beat with concrete cause-and-effect visual evidence, "
-                f"not a generic symbolic background, visual focus: {scene_hint}, scene role: {visual_intent}"
+                "show this exact narration beat as concrete visual evidence, "
+                f"not a generic symbolic background, focus: {scene_hint}, role: {visual_intent}"
             )
-        return "depict the specific narration beat with concrete cause-and-effect visual evidence, not a generic symbolic background"
+        return "show this exact narration beat as concrete visual evidence, not a generic symbolic background"
 
     def visual_domain_style(self, scene: dict[str, Any]) -> str:
         domain = self.normalized_visual_domain(scene)
@@ -361,8 +396,8 @@ class ImageAssetDomain:
     def domain_style_directive(self, scene: dict[str, Any]) -> str:
         style = self.visual_domain_style(scene)
         if self.is_science_visual_domain(scene):
-            return f"{style}, scientific visualization where appropriate"
-        return f"{style}, domain-compatible visual style, avoid lab-diagram styling unless explicitly required by the narration"
+            return f"{style}, scientific visualization only where the narration requires it"
+        return f"{style}, domain-compatible objects only, no lab-diagram styling unless required"
 
     def remove_incompatible_scientific_style(self, prompt: str, scene: dict[str, Any]) -> str:
         if self.is_science_visual_domain(scene):
@@ -401,9 +436,8 @@ class ImageAssetDomain:
     def visual_hook_directive(self, scene: dict[str, Any], scene_hint: str) -> str:
         return (
             "first-frame hook for Shorts, instantly legible in under one second, "
-            "strong concrete contrast or visible consequence, close vertical composition, "
-            f"opening goal: show a concrete result, movement, or visual contrast, visual focus: {scene_hint}, "
-            "stay within this scene beat, do not reveal later payoff, no calm establishing shot, no generic beauty shot"
+            f"close vertical composition, concrete contrast or consequence, focus: {scene_hint}, "
+            "stay within this scene beat, do not reveal later payoff, no calm establishing shot"
         )
 
     def should_rebuild_image_prompt(self, prompt: str) -> bool:
@@ -428,6 +462,40 @@ class ImageAssetDomain:
             ]
         )
 
+    def prompt_conflicts_with_visual_domain(self, prompt: str, scene: dict[str, Any]) -> bool:
+        if not self.is_miniature_diorama_domain(scene):
+            return False
+        prompt_lower = prompt.lower()
+        forbidden_terms = {
+            "video game character",
+            "game character",
+            "human character",
+            "full-size person",
+            "full size person",
+            "man holding",
+            "person holding",
+            "gun",
+            "weapon",
+            "pistol",
+            "rifle",
+            "sunglasses",
+            "game graphics",
+            "screen interface",
+            "ui screen",
+            "poster",
+            "posters",
+            "billboard",
+            "billboards",
+            "street sign",
+            "signage",
+            "hand enters",
+            "hand holding",
+            "picking up",
+            "plastic block",
+            "revealing true size",
+        }
+        return any(term in prompt_lower for term in forbidden_terms)
+
     def replace_subject_aliases(self, prompt: str) -> str:
         updated = prompt
         for source, target in sorted(ENGLISH_SUBJECT_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
@@ -438,15 +506,10 @@ class ImageAssetDomain:
         prompt = " ".join(prompt.replace("_", " ").split())
         prompt_lower = prompt.lower()
         extra_constraints = [
-            "no letters, no words, no numbers, no symbols",
-            "no logo, no watermark, no captions, no subtitles",
-            "every object must be completely blank and unbranded",
-            "plain containers only, blank cups only, blank packages only",
-            "no text on cups, no text on packages, no text on screens",
-            "no labels or lettering on any object surface",
-            "avoid screens, documents, books, newspapers, signs, dashboards, graphs, labels, and branded packaging",
-            "no floating spheres, no random packages, no irrelevant lab props, no generic sci-fi objects",
-            "the main subject must be unmistakable and relevant to the narration beat",
+            "main subject unmistakable and relevant to the narration beat",
+            "every visible object blank and unbranded",
+            "no text on cups, packages, screens, charts or labels",
+            "avoid random props, generic sci-fi objects and irrelevant backgrounds",
         ]
         if "no readable text anywhere" not in prompt_lower:
             prompt = f"{prompt}, {NO_TEXT_IMAGE_CONSTRAINT}".strip(", ")
@@ -456,3 +519,109 @@ class ImageAssetDomain:
                 prompt = f"{prompt}, {constraint}"
                 prompt_lower = prompt.lower()
         return prompt
+
+    def domain_negative_constraints(self, scene: dict[str, Any]) -> str:
+        corpus = " ".join(
+            str(scene.get(key) or "")
+            for key in ("visual_domain", "primary_subject", "topic_hint", "narration_text", "image_prompt", "visual_intent")
+        ).lower()
+        corpus = (
+            corpus.replace("á", "a")
+            .replace("à", "a")
+            .replace("ã", "a")
+            .replace("â", "a")
+            .replace("é", "e")
+            .replace("ê", "e")
+            .replace("í", "i")
+            .replace("ó", "o")
+            .replace("õ", "o")
+            .replace("ô", "o")
+            .replace("ú", "u")
+            .replace("ç", "c")
+        )
+        if self.is_miniature_diorama_domain(scene, corpus=corpus):
+            return (
+                "plain outdoor miniature city diorama only: tiny asphalt streets, toy cars, blank model buildings, "
+                "street lamps, road markings, camera lens perspective; no cups, containers, food, hands, people, "
+                "weapons, screens, posters, storefronts, signs, numbers, letters or labels"
+            )
+        if self.is_science_visual_domain(scene):
+            return "no labeled diagrams, no invented anatomy, no fantasy organs, no unsupported medical detail"
+        return "no irrelevant props, no product packaging, no signage"
+
+    def is_miniature_diorama_domain(self, scene: dict[str, Any], corpus: str | None = None) -> bool:
+        if corpus is None:
+            corpus = " ".join(
+                str(scene.get(key) or "")
+                for key in ("visual_domain", "primary_subject", "topic_hint", "narration_text", "image_prompt", "visual_intent")
+            ).lower()
+            corpus = (
+                corpus.replace("á", "a")
+                .replace("à", "a")
+                .replace("ã", "a")
+                .replace("â", "a")
+                .replace("é", "e")
+                .replace("ê", "e")
+                .replace("í", "i")
+                .replace("ó", "o")
+                .replace("õ", "o")
+                .replace("ô", "o")
+                .replace("ú", "u")
+                .replace("ç", "c")
+            )
+        return any(term in corpus for term in ("miniature", "diorama", "maquete", "model city", "cidade falsa", "cidade em miniatura"))
+
+    def minimax_no_text_constraint(self, scene: dict[str, Any]) -> str:
+        if self.is_miniature_diorama_domain(scene):
+            return "no readable text, letters, numbers, logos, watermarks, signs, labels or UI"
+        return NO_TEXT_IMAGE_CONSTRAINT
+
+    def minimax_safe_image_prompt(self, prompt: str, scene: dict[str, Any]) -> str:
+        prompt = " ".join(str(prompt or "").replace("_", " ").split())
+        prompt = prompt.replace("Visual contract hook requirements:", "Required visual elements:")
+        prompt = self.replace_subject_aliases(prompt)
+        prompt = self.remove_incompatible_scientific_style(prompt, scene)
+        if self.is_miniature_diorama_domain(scene):
+            prompt = prompt.replace(NO_TEXT_IMAGE_CONSTRAINT, self.minimax_no_text_constraint(scene))
+
+        required_constraints = [
+            "vertical 2:3 frame for YouTube Shorts",
+            self.domain_negative_constraints(scene),
+            self.minimax_no_text_constraint(scene),
+        ]
+        for constraint in required_constraints:
+            if constraint.lower() not in prompt.lower():
+                prompt = f"{prompt}, {constraint}".strip(", ")
+
+        prompt = self._dedupe_prompt_clauses(prompt)
+        if len(prompt) <= MINIMAX_IMAGE_PROMPT_TARGET_CHARS:
+            return prompt
+
+        clauses = [clause.strip() for clause in prompt.split(",") if clause.strip()]
+        required_tail = self._dedupe_prompt_clauses(", ".join(required_constraints))
+        head_budget = max(180, MINIMAX_IMAGE_PROMPT_TARGET_CHARS - len(required_tail) - 2)
+        keep: list[str] = []
+        for clause in clauses:
+            if clause.lower() in required_tail.lower():
+                continue
+            if len(clause) > 260:
+                clause = clause[:260].rsplit(" ", 1)[0].strip()
+            candidate = ", ".join([*keep, clause])
+            if len(candidate) <= head_budget:
+                keep.append(clause)
+        compact = self._dedupe_prompt_clauses(", ".join([*keep, required_tail]))
+        if len(compact) > MINIMAX_IMAGE_PROMPT_TARGET_CHARS:
+            compact = self._dedupe_prompt_clauses(required_tail)
+        return compact.strip(" ,")
+
+    def _dedupe_prompt_clauses(self, prompt: str) -> str:
+        clauses = [clause.strip() for clause in re.split(r",|;", prompt) if clause.strip()]
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for clause in clauses:
+            key = clause.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(clause)
+        return ", ".join(deduped)

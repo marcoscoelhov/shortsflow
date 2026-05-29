@@ -2402,6 +2402,23 @@ def test_human_review_checklist_includes_publish_audit_confirmation() -> None:
     item = next(item for item in checklist["items"] if item["code"] == "publish_audit_required")
     assert item["confirmation_code"] == "publish_audit_confirmed"
 
+def test_human_review_checklist_includes_visual_review_confirmation() -> None:
+    checklist = build_human_review_checklist(
+        rights_registry={"all_commercial_rights_confirmed": True},
+        ai_disclosure={"youtube_disclosure_required": False},
+        fact_claims_report={"requires_fact_review": False},
+        metadata_review={"requires_metadata_review": False},
+        channel_repetition_report={"repetition_risk": "low"},
+        publish_audit_required=False,
+        confirmations=set(),
+        visual_review_required=True,
+    )
+
+    assert "visual_review_required" in checklist["pending_codes"]
+    item = next(item for item in checklist["items"] if item["code"] == "visual_review_required")
+    assert item["confirmation_code"] == "visual_review_confirmed"
+    assert item["source"] == "asset_visual_gate"
+
 def test_publish_audit_failures_become_automatic_hard_blockers() -> None:
     blockers = orchestrator.monetization_pipeline.automatic_publish_blockers(
         {

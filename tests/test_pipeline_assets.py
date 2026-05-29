@@ -1471,7 +1471,7 @@ def test_scene_semantics_keeps_image_prompt_in_english() -> None:
     assert "no logo" in prompt
     assert "no typography" in prompt
     assert "no text printed on objects" in prompt
-    assert "blank packages" in prompt
+    assert "no product packaging" in prompt
     assert "sem texto" not in prompt
 
 def test_scene_semantics_uses_visual_contract_domain_for_non_science_prompt() -> None:
@@ -1494,6 +1494,76 @@ def test_scene_semantics_uses_visual_contract_domain_for_non_science_prompt() ->
     assert "miniature craft documentary realism" in prompt
     assert "scientific visualization" not in prompt
     assert "scientific image" not in prompt
+    assert "outdoor miniature city diorama only" in prompt
+    assert "no cups" in prompt
+    assert "containers" in prompt or "storefronts" in prompt
+
+def test_minimax_scene_prompt_stays_compact_for_miniature_diorama() -> None:
+    from app.pipelines.image_assets import MINIMAX_IMAGE_PROMPT_TARGET_CHARS
+
+    scene = {
+        "scene_id": "scene-1",
+        "order": 1,
+        "retention_role": "visual_hook",
+        "primary_subject": "diorama de cidade abandonada",
+        "topic_hint": "diorama de cidade abandonada",
+        "visual_domain": "miniature urban diorama / craft documentary realism",
+        "narration_text": "Uma cidade inteira cabe na palma da mão, mas parece real por causa da escala.",
+        "visual_intent": "deceptive_establishing",
+        "image_prompt": (
+            "vertical cinematic scientific image of an abandoned miniature street, scientific visualization, "
+            "Visual contract hook requirements: tiny city block, real scale illusion, no packaging, no cups, "
+            "no readable text anywhere, highly detailed, shallow depth of field, dramatic light, "
+            "repeat the central subject clearly, repeat the craft table, repeat the scale trick, "
+            "avoid generic city, avoid random containers, avoid product labels, avoid poster design, "
+            "avoid title cards, avoid UI, avoid lab glassware, avoid floating spheres, avoid vague mood"
+        ),
+        "fallback_queries": ["diorama cidade"],
+    }
+
+    variants = orchestrator.asset_pipeline.image_assets.image_prompt_variants(scene)
+
+    assert variants
+    for variant in variants:
+        prompt = variant["image_prompt"].lower()
+        assert len(variant["image_prompt"]) <= MINIMAX_IMAGE_PROMPT_TARGET_CHARS
+        assert "miniature city" in prompt or "miniature urban diorama" in prompt
+        assert "outdoor miniature city diorama only" in prompt
+        assert "no cups" in prompt
+        assert "no readable text" in prompt
+        assert "scientific visualization" not in prompt
+
+def test_miniature_diorama_prompt_rebuilds_off_domain_game_character_scene() -> None:
+    normalized = orchestrator.scene_pipeline.normalize_scene_semantics(
+        {
+            "scene_id": "scene-5",
+            "order": 5,
+            "retention_role": "escalation",
+            "primary_subject": "diorama urbano",
+            "narration_text": "Em filmes e games, simular esse borrão é essencial. Sem ele, a imagem parece falsa.",
+            "visual_intent": "visual_evidence",
+            "visual_domain": "miniature urban diorama / craft documentary realism",
+            "image_prompt": (
+                "Split screen comparison of a video game character holding a gun in a city with posters, "
+                "left side with motion blur and right side without motion blur, game graphics style, "
+                "no readable text anywhere"
+            ),
+            "fallback_queries": ["diorama urbano"],
+        },
+        "dioramas hiper-realistas de cidades em miniatura",
+        visual_contract={"visual_domain": "miniature urban diorama / craft documentary realism"},
+    )
+
+    prompt = normalized["image_prompt"].lower()
+    assert "miniature city diorama" in prompt or "miniature urban diorama" in prompt
+    assert "two tiny cars" in prompt
+    assert "video game character" not in prompt
+    assert "game graphics" not in prompt
+    assert "holding a gun" not in prompt
+    assert "weapons" in prompt
+    assert "city with posters" not in prompt
+    assert "posters" in prompt
+    assert "people" in prompt
 
 def test_scene_semantics_rebuilds_generic_portuguese_prompt_from_narration() -> None:
     normalized = orchestrator.scene_pipeline.normalize_scene_semantics(
@@ -1532,7 +1602,7 @@ def test_first_scene_prompt_adds_visual_hook_contract() -> None:
     prompt = normalized["image_prompt"].lower()
     assert "first-frame hook for shorts" in prompt
     assert "under one second" in prompt
-    assert "strong concrete contrast or visible consequence" in prompt
+    assert "concrete contrast or consequence" in prompt
     assert "do not reveal later payoff" in prompt
     assert "three subtle hearts" in prompt
     assert "blue copper-rich blood vessels" in prompt
@@ -1578,9 +1648,9 @@ def test_scene_semantics_adds_caffeine_specific_visuals_and_blank_objects() -> N
     prompt = normalized["image_prompt"].lower()
     assert "caffeine molecules" in prompt
     assert "adenosine receptors" in prompt
-    assert "plain unbranded" in prompt or "blank cups" in prompt
+    assert "unbranded" in prompt
     assert "no text on cups" in prompt
-    assert "no labels or lettering on any object surface" in prompt
+    assert "no text on cups, packages, screens, charts or labels" in prompt
     assert "cafeina" not in prompt
 
 def test_scene_semantics_translates_long_caffeine_topic_to_english_subject() -> None:
@@ -1891,6 +1961,27 @@ def test_voice_direction_uses_script_hook_and_retention_artifact(tmp_path: Path)
     assert direction["canonical_topic"] == "polvos"
     assert direction["retention_map"]["visual_hook"] == "Segurar o primeiro segundo."
     assert direction["retention_map"]["loop_close"] == "O final muda o começo."
+
+def test_voice_direction_supports_gemini_voice_selection() -> None:
+    from app.providers.tts import GeminiTTSProvider
+
+    direction = {
+        "canonical_topic": "por que a torre de pisa nao cai",
+        "angle": "historia e engenharia",
+        "title": "A torre torta que enganou seculos",
+        "hook": "Ela parece cair, mas resiste há séculos.",
+        "body_beats": ["A fundação medieval afundou em solo mole."],
+        "ending": "A correção moderna mudou o risco sem endireitar tudo.",
+        "retention_map": {"visual_hook": "parece impossivel no primeiro segundo"},
+    }
+
+    voice = GeminiTTSProvider().select_gemini_voice(
+        SimpleNamespace(gemini_tts_voice_name="Kore", gemini_tts_voice_rotation_enabled=True),
+        direction,
+    )
+
+    assert voice["voice_name"] == "Gacrux"
+    assert voice["profile"] == "history_authority"
 
 def test_scene_token_coverage_normalization_rebuilds_contiguous_spans() -> None:
     scenes = [

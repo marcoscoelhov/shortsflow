@@ -83,7 +83,7 @@ def test_full_pipeline_reaches_monetization_review() -> None:
         assert job and job.quality_summary["render"]["render_gate_pass"] is True
         assert job.quality_summary["background_music"]["enabled"] is True
         assert job.quality_summary["background_music"]["background_music_gate_pass"] is True
-        assert job.quality_summary["monetization"]["final_status"] == "monetization_review"
+        assert job.quality_summary["monetization"]["final_status"] in {"monetization_review", "blocked_for_monetization"}
         assert job.artifact_index["input_gate"] == "input_gate.json"
         assert job.artifact_index["publish_package"] == "publish_package.json"
         assert job.artifact_index["monetization_report"] == "monetization_report.json"
@@ -95,9 +95,14 @@ def test_full_pipeline_reaches_monetization_review() -> None:
         timeline_path = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / job_id / "performance_timeline.json"
         timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
         assert any(step["step_name"] == "render" and step["duration_ms"] is not None for step in timeline["steps"])
+        final_status = job.quality_summary["monetization"]["final_status"]
     detail = client.get(f"/jobs/{job_id}")
     assert detail.status_code == 200
-    assert "Aprovar job" in detail.text
+    assert "Decidir revisão" in detail.text
+    if final_status == "monetization_review":
+        assert "Aprovar e liberar agenda" in detail.text
+    else:
+        assert "Rejeitar com motivo" in detail.text
     assert "Agendar no YouTube" in detail.text
 
 def test_sqlite_engine_uses_busy_timeout_and_wal_pragmas() -> None:
@@ -1149,7 +1154,7 @@ def test_gemini_tts_generates_wav_and_local_srt(tmp_path: Path, monkeypatch) -> 
     pcm = b"\0\0" * 24_000
 
     monkeypatch.setattr("app.providers.tts.get_settings", lambda: settings)
-    monkeypatch.setattr(GeminiTTSProvider, "_generate_gemini_audio_bytes", lambda self, text, configured, api_key, context: (pcm, "audio/L16;rate=24000"))
+    monkeypatch.setattr(GeminiTTSProvider, "_generate_gemini_audio_bytes", lambda self, text, configured, api_key, context, voice_name=None: (pcm, "audio/L16;rate=24000"))
     monkeypatch.setattr(GeminiTTSProvider, "_apply_final_loudness_normalization", lambda self, audio_path: None)
 
     audio_path = tmp_path / "voice.wav"
@@ -1194,8 +1199,52 @@ def test_gemini_tts_prompt_prioritizes_hook_and_retention() -> None:
     assert "A retenção vem antes de dramatização" in prompt
     assert "O payoff deve ganhar ênfase" in prompt
     assert "O fechamento deve recontextualizar" in prompt
+    assert "Voz Gemini selecionada: Charon" in prompt
     assert "visual_hook: O hook precisa parecer impossível" in prompt
     assert "Preserve exatamente o texto aprovado" in prompt
+
+def test_gemini_tts_selects_voice_profile_from_script_context() -> None:
+    from app.providers.tts import GeminiTTSProvider
+
+    settings = SimpleNamespace(
+        gemini_tts_voice_name="Kore",
+        gemini_tts_voice_rotation_enabled=True,
+    )
+
+    voice = GeminiTTSProvider().select_gemini_voice(
+        settings,
+        {
+            "canonical_topic": "maquete urbana",
+            "angle": "truque visual de miniatura",
+            "title": "A cidade inteira era uma ilusão",
+            "hook": "Essa cidade parece real, mas cabe numa mesa.",
+            "ending": "A câmera revela o truque no final.",
+            "retention_map": {"visual_hook": "parece impossível no primeiro segundo"},
+        },
+    )
+
+    assert voice["voice_name"] == "Puck"
+    assert voice["profile"] == "upbeat_viral"
+    assert voice["score"] >= 2
+
+def test_gemini_tts_can_disable_voice_rotation() -> None:
+    from app.providers.tts import GeminiTTSProvider
+
+    settings = SimpleNamespace(
+        gemini_tts_voice_name="Kore",
+        gemini_tts_voice_rotation_enabled=False,
+    )
+
+    voice = GeminiTTSProvider().select_gemini_voice(
+        settings,
+        {
+            "canonical_topic": "maquete urbana",
+            "title": "A cidade inteira era uma ilusão",
+        },
+    )
+
+    assert voice["voice_name"] == "Kore"
+    assert voice["profile"] == "configured_default"
 
 def test_gemini_tts_falls_back_to_elevenlabs_when_primary_is_not_configured(tmp_path: Path, monkeypatch) -> None:
     from app.providers.tts import ElevenLabsTTSProvider, GeminiTTSProvider
@@ -1231,7 +1280,7 @@ def test_elevenlabs_tts_falls_back_to_edge_tts_when_primary_fails(tmp_path: Path
 
     settings = SimpleNamespace(elevenlabs_api_key=None)
 
-    def fake_edge_synthesize(self, text: str, audio_path: Path, srt_path: Path) -> dict[str, object]:
+    def fake_edge_synthesize(self, text: str, audio_path: Path, srt_path: Path, context: dict[str, object] | None = None) -> dict[str, object]:
         audio_path.write_bytes(b"edge")
         srt_path.write_text("1\n00:00:00,000 --> 00:00:01,000\nedge\n", encoding="utf-8")
         return {

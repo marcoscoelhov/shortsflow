@@ -149,10 +149,15 @@ class MonetizationPipeline(BasePipeline):
         publish_audit_required = "text_publish_audit_skipped" in publish_readiness["reasons"]
         if publish_audit_required:
             manual_required.append("publish_audit_required")
+        visual_review_required = self.visual_review_required_for_assets(job)
+        if visual_review_required and "visual_review_confirmed" not in confirmations:
+            manual_required.append("visual_review_required")
         if "rights_confirmed" in confirmations:
             manual_required = [item for item in manual_required if item != "rights_confirmation_required"]
         if "publish_audit_confirmed" in confirmations:
             manual_required = [item for item in manual_required if item != "publish_audit_required"]
+        if "visual_review_confirmed" in confirmations:
+            manual_required = [item for item in manual_required if item != "visual_review_required"]
         warnings.extend(publish_readiness["reasons"])
         if not self.settings.allow_synthetic_visuals_for_monetization and ai_disclosure["contains_synthetic_visuals"]:
             hard_blockers.append("synthetic_visuals_disabled_by_policy")
@@ -174,6 +179,7 @@ class MonetizationPipeline(BasePipeline):
             channel_repetition_report=channel_repetition_report,
             publish_audit_required=publish_audit_required,
             confirmations=confirmations,
+            visual_review_required=visual_review_required,
         )
         passed = not hard_blockers and not manual_required
         final_status = "ready_for_upload" if passed else ("blocked_for_monetization" if hard_blockers else "monetization_review")
@@ -232,6 +238,18 @@ class MonetizationPipeline(BasePipeline):
             "render_gate_pass": bool((quality_summary.get("render") or {}).get("render_gate_pass")),
         }
 
+    def visual_review_required_for_assets(self, job: Job) -> bool:
+        quality_summary = job.quality_summary or {}
+        asset_summary = quality_summary.get("assets", {}) if isinstance(quality_summary.get("assets"), dict) else {}
+        if not asset_summary:
+            return False
+        if asset_summary.get("asset_visual_real_vision_checked") is True:
+            return False
+        modes = asset_summary.get("asset_visual_verification_modes")
+        if isinstance(modes, list) and "prompt_heuristic" in {str(item) for item in modes}:
+            return True
+        return bool(asset_summary.get("asset_visual_gate_checked")) and "asset_visual_real_vision_checked" not in asset_summary
+
     def build_human_review_checklist(
         self,
         rights_registry: dict[str, Any],
@@ -241,6 +259,7 @@ class MonetizationPipeline(BasePipeline):
         channel_repetition_report: dict[str, Any],
         publish_audit_required: bool,
         confirmations: set[str],
+        visual_review_required: bool = False,
     ) -> dict[str, Any]:
         return build_human_review_checklist(
             rights_registry=rights_registry,
@@ -250,6 +269,7 @@ class MonetizationPipeline(BasePipeline):
             channel_repetition_report=channel_repetition_report,
             publish_audit_required=publish_audit_required,
             confirmations=confirmations,
+            visual_review_required=visual_review_required,
         )
 
     def build_rights_registry(
@@ -453,17 +473,10 @@ class MonetizationPipeline(BasePipeline):
                 grounded_trace.append(normalized_item)
             else:
                 ungrounded_trace.append(normalized_item)
-        factual_topic = bool(
-            topic_plan
-            and re.search(
-                r"\b(?:por que|porque|como|ci[eê]ncia|f[ií]sica|biologia|engenharia|hist[oó]ria|sa[uú]de|m[eé]dico|animal|animais|flamingo|torre|c[eé]rebro|neuro|estat[ií]stica)\b",
-                f"{topic_plan.canonical_topic} {topic_plan.angle}",
-                re.IGNORECASE,
-            )
-        )
+        factual_topic = resolve_editorial_mode(topic_plan, None) == "factual_strict"
         requires_review = (
             fact_pack.get("status") != "verified"
-            and (factual_topic or fact_risk.get("claim_count", 0) > 0 or len(word_tokens(script_dict.get("full_narration", ""))) >= 45)
+            and (factual_topic or fact_risk.get("claim_count", 0) > 0 or bool(ungrounded_trace))
         )
         claim_sources = [
             {

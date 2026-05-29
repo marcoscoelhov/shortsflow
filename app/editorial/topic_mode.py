@@ -27,7 +27,24 @@ SCIENCE_TOPIC_PATTERN = re.compile(
 )
 
 NEGATED_SCIENCE_CONTEXT_PATTERN = re.compile(
-    r"\b(?:sem|nao|não)\s+(?:explica[cç][aã]o\s+)?cient[ií]fic[oa]s?\b",
+    r"\b(?:sem|nao|não)\s+(?:parecer\s+)?(?:explica[cç][aã]o\s+)?cient[ií]fic[oa]s?\b",
+    re.IGNORECASE,
+)
+
+VISUAL_CRAFT_TOPIC_PATTERN = re.compile(
+    r"\b(?:diorama|dioramas|maquete|maquetes|miniatura|miniaturas|model\s+city|miniature\s+city|"
+    r"cidade\s+falsa|cidades\s+falsas|cidade\s+em\s+miniatura|cidades\s+em\s+miniatura)\b",
+    re.IGNORECASE,
+)
+
+VISUAL_CRAFT_CONTEXT_PATTERN = re.compile(
+    r"\b(?:visual|cinematogr[aá]fic[oa]|c[aâ]mera|camera|lente|escala|perspectiva|foto|imagem|"
+    r"parece\s+real|parecem\s+reais|engana\s+o\s+olho|mesa|artesanal|craft)\b",
+    re.IGNORECASE,
+)
+
+VISUAL_PERCEPTION_TERMS_PATTERN = re.compile(
+    r"\b(?:c[eé]rebro|percep[cç][aã]o|olho|ilus[aã]o|[oó]tica)\b",
     re.IGNORECASE,
 )
 
@@ -36,6 +53,17 @@ def _read_field(source: Any, field: str, default: Any = None) -> Any:
     if isinstance(source, Mapping):
         return source.get(field, default)
     return getattr(source, field, default)
+
+
+def _is_visual_craft_context(source_text: str, requested_angle: str) -> bool:
+    visual_text = " ".join(part for part in [source_text, requested_angle] if part)
+    return bool(
+        VISUAL_CRAFT_TOPIC_PATTERN.search(visual_text)
+        and (
+            NEGATED_SCIENCE_CONTEXT_PATTERN.search(visual_text)
+            or VISUAL_CRAFT_CONTEXT_PATTERN.search(visual_text)
+        )
+    )
 
 
 def resolve_editorial_mode(topic_plan: Any | None = None, request: Any | None = None) -> str:
@@ -51,12 +79,18 @@ def resolve_editorial_mode(topic_plan: Any | None = None, request: Any | None = 
         return "factual_strict"
     source_text = " ".join(part for part in [seed_theme, canonical_topic, angle, hook_promise] if part).strip()
     source_text_for_risk = NEGATED_SCIENCE_CONTEXT_PATTERN.sub(" ", source_text)
-    if source_text_for_risk and (
-        HIGH_RISK_TOPIC_PATTERN.search(source_text_for_risk) or SCIENCE_TOPIC_PATTERN.search(source_text_for_risk)
-    ):
+    if source_text_for_risk and HIGH_RISK_TOPIC_PATTERN.search(source_text_for_risk):
+        return "factual_strict"
+    visual_craft_context = _is_visual_craft_context(source_text, requested_angle)
+    source_text_for_science = source_text_for_risk
+    if visual_craft_context:
+        source_text_for_science = VISUAL_PERCEPTION_TERMS_PATTERN.sub(" ", source_text_for_science)
+    if source_text_for_science and SCIENCE_TOPIC_PATTERN.search(source_text_for_science):
         return "factual_strict"
     if isinstance(quality_metrics, Mapping):
         existing_mode = str(quality_metrics.get("editorial_mode") or "").strip()
+        if existing_mode == "factual_strict" and visual_craft_context:
+            return "viral_curiosidades"
         if existing_mode in {"viral_curiosidades", "factual_strict"}:
             return existing_mode
     return "viral_curiosidades"

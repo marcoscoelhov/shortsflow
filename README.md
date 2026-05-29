@@ -156,10 +156,11 @@ YTS_TTS_PRIMARY_PROVIDER=gemini_tts
 YTS_GEMINI_API_KEY=...
 YTS_GEMINI_TTS_MODEL=gemini-3.1-flash-tts-preview
 YTS_GEMINI_TTS_VOICE_NAME=Kore
+YTS_GEMINI_TTS_VOICE_ROTATION_ENABLED=true
 YTS_GEMINI_TTS_STYLE_PROMPT="Narre em portugues brasileiro natural, com ritmo humano de documentario curto, sem soar sintetico ou robotico."
 ```
 
-Se Gemini TTS falhar ou nao tiver chave, o pipeline tenta ElevenLabs; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados da narracao.
+Se Gemini TTS falhar ou nao tiver chave, o pipeline tenta ElevenLabs; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados da narracao. Quando a rotacao esta ativa, `YTS_GEMINI_TTS_VOICE_NAME` vira fallback e o provider escolhe uma voz Gemini pelo perfil do roteiro.
 
 ```env
 YTS_TTS_PRIMARY_PROVIDER=elevenlabs

@@ -21,6 +21,106 @@ from app.config import get_settings
 from app.utils import parse_srt, word_tokens, wrap_caption
 
 
+GEMINI_TTS_VOICE_PROFILES: dict[str, dict[str, Any]] = {
+    "science_explainer": {
+        "voice_name": "Charon",
+        "description": "informative, precise, curious",
+        "keywords": {
+            "ciencia",
+            "cientifico",
+            "biologia",
+            "fisica",
+            "neuro",
+            "anatomia",
+            "molecula",
+            "energia",
+            "experimento",
+            "receptores",
+            "oxigenio",
+            "sangue",
+        },
+        "direction": "Tom claro e informativo, com curiosidade crescente e sem dramatização artificial.",
+    },
+    "mystery_tension": {
+        "voice_name": "Fenrir",
+        "description": "excitable, tense, high-retention",
+        "keywords": {
+            "misterio",
+            "estranho",
+            "impossivel",
+            "assustador",
+            "segredo",
+            "ninguém",
+            "ninguem",
+            "por que",
+            "nao era",
+            "parece",
+            "tensao",
+            "abandona",
+            "falso",
+        },
+        "direction": "Tom tenso e energico, com urgência controlada no hook e pausa clara antes do payoff.",
+    },
+    "history_authority": {
+        "voice_name": "Gacrux",
+        "description": "mature, authoritative, documentary",
+        "keywords": {
+            "historia",
+            "historico",
+            "seculo",
+            "antigo",
+            "arqueologia",
+            "imperio",
+            "guerra",
+            "templo",
+            "civilizacao",
+            "cultura",
+            "engenharia",
+            "fundacao",
+            "medieval",
+            "pisa",
+            "torre",
+        },
+        "direction": "Tom maduro de documentário curto, com peso narrativo sem virar aula longa.",
+    },
+    "warm_curiosity": {
+        "voice_name": "Sulafat",
+        "description": "warm, accessible, curious",
+        "keywords": {
+            "animal",
+            "gato",
+            "polvo",
+            "corpo",
+            "vida",
+            "curiosidade",
+            "comportamento",
+            "mente",
+            "cerebro",
+            "cérebro",
+        },
+        "direction": "Tom quente e acessível, mantendo surpresa sem parecer propaganda.",
+    },
+    "upbeat_viral": {
+        "voice_name": "Puck",
+        "description": "upbeat, fast, playful",
+        "keywords": {
+            "viral",
+            "rapido",
+            "rápido",
+            "truque",
+            "recorde",
+            "absurdo",
+            "miniatura",
+            "maquete",
+            "cidade",
+            "ilusão",
+            "ilusao",
+        },
+        "direction": "Tom ágil e curioso, com energia de Shorts sem atropelar a clareza.",
+    },
+}
+
+
 class LocalSpeechFallbackProvider:
     voice = "pt-BR-FranciscaNeural"
 
@@ -466,7 +566,9 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
 
     def _run_gemini(self, text: str, audio_path: Path, srt_path: Path, settings: Any, api_key: str, context: dict[str, Any] | None) -> dict[str, Any]:
         audio_path.parent.mkdir(parents=True, exist_ok=True)
-        audio_bytes, mime_type = self._generate_gemini_audio_bytes(text, settings, api_key, context)
+        voice_selection = self.select_gemini_voice(settings, context)
+        selected_voice = str(voice_selection["voice_name"])
+        audio_bytes, mime_type = self._generate_gemini_audio_bytes(text, settings, api_key, context, selected_voice)
         self._write_gemini_audio(audio_bytes, mime_type, audio_path)
         self._apply_final_loudness_normalization(audio_path)
         duration_ms = self._measure_audio_ms(audio_path)
@@ -474,7 +576,7 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
         srt_path.write_text(self._render_srt(cues), encoding="utf-8")
         return {
             "provider": "gemini_tts",
-            "voice": settings.gemini_tts_voice_name,
+            "voice": selected_voice,
             "audio_uri": audio_path.resolve().as_uri(),
             "raw_subtitles_uri": srt_path.resolve().as_uri(),
             "duration_ms": duration_ms,
@@ -483,7 +585,13 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
             "provider_metadata": {
                 "mode": "gemini_tts",
                 "model_id": settings.gemini_tts_model,
-                "voice_name": settings.gemini_tts_voice_name,
+                "voice_name": selected_voice,
+                "configured_voice_name": settings.gemini_tts_voice_name,
+                "voice_rotation_enabled": bool(getattr(settings, "gemini_tts_voice_rotation_enabled", True)),
+                "voice_profile": voice_selection["profile"],
+                "voice_profile_description": voice_selection["description"],
+                "voice_selection_reason": voice_selection["reason"],
+                "voice_selection_score": voice_selection["score"],
                 "mime_type": mime_type,
                 "voice_direction_used": bool(context),
                 "voice_direction": self._metadata_voice_direction(context),
@@ -495,11 +603,12 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
             },
         }
 
-    def _generate_gemini_audio_bytes(self, text: str, settings: Any, api_key: str, context: dict[str, Any] | None) -> tuple[bytes, str]:
+    def _generate_gemini_audio_bytes(self, text: str, settings: Any, api_key: str, context: dict[str, Any] | None, voice_name: str | None = None) -> tuple[bytes, str]:
         from google import genai
         from google.genai import types
 
         prompt = self._build_gemini_prompt(text, settings, context)
+        selected_voice = voice_name or str(getattr(settings, "gemini_tts_voice_name", "Kore") or "Kore")
         client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=int(float(settings.gemini_tts_timeout_sec) * 1000)))
         response = client.models.generate_content(
             model=settings.gemini_tts_model,
@@ -508,7 +617,7 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
                 response_modalities=["AUDIO"],
                 speech_config=types.SpeechConfig(
                     voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=settings.gemini_tts_voice_name)
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=selected_voice)
                     )
                 )
             ),
@@ -525,6 +634,7 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
 
     def _build_gemini_prompt(self, text: str, settings: Any, context: dict[str, Any] | None) -> str:
         direction = context or {}
+        voice_selection = self.select_gemini_voice(settings, context)
         retention_map = direction.get("retention_map") if isinstance(direction.get("retention_map"), dict) else {}
         retention_lines = []
         for key in ("visual_hook", "proof_or_tension", "escalation", "turn_or_payoff", "loop_close"):
@@ -534,6 +644,8 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
         blocks = [
             "### PERFIL DA VOZ",
             str(settings.gemini_tts_style_prompt),
+            f"Voz Gemini selecionada: {voice_selection['voice_name']} ({voice_selection['description']}).",
+            str(voice_selection["direction"]),
             "A narração deve soar humana, brasileira e editorialmente intencional, sem tom de propaganda ou leitura robotica.",
             "",
             "### PRIORIDADE EDITORIAL",
@@ -560,6 +672,79 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
             blocks.extend(["", "### MAPA DE RETENCAO", *retention_lines])
         blocks.extend(["", "### TEXTO EXATO DA NARRACAO", text])
         return "\n".join(blocks)
+
+    def select_gemini_voice(self, settings: Any, context: dict[str, Any] | None) -> dict[str, Any]:
+        configured_voice = str(getattr(settings, "gemini_tts_voice_name", "Kore") or "Kore").strip() or "Kore"
+        if not bool(getattr(settings, "gemini_tts_voice_rotation_enabled", True)) or not context:
+            return {
+                "voice_name": configured_voice,
+                "profile": "configured_default",
+                "description": "configured default",
+                "direction": "Use a voz configurada como padrão operacional.",
+                "reason": "voice rotation disabled or missing script context",
+                "score": 0,
+            }
+        corpus = self._voice_context_corpus(context)
+        best_profile = "configured_default"
+        best_score = 0
+        best_matches: list[str] = []
+        for profile_name, profile in GEMINI_TTS_VOICE_PROFILES.items():
+            keywords = profile["keywords"]
+            matches = sorted(keyword for keyword in keywords if self._normalized_voice_token(keyword) in corpus)
+            score = len(matches)
+            if score > best_score:
+                best_profile = profile_name
+                best_score = score
+                best_matches = matches
+        if best_score <= 0:
+            return {
+                "voice_name": configured_voice,
+                "profile": "configured_default",
+                "description": "configured default",
+                "direction": "Use a voz configurada como padrão operacional.",
+                "reason": "no stronger script profile matched",
+                "score": 0,
+            }
+        profile = GEMINI_TTS_VOICE_PROFILES[best_profile]
+        return {
+            "voice_name": profile["voice_name"],
+            "profile": best_profile,
+            "description": profile["description"],
+            "direction": profile["direction"],
+            "reason": f"matched script signals: {', '.join(best_matches[:6])}",
+            "score": best_score,
+        }
+
+    def _voice_context_corpus(self, context: dict[str, Any]) -> str:
+        values: list[str] = []
+        for key in ("canonical_topic", "angle", "hook_promise", "title", "hook", "ending"):
+            values.append(str(context.get(key) or ""))
+        body_beats = context.get("body_beats")
+        if isinstance(body_beats, list):
+            values.extend(str(item or "") for item in body_beats)
+        retention_map = context.get("retention_map") if isinstance(context.get("retention_map"), dict) else {}
+        values.extend(str(item or "") for item in retention_map.values())
+        return self._normalized_voice_token(" ".join(values))
+
+    def _normalized_voice_token(self, value: str) -> str:
+        normalized = str(value or "").lower()
+        replacements = {
+            "á": "a",
+            "à": "a",
+            "ã": "a",
+            "â": "a",
+            "é": "e",
+            "ê": "e",
+            "í": "i",
+            "ó": "o",
+            "õ": "o",
+            "ô": "o",
+            "ú": "u",
+            "ç": "c",
+        }
+        for source, target in replacements.items():
+            normalized = normalized.replace(source, target)
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", normalized).split())
 
     def _metadata_voice_direction(self, context: dict[str, Any] | None) -> dict[str, Any] | None:
         if not context:

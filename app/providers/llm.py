@@ -699,17 +699,21 @@ Excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas e nomes d
 
 Regras obrigatorias para image_prompt:
 - image_prompt MUST be written in English only, even when the narration is pt-BR
-- describe only a vertical cinematic visual scene with objects that fit visual_contract.visual_domain when present
+- keep image_prompt compact for MiniMax image-01, under 900 characters; no long negative-prompt wall
+- describe one vertical 2:3 cinematic visual scene with objects that fit visual_contract.visual_domain when present
 - every image_prompt must depict the concrete fact in that scene's narration_text, not just the generic visual_intent
 - if visual_contract exists, every image_prompt must obey the scene's visual_intent and the visual contract; do not override it with generic scientific styling
+- if visual_contract.visual_domain is miniature/diorama/model city/craft, keep every scene inside that same miniature diorama world, even when narration mentions movies, games, cameras or motion blur
+- specify main subject, action, scale, camera angle and required visible elements; avoid vague mood-only prompts
 - scene with order=1 is the visual hook frame: make it instantly legible in under one second, with a concrete result, movement, contrast, threat, paradox, or impossible-looking factual consequence tied to the hook and its own narration_text
 - for scene order=1, avoid calm establishing shots, generic beauty shots, neutral portraits, abstract ambience, or vague scientific background
 - for scene order=1, do not reveal a later payoff unless that payoff is already present in its narration_text
 - do not copy the title, narration phrases, Portuguese words, numbers, written names, or any visible text
-- avoid abstract props, floating spheres, random packages, lab glassware, generic sci-fi objects, or irrelevant backgrounds unless directly required by the narration
+- avoid abstract props, floating spheres, random packages, cups, containers, lab glassware, generic sci-fi objects, or irrelevant backgrounds unless directly required by the narration
+- for miniature/diorama/model city/craft prompts, keep the positive subject to outdoor model streets, blank tiny buildings, toy cars, street lamps, road markings, camera lens and craft lights; never request hands, scale-reference props, plastic blocks, shop interiors, food, bowls, jars, full-size people, human characters, weapons, game characters, screens, UI, posters, billboards, signs, labels, product boxes, cups or tabletop clutter
 - make the central subject unmistakable in every frame
 - never request title cards, posters, covers, signs, labels, captions, labeled diagrams, labeled charts, UI, interfaces, or infographics
-- include in every image_prompt: no readable text anywhere, no letters, no words, no numbers, no logo, no watermark
+- include in every image_prompt: no readable text anywhere, no logo, no watermark
 - Example for narration about blue blood: "octopus anatomy close-up with blue copper-rich blood vessels, cinematic underwater realism, no readable text anywhere"
 - Example for narration about color change: "octopus changing skin color and texture while camouflaging from a predator, cinematic underwater realism, no readable text anywhere"
 """

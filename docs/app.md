@@ -308,7 +308,7 @@ Credenciais MiniMax por midia:
 - imagem usa `YTS_MINIMAX_IMAGE_API_KEY` so depois de limite ou quota na chave de texto, e marca essa chave como esgotada para o job atual
 - se nao houver chave de texto, imagem usa diretamente `YTS_MINIMAX_IMAGE_API_KEY`
 - musica usa `YTS_MINIMAX_MUSIC_API_KEY` ou a chave resolvida de texto apenas quando MiniMax Music esta configurado como provider ou fallback
-- narracao usa Gemini TTS quando `YTS_TTS_PRIMARY_PROVIDER=gemini_tts` e `YTS_GEMINI_TTS_API_KEY` ou `YTS_GEMINI_API_KEY` esta configurada; se Gemini falhar, tenta ElevenLabs
+- narracao usa Gemini TTS quando `YTS_TTS_PRIMARY_PROVIDER=gemini_tts` e `YTS_GEMINI_TTS_API_KEY` ou `YTS_GEMINI_API_KEY` esta configurada; por padrao, escolhe uma voz Gemini pelo perfil editorial do roteiro e registra a decisao em `narration_asset.json`; se Gemini falhar, tenta ElevenLabs
 - narracao usa ElevenLabs quando `YTS_TTS_PRIMARY_PROVIDER=elevenlabs` e `YTS_ELEVENLABS_API_KEY` esta configurada; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados
 
 Limite de provedor para troca de chave de imagem significa quota, saldo, credito ou rate limit. Timeout, erro de conexao, resposta invalida e `5xx` continuam sendo falhas transientes da chamada atual.

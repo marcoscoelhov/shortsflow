@@ -7,3 +7,4 @@ We generate a **Contrato Visual do Roteiro** after the approved script and befor
 - `visual_contract.json` is an audit artifact between `script.json` and `scene_plan.json`.
 - A weak hook image is treated as a visual contract or validation failure, not just an aesthetic issue.
 - Retry behavior is split: regenerate the **Plano de Cenas** when it violates the contract, regenerate only the asset when the image violates an otherwise valid plan.
+- The provider-facing **Especificacao Visual da Cena** stays compact and concrete because MiniMax `image-01` receives one prompt string, not a separate negative prompt contract, and rejects prompts over its character limit.

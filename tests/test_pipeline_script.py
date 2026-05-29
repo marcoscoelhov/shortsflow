@@ -725,6 +725,27 @@ def test_script_pipeline_does_not_promote_negated_science_angle_to_factual_mode(
     assert pipeline._editorial_mode(topic_plan, request) == "viral_curiosidades"
     assert pipeline._topic_requires_verified_fact_pack(topic_plan, request) is False
 
+def test_visual_diorama_topic_with_brain_hook_stays_non_factual_mode() -> None:
+    pipeline = orchestrator.script_pipeline
+    topic_plan = SimpleNamespace(
+        canonical_topic="Dioramas hiper-realistas de cidades em miniatura",
+        angle="Como a escala e a camera enganam o olho sem parecer explicacao cientifica",
+        hook_promise="por que seu cérebro insiste que essa cidade falsa é real",
+        quality_metrics={"editorial_mode": "factual_strict"},
+    )
+    request = SimpleNamespace(
+        seed_theme="dioramas hiper-realistas de cidades em miniatura que parecem reais",
+        notes=None,
+        requested_angle="como a escala e a camera enganam o olho sem parecer explicacao cientifica",
+    )
+
+    research_brief = pipeline._build_research_brief(topic_plan, request)
+
+    assert pipeline._editorial_mode(topic_plan, request) == "viral_curiosidades"
+    assert pipeline._topic_requires_verified_fact_pack(topic_plan, request) is False
+    assert research_brief["claim_scope"] == "visual_craft_observation"
+    assert research_brief["require_mechanism_match"] is False
+
 def test_script_pipeline_promotes_biological_curiosidades_to_factual_mode() -> None:
     pipeline = orchestrator.script_pipeline
     topic_plan = SimpleNamespace(
@@ -737,6 +758,28 @@ def test_script_pipeline_promotes_biological_curiosidades_to_factual_mode() -> N
 
     assert pipeline._editorial_mode(topic_plan, request) == "factual_strict"
     assert pipeline._topic_requires_verified_fact_pack(topic_plan, request) is True
+
+def test_visual_non_factual_topic_without_claims_does_not_require_fact_review(monkeypatch) -> None:
+    topic_plan = SimpleNamespace(
+        canonical_topic="Dioramas hiper-realistas de cidades em miniatura",
+        angle="visual cinematográfico sem explicação científica",
+        hook_promise="mostrar a ilusão de escala",
+        quality_metrics={"editorial_mode": "viral_curiosidades"},
+    )
+    fact_pack = {"status": "limited", "facts": [], "sources": []}
+    script_artifact = {
+        "full_narration": " ".join(["Miniatura visual sem promessa factual precisa de revisão visual."] * 8),
+        "qa_metrics": {},
+    }
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline.script_gate,
+        "_fact_risk_report",
+        lambda *_args, **_kwargs: {"score": 0, "blocked": False, "claim_count": 0, "high_risk_claim_count": 0, "claims": []},
+    )
+
+    report = orchestrator.monetization_pipeline.build_fact_claims_report(None, topic_plan, fact_pack, script_artifact)
+
+    assert report["requires_fact_review"] is False
 
 def test_script_pipeline_uses_verified_fact_pack_deterministic_fallback(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
@@ -1364,6 +1407,35 @@ def test_quality_checklist_requires_executed_asset_visual_gate_to_pass() -> None
 
     assert checklist["asset_gate_pass"] is True
     assert checklist["asset_visual_gate_pass"] is False
+
+def test_visual_review_required_when_assets_only_used_prompt_heuristic() -> None:
+    job = SimpleNamespace(
+        quality_summary={
+            "assets": {
+                "semantic_threshold_pass": True,
+                "asset_visual_gate_pass": True,
+                "asset_visual_gate_checked": True,
+                "asset_visual_verification_modes": ["prompt_heuristic"],
+            }
+        }
+    )
+
+    assert orchestrator.monetization_pipeline.visual_review_required_for_assets(job) is True
+
+def test_visual_review_not_required_after_real_vision_check() -> None:
+    job = SimpleNamespace(
+        quality_summary={
+            "assets": {
+                "semantic_threshold_pass": True,
+                "asset_visual_gate_pass": True,
+                "asset_visual_gate_checked": True,
+                "asset_visual_real_vision_checked": True,
+                "asset_visual_verification_modes": ["vision"],
+            }
+        }
+    )
+
+    assert orchestrator.monetization_pipeline.visual_review_required_for_assets(job) is False
 
 def test_simple_shorts_mode_publish_readiness_blocks_factual_topic_without_grounding(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)

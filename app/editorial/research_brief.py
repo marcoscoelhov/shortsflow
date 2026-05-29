@@ -132,6 +132,18 @@ def research_tokens(text: str, ignored_terms: set[str] | None = None) -> list[st
 
 def _infer_claim_scope(seed_theme: str, canonical_topic: str, angle: str, hook_promise: str) -> str:
     scope_text = " ".join([seed_theme, canonical_topic, angle, hook_promise]).lower()
+    visual_craft_topic = re.search(
+        r"\b(?:diorama|dioramas|maquete|maquetes|miniatura|miniaturas|cidade\s+falsa|cidade\s+em\s+miniatura)\b",
+        scope_text,
+    )
+    visual_craft_context = re.search(
+        r"\b(?:visual|cinematografico|cinematográfico|camera|câmera|lente|escala|perspectiva|foto|imagem|"
+        r"parece\s+real|engana\s+o\s+olho|mesa|artesanal|sem\s+(?:explicacao|explicação)\s+cientifica|"
+        r"sem\s+(?:explicacao|explicação)\s+científica)\b",
+        scope_text,
+    )
+    if visual_craft_topic and visual_craft_context:
+        return "visual_craft_observation"
     if re.search(r"\b(?:por que|porque|como|mecanismo|explica|causa|funciona|bloqueia|ativa)\b", scope_text):
         return "explanatory_mechanism"
     if re.search(r"\b(?:origem|historia|história|quando|quem|fundacao|fundação|surgiu|ordem)\b", scope_text):

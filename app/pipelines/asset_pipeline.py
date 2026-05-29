@@ -144,11 +144,20 @@ class AssetPipeline(BasePipeline):
         if not asset_visual_gate.passed:
             raise RecoverableStepError(f"asset visual quality gate failed: {', '.join(asset_visual_gate.reasons[:6])}")
         quality_summary = dict(job.quality_summary or {})
+        verification_modes = sorted(
+            {
+                str(asset.get("verification_mode") or "vision")
+                for asset in selected_assets
+                if str(asset.get("provider") or "").lower() in {"minimax", "ai", "mock_ai"}
+            }
+        )
         quality_summary["assets"] = {
             **asset_gate.metrics,
             "semantic_threshold_pass": True,
             "asset_visual_gate_pass": asset_visual_gate.metrics.get("asset_visual_gate_pass", True),
             "asset_visual_gate_checked": asset_visual_gate.metrics.get("checked", False),
+            "asset_visual_verification_modes": verification_modes,
+            "asset_visual_real_vision_checked": bool(verification_modes) and "prompt_heuristic" not in verification_modes,
         }
         job.quality_summary = quality_summary
         self._append_event(job.job_id, "asset.selected", "succeeded", quality_summary["assets"])

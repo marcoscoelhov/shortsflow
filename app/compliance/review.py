@@ -11,6 +11,7 @@ def build_human_review_checklist(
     channel_repetition_report: dict[str, Any],
     publish_audit_required: bool,
     confirmations: set[str],
+    visual_review_required: bool = False,
 ) -> dict[str, Any]:
     items = [
         {
@@ -61,6 +62,14 @@ def build_human_review_checklist(
             "required": publish_audit_required,
             "completed": "publish_audit_confirmed" in confirmations,
             "source": "publish_readiness",
+        },
+        {
+            "code": "visual_review_required",
+            "confirmation_code": "visual_review_confirmed",
+            "label": "Imagens conferidas visualmente",
+            "required": visual_review_required,
+            "completed": "visual_review_confirmed" in confirmations,
+            "source": "asset_visual_gate",
         },
     ]
     required_codes = [item["code"] for item in items if item["required"]]

@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     gemini_tts_api_key: str | None = None
     gemini_tts_model: str = "gemini-3.1-flash-tts-preview"
     gemini_tts_voice_name: str = "Kore"
+    gemini_tts_voice_rotation_enabled: bool = True
     gemini_tts_style_prompt: str = "Narre em portugues brasileiro natural, com ritmo humano de documentario curto, sem soar sintetico ou robotico."
     gemini_tts_timeout_sec: float = 120.0
     elevenlabs_api_key: str | None = None

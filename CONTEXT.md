@@ -260,6 +260,10 @@ _Avoid_: thumbnail, capa, poster, imagem generica de abertura
 A divisao visual de um roteiro aprovado em cenas ordenadas, cada uma com funcao narrativa, trecho de narracao e orientacao visual.
 _Avoid_: prompt de imagem isolado, storyboard livre, roteiro reescrito
 
+**Especificacao Visual da Cena**:
+A orientacao visual concreta de uma cena do **Plano de Cenas**, usada pelo **Gerador de Imagens** para produzir um asset coerente com a narracao, a **Intencao Visual** e o **Contrato Visual do Roteiro**.
+_Avoid_: prompt solto, descricao estetica generica, copia da narracao, lista longa de proibicoes
+
 **Intencao Visual**:
 A funcao editorial que uma cena cumpre visualmente dentro de um **Plano de Cenas**.
 _Avoid_: estilo de camera, categoria tecnica solta, descricao estetica
@@ -319,6 +323,10 @@ _Avoid_: qualquer TTS gerado, voz de teste, fallback tecnico, audio sem direito 
 **Direcao de Voz**:
 A orientacao editorial que define como a **Narracao Publicavel** deve soar, priorizando hook, retencao, payoff e fechamento sem alterar o texto aprovado do roteiro.
 _Avoid_: reescrita do roteiro, improviso do TTS, contexto visual solto, efeito de voz sem funcao editorial
+
+**Perfil de Narrador**:
+A escolha recorrente de personalidade vocal para uma **Narracao Publicavel**, baseada no tipo de roteiro, como explicativo, tenso, historico, caloroso ou agil.
+_Avoid_: voz fixa para todo roteiro, alternancia aleatoria, efeito teatral sem relacao com a retencao
 
 **Tentativa Automatizada Sem Publicacao**:
 Um **Job de Video** criado pela automacao que falha, nao chega a `ready_for_upload` ou nao atinge o **Score de Autoaprovacao**, consumindo uma tentativa diaria sem ser descartado automaticamente.
@@ -512,9 +520,11 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - O **Planejador de Cenas** deve respeitar o **Contrato Visual do Roteiro** ao produzir o **Plano de Cenas**.
 - Um **Plano de Cenas** deve atribuir **Intencao Visual** coerente com o **Contrato Visual do Roteiro**.
 - Um **Plano de Cenas** deve passar por validacao antes de orientar o **Gerador de Imagens**.
+- Uma **Especificacao Visual da Cena** deve ser concreta o bastante para o **Gerador de Imagens** produzir o objeto certo, nao apenas o clima da cena.
 - Um asset visual deve passar por **Validacao Visual de Asset** antes de sustentar a **Elegibilidade Automatizada**.
 - A **Imagem de Hook Visual** deve ser avaliada pela **Validacao Visual de Asset** com mais rigor que cenas intermediarias.
 - **Janela Alvo de Duracao do Short** deve orientar roteiro, TTS e render de **Jobs de Video** automaticos.
+- Um **Perfil de Narrador** deve combinar com a **Direcao de Voz** e com o tipo de roteiro, sem alterar a narracao aprovada.
 - Uma **Barra Lateral Global do Hub** pode exibir **Status Compacto da Automacao**.
 - **Status Compacto da Automacao** pode alternar a **Pausa Global da Automacao**.
 - **Status Compacto da Automacao** nao deve iniciar um **Ciclo Diario de Automacao**.
