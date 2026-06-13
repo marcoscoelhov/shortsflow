@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.editorial.repetition import build_channel_repetition_report
 from app.compliance.review import build_human_review_checklist
 from app.editorial.topic_mode import resolve_editorial_mode
+from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
 from app.models import BackgroundMusicAsset, Job, NarrationAsset, PerformanceMetric, PublicationSchedule, RenderOutput, ReviewRecord, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRequest
 from app.pipelines.base import BasePipeline
 from app.utils import iso_now, stable_hash, word_tokens
@@ -23,9 +24,6 @@ class MonetizationPipeline(BasePipeline):
     AI_GENERATED_RIGHTS_PROVIDERS = {"minimax", "minimax_music", "elevenlabs", "gemini_tts", "edge_tts", "mock", "mock_music", "synthetic_wav"}
     TECHNICAL_TTS_PROVIDERS = {"edge_tts", "espeak_ng", "synthetic_wav"}
 
-    def _simple_mode_fact_skip(self, fact_pack: dict[str, Any]) -> bool:
-        return self.settings.simple_shorts_mode and fact_pack.get("status") == "skipped"
-
     def _ready_script_fact_check_confirmed(self, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
         qa_metrics = dict((script_artifact or {}).get("qa_metrics") or {})
         sources = fact_pack.get("sources") or []
@@ -37,6 +35,9 @@ class MonetizationPipeline(BasePipeline):
             and bool(qa_metrics.get("ready_script"))
             and bool(qa_metrics.get("fact_check_confirmed"))
         )
+
+    def _ready_script_bank_human_validated(self, job: Job, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
+        return job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK and self._ready_script_fact_check_confirmed(fact_pack, script_artifact)
 
     def step_monetization_readiness(self, session: Session, job: Job, attempt: int) -> list[str]:
         report = self.build_monetization_report(session, job)
@@ -86,37 +87,21 @@ class MonetizationPipeline(BasePipeline):
         fact_pack = self.read_job_json(job.job_id, "fact_pack.json")
         script_artifact = self.read_job_json(job.job_id, "script.json")
         ready_script_fact_check_confirmed = self._ready_script_fact_check_confirmed(fact_pack, script_artifact)
+        ready_script_bank_human_validated = self._ready_script_bank_human_validated(job, fact_pack, script_artifact)
         tags = self.build_publish_hashtags(topic_plan, script)
         checklist = self.build_quality_checklist(job)
-        if self._simple_mode_fact_skip(fact_pack):
-            checklist["script_gate_pass"] = True
         confirmations = self.manual_monetization_confirmations(session, job.job_id)
         confirmations.update(extra_confirmations or set())
         if ready_script_fact_check_confirmed:
             confirmations.update({"fact_review_confirmed", "publish_audit_confirmed", "originality_confirmed"})
+        if ready_script_bank_human_validated:
+            confirmations.update({"metadata_confirmed"})
 
         rights_registry = self.build_rights_registry(job, assets, narration, background_music)
         ai_disclosure = self.build_ai_disclosure_report(assets)
         fact_claims_report = self.build_fact_claims_report(script, topic_plan, fact_pack, script_artifact)
-        if self._simple_mode_fact_skip(fact_pack):
-            fact_claims_report = {
-                **fact_claims_report,
-                "requires_fact_review": False,
-                "simple_shorts_mode": True,
-            }
         channel_repetition_report = self.build_channel_repetition_report(session, job, topic_plan, script)
         metadata_review = self.build_metadata_review(topic_plan, script, tags)
-        if self._simple_mode_fact_skip(fact_pack):
-            channel_repetition_report = {
-                **channel_repetition_report,
-                "repetition_risk": "low",
-                "simple_shorts_mode": True,
-            }
-            metadata_review = {
-                **metadata_review,
-                "requires_metadata_review": False,
-                "simple_shorts_mode": True,
-            }
         publish_readiness = self.publish_readiness_report(
             script,
             topic_plan,
@@ -164,9 +149,9 @@ class MonetizationPipeline(BasePipeline):
         if render and render.duration_ms > 60_000:
             hard_blockers.append("shorts_duration_over_60s")
         hard_blockers.extend(self.narration_publishability_blockers(narration))
-        if not self.settings.simple_shorts_mode and channel_repetition_report["repetition_risk"] == "high" and "originality_confirmed" not in confirmations:
+        if channel_repetition_report["repetition_risk"] == "high" and "originality_confirmed" not in confirmations:
             hard_blockers.append("channel_repetition_high")
-        hard_blockers.extend(self.automatic_publish_blockers(publish_readiness))
+        hard_blockers.extend(self.automatic_publish_blockers(publish_readiness, ready_script_bank_human_validated=ready_script_bank_human_validated))
 
         hard_blockers = list(dict.fromkeys(hard_blockers))
         manual_required = list(dict.fromkeys(manual_required))
@@ -201,9 +186,14 @@ class MonetizationPipeline(BasePipeline):
             "channel_repetition_report": channel_repetition_report,
             "metadata_review": metadata_review,
             "publish_readiness": publish_readiness,
+            "ready_script_publish_policy": (
+                "human_validated_bank_script_editorial_warnings_only"
+                if ready_script_bank_human_validated
+                else "standard_publish_readiness"
+            ),
         }
 
-    def automatic_publish_blockers(self, publish_readiness: dict[str, Any]) -> list[str]:
+    def automatic_publish_blockers(self, publish_readiness: dict[str, Any], *, ready_script_bank_human_validated: bool = False) -> list[str]:
         automatic_reasons = {
             "source_fact_mismatch",
             "unsupported_claim",
@@ -220,6 +210,20 @@ class MonetizationPipeline(BasePipeline):
             "asset_visual_gate_not_passed",
             "placeholder_source_language",
         }
+        if ready_script_bank_human_validated:
+            automatic_reasons -= {
+                "source_fact_mismatch",
+                "unsupported_claim",
+                "weak_ending",
+                "truncated_ending_logic",
+                "low_retention_hook",
+                "minimax_audit_failed",
+                "minimax_audit_invalid",
+                "text_publish_audit_timeout",
+                "claim_trace_grounding_missing",
+                "invented_source_fact_ids",
+                "fact_pack_missing_for_factual_topic",
+            }
         return [reason for reason in publish_readiness.get("reasons") or [] if reason in automatic_reasons]
 
     def build_quality_checklist(self, job: Job) -> dict[str, bool]:
@@ -618,7 +622,6 @@ class MonetizationPipeline(BasePipeline):
             "subtitles": "audio/subtitles.ass",
             "render": "render/final.mp4",
             "events": "events.jsonl",
-            "ffmpeg_log": "render/ffmpeg.log",
             "rights_registry": "rights_registry.json",
             "ai_disclosure": "ai_disclosure.json",
             "fact_claims_report": "fact_claims_report.json",
@@ -631,6 +634,12 @@ class MonetizationPipeline(BasePipeline):
         }
         if (self.storage.job_dir(job.job_id) / "subtitle_timing_report.json").exists():
             artifact_index["subtitle_timing"] = "subtitle_timing_report.json"
+        if (self.storage.job_dir(job.job_id) / "render" / "ffmpeg.log").exists():
+            artifact_index["ffmpeg_log"] = "render/ffmpeg.log"
+        if (self.storage.job_dir(job.job_id) / "render" / "remotion.log").exists():
+            artifact_index["remotion_log"] = "render/remotion.log"
+        if (self.storage.job_dir(job.job_id) / "render" / "edit_plan.json").exists():
+            artifact_index["remotion_edit_plan"] = "render/edit_plan.json"
         if (self.storage.job_dir(job.job_id) / "audio" / "background_source.wav").exists():
             artifact_index["background_music"] = "audio/background_source.wav"
         if (self.storage.job_dir(job.job_id) / "audio" / "mixed.wav").exists():
@@ -681,10 +690,24 @@ class MonetizationPipeline(BasePipeline):
         if overrides.get("description"):
             description = str(overrides["description"])
         checklist = self.build_quality_checklist(job)
-        if self.settings.simple_shorts_mode:
-            checklist["script_gate_pass"] = True
         minimax_audit = self.provider_publish_audit(script_artifact, fact_pack, tags, job.job_id)
         readiness = self.publish_readiness_report(script, topic_plan, fact_pack, tags, checklist, script_artifact, minimax_audit)
+        premium_publish_audit = self.read_job_json(job.job_id, "premium_publish_audit.json")
+        if premium_publish_audit and not premium_publish_audit.get("passed"):
+            readiness = {
+                **readiness,
+                "passed": False,
+                "reasons": list(
+                    dict.fromkeys(
+                        list(readiness.get("reasons") or [])
+                        + ["premium_publish_audit_failed"]
+                        + [str(reason) for reason in premium_publish_audit.get("reasons") or []]
+                    )
+                ),
+                "premium_publish_gate_pass": False,
+                "premium_publish_score": premium_publish_audit.get("score"),
+                "premium_publish_target_score": premium_publish_audit.get("target_score"),
+            }
         if monetization_report:
             readiness = {
                 **readiness,
@@ -726,12 +749,11 @@ class MonetizationPipeline(BasePipeline):
             "altered_or_synthetic": bool(monetization_report.get("ai_disclosure", {}).get("youtube_disclosure_required")) if monetization_report else False,
             "ai_disclosure_reason": monetization_report.get("ai_disclosure", {}).get("reason") if monetization_report else None,
             "minimax_publish_audit": minimax_audit,
+            "premium_publish_audit": premium_publish_audit,
             "quality_summary": job.quality_summary or {},
         }
 
     def provider_publish_audit(self, script_artifact: dict[str, Any], fact_pack: dict[str, Any], tags: list[str], job_id: str | None = None) -> dict[str, Any]:
-        if self._simple_mode_fact_skip(fact_pack):
-            return {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True}
         if self._ready_script_fact_check_confirmed(fact_pack, script_artifact):
             return {"passed": True, "reasons": [], "provider": "ready_script_manual_fact_check", "skipped": True}
         auditor = getattr(self.providers.creative, "audit_publish_package", None)
@@ -979,31 +1001,6 @@ class MonetizationPipeline(BasePipeline):
             reasons.append("quality_checklist_failed")
             if "asset_visual_gate_pass" in failed_quality_items:
                 reasons.append("asset_visual_gate_not_passed")
-        if self._simple_mode_fact_skip(fact_pack):
-            claim_trace = script_dict.get("claim_trace") or script_dict.get("qa_metrics", {}).get("claim_trace") or []
-            if not isinstance(claim_trace, list):
-                claim_trace = []
-            has_missing_grounding = any(
-                isinstance(item, dict) and str(item.get("grounding") or "").lower() == "missing"
-                for item in claim_trace
-            )
-            if minimax_audit and minimax_audit.get("skipped"):
-                reasons.append("text_publish_audit_skipped")
-            if factual_topic and fact_pack.get("status") != "verified":
-                reasons.append("fact_pack_missing_for_factual_topic")
-            if factual_topic and (has_missing_grounding or (fact_risk.get("claim_count", 0) > 0 and not source_ids)):
-                reasons.append("claim_trace_grounding_missing")
-            return {
-                "passed": not reasons,
-                "reasons": list(dict.fromkeys(reasons)),
-                "fact_pack_status": fact_pack.get("status") or "skipped",
-                "hashtag_count": len(tags),
-                "weak_hashtags": [],
-                "fact_risk": {**fact_risk, "simple_shorts_mode": True},
-                "minimax_audit": minimax_audit or {"skipped": True},
-                "simple_shorts_mode": True,
-                "editorial_mode": editorial_mode,
-            }
         if fact_pack.get("status") != "verified" and source_ids:
             reasons.append("invented_source_fact_ids")
         if factual_topic and fact_pack.get("status") != "verified" and (fact_risk.get("claim_count", 0) > 0 or len(word_tokens(script_dict.get("full_narration", ""))) >= 45):

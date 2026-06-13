@@ -35,19 +35,6 @@ class ScriptFactPackDomain(BasePipeline):
     def _topic_requires_verified_fact_pack(self, topic_plan: TopicPlan, request: TopicRequest) -> bool:
         return self._editorial_mode(topic_plan, request) == "factual_strict"
 
-    def _simple_mode_fact_pack(self, request: TopicRequest) -> dict[str, Any]:
-        return {
-            "status": "skipped",
-            "provider": "simple_shorts_mode",
-            "query_used": request.seed_theme,
-            "facts": [],
-            "sources": [],
-            "editorial_rule": (
-                "Simple Shorts mode: do not block generation on academic fact packs. "
-                "Use broadly safe wording, avoid precise numbers and source IDs, and prioritize a viral pt-BR script."
-            ),
-        }
-
     def _build_research_brief(self, topic_plan: Any, request: Any) -> dict[str, Any]:
         return build_research_brief(topic_plan, request)
 

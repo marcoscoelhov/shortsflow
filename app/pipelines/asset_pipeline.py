@@ -380,6 +380,7 @@ class AssetPipeline(BasePipeline):
             "duration_ms": result["duration_ms"],
             "provider": result["provider"],
             "fallback_used": result.get("provider_metadata", {}).get("fallback_used", False),
+            "fallback_chain": result.get("provider_metadata", {}).get("fallback_chain") or [],
             "loudness_normalized": result.get("provider_metadata", {}).get("loudness_normalized", False),
             "loudness_target_lufs": result.get("provider_metadata", {}).get("loudness_target_lufs", -16.0),
             "true_peak_limit_db": result.get("provider_metadata", {}).get("true_peak_limit_db", -1.5),

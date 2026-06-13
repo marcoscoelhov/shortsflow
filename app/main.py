@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -46,6 +46,13 @@ from app.youtube_api import YouTubeIntegrationError
 
 settings = get_settings()
 automation_service = AutomationService(orchestrator)
+
+
+def _generate_premium_finish_background(job_id: str) -> None:
+    try:
+        orchestrator.generate_premium_finishing(job_id)
+    except Exception as exc:  # noqa: BLE001
+        orchestrator.record_premium_finishing_failure(job_id, str(exc))
 
 
 def _request_path_with_query(request: Request) -> str:
@@ -134,6 +141,7 @@ _job_flow_stage = hub_context._job_flow_stage
 _job_next_action = hub_context._job_next_action
 _publication_operational_status = hub_context._publication_operational_status
 _job_progress_snapshot = hub_context._job_progress_snapshot
+_failure_diagnosis = hub_context._failure_diagnosis
 _job_origin_display = hub_context._job_origin_display
 _creation_via_display = hub_context._creation_via_display
 _job_action_guide = hub_context._job_action_guide
@@ -183,6 +191,7 @@ templates.env.globals["job_flow_stage"] = _job_flow_stage
 templates.env.globals["job_next_action"] = _job_next_action
 templates.env.globals["publication_operational_status"] = _publication_operational_status
 templates.env.globals["job_progress_snapshot"] = _job_progress_snapshot
+templates.env.globals["failure_diagnosis"] = _failure_diagnosis
 templates.env.globals["job_origin_display"] = _job_origin_display
 templates.env.globals["creation_via_display"] = _creation_via_display
 
@@ -384,6 +393,7 @@ def jobs_page(
     via: str | None = Query(default=None),
     page: int = Query(default=1),
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
+    deleted_job: str | None = Query(default=None),
 ):
     list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
     publication_context = _publication_dashboard_context(request, limit=4)
@@ -404,6 +414,7 @@ def jobs_page(
             "viral_prompt_template": _viral_prompt_template(),
             "calendar_url": "/calendar",
             "settings": settings,
+            "deleted_job": deleted_job,
         },
     )
 
@@ -437,7 +448,7 @@ async def update_operational_settings(request: Request):
 
 
 @app.get("/jobs", response_class=HTMLResponse)
-def jobs_fragment(
+def jobs_route(
     request: Request,
     status: str | None = Query(default=None),
     search: str | None = Query(default=None),
@@ -447,8 +458,31 @@ def jobs_fragment(
     via: str | None = Query(default=None),
     page: int = Query(default=1),
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
+    deleted_job: str | None = Query(default=None),
 ):
     list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
+    if request.headers.get("hx-request", "").lower() != "true":
+        publication_context = _publication_dashboard_context(request, limit=4)
+        return templates.TemplateResponse(
+            request,
+            "jobs.html",
+            {
+                **list_context,
+                "workflow_summary": publication_context["metrics"],
+                "youtube_integration": publication_context["integration"],
+                "automation": publication_context["automation"],
+                "hub_defaults": {
+                    "niche_id": HUB_DEFAULT_NICHE,
+                    "seed_theme": "",
+                    "suggested_seed_theme": _default_seed_theme(),
+                    "target_duration_sec": HUB_RETENTION_OPTIMIZED_DURATION_SEC,
+                },
+                "viral_prompt_template": _viral_prompt_template(),
+                "calendar_url": "/calendar",
+                "settings": settings,
+                "deleted_job": deleted_job,
+            },
+        )
     return templates.TemplateResponse(
         request,
         "jobs_table.html",
@@ -705,6 +739,7 @@ def job_json(job_id: str):
                 "duration_ms": details["render"].duration_ms if details["render"] else None,
             },
             "progress": details["progress"],
+            "premium_finishing": details.get("premium_finishing") or {},
         }
 
 
@@ -729,6 +764,8 @@ def job_detail(request: Request, job_id: str):
             "youtube_integration": youtube_integration,
             "review_error": request.query_params.get("review_error"),
             "publish_error": request.query_params.get("publish_error"),
+            "reprocess_error": request.query_params.get("reprocess_error"),
+            "premium_error": request.query_params.get("premium_error"),
             "action_guide": _job_action_guide(
                 details["job"],
                 details.get("monetization_report"),
@@ -737,6 +774,59 @@ def job_detail(request: Request, job_id: str):
             ),
         },
     )
+
+
+@app.post("/jobs/{job_id}/delete")
+def delete_job(job_id: str):
+    try:
+        with SessionLocal() as session:
+            resolved_job_id = _resolve_job_id(session, job_id)
+        orchestrator.delete_job(resolved_job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except FatalStepError as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'review_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    return RedirectResponse(url=f"/?{urlencode({'deleted_job': resolved_job_id[:8]})}", status_code=303)
+
+
+@app.post("/jobs/{job_id}/premium-finish")
+def generate_premium_finish(job_id: str, background_tasks: BackgroundTasks):
+    try:
+        with SessionLocal() as session:
+            resolved_job_id = _resolve_job_id(session, job_id)
+        orchestrator.request_premium_finishing(resolved_job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except FatalStepError as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'premium_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    background_tasks.add_task(_generate_premium_finish_background, resolved_job_id)
+    return RedirectResponse(url=f"/jobs/{resolved_job_id}?premium_started=1", status_code=303)
+
+
+@app.post("/jobs/{job_id}/reprocess")
+def reprocess_job_from_step(job_id: str, from_step: str = Form(default="tts")):
+    try:
+        orchestrator.reprocess_job_from_step(job_id, from_step)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except (FatalStepError, ValueError) as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'reprocess_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
+
+
+@app.post("/jobs/{job_id}/scenes/{scene_id}/regenerate")
+def regenerate_scene(job_id: str, scene_id: str, operator_instruction: str | None = Form(default=None)):
+    try:
+        orchestrator.regenerate_scene_and_rerender(job_id, scene_id, operator_instruction=operator_instruction)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except (FatalStepError, RecoverableStepError, ValueError) as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'reprocess_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
 
 @app.post("/jobs/{job_id}/review")
@@ -783,6 +873,18 @@ def review_job(
         return RedirectResponse(url=redirect_to, status_code=303)
     redirect_to = f"/jobs/{new_job_id}" if new_job_id else f"/jobs/{job_id}"
     return RedirectResponse(url=redirect_to, status_code=303)
+
+
+@app.post("/jobs/{job_id}/premium-approve")
+def approve_premium_for_publish(job_id: str, reviewer_identity: str = Form(default="tailscale:local-reviewer")):
+    try:
+        orchestrator.approve_premium_for_publish(job_id, reviewer_identity=reviewer_identity)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except FatalStepError as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'review_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
 
 @app.post("/jobs/{job_id}/publish-metadata")

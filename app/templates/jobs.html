@@ -9,8 +9,10 @@
   </div>
   <ul class="jobs-operation-summary" aria-label="Resumo de operação">
     <li>
-      <span>Precisam de ação</span>
-      <strong>{{ workflow_summary.awaiting_approval_count + workflow_summary.unscheduled_approved_count }}</strong>
+      <a class="jobs-summary-link {% if filters.status == 'needs_action' %}active{% endif %}" href="/jobs?status=needs_action&per_page={{ pagination.per_page }}" {% if filters.status == 'needs_action' %}aria-current="page"{% endif %}>
+        <span>Precisam de ação</span>
+        <strong>{{ workflow_summary.needs_action_count }}</strong>
+      </a>
     </li>
     <li>
       <span>Na fila</span>
@@ -19,9 +21,38 @@
   </ul>
 </section>
 
+{% if deleted_job %}
+<section class="panel status-banner deletion-banner">
+  <strong>Job excluído.</strong>
+  <p>O registro {{ deleted_job }} e seus artefatos locais foram removidos do Hub.</p>
+</section>
+{% endif %}
+
+{% if automation.last_run and automation.last_run.status == "failed" %}
+<section class="panel status-banner">
+  <strong>Ciclo de automação não agendou publicação</strong>
+  <p>{{ automation.last_run.error }}</p>
+  {% if automation.last_run.metadata.ready_script_publish_policy %}
+  <p>{{ automation.last_run.metadata.ready_script_publish_policy }}</p>
+  {% endif %}
+  {% if automation.last_run.metadata.publish_blockers %}
+  <div class="publication-list compact">
+    {% for blocker in automation.last_run.metadata.publish_blockers %}
+    <div class="publication-item">
+      <strong>{{ blocker.source_label }}{% if blocker.job_id %} · {{ blocker.job_id[:8] }}{% endif %}</strong>
+      <p>{{ blocker.reason or blocker.status }}</p>
+      {% if blocker.job_id %}<a class="text-link" href="/jobs/{{ blocker.job_id }}">Abrir job</a>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="jobs-action-row" aria-label="Ações de jobs">
   <div class="jobs-filter-pills" aria-label="Filtros rápidos">
     <a class="{% if not filters.status %}active{% endif %}" href="/?per_page={{ pagination.per_page }}" {% if not filters.status %}aria-current="page"{% endif %}>Todos</a>
+    <a class="{% if filters.status == 'needs_action' %}active{% endif %}" href="/jobs?status=needs_action&per_page={{ pagination.per_page }}" {% if filters.status == 'needs_action' %}aria-current="page"{% endif %}>Ação pendente</a>
     <a class="{% if filters.status == 'running' %}active{% endif %}" href="/?status=running&per_page={{ pagination.per_page }}" {% if filters.status == 'running' %}aria-current="page"{% endif %}>Renderizando</a>
     <a class="{% if filters.status == 'unscheduled_approved' %}active{% endif %}" href="/?status=unscheduled_approved&per_page={{ pagination.per_page }}" {% if filters.status == 'unscheduled_approved' %}aria-current="page"{% endif %}>Sem agenda</a>
     <a class="{% if filters.status == 'scheduled_publication' %}active{% endif %}" href="/?status=scheduled_publication&per_page={{ pagination.per_page }}" {% if filters.status == 'scheduled_publication' %}aria-current="page"{% endif %}>Agendados</a>
@@ -55,7 +86,7 @@
           <label for="status">Status do job</label>
           <select id="status" name="status">
             <option value="">Todos</option>
-            {% for value in ["queued","running","script_quality_failed","scene_plan_quality_failed","asset_quality_failed","subtitle_quality_failed","render_quality_failed","monetization_review","blocked_for_monetization","ready_for_upload","approved_for_publish","unscheduled_approved","scheduled_publication","awaiting_confirmation","publication_failed","published","approved","rejected","failed"] %}
+            {% for value in ["needs_action","queued","running","script_quality_failed","scene_plan_quality_failed","asset_quality_failed","subtitle_quality_failed","render_quality_failed","monetization_review","blocked_for_monetization","ready_for_upload","approved_for_publish","unscheduled_approved","scheduled_publication","awaiting_confirmation","publication_failed","published","approved","rejected","failed"] %}
             <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ job_status_label(value) }}</option>
             {% endfor %}
           </select>

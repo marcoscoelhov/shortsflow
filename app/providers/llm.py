@@ -537,7 +537,6 @@ Regras:
 - sem instruções de camera nos campos narrados; visual_opening pode descrever composicao visual, sujeito, contraste, acao e resultado esperado
 - evite repetir aberturas listadas em recent_pattern_brief.avoid_hook_openings e padrões de título recentes
 - QA deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass, editorial_prompt_version
-- se Entrada JSON.simple_shorts_mode for true: não tente citar fonte, não use frases como "a fonte aponta", não gere source_fact_ids, deixe claim_trace vazio ou conservador, e priorize roteiro viral claro com fatos amplamente seguros, sem números precisos não fornecidos
 """
         payload = self._json_completion(prompt)
         payload["qa_metrics"] = {**payload.get("qa_metrics", {}), "source_provider": self.provider_name}
@@ -602,6 +601,9 @@ Regras obrigatórias:
 - se Contexto da pauta JSON.editorial_mode for "factual_strict", preserve o grounding factual e remova qualquer mecanismo sem lastro
 - preserve a régua editorial do app: hook forte, loop aberto, beats em escalada, payoff no último terço e fechamento que provoque replay
 - se os motivos incluírem weak_loop_closure ou ending_not_connected_to_hook, corrija o bloco loop_close sem criar final genérico repetitivo
+- se os motivos incluírem weak_ending, reescreva o ending para pagar a promessa do hook e apontar concretamente de volta ao início
+- se os motivos incluírem off_topic, remova desvios e alinhe título, hook, beats, payoff e ending ao canonical_topic, angle e hook_promise do contexto
+- se os motivos incluírem unsupported_claim, remova a afirmação sem lastro ou substitua por formulação diretamente sustentada por facts[].claim
 - o novo ending deve criar loop de reassistência: o início precisa ganhar novo significado na segunda visualização
 - não use frase meta como "fecha o ciclo", "agora tudo faz sentido" ou "essa curiosidade muda como você olha"
 - preserve tom viral mesmo quando usar fatos científicos; não transforme o roteiro em aula ou resumo acadêmico
@@ -655,6 +657,10 @@ passed, reasons, factual_score, retention_score, metadata_score, ending_score, s
 Regras:
 - passed só pode ser true se o roteiro não parecer factualmente exagerado, o final não parecer truncado, título/hashtags forem publicáveis e não houver fonte falsa.
 - reasons deve usar slugs curtos em inglês, ex: unsupported_claim, weak_ending, weak_hashtags, invented_source_fact_ids, low_retention.
+- avalie off_topic somente comparando o roteiro com Entrada JSON.topic; não infira outro tema apenas por estilo ou vocabulário
+- use unsupported_claim apenas para afirmação factual concreta sem apoio no fact_pack; metáfora, tensão editorial e linguagem explicitamente conservadora não bastam
+- use invented_source_fact_ids somente quando source_fact_ids ou claim_trace contiverem IDs ausentes em fact_pack.facts
+- use weak_ending somente quando o ending não pagar a promessa do hook ou estiver truncado/genérico; preferência estilística isolada não basta
 - scores de 0 a 1.
 - Não reescreva o roteiro; só audite.
 Sem markdown.
@@ -700,7 +706,7 @@ Excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas e nomes d
 Regras obrigatorias para image_prompt:
 - image_prompt MUST be written in English only, even when the narration is pt-BR
 - keep image_prompt compact for MiniMax image-01, under 900 characters; no long negative-prompt wall
-- describe one vertical 2:3 cinematic visual scene with objects that fit visual_contract.visual_domain when present
+- describe one cinematic visual scene for 9:16 vertical shorts with objects that fit visual_contract.visual_domain when present
 - every image_prompt must depict the concrete fact in that scene's narration_text, not just the generic visual_intent
 - if visual_contract exists, every image_prompt must obey the scene's visual_intent and the visual contract; do not override it with generic scientific styling
 - if visual_contract.visual_domain is miniature/diorama/model city/craft, keep every scene inside that same miniature diorama world, even when narration mentions movies, games, cameras or motion blur

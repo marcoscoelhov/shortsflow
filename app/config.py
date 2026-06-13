@@ -27,7 +27,6 @@ class Settings(BaseSettings):
     language: str = "pt-BR"
     target_duration_sec: int = 50
     scene_target_count: int = 6
-    simple_shorts_mode: bool = True
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
@@ -48,6 +47,7 @@ class Settings(BaseSettings):
     asset_semantic_threshold: float = 0.80
     asset_total_threshold: float = 0.75
     render_min_bitrate: int = 250_000
+    render_primary_backend: str = "remotion"
     asset_generation_timeout_sec: float = 75.0
     asset_generation_regeneration_rounds: int = 2
     asset_generation_parallelism: int = 3
@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     automation_max_generation_attempts: int = 3
     automation_max_publish_attempts_per_job: int = 3
     automation_score_threshold: float = 0.82
+    premium_publish_min_score: float = 9.2
     performance_collection_enabled: bool = True
     performance_sync_active_window_days: int = 45
     performance_sync_archive_window_days: int = 180
@@ -119,6 +120,7 @@ class Settings(BaseSettings):
     minimax_text_base_url: str = "https://api.minimax.io/v1"
     minimax_image_base_url: str = "https://api.minimax.io/v1/image_generation"
     minimax_music_base_url: str = "https://api.minimax.io/v1"
+    minimax_image_aspect_ratio: str = "9:16"
     minimax_text_timeout_sec: float = 180.0
     minimax_music_timeout_sec: float = 240.0
     minimax_scene_plan_timeout_sec: float = 120.0
@@ -217,6 +219,15 @@ class Settings(BaseSettings):
             raise ValueError("background_music_provider must be one of: local_bank, minimax, auto")
         return normalized
 
+    @field_validator("render_primary_backend")
+    @classmethod
+    def validate_render_primary_backend(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"ffmpeg", "remotion"}
+        if normalized not in allowed:
+            raise ValueError("render_primary_backend must be one of: ffmpeg, remotion")
+        return normalized
+
     @field_validator(
         "artifact_retention_sweep_seconds",
         "artifact_ttl_hard_failure_hours",
@@ -250,6 +261,13 @@ class Settings(BaseSettings):
             raise ValueError("automation_score_threshold must be between 0 and 1")
         return value
 
+    @field_validator("premium_publish_min_score")
+    @classmethod
+    def validate_premium_publish_min_score(cls, value: float) -> float:
+        if not 0 <= value <= 10:
+            raise ValueError("premium_publish_min_score must be between 0 and 10")
+        return value
+
     @field_validator("performance_sync_active_window_days", "performance_sync_archive_window_days")
     @classmethod
     def validate_performance_sync_windows(cls, value: int) -> int:
@@ -263,6 +281,15 @@ class Settings(BaseSettings):
         if not 1 <= value <= 100:
             raise ValueError("performance_sync_batch_limit must be between 1 and 100")
         return value
+
+    @field_validator("minimax_image_aspect_ratio")
+    @classmethod
+    def validate_minimax_image_aspect_ratio(cls, value: str) -> str:
+        normalized = (value or "").strip()
+        allowed = {"1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9"}
+        if normalized not in allowed:
+            raise ValueError(f"minimax_image_aspect_ratio must be one of: {', '.join(sorted(allowed))}")
+        return normalized
 
     @model_validator(mode="after")
     def validate_performance_sync_window_order(self) -> "Settings":

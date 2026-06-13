@@ -30,7 +30,6 @@ class ScriptPipeline(BasePipeline):
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
         assert topic_plan and request
         editorial_mode = self._editorial_mode(topic_plan, request)
-        simple_mode_fact_skip = self.settings.simple_shorts_mode and editorial_mode == "viral_curiosidades"
         research_brief = self._build_research_brief(topic_plan, request)
         plan_dict = {
             "canonical_topic": topic_plan.canonical_topic,
@@ -41,7 +40,6 @@ class ScriptPipeline(BasePipeline):
             "requested_angle": request.requested_angle,
             "hub_notes": request.notes,
             "original_input": request.seed_theme,
-            "simple_shorts_mode": simple_mode_fact_skip,
             "editorial_mode": editorial_mode,
             "research_brief": research_brief,
         }
@@ -71,7 +69,7 @@ class ScriptPipeline(BasePipeline):
         if ready_script is not None:
             fact_pack = ready_script.fact_pack
         else:
-            fact_pack = self._simple_mode_fact_pack(request) if simple_mode_fact_skip else self._build_fact_pack(topic_plan, request, research_brief)
+            fact_pack = self._build_fact_pack(topic_plan, request, research_brief)
         stage_timings_ms["fact_pack_ms"] = round((time.monotonic() - fact_started) * 1000, 1)
         plan_dict["fact_pack"] = fact_pack
         self.storage.persist_json(job.job_id, "fact_pack.json", self._serialize_for_json(fact_pack))
@@ -144,7 +142,23 @@ class ScriptPipeline(BasePipeline):
             raise
         stage_timings_ms["validation_ms"] = round((time.monotonic() - validation_started) * 1000, 1)
         audit_started = time.monotonic()
-        text_audit = self._text_publish_audit(job.job_id, script, fact_pack)
+        audit_topic_context = {
+            key: plan_dict.get(key)
+            for key in ("canonical_topic", "angle", "hook_promise", "original_input", "editorial_mode")
+        }
+        text_audit = self._text_publish_audit(job.job_id, script, fact_pack, audit_topic_context)
+        audit_repair_file: str | None = None
+        if text_audit.get("passed") is False:
+            script, metrics, text_audit, audit_repair_file = self._repair_after_text_audit(
+                job_id=job.job_id,
+                script=script,
+                metrics=metrics,
+                audit=text_audit,
+                plan_dict=plan_dict,
+                target_duration_sec=job.target_duration_sec,
+                cta_style=request.cta_style or "none",
+                topic_context=audit_topic_context,
+            )
         stage_timings_ms["text_publish_audit_ms"] = round((time.monotonic() - audit_started) * 1000, 1)
         if text_audit.get("passed") is False:
             audit_reasons = [str(reason) for reason in text_audit.get("reasons") or ["text_publish_audit_failed"]]
@@ -234,12 +248,75 @@ class ScriptPipeline(BasePipeline):
         job.quality_summary = quality_summary
         self._append_event(job.job_id, "script.generated", "succeeded", metrics)
         artifacts = ["fact_pack.json", "script.json", "script_generation_debug.json", "text_publish_audit.json", script_telemetry_file]
+        if audit_repair_file is not None:
+            artifacts.append(audit_repair_file)
         artifacts.append("visual_contract.json")
         if ready_script is not None:
             artifacts.append("ready_script_input.json")
         if structured_contract_file is not None:
             artifacts.append(structured_contract_file)
         return artifacts
+
+    def _repair_after_text_audit(
+        self,
+        *,
+        job_id: str,
+        script: dict[str, Any],
+        metrics: dict[str, Any],
+        audit: dict[str, Any],
+        plan_dict: dict[str, Any],
+        target_duration_sec: int,
+        cta_style: str,
+        topic_context: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str | None]:
+        reasons = list(dict.fromkeys(str(reason) for reason in audit.get("reasons") or []))
+        repairable_reasons = {"invented_source_fact_ids", "off_topic", "unsupported_claim", "weak_ending"}
+        if not reasons or not set(reasons).issubset(repairable_reasons):
+            return script, metrics, audit, None
+
+        try:
+            candidate = self.providers.creative.repair_script(script, reasons, plan_dict)
+            repaired_script, repaired_metrics = self._validate_or_repair_script(
+                candidate,
+                plan_dict,
+                target_duration_sec,
+                cta_style,
+                job_id,
+            )
+            repaired_audit = self._text_publish_audit(job_id, repaired_script, plan_dict.get("fact_pack") or {}, topic_context)
+        except Exception as exc:  # noqa: BLE001
+            repaired_script = script
+            repaired_metrics = metrics
+            repaired_audit = {
+                "passed": False,
+                "reasons": reasons,
+                "provider": "post_audit_repair",
+                "repair_error": f"{type(exc).__name__}: {exc}",
+            }
+
+        artifact_name = "text_publish_audit_repair.json"
+        self.storage.persist_json(
+            job_id,
+            artifact_name,
+            {
+                "schema_version": self.settings.schema_version,
+                "job_id": job_id,
+                "created_at": utcnow().isoformat(),
+                "initial_audit": self._serialize_for_json(audit),
+                "final_audit": self._serialize_for_json(repaired_audit),
+                "repair_reasons": reasons,
+                "revalidated_locally": repaired_audit.get("repair_error") is None,
+            },
+        )
+        if repaired_audit.get("passed") is not True:
+            return script, metrics, repaired_audit, artifact_name
+        repaired_metrics = {
+            **repaired_metrics,
+            "text_audit_repair_used": True,
+            "text_audit_repair_initial_reasons": reasons,
+        }
+        repaired_script["qa_metrics"] = repaired_metrics
+        return repaired_script, repaired_metrics, repaired_audit, artifact_name
 
     def __init__(self, owner: Any) -> None:
         super().__init__(owner)
@@ -334,9 +411,6 @@ class ScriptPipeline(BasePipeline):
 
     def _topic_requires_verified_fact_pack(self, *args: Any, **kwargs: Any) -> Any:
         return self.fact_pack_domain._topic_requires_verified_fact_pack(*args, **kwargs)
-
-    def _simple_mode_fact_pack(self, *args: Any, **kwargs: Any) -> Any:
-        return self.fact_pack_domain._simple_mode_fact_pack(*args, **kwargs)
 
     def _build_research_brief(self, *args: Any, **kwargs: Any) -> Any:
         return self.fact_pack_domain._build_research_brief(*args, **kwargs)
@@ -469,15 +543,6 @@ class ScriptPipeline(BasePipeline):
 
     def _ready_script_declared_fact_check_accepts(self, *args: Any, **kwargs: Any) -> Any:
         return self.repair_domain._ready_script_declared_fact_check_accepts(*args, **kwargs)
-
-    def _simple_mode_blocking_script_reasons(self, *args: Any, **kwargs: Any) -> Any:
-        return self.repair_domain._simple_mode_blocking_script_reasons(*args, **kwargs)
-
-    def _simple_mode_lightweight_repair_reasons(self, *args: Any, **kwargs: Any) -> Any:
-        return self.repair_domain._simple_mode_lightweight_repair_reasons(*args, **kwargs)
-
-    def _simple_mode_repair_improved(self, *args: Any, **kwargs: Any) -> Any:
-        return self.repair_domain._simple_mode_repair_improved(*args, **kwargs)
 
     def _claim_trace_metrics(self, *args: Any, **kwargs: Any) -> Any:
         return self.repair_domain._claim_trace_metrics(*args, **kwargs)

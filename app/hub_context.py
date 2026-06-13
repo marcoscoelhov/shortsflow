@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Request
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 
 from app.db import SessionLocal
 from app.job_origin import (
@@ -29,6 +29,7 @@ COMMON_SCHEDULE_TIMEZONES = [
 ]
 
 JOB_STATUS_LABELS = {
+    "needs_action": "Ação pendente",
     "queued": "Na fila",
     "running": "Gerando vídeo",
     "script_quality_failed": "Falhou no roteiro",
@@ -57,6 +58,187 @@ SCHEDULE_STATUS_LABELS = {
     "publish_failed": "Falhou no upload",
     "published": "Publicado",
     "cancelled": "Programação limpa",
+}
+
+NEEDS_ACTION_JOB_STATUSES = {
+    "monetization_review",
+    "ready_for_upload",
+    "blocked_for_monetization",
+    "rejected",
+    "failed",
+}
+
+FAILURE_REASON_GUIDES = {
+    "fact_pack_missing_for_factual_topic": {
+        "title": "Faltou base factual para tema factual",
+        "cause": "O roteiro entrou no caminho factual, mas o job não tinha pacote de fatos confirmado o bastante para publicação automática.",
+        "action": "Use Roteiro Pronto com confirmação factual ou regenere o roteiro com fontes confiáveis antes de publicar.",
+    },
+    "source_fact_mismatch": {
+        "title": "Roteiro não bate com as fontes",
+        "cause": "A auditoria comparou o roteiro com o pacote factual e encontrou afirmação ou contexto que não está alinhado às fontes salvas.",
+        "action": "Corrija o trecho factual, gere um novo roteiro com o fact pack correto ou use um Roteiro Pronto com confirmação factual.",
+    },
+    "claim_trace_grounding_missing": {
+        "title": "Afirmação sem rastreio até a fonte",
+        "cause": "O roteiro tem afirmação factual, mas ela não está ligada a um item verificável do pacote de fatos.",
+        "action": "Adicione source_fact_ids corretos ao claim trace ou reescreva a afirmação de forma conservadora.",
+    },
+    "quality_gate_not_passed": {
+        "title": "Uma etapa de qualidade não passou",
+        "cause": "O checklist final encontrou pelo menos uma etapa técnica ou editorial marcada como reprovada.",
+        "action": "Abra Qualidade e monetização, veja o item reprovado e regenere a etapa correspondente.",
+    },
+    "quality_checklist_failed": {
+        "title": "Checklist de publicação incompleto",
+        "cause": "A publicação automática exige roteiro, cenas, assets, legendas e render aprovados, mas algum item ainda não passou.",
+        "action": "Refaça a etapa marcada como falsa no checklist antes de tentar publicar.",
+    },
+    "asset_visual_gate_not_passed": {
+        "title": "Visual não passou no gate",
+        "cause": "As imagens selecionadas não provaram bem o conteúdo do Short ou ficaram abaixo do padrão visual mínimo.",
+        "action": "Regere as cenas fracas ou use a revisão visual para escolher assets mais alinhados ao roteiro.",
+    },
+    "weak_ending": {
+        "title": "Fechamento fraco",
+        "cause": "A última frase não fecha a promessa do hook com clareza ou termina sem payoff suficiente.",
+        "action": "Reescreva o fechamento para entregar a virada principal e conectar com o começo.",
+    },
+    "truncated_ending_logic": {
+        "title": "Fechamento parece cortado",
+        "cause": "A lógica do final ficou incompleta, como se a narração tivesse sido interrompida antes de concluir.",
+        "action": "Regere ou ajuste o roteiro para terminar com uma frase completa e verificável.",
+    },
+    "low_retention_hook": {
+        "title": "Hook fraco para retenção",
+        "cause": "O começo do Short não criou contraste, pergunta ou promessa forte o suficiente para publicação automática.",
+        "action": "Reescreva o hook com uma imagem concreta e uma promessa que só se resolva no final.",
+    },
+    "weak_hashtags": {
+        "title": "Hashtags fracas ou genéricas",
+        "cause": "O pacote de publicação ficou com hashtags amplas demais, repetidas ou pouco ligadas ao tema.",
+        "action": "Troque por hashtags específicas do assunto, mantendo #shorts e termos reais do roteiro.",
+    },
+    "minimax_audit_failed": {
+        "title": "Auditoria textual não aprovou",
+        "cause": "A auditoria do pacote de publicação falhou e não liberou o texto para publicação automática.",
+        "action": "Revise roteiro, título, descrição, hashtags e claims; depois regenere a auditoria ou aprove manualmente se tiver certeza.",
+    },
+    "minimax_audit_invalid": {
+        "title": "Auditoria textual veio inválida",
+        "cause": "O provider de auditoria retornou uma resposta que o hub não conseguiu validar.",
+        "action": "Repita a auditoria ou aprove manualmente só depois de revisar roteiro e metadados.",
+    },
+    "text_publish_audit_timeout": {
+        "title": "Auditoria textual expirou",
+        "cause": "O provider demorou demais para revisar o pacote de publicação.",
+        "action": "Tente novamente ou faça a revisão manual do pacote antes de aprovar.",
+    },
+    "synthetic_visuals_disabled_by_policy": {
+        "title": "Política bloqueou visual sintético",
+        "cause": "O job usa assets sintéticos, mas a configuração atual não permite esses visuais para monetização automática.",
+        "action": "Ative a política adequada com confirmação de direitos ou troque os assets por fontes permitidas.",
+    },
+    "shorts_duration_over_60s": {
+        "title": "Duração passou do limite de Short",
+        "cause": "O render final ficou acima de 60 segundos.",
+        "action": "Encurte a narração ou regenere áudio e legendas dentro da Janela Alvo de Duracao do Short.",
+    },
+    "channel_repetition_high": {
+        "title": "Tema repetido demais no canal",
+        "cause": "O job ficou muito parecido com conteúdo recente do canal.",
+        "action": "Mude o ângulo editorial ou crie um novo job com tema mais distante.",
+    },
+    "rights_confirmation_required": {
+        "title": "Direitos comerciais pendentes",
+        "cause": "O hub ainda não tem confirmação suficiente de direitos dos assets ou áudio usados.",
+        "action": "Confirme direitos no checklist ou substitua o material por fonte com licença clara.",
+    },
+    "youtube_ai_disclosure_toggle_required": {
+        "title": "Disclosure de IA pendente",
+        "cause": "O vídeo contém material alterado ou sintético e precisa de confirmação sobre disclosure no YouTube.",
+        "action": "Revise a exigência do YouTube e marque a confirmação correta antes de publicar.",
+    },
+    "fact_review_required": {
+        "title": "Revisão factual pendente",
+        "cause": "O tema contém claims factuais e precisa de confirmação humana antes da publicação.",
+        "action": "Confira as fontes e marque a confirmação factual no checklist.",
+    },
+    "metadata_review_required": {
+        "title": "Metadados precisam revisão",
+        "cause": "Título, descrição ou hashtags precisam de ajuste humano antes da publicação.",
+        "action": "Abra Ajustar metadados do upload, corrija o pacote e confirme a revisão.",
+    },
+    "originality_review_required": {
+        "title": "Originalidade precisa confirmação",
+        "cause": "O job tem risco de repetição com conteúdo recente do canal.",
+        "action": "Compare com os vídeos recentes e confirme originalidade ou refaça o ângulo.",
+    },
+    "unsupported_claim": {
+        "title": "Afirmação sem suporte suficiente",
+        "cause": "A auditoria textual encontrou uma afirmação factual que não estava sustentada pelo pacote de fatos.",
+        "action": "Revise a afirmação, adicione fonte confiável ou reescreva o trecho de forma mais conservadora.",
+    },
+    "invented_source_fact_ids": {
+        "title": "Roteiro referenciou fonte inexistente",
+        "cause": "O texto ou a auditoria encontrou IDs de fatos que não existem no pacote factual do job.",
+        "action": "Regere o roteiro/fact pack ou use um Roteiro Pronto com fatos confirmados manualmente.",
+    },
+    "low_retention": {
+        "title": "Retenção textual fraca",
+        "cause": "O roteiro não sustentou hook, loop, escalada ou payoff com força suficiente para autopublicação.",
+        "action": "Reforce hook, tensão do loop e payoff antes de tentar publicar automaticamente.",
+    },
+    "topic_mismatch": {
+        "title": "Roteiro saiu do tema pedido",
+        "cause": "A auditoria detectou desalinhamento entre tema, roteiro ou metadados.",
+        "action": "Regere o job com tema mais específico ou ajuste o roteiro para provar exatamente o título.",
+    },
+    "metadata_mismatch": {
+        "title": "Metadados desalinhados",
+        "cause": "Título, descrição, hashtags ou pacote de publicação não bateram com o roteiro aprovado.",
+        "action": "Ajuste metadados para refletir o conteúdo real antes de aprovar ou publicar.",
+    },
+    "repeated_clause": {
+        "title": "Roteiro repetitivo",
+        "cause": "O gate de roteiro detectou repetição de frase, estrutura ou ideia.",
+        "action": "Regere ou reescreva os beats para cada frase avançar a história.",
+    },
+    "visual_contract_hook_reveals_hidden_element": {
+        "title": "Cena entregou o payoff cedo demais",
+        "cause": "O plano visual revelou no hook um elemento que deveria sustentar o loop ou aparecer só depois.",
+        "action": "Regere o plano de cenas preservando mistério no começo e payoff tardio.",
+    },
+    "explosive_instructions": {
+        "title": "Moderação bloqueou a entrada",
+        "cause": "O filtro interpretou o tema ou vocabulário como instrução sensível, mesmo que possa ser falso positivo.",
+        "action": "Reformule termos ambíguos e tente novamente, mantendo o tema factual sem linguagem instrucional.",
+    },
+    "tts_duration_outside_allowed_range": {
+        "title": "Narração fora da janela do Short",
+        "cause": "O áudio TTS ficou fora da Janela Alvo de Duracao do Short, entre 35 e 55 segundos.",
+        "action": "Use roteiro com cerca de 95 a 125 palavras de narração ou regere o áudio após ajustar o texto.",
+    },
+    "ffmpeg_render_failed": {
+        "title": "Render falhou no FFmpeg",
+        "cause": "A etapa de renderização não conseguiu montar o Arquivo de Video Final.",
+        "action": "Revise artefatos de mídia, áudio e logs técnicos antes de tentar renderizar de novo.",
+    },
+    "technical_tts_provider_not_publishable": {
+        "title": "TTS final não é publicável automaticamente",
+        "cause": "O provider primário de voz não entregou áudio publicável e o job caiu para um TTS técnico de emergência.",
+        "action": "Corrija o provider primário ou o fallback comercial antes de regenerar; se quiser usar esse áudio, aprove apenas após confirmar direitos e qualidade manualmente.",
+    },
+    "visual_review_required": {
+        "title": "Revisão visual necessária",
+        "cause": "O job terminou, mas os sinais visuais não foram fortes o bastante para autopublicação.",
+        "action": "Assista ao vídeo no Hub de Revisao e aprove manualmente ou refaça assets/cenas.",
+    },
+    "publish_audit_required": {
+        "title": "Auditoria de publicação pendente",
+        "cause": "O pacote textual precisa de confirmação humana antes de entrar em publicação automatizada.",
+        "action": "Revise checklist, metadados e claims; depois aprove manualmente se estiver correto.",
+    },
 }
 
 HUB_JOBS_PER_PAGE = 4
@@ -149,6 +331,227 @@ class HubContext:
 
     def _job_progress_snapshot(self, job: Job) -> dict[str, object]:
         return self.orchestrator.build_job_progress(job)
+
+    def _tts_fallback_evidence(self, narration: Any | None) -> list[str]:
+        metadata = dict(getattr(narration, "provider_metadata", None) or {})
+        chain = metadata.get("fallback_chain")
+        lines: list[str] = []
+        if isinstance(chain, list):
+            for step in chain:
+                if not isinstance(step, dict):
+                    continue
+                from_provider = str(step.get("from_provider") or "").strip() or "provider anterior"
+                to_provider = str(step.get("to_provider") or "").strip() or "provider final"
+                reason = str(step.get("reason") or "").strip()
+                lines.append(f"TTS fallback: {from_provider} -> {to_provider}: {reason}" if reason else f"TTS fallback: {from_provider} -> {to_provider}")
+        elif metadata.get("fallback_used"):
+            from_provider = str(metadata.get("fallback_from_provider") or "").strip() or "provider anterior"
+            to_provider = str(metadata.get("fallback_provider") or getattr(narration, "provider", "") or "").strip() or "provider final"
+            reason = str(metadata.get("fallback_reason") or "").strip()
+            lines.append(f"TTS fallback: {from_provider} -> {to_provider}: {reason}" if reason else f"TTS fallback: {from_provider} -> {to_provider}")
+        return lines
+
+    def _failure_diagnosis(self, job: Job, monetization_report: dict[str, object] | None = None, narration: Any | None = None) -> dict[str, object]:
+        status = str(job.status or "")
+        raw_reason = str(job.failure_reason or "").strip()
+        report = monetization_report or {}
+        hard_blockers = [str(item) for item in report.get("hard_blockers") or []]
+        manual_required = [str(item) for item in report.get("manual_required") or []]
+        problem_items = self._monetization_problem_items(report)
+        evidence = [item for item in [raw_reason, *hard_blockers, *manual_required] if item]
+        if "technical_tts_provider_not_publishable" in evidence or any("tts" in item.lower() for item in evidence):
+            evidence.extend(self._tts_fallback_evidence(narration))
+        if not evidence and status not in {"failed", "blocked_for_monetization", "rejected"} and not status.endswith("_failed"):
+            return {"visible": False, "title": "", "cause": "", "action": "", "evidence": [], "problem_items": []}
+
+        for evidence_code in evidence:
+            guide = FAILURE_REASON_GUIDES.get(str(evidence_code))
+            if guide:
+                return {"visible": True, "code": str(evidence_code), "evidence": evidence, "problem_items": problem_items, **guide}
+
+        normalized_text = " ".join(evidence).lower().replace("-", "_").replace(" ", "_")
+        for code, guide in FAILURE_REASON_GUIDES.items():
+            if code in normalized_text:
+                return {"visible": True, "code": code, "evidence": evidence, "problem_items": problem_items, **guide}
+
+        if status == "blocked_for_monetization":
+            first_problem = problem_items[0] if problem_items else {}
+            return {
+                "visible": True,
+                "code": str(first_problem.get("code") or "blocked_for_monetization"),
+                "title": str(first_problem.get("title") or "Bloqueado por critério de publicação"),
+                "cause": str(first_problem.get("cause") or "O job terminou, mas um ou mais gates impediram publicação automática."),
+                "action": str(first_problem.get("action") or "Abra Qualidade e monetização, confira os bloqueios e decida entre corrigir, aprovar manualmente ou refazer."),
+                "evidence": evidence,
+                "problem_items": problem_items,
+            }
+        if status == "rejected":
+            return {
+                "visible": True,
+                "code": "rejected",
+                "title": "Rejeitado na revisão",
+                "cause": "Uma revisão humana reprovou o job ou marcou motivo de refação.",
+                "action": "Use os motivos da revisão para criar um novo job ou ajustar o roteiro antes de tentar de novo.",
+                "evidence": evidence,
+                "problem_items": problem_items,
+            }
+        if status.endswith("_failed") or status == "failed":
+            failed_step = raw_reason.split(":", 1)[0].strip() if ":" in raw_reason else (job.current_step or "pipeline")
+            readable_step = self._job_status_label(status)
+            return {
+                "visible": True,
+                "code": "pipeline_failure",
+                "title": readable_step,
+                "cause": f"A etapa {failed_step} falhou antes de o job chegar à revisão/publicação.",
+                "action": "Leia a evidência abaixo e refaça o job depois de corrigir a causa principal.",
+                "evidence": evidence,
+                "problem_items": problem_items,
+            }
+        return {"visible": False, "title": "", "cause": "", "action": "", "evidence": [], "problem_items": problem_items}
+
+    def _monetization_problem_items(self, report: dict[str, object] | None) -> list[dict[str, str]]:
+        if not report:
+            return []
+        items: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for field_name, label in [
+            ("hard_blockers", "Bloqueio"),
+            ("manual_required", "Confirmação pendente"),
+            ("warnings", "Aviso"),
+        ]:
+            for raw_code in report.get(field_name) or []:
+                code = str(raw_code or "").strip()
+                if not code:
+                    continue
+                key = (field_name, code)
+                if key in seen:
+                    continue
+                seen.add(key)
+                guide = FAILURE_REASON_GUIDES.get(code) or {}
+                items.append(
+                    {
+                        "kind": label,
+                        "code": code,
+                        "title": str(guide.get("title") or self._humanize_problem_code(code)),
+                        "cause": self._problem_cause(code, guide, report),
+                        "action": str(guide.get("action") or "Revise esse item no relatório de qualidade e regenere a etapa ligada ao bloqueio."),
+                    }
+                )
+        return items
+
+    def _problem_cause(self, code: str, guide: dict[str, str], report: dict[str, object]) -> str:
+        if code == "minimax_audit_failed":
+            audit = dict((dict(report.get("publish_readiness") or {}).get("minimax_audit")) or {})
+            error = str(audit.get("error") or "").strip()
+            if error:
+                return f"A auditoria textual falhou com este erro: {error}"
+        if code == "weak_hashtags":
+            weak = dict(report.get("publish_readiness") or {}).get("weak_hashtags") or []
+            if weak:
+                return f"As hashtags fracas detectadas foram: {', '.join(str(item) for item in weak[:5])}."
+        if code in {"quality_gate_not_passed", "quality_checklist_failed"}:
+            checklist = dict(report.get("quality_checklist") or {})
+            failed = [name for name, passed in checklist.items() if not passed]
+            if failed:
+                return f"Falharam estes itens do checklist: {', '.join(failed[:6])}."
+        return str(guide.get("cause") or "O hub recebeu este código de bloqueio no relatório de monetização.")
+
+    def _humanize_problem_code(self, code: str) -> str:
+        return str(code or "bloqueio").replace("_", " ").strip().capitalize()
+
+    def _job_queue_action_summary(self, job: Job, schedule: PublicationSchedule | None = None) -> dict[str, str]:
+        status = str(job.status or "")
+        schedule_status = str(schedule.status or "") if schedule else ""
+        quality_summary = dict(job.quality_summary or {})
+        monetization_report = dict(quality_summary.get("monetization") or {})
+        hard_blockers = [str(item) for item in monetization_report.get("hard_blockers") or []]
+        manual_required = [str(item) for item in monetization_report.get("manual_required") or []]
+        diagnosis = self._failure_diagnosis(job, monetization_report)
+
+        if schedule_status == "published" or status == "published":
+            return {
+                "kind": "done",
+                "label": "Concluído",
+                "missing": "Nada para publicar; falta só registrar performance quando houver dados.",
+                "recommendation": "Acompanhe métricas e use como referência para os próximos Jobs.",
+            }
+        if schedule_status in {"scheduled", "publishing"}:
+            return {
+                "kind": "scheduled",
+                "label": "Aproveitar",
+                "missing": "Nada até a última etapa; o worker precisa chegar ao horário salvo.",
+                "recommendation": "Mantenha na agenda e confira a confirmação depois da janela de publicação.",
+            }
+        if schedule_status == "publish_failed":
+            return {
+                "kind": "regenerate",
+                "label": "Regenerar",
+                "missing": "Falhou na publicação; falta revisar a tentativa e repetir o upload.",
+                "recommendation": "Abra o Job, leia a falha de publicação e tente publicar novamente.",
+            }
+        if status == "approved_for_publish":
+            return {
+                "kind": "schedule",
+                "label": "Aproveitar",
+                "missing": "Falta data, hora e visibilidade para chegar à publicação.",
+                "recommendation": "O vídeo já foi aprovado. Agende ou publique agora.",
+            }
+        if status in NEEDS_ACTION_JOB_STATUSES:
+            if hard_blockers:
+                blocker_text = ", ".join(hard_blockers[:2])
+                return {
+                    "kind": "regenerate",
+                    "label": "Regenerar",
+                    "missing": f"Falta remover bloqueios de publicação: {blocker_text}.",
+                    "recommendation": "Refaça o ponto bloqueado ou rejeite com motivo antes de tentar publicar.",
+                }
+            if manual_required:
+                return {
+                    "kind": "reuse",
+                    "label": "Aproveitar",
+                    "missing": f"Faltam {len(manual_required)} confirmação(ões) do checklist de revisão.",
+                    "recommendation": "Assista ao vídeo, marque as confirmações exigidas e aprove se estiver correto.",
+                }
+            return {
+                "kind": "approve",
+                "label": "Só aprovar",
+                "missing": "Falta aprovação humana para liberar agenda e publicação.",
+                "recommendation": "Revise rápido o conteúdo e clique em Aprovar.",
+            }
+        if status == "blocked_for_monetization":
+            return {
+                "kind": "regenerate",
+                "label": "Regenerar",
+                "missing": diagnosis.get("title") or "Faltam correções antes de publicar.",
+                "recommendation": diagnosis.get("action") or "Corrija os bloqueios ou refaça o Job.",
+            }
+        if status == "rejected":
+            return {
+                "kind": "delete",
+                "label": "Excluir",
+                "missing": "Este Job saiu do fluxo de publicação e não chega à última etapa.",
+                "recommendation": "Use os motivos como referência e deixe a retenção limpar os artefatos.",
+            }
+        if status.endswith("_failed") or status == "failed":
+            return {
+                "kind": "regenerate",
+                "label": "Regenerar",
+                "missing": diagnosis.get("title") or "A geração falhou antes da revisão.",
+                "recommendation": diagnosis.get("action") or "Abra o Job, corrija a causa e gere novamente.",
+            }
+        if status in {"queued", "running"}:
+            return {
+                "kind": "wait",
+                "label": "Aguardar",
+                "missing": "Falta terminar geração, revisão, aprovação e agenda.",
+                "recommendation": "Acompanhe até o pipeline liberar uma decisão humana.",
+            }
+        return {
+            "kind": "inspect",
+            "label": "Abrir",
+            "missing": self._job_next_action(status, schedule_status or None),
+            "recommendation": "Abra o Job para decidir o próximo passo.",
+        }
 
     def _job_origin_display(
         self,
@@ -319,6 +722,18 @@ class HubContext:
                     stmt = stmt.where(or_(Job.status == "published", PublicationSchedule.status == "published"))
                 elif status == "failed":
                     stmt = stmt.where(or_(Job.status == "failed", Job.status.like("%_failed"), PublicationSchedule.status == "publish_failed"))
+                elif status == "needs_action":
+                    stmt = stmt.where(
+                        or_(
+                            Job.status.in_(list(NEEDS_ACTION_JOB_STATUSES)),
+                            Job.status.like("%_failed"),
+                            PublicationSchedule.status == "publish_failed",
+                            and_(
+                                Job.status == "approved_for_publish",
+                                or_(PublicationSchedule.schedule_id.is_(None), PublicationSchedule.status == "cancelled"),
+                            ),
+                        )
+                    )
                 else:
                     stmt = stmt.where(Job.status == status)
             if search:
@@ -349,6 +764,7 @@ class HubContext:
                         "publication_schedule": publication_schedule,
                         "job_origin": origin_display,
                         "creation_via": via_display,
+                        "action_summary": self._job_queue_action_summary(job, publication_schedule),
                     }
                 )
             total = len(all_rows)
@@ -507,6 +923,7 @@ class HubContext:
         }
 
     def _publication_dashboard_context(self, request: Request, limit: int = 6) -> dict[str, object]:
+        refreshed_at = datetime.now(UTC)
         with SessionLocal() as session:
             ready_to_schedule = self._ready_to_schedule_entries(session, limit=limit)
             schedule_rows = session.execute(
@@ -531,6 +948,22 @@ class HubContext:
                 select(func.count())
                 .select_from(Job)
                 .where(Job.status.in_(["monetization_review", "ready_for_upload"]))
+            ) or 0
+            needs_action_count = session.scalar(
+                select(func.count(func.distinct(Job.job_id)))
+                .select_from(Job)
+                .join(PublicationSchedule, PublicationSchedule.job_id == Job.job_id, isouter=True)
+                .where(
+                    or_(
+                        Job.status.in_(list(NEEDS_ACTION_JOB_STATUSES)),
+                        Job.status.like("%_failed"),
+                        PublicationSchedule.status == "publish_failed",
+                        and_(
+                            Job.status == "approved_for_publish",
+                            or_(PublicationSchedule.schedule_id.is_(None), PublicationSchedule.status == "cancelled"),
+                        ),
+                    )
+                )
             ) or 0
             unscheduled_approved_count = session.scalar(
                 select(func.count())
@@ -596,6 +1029,10 @@ class HubContext:
                 .limit(100)
             ).all()
             analytics_snapshot_count = session.scalar(select(func.count()).select_from(YouTubeAnalyticsSnapshot)) or 0
+            analytics_job_count = session.scalar(select(func.count(func.distinct(YouTubeAnalyticsSnapshot.job_id))).select_from(YouTubeAnalyticsSnapshot)) or 0
+            published_with_youtube_id = session.scalar(
+                select(func.count()).select_from(PublicationSchedule).where(PublicationSchedule.youtube_video_id.is_not(None))
+            ) or 0
             jobs_missing_analytics = session.scalar(
                 select(func.count())
                 .select_from(PublicationSchedule)
@@ -653,6 +1090,83 @@ class HubContext:
             stale_snapshot_count=stale_snapshot_count,
             sync_candidates_count=len(sync_candidates),
         )
+        analytics_coverage_percent = round((analytics_job_count / published_with_youtube_id) * 100) if published_with_youtube_id else 0
+        if reliable_snapshot_count >= 3 and analytics_snapshot_count >= 5:
+            decision_status = "base pronta para decisão editorial"
+            decision_headline = "Já dá para comparar linhas editoriais."
+            decision_body = "Use retenção e volume confiável para repetir temas vencedores e pausar linhas fracas."
+        elif len(sync_candidates):
+            decision_status = "coleta pendente"
+            decision_headline = "A prioridade é coletar Analytics agora."
+            decision_body = f"{len(sync_candidates)} publicação(ões) já podem virar evidência. Sem isso, qualquer ranking editorial é chute."
+        elif jobs_missing_analytics:
+            decision_status = "base incompleta"
+            decision_headline = "Faltam vínculos de Analytics antes de decidir pauta."
+            decision_body = f"{jobs_missing_analytics} publicação(ões) ainda não têm snapshot salvo no hub."
+        else:
+            decision_status = "aguardando volume"
+            decision_headline = "Acompanhe até a amostra ficar confiável."
+            decision_body = "Ainda não há três Jobs com volume mínimo para orientar o próximo lote editorial."
+        action_items = [
+            {
+                "kind": "sync_due",
+                "priority": "P1",
+                "title": "Coletar Analytics pendente",
+                "metric": len(sync_candidates),
+                "metric_label": "prontas",
+                "body": "Atualiza a base usada para ranking, confiança e recomendações.",
+                "enabled": bool(self.settings.performance_collection_enabled and len(sync_candidates)),
+                "action_label": "Coletar pendentes",
+            },
+            {
+                "kind": "schedule_backlog",
+                "priority": "P1" if unscheduled_approved_count else "OK",
+                "title": "Preencher calendário",
+                "metric": unscheduled_approved_count,
+                "metric_label": "aprovados sem horário",
+                "body": "Jobs aprovados ainda não aparecem como publicação futura enquanto não têm horário salvo.",
+                "enabled": bool(unscheduled_approved_count),
+                "action_label": "Abrir calendário",
+                "href": "/calendar",
+            },
+            {
+                "kind": "review_queue",
+                "priority": "P2" if awaiting_approval_count else "OK",
+                "title": "Liberar ou bloquear revisão",
+                "metric": needs_action_count,
+                "metric_label": "precisam de ação",
+                "body": "Converte Jobs aproveitáveis em agenda ou remove bloqueios antes que a fila perca valor.",
+                "enabled": bool(needs_action_count),
+                "action_label": "Abrir fila",
+                "href": "/jobs?status=needs_action",
+            },
+        ]
+        scoreboard = [
+            {
+                "label": "Cobertura Analytics",
+                "value": f"{analytics_coverage_percent}%",
+                "detail": f"{analytics_job_count} de {published_with_youtube_id} publicações com snapshot",
+                "state": "bad" if published_with_youtube_id and analytics_coverage_percent < 50 else "ok",
+            },
+            {
+                "label": "Base confiável",
+                "value": f"{reliable_snapshot_count}/3",
+                "detail": "mínimo para relatório editorial",
+                "state": "ok" if reliable_snapshot_count >= 3 else "warn",
+            },
+            {
+                "label": "Agenda futura",
+                "value": str(scheduled_count),
+                "detail": f"{unscheduled_approved_count} aprovados ainda livres",
+                "state": "warn" if unscheduled_approved_count else "ok",
+            },
+            {
+                "label": "Fila de revisão",
+                "value": str(awaiting_approval_count),
+                "detail": "Jobs esperando aprovação ou correção",
+                "state": "warn" if awaiting_approval_count else "ok",
+            },
+        ]
         return {
             "integration": self._youtube_integration_context(request),
             "tiktok_integration": self._tiktok_integration_context(),
@@ -668,12 +1182,22 @@ class HubContext:
                 "collection_enabled": self.settings.performance_collection_enabled,
                 "sync_candidates_count": len(sync_candidates),
                 "snapshot_count": analytics_snapshot_count,
+                "analytics_job_count": analytics_job_count,
+                "published_with_youtube_id": published_with_youtube_id,
+                "analytics_coverage_percent": analytics_coverage_percent,
                 "jobs_missing_analytics": jobs_missing_analytics,
                 "reliable_snapshot_count": reliable_snapshot_count,
                 "low_confidence_count": low_confidence_count,
                 "stale_snapshot_count": stale_snapshot_count,
                 "top_performers": top_performers,
                 "recommendations": recommendations,
+                "scoreboard": scoreboard,
+                "action_items": action_items,
+                "decision": {
+                    "status": decision_status,
+                    "headline": decision_headline,
+                    "body": decision_body,
+                },
                 "last_snapshot_at": next(iter(latest_snapshots.values()), {}).get("fetched_at") if latest_snapshots else None,
                 "weekly_report": {
                     "ready": reliable_snapshot_count >= 3 and analytics_snapshot_count >= 5,
@@ -681,6 +1205,7 @@ class HubContext:
                     "minimum_reliable_jobs": 3,
                     "status_label": "base suficiente" if reliable_snapshot_count >= 3 and analytics_snapshot_count >= 5 else "dados insuficientes",
                 },
+                "refreshed_at_label": refreshed_at.strftime("%H:%M:%S UTC"),
             },
             "metrics": {
                 "unscheduled_approved_count": unscheduled_approved_count,
@@ -689,6 +1214,7 @@ class HubContext:
                 "failed_count": failed_count,
                 "published_count": published_count,
                 "awaiting_approval_count": awaiting_approval_count,
+                "needs_action_count": needs_action_count,
                 "tiktok_scheduled_count": tiktok_scheduled_count,
                 "tiktok_published_count": tiktok_published_count,
                 "tiktok_failed_count": tiktok_failed_count,

@@ -21,6 +21,11 @@ NO_TEXT_IMAGE_CONSTRAINT = (
     "no typography, no labels, no UI, no signs, no text printed on objects"
 )
 
+SINGLE_VERTICAL_IMAGE_CONSTRAINT = (
+    "single full-frame 9:16 vertical image, no split screen, no side-by-side, no collage, "
+    "no panels, no picture-in-picture, no timeline, no arrows, no guide lines, no overlay graphics"
+)
+
 ENGLISH_SUBJECT_ALIASES = {
     "polvo": "octopus",
     "polvos": "octopuses",
@@ -118,6 +123,7 @@ SCENE_VISUAL_HINTS = [
 class ImageAssetDomain:
     def __init__(self, pipeline: Any) -> None:
         self.pipeline = pipeline
+        self.minimax_image_aspect_ratio = str(getattr(pipeline.settings, "minimax_image_aspect_ratio", "9:16"))
 
     def generate_primary_asset(self, job_id: str, scene: dict[str, Any], output_path: Path) -> dict[str, Any]:
         result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
@@ -435,9 +441,9 @@ class ImageAssetDomain:
 
     def visual_hook_directive(self, scene: dict[str, Any], scene_hint: str) -> str:
         return (
-            "first-frame hook for Shorts, instantly legible in under one second, "
-            f"close vertical composition, concrete contrast or consequence, focus: {scene_hint}, "
-            "stay within this scene beat, do not reveal later payoff, no calm establishing shot"
+            "first-frame hook for Shorts under one second, concrete contrast or consequence, "
+            "do not reveal later payoff, close vertical composition, no calm establishing shot, "
+            f"focus: {scene_hint}"
         )
 
     def should_rebuild_image_prompt(self, prompt: str) -> bool:
@@ -509,6 +515,7 @@ class ImageAssetDomain:
             "main subject unmistakable and relevant to the narration beat",
             "every visible object blank and unbranded",
             "no text on cups, packages, screens, charts or labels",
+            SINGLE_VERTICAL_IMAGE_CONSTRAINT,
             "avoid random props, generic sci-fi objects and irrelevant backgrounds",
         ]
         if "no readable text anywhere" not in prompt_lower:
@@ -585,7 +592,8 @@ class ImageAssetDomain:
             prompt = prompt.replace(NO_TEXT_IMAGE_CONSTRAINT, self.minimax_no_text_constraint(scene))
 
         required_constraints = [
-            "vertical 2:3 frame for YouTube Shorts",
+            f"vertical {self.minimax_image_aspect_ratio} frame for YouTube Shorts",
+            SINGLE_VERTICAL_IMAGE_CONSTRAINT,
             self.domain_negative_constraints(scene),
             self.minimax_no_text_constraint(scene),
         ]

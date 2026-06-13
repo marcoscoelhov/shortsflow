@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import time
+from typing import Callable, TypeVar
 
 from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from app.config import get_settings
 
+
+T = TypeVar("T")
 
 settings = get_settings()
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
@@ -65,3 +70,44 @@ def session_scope() -> Session:
         raise
     finally:
         session.close()
+
+
+def is_sqlite_lock_error(exc: BaseException) -> bool:
+    if not settings.database_url.startswith("sqlite") or not isinstance(exc, OperationalError):
+        return False
+    message = str(getattr(exc, "orig", exc)).lower()
+    return any(
+        marker in message
+        for marker in (
+            "database is locked",
+            "database table is locked",
+            "database schema is locked",
+        )
+    )
+
+
+def run_transaction_with_lock_retry(
+    operation: Callable[[Session], T],
+    *,
+    max_attempts: int = 4,
+    base_delay_sec: float = 0.05,
+) -> T:
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+    for attempt in range(1, max_attempts + 1):
+        session = SessionLocal()
+        try:
+            result = operation(session)
+            session.commit()
+            return result
+        except OperationalError as exc:
+            session.rollback()
+            if not is_sqlite_lock_error(exc) or attempt == max_attempts:
+                raise
+            time.sleep(base_delay_sec * (2 ** (attempt - 1)))
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+    raise RuntimeError("unreachable")

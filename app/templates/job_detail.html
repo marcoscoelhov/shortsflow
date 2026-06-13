@@ -17,6 +17,8 @@
 {% set background_music = details.background_music %}
 {% set monetization = details.monetization_report or {} %}
 {% set asset_visual_gate = details.asset_visual_gate or {} %}
+{% set visual_review_report = details.visual_review_report or {} %}
+{% set selected_assets_by_scene = details.selected_assets_by_scene or {} %}
 {% set publish_package = details.publish_package or {} %}
 {% set review_checklist = monetization.human_review_checklist or publish_package.human_review_checklist or {} %}
 {% set checklist_items = review_checklist.get("items", []) %}
@@ -24,19 +26,38 @@
 {% set publication_attempts = details.publication_attempts or [] %}
 {% set publish_result = details.publish_result or {} %}
 {% set progress = details.progress or {} %}
+{% set premium = details.premium_finishing or {} %}
+{% set premium_running = premium.running or premium.status == "running" or request.query_params.get("premium_started") %}
+{% set diagnosis = failure_diagnosis(job, monetization, narration) %}
 {% set retention = (job.quality_summary or {}).get("retention", {}) %}
 {% set retention_cleanup = details.retention_cleanup or {} %}
 {% set artifacts_cleaned = details.artifacts_cleaned %}
 {% set can_approve = job.status in ["monetization_review", "ready_for_upload"] and not monetization.get("hard_blockers") %}
 {% set can_reject = job.status in ["monetization_review", "blocked_for_monetization", "ready_for_upload", "rejected", "failed", "script_quality_failed", "scene_plan_quality_failed", "asset_quality_failed", "subtitle_quality_failed", "render_quality_failed"] %}
 {% set can_retry = job.status in ["monetization_review", "blocked_for_monetization", "rejected", "failed", "script_quality_failed", "scene_plan_quality_failed", "asset_quality_failed", "subtitle_quality_failed", "render_quality_failed"] %}
+{% set can_reprocess_tts = job.status in ["monetization_review", "blocked_for_monetization", "failed"] and "technical_tts_provider_not_publishable" in monetization.get("hard_blockers", []) %}
 {% set schedule_status = publication_schedule_display.status if publication_schedule_display else None %}
 {% set is_approved = job.status in ["approved_for_publish", "published"] %}
 {% set schedule_ready = publication_schedule_display and publication_schedule_display.status == "scheduled" %}
-<section class="detail-grid minimalist-detail" {% if job.status in ["queued", "running"] or (publication_schedule_display and publication_schedule_display.status == "publishing") %}hx-get="/jobs/{{ job.job_id }}" hx-trigger="every 4s" hx-select=".detail-grid" hx-swap="outerHTML"{% endif %}>
+<section class="detail-grid minimalist-detail" {% if job.status in ["queued", "running"] or premium_running or (publication_schedule_display and publication_schedule_display.status == "publishing") %}hx-get="/jobs/{{ job.job_id }}" hx-trigger="every 4s" hx-select=".detail-grid" hx-swap="outerHTML"{% endif %}>
   <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
     Job {{ job.job_id[:8] }} atualizado. Status {{ job_status_label(job.status) }}. Progresso {{ progress.percent }}%, {{ progress.current_label }}.
   </p>
+  <nav class="job-local-nav" aria-label="Seções do job">
+    <a href="#decisao-job">Decidir</a>
+    <a href="#video-final">Vídeo</a>
+    <a href="#progresso-job">Progresso</a>
+    <a href="#qualidade-job">Qualidade</a>
+    <a href="#agenda-job">Agenda</a>
+  </nav>
+  <div class="job-mobile-tabs" role="tablist" aria-label="Tarefas do job">
+    <button type="button" role="tab" aria-selected="true" data-job-tab="decidir">Decidir</button>
+    <button type="button" role="tab" aria-selected="false" data-job-tab="video">Vídeo</button>
+    <button type="button" role="tab" aria-selected="false" data-job-tab="progresso">Progresso</button>
+    <button type="button" role="tab" aria-selected="false" data-job-tab="qualidade">Qualidade</button>
+    <button type="button" role="tab" aria-selected="false" data-job-tab="conteudo">Conteúdo</button>
+    <button type="button" role="tab" aria-selected="false" data-job-tab="tecnico">Técnico</button>
+  </div>
   <div class="main-column">
     {% if review_error %}
     <section class="panel status-banner error-banner">
@@ -48,6 +69,18 @@
     <section class="panel status-banner error-banner">
       <strong>Não foi possível publicar agora.</strong>
       <p>{{ publish_error }}</p>
+    </section>
+    {% endif %}
+    {% if reprocess_error %}
+    <section class="panel status-banner error-banner">
+      <strong>Não foi possível reprocessar o job.</strong>
+      <p>{{ reprocess_error }}</p>
+    </section>
+    {% endif %}
+    {% if premium_error %}
+    <section class="panel status-banner error-banner">
+      <strong>Não foi possível gerar a versão premium.</strong>
+      <p>{{ premium_error }}</p>
     </section>
     {% endif %}
     {% if artifacts_cleaned %}
@@ -113,7 +146,34 @@
       </div>
     </section>
 
-    <section class="panel job-progress-panel">
+    {% if diagnosis.visible %}
+    <section class="panel status-banner error-banner">
+      <strong>{{ diagnosis.title }}</strong>
+      <p>{{ diagnosis.cause }}</p>
+      <p>{{ diagnosis.action }}</p>
+      {% if diagnosis.problem_items %}
+      <div class="job-problem-list" aria-label="Problemas específicos do job">
+        {% for item in diagnosis.problem_items %}
+        <article class="job-problem-item">
+          <span>{{ item.kind }}</span>
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.cause }}</p>
+          <small>{{ item.action }}</small>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if diagnosis.evidence %}
+      <details class="inline-disclosure">
+        <summary aria-label="Abrir evidências da falha">Evidências da falha</summary>
+        <pre>{% for item in diagnosis.evidence %}{{ item }}
+{% endfor %}</pre>
+      </details>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    <section id="progresso-job" class="panel job-progress-panel" data-job-panel="progresso" role="tabpanel">
       <div class="job-progress-head">
         <div>
           <p class="eyebrow">Progresso do job</p>
@@ -144,7 +204,7 @@
           {% elif step.status == "failed" %}
           <small>falhou</small>
           {% else %}
-          <small>{{ step.status }}</small>
+          <small>{% if step.status == "completed" %}concluído{% elif step.status == "pending" %}pendente{% else %}{{ step.status }}{% endif %}</small>
           {% endif %}
         </div>
         {% endfor %}
@@ -154,7 +214,7 @@
       {% endif %}
     </section>
 
-    <section class="panel featured-render minimal-featured-render">
+    <section id="video-final" class="panel featured-render minimal-featured-render" data-job-panel="video" role="tabpanel">
       <div class="featured-player-shell">
         {% if render %}
         <video class="featured-player" controls preload="metadata" playsinline poster="{{ artifact_url(render.poster_uri) }}" src="{{ artifact_url(render.video_uri) }}"></video>
@@ -196,7 +256,98 @@
       </div>
     </section>
 
-    <details class="panel collapse-panel" {% if monetization.get("hard_blockers") %}open{% endif %}>
+    {% if render and not artifacts_cleaned %}
+    <section class="panel premium-proof-panel" data-job-panel="video" role="tabpanel">
+      <div class="premium-proof-header">
+        <div>
+          <p class="eyebrow">Prova premium</p>
+          <h3>Comparar acabamento editorial</h3>
+        </div>
+        {% if premium.available %}
+        <span class="badge {% if premium.gate_pass %}approved{% else %}render_quality_failed{% endif %}">
+          {% if premium.gate_pass %}Critérios aprovados{% else %}Critérios pendentes{% endif %}
+        </span>
+        {% elif premium_running %}
+        <span class="badge running">gerando</span>
+        {% elif premium.status == "failed" %}
+        <span class="badge render_quality_failed">falhou</span>
+        {% else %}
+        <span class="badge monetization_review">não gerada</span>
+        {% endif %}
+      </div>
+      {% if premium.available %}
+      <div class="premium-comparison-grid" aria-label="Comparação de acabamento">
+        <div class="premium-video-column">
+          <strong>Fluxo atual</strong>
+          <video class="premium-comparison-player" controls preload="metadata" playsinline poster="{{ artifact_url(render.poster_uri) }}" src="{{ artifact_url(render.video_uri) }}"></video>
+        </div>
+        <div class="premium-video-column">
+          <strong>Versão premium</strong>
+          <video class="premium-comparison-player" controls preload="metadata" playsinline src="{{ artifact_url(premium.video_uri) }}"></video>
+        </div>
+      </div>
+      <div class="featured-actions premium-proof-actions">
+        <a class="button-link" href="{{ artifact_url(premium.video_uri) }}" target="_blank" rel="noopener">Abrir premium</a>
+        {% if premium.edit_plan_uri %}
+        <a class="button-link ghost-link" href="{{ artifact_url(premium.edit_plan_uri) }}" target="_blank" rel="noopener">Abrir plano</a>
+        {% endif %}
+        {% if premium.log_uri %}
+        <a class="button-link ghost-link" href="{{ artifact_url(premium.log_uri) }}" target="_blank" rel="noopener">Abrir log</a>
+        {% endif %}
+        {% if can_approve and premium.gate_pass %}
+        <form method="post" action="/jobs/{{ job.job_id }}/premium-approve" class="inline-action-form">
+          <input type="hidden" name="reviewer_identity" value="tailscale:local-reviewer">
+          <button type="submit">Aprovar premium e liberar agenda</button>
+        </form>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="premium-proof-empty">
+        {% if premium.status == "failed" and premium.error %}
+        <div class="premium-progress-card failed" role="status" aria-live="polite">
+          <strong>Acabamento premium falhou</strong>
+          <p>{{ premium.error }}</p>
+        </div>
+        {% endif %}
+        <p>Gere uma versão paralela para avaliar captions, transições, enquadramento estável, overlays e identidade visual sem substituir o arquivo final atual.</p>
+        <form method="post" action="/jobs/{{ job.job_id }}/premium-finish" data-premium-form>
+          <button type="submit" class="secondary" {% if premium_running %}disabled{% endif %}>
+            {% if premium_running %}Gerando versão premium{% else %}Gerar versão premium{% endif %}
+          </button>
+        </form>
+        <div class="premium-progress-card{% if not premium_running %} hidden{% endif %}" data-premium-progress role="status" aria-live="polite">
+          <div class="premium-progress-copy">
+            <strong>Gerando versão premium</strong>
+            {% if job.status == "running" %}
+            <span>{{ progress.percent }}% · {{ progress.current_label }}</span>
+            {% else %}
+            <span>{{ premium.report.detail or "Render premium em andamento" }}</span>
+            {% endif %}
+          </div>
+          {% if job.status == "running" %}
+          <div
+            class="job-progress-bar premium-progress-bar"
+            role="progressbar"
+            aria-label="Progresso da versão premium: {{ progress.current_label }}"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="{{ progress.percent }}"
+          >
+            <span class="job-progress-fill" style="width: {{ progress.percent }}%"></span>
+          </div>
+          {% else %}
+          <div class="job-progress-bar premium-progress-bar" role="progressbar" aria-label="Render premium em andamento">
+            <span class="job-progress-fill premium-progress-fill indeterminate"></span>
+          </div>
+          {% endif %}
+          <small>Esta página atualiza automaticamente até concluir.</small>
+        </div>
+      </div>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    <details id="qualidade-job" class="panel collapse-panel" data-job-panel="qualidade" role="tabpanel" {% if monetization.get("hard_blockers") %}open{% endif %}>
       <summary aria-label="Abrir qualidade e monetização">
         <span>Qualidade e monetização</span>
         <small>
@@ -238,6 +389,22 @@
         <pre>{{ asset_visual_gate.reasons }}</pre>
         {% endif %}
         {% endif %}
+        {% if visual_review_report %}
+        <div class="review-checklist-status">
+          <div class="review-status-row">
+            <span>
+              <strong>Revisão visual auxiliar</strong><br>
+              <small>{{ visual_review_report.reviewer or "revisor não informado" }} · visual_review_report.json</small>
+            </span>
+            <span class="badge {% if visual_review_report.passed %}approved{% else %}asset_quality_failed{% endif %}">
+              {% if visual_review_report.passed %}aprovada{% else %}atenção{% endif %}
+            </span>
+          </div>
+        </div>
+        {% if visual_review_report.summary %}
+        <p class="field-help">{{ visual_review_report.summary }}</p>
+        {% endif %}
+        {% endif %}
         {% if checklist_items %}
         <div class="review-checklist-status">
           {% for item in checklist_items %}
@@ -260,7 +427,7 @@
       </div>
     </details>
 
-    <details class="panel collapse-panel">
+    <details class="panel collapse-panel" data-job-panel="conteudo" role="tabpanel">
       <summary aria-label="Abrir roteiro e cenas">
         <span>Roteiro e cenas</span>
         <small>roteiro, hook, narração e prompts visuais</small>
@@ -280,13 +447,25 @@
         {% if scene_plan %}
         <div class="scene-list">
           {% for scene in scene_plan.scenes %}
+          {% set scene_asset = selected_assets_by_scene.get(scene.scene_id) %}
           <article class="scene-card">
             <header>
               <strong>Cena {{ scene.order }}</strong>
               <span>{{ scene.visual_intent }}</span>
             </header>
+            {% if scene_asset %}
+            <img class="scene-preview" src="{{ artifact_url(scene_asset.uri) }}" alt="Imagem selecionada da cena {{ scene.order }}" loading="lazy" decoding="async" width="1080" height="1920">
+            {% endif %}
             <p>{{ scene.narration_text }}</p>
             <p><strong>Prompt:</strong> {{ scene.image_prompt }}</p>
+            {% if scene_asset and not artifacts_cleaned %}
+            <form method="post" action="/jobs/{{ job.job_id }}/scenes/{{ scene.scene_id }}/regenerate" class="scene-regenerate-form">
+              <label for="scene_instruction_{{ loop.index }}">Correção visual opcional</label>
+              <textarea id="scene_instruction_{{ loop.index }}" name="operator_instruction" rows="2" placeholder="Ex.: substituir por uma única imagem vertical, sem tela dividida, sem texto e sem linhas gráficas."></textarea>
+              <button type="submit" class="secondary">Regenerar cena e render</button>
+              <p class="field-help">Reusa roteiro, narração, legendas e trilha. Troca só esta imagem e gera novo arquivo final.</p>
+            </form>
+            {% endif %}
           </article>
           {% endfor %}
         </div>
@@ -294,7 +473,7 @@
       </div>
     </details>
 
-    <details class="panel collapse-panel">
+    <details class="panel collapse-panel" data-job-panel="conteudo" role="tabpanel">
       <summary aria-label="Abrir mídia e áudio">
         <span>Mídia e áudio</span>
         <small>imagens, narração, trilha e legendas</small>
@@ -350,7 +529,7 @@
       </div>
     </details>
 
-    <details class="panel collapse-panel">
+    <details class="panel collapse-panel" data-job-panel="tecnico" role="tabpanel">
       <summary aria-label="Abrir dados técnicos">
         <span>Dados técnicos</span>
         <small>logs, reparos automáticos, artefatos e métricas</small>
@@ -383,12 +562,21 @@
     </details>
   </div>
 
-  <aside class="side-column">
-    <section class="panel sticky workflow-focus">
+  <aside class="side-column" data-job-panel="decidir" role="tabpanel">
+    <section id="decisao-job" class="panel sticky workflow-focus">
       <div class="focus-step {% if is_approved %}completed{% elif can_approve or can_reject or can_retry %}active{% endif %}">
         <p class="eyebrow">Passo 1</p>
         <h3>Decidir revisão</h3>
         <p class="publication-note">Aprovar libera a agenda. Rejeitar ou refazer exige motivo para orientar o próximo reparo.</p>
+        {% if can_reprocess_tts %}
+        <form method="post" action="/jobs/{{ job.job_id }}/reprocess" class="review-form">
+          <input type="hidden" name="from_step" value="tts">
+          <div class="button-row action-stack review-primary-action">
+            <button type="submit" class="secondary">Reprocessar TTS e render</button>
+          </div>
+          <p class="field-help">Usa o roteiro e assets atuais, gera nova narração e recalcula legendas, mixagem, render e monetização.</p>
+        </form>
+        {% endif %}
         <form method="post" action="/jobs/{{ job.job_id }}/review" class="review-form">
           <input type="hidden" name="reviewer_identity" value="tailscale:local-reviewer">
           {% if checklist_items %}
@@ -437,7 +625,7 @@
         </form>
       </div>
 
-      <div class="focus-step {% if is_approved and not schedule_ready and job.status != "published" %}active{% elif schedule_ready or job.status == "published" %}completed{% else %}locked{% endif %}">
+      <div id="agenda-job" class="focus-step {% if is_approved and not schedule_ready and job.status != "published" %}active{% elif schedule_ready or job.status == "published" %}completed{% else %}locked{% endif %}">
         <p class="eyebrow">Passo 2</p>
         <h3>Agendar no YouTube</h3>
         {% if is_approved %}
@@ -635,11 +823,116 @@
           <button type="submit" class="ghost" aria-label="Registrar métricas de performance">Registrar métricas</button>
         </form>
       </details>
+
+      <details class="inline-disclosure danger-disclosure">
+        <summary aria-label="Abrir exclusão do job">Excluir job <small>registro local e artefatos</small></summary>
+        <p class="publication-note">Remove este job do Hub de Revisao e apaga seus artefatos locais. Não remove vídeos já publicados no YouTube.</p>
+        <form
+          method="post"
+          action="/jobs/{{ job.job_id }}/delete"
+          class="review-form"
+          onsubmit="return confirm('Excluir este job do Hub e apagar os artefatos locais? Esta ação não pode ser desfeita.');"
+        >
+          <button type="submit" class="danger-button">Excluir job</button>
+        </form>
+      </details>
     </section>
   </aside>
 </section>
 
 <script>
+  (function() {
+    document.querySelectorAll("[data-premium-form]").forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        const button = event.submitter || form.querySelector("button[type='submit']");
+        const panel = form.parentElement?.querySelector("[data-premium-progress]");
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Gerando versão premium";
+        }
+        if (panel) panel.classList.remove("hidden");
+      });
+    });
+  })();
+
+  (function() {
+    const root = document.querySelector(".detail-grid");
+    if (!root) return;
+    const tabs = Array.from(root.querySelectorAll("[data-job-tab]"));
+    const panels = Array.from(root.querySelectorAll("[data-job-panel]"));
+    if (!tabs.length || !panels.length) return;
+
+    const mobileQuery = window.matchMedia("(max-width: 640px)");
+    const hashToTab = {
+      "#decisao-job": "decidir",
+      "#agenda-job": "decidir",
+      "#video-final": "video",
+      "#progresso-job": "progresso",
+      "#qualidade-job": "qualidade",
+    };
+    let active = hashToTab[window.location.hash] || "decidir";
+
+    const apply = () => {
+      const isMobile = mobileQuery.matches;
+      tabs.forEach((tab) => {
+        const selected = tab.dataset.jobTab === active;
+        tab.setAttribute("aria-selected", selected ? "true" : "false");
+        tab.tabIndex = selected ? 0 : -1;
+      });
+      panels.forEach((panel) => {
+        const selected = panel.dataset.jobPanel === active;
+        if (isMobile) {
+          panel.hidden = !selected;
+        } else {
+          panel.hidden = false;
+        }
+      });
+    };
+
+    const select = (name, { scroll = false } = {}) => {
+      active = name;
+      apply();
+      if (scroll && mobileQuery.matches) {
+        const selectedPanel = panels.find((panel) => panel.dataset.jobPanel === active && !panel.hidden);
+        const target = selectedPanel || root.querySelector(".job-mobile-tabs");
+        target?.scrollIntoView({ block: "start", behavior: "auto" });
+      }
+    };
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => select(tab.dataset.jobTab, { scroll: true }));
+      tab.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const currentIndex = tabs.indexOf(tab);
+        let nextIndex = currentIndex;
+        if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+        if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        if (event.key === "Home") nextIndex = 0;
+        if (event.key === "End") nextIndex = tabs.length - 1;
+        tabs[nextIndex].focus();
+        select(tabs[nextIndex].dataset.jobTab);
+      });
+    });
+
+    root.querySelectorAll('.job-local-nav a[href^="#"]').forEach((link) => {
+      link.addEventListener("click", (event) => {
+        const tabName = hashToTab[link.getAttribute("href")];
+        if (!tabName || !mobileQuery.matches) return;
+        event.preventDefault();
+        history.pushState(null, "", link.getAttribute("href"));
+        select(tabName, { scroll: true });
+      });
+    });
+
+    window.addEventListener("hashchange", () => {
+      const tabName = hashToTab[window.location.hash];
+      if (tabName) select(tabName, { scroll: true });
+    });
+    mobileQuery.addEventListener?.("change", apply);
+    apply();
+  })();
+
   (function() {
     const timezoneInput = document.getElementById("publication_timezone");
     if (!timezoneInput) return;

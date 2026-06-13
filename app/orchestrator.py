@@ -13,6 +13,7 @@ import concurrent.futures
 import wave
 import ast
 import httpx
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,13 +23,14 @@ from zoneinfo import ZoneInfo
 import imageio_ffmpeg
 from PIL import Image
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.audio.music_mix import mix_background_music
 from app.audio.sound_design import generate_sound_design_track, mix_sound_design_track
 from app.compliance.review import build_human_review_checklist
 from app.config import get_settings
-from app.db import SessionLocal, session_scope
+from app.db import SessionLocal, run_transaction_with_lock_retry, session_scope
 from app.editorial.retention import attach_retention_metadata, enrich_plan_for_script_generation
 from app.editorial.repetition import build_channel_repetition_report
 from app.job_origin import (
@@ -47,6 +49,7 @@ from app.job_origin import (
 )
 from app.models import (
     AutomationAttempt,
+    AutomationRun,
     BackgroundMusicAsset,
     ChannelPublication,
     ErrorLog,
@@ -55,6 +58,7 @@ from app.models import (
     NarrationAsset,
     PerformanceMetric,
     PublicationSchedule,
+    ReadyScriptItem,
     RenderOutput,
     ReviewRecord,
     SceneAsset,
@@ -63,7 +67,9 @@ from app.models import (
     StepExecution,
     SubtitleTrack,
     TopicPlan,
+    TopicRegistry,
     TopicRequest,
+    YouTubeAnalyticsSnapshot,
 )
 from app.pipelines.common import FatalStepError, RecoverableStepError, model_payload
 from app.providers.registry import ProviderRegistry
@@ -97,6 +103,8 @@ from app.utils import (
 )
 from app.youtube_api import YouTubeIntegrationError, YouTubePublisher
 from app.tiktok_api import TikTokIntegrationError, TikTokPublisher
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_script_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
@@ -320,6 +328,9 @@ class JobOrchestrator:
         self.asset_visual_gate = AssetVisualGate()
         self.subtitle_gate = SubtitleGate()
         self.render_gate = RenderGate(min_bitrate=self.settings.render_min_bitrate)
+        from app.premium_finishing import PremiumFinishingService
+
+        self.premium_finishing = PremiumFinishingService(self)
         self.worker_id = f"worker-{new_id()[:8]}"
         self.stop_event = threading.Event()
         self.worker_thread: threading.Thread | None = None
@@ -347,11 +358,18 @@ class JobOrchestrator:
 
         def heartbeat() -> None:
             while not stop_heartbeat.wait(interval):
-                with session_scope() as session:
+                def refresh_lease(session: Session) -> bool:
                     job = session.get(Job, job_id)
                     if not job or job.status != "running" or job.lease_owner != self.worker_id:
-                        return
+                        return False
                     job.lease_expires_at = utcnow() + self._lease_delta()
+                    return True
+
+                try:
+                    if not run_transaction_with_lock_retry(refresh_lease):
+                        return
+                except OperationalError:
+                    logger.warning("lease heartbeat skipped after repeated database lock for job %s", job_id, exc_info=True)
 
         threading.Thread(target=heartbeat, name=f"yts-lease-{job_id[:8]}", daemon=True).start()
         return stop_heartbeat
@@ -478,6 +496,195 @@ class JobOrchestrator:
         self._cli_progress(job_id, "job", "finished", f"status={job.status}")
         return job.status
 
+    def reprocess_job_from_step(self, job_id: str, step_name: str) -> str:
+        steps = self._steps()
+        step_names = [step.name for step in steps]
+        if step_name not in step_names:
+            raise ValueError(f"unknown step {step_name}")
+        start_index = step_names.index(step_name)
+        steps_to_run = steps[start_index:]
+        step_names_to_run = step_names[start_index:]
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            if job.status in {"approved", "approved_for_publish", "published"}:
+                raise FatalStepError(f"job status {job.status} cannot be reprocessed")
+            session.execute(delete(StepExecution).where(StepExecution.job_id == job_id, StepExecution.step_name.in_(step_names_to_run)))
+            job.status = "running"
+            job.current_step = step_name
+            job.failure_reason = None
+            job.lease_owner = self.worker_id
+            job.lease_expires_at = utcnow() + self._lease_delta()
+        self._append_event(job_id, "job.reprocess_requested", "succeeded", {"from_step": step_name, "steps": step_names_to_run})
+        self._cli_progress(job_id, "job", "reprocess", f"from_step={step_name} steps={len(steps_to_run)}")
+        for offset, step in enumerate(steps_to_run, start=start_index + 1):
+            ok = self._run_step(job_id, step, step_index=offset, total_steps=len(steps))
+            if not ok:
+                with session_scope() as session:
+                    job = session.get(Job, job_id)
+                    if not job:
+                        raise KeyError(job_id)
+                    self._cli_progress(job_id, "job", "stopped", f"status={job.status}")
+                    return job.status
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            assert job
+            monetization = (job.quality_summary or {}).get("monetization", {})
+            job.status = str(monetization.get("final_status") or "monetization_review")
+            job.current_step = "publish_to_review_hub"
+            job.lease_owner = None
+            job.lease_expires_at = None
+            self.topic_pipeline.upsert_topic_registry(session, job_id, approved=False)
+            self.publication_ops._refresh_retention_state(session, job)
+        self._append_event(job_id, "job.reprocessed", "succeeded", {"status": job.status, "from_step": step_name})
+        self._cli_progress(job_id, "job", "reprocessed", f"status={job.status}")
+        return job.status
+
+    def regenerate_scene_and_rerender(self, job_id: str, scene_id: str, operator_instruction: str | None = None) -> str:
+        scene_id = str(scene_id or "").strip()
+        if not scene_id:
+            raise ValueError("scene_id is required")
+        downstream_step_names = ["render", "monetization_readiness_gate", "publish_to_review_hub"]
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            if job.status in {"approved", "approved_for_publish", "published"}:
+                raise FatalStepError(f"job status {job.status} cannot be reprocessed")
+            scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job_id))
+            if not scene_plan:
+                raise FatalStepError("scene plan is required before scene regeneration")
+            scene = next((item for item in scene_plan.scenes if str(item.get("scene_id") or "") == scene_id), None)
+            if scene is None:
+                raise ValueError(f"unknown scene {scene_id}")
+            session.execute(delete(SceneAsset).where(SceneAsset.job_id == job_id, SceneAsset.scene_id == scene_id))
+            session.execute(delete(StepExecution).where(StepExecution.job_id == job_id, StepExecution.step_name.in_(downstream_step_names)))
+            job.status = "running"
+            job.current_step = "asset_generation"
+            job.failure_reason = None
+            job.lease_owner = self.worker_id
+            job.lease_expires_at = utcnow() + self._lease_delta()
+
+        scene_for_generation = dict(scene)
+        instruction = " ".join(str(operator_instruction or "").split())
+        if instruction:
+            scene_for_generation["image_prompt"] = f"{scene_for_generation.get('image_prompt') or ''}, operator correction: {instruction}"
+        self._append_event(
+            job_id,
+            "scene.regeneration_requested",
+            "succeeded",
+            {"scene_id": scene_id, "downstream_steps": downstream_step_names, "operator_instruction": instruction},
+        )
+
+        result = self.asset_pipeline._generate_assets_for_scene(job_id, scene_for_generation, attempt=1)
+        visual_gate_failure_message = ""
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job_id))
+            assert job and scene_plan
+            for event_name, status, payload in result["events"]:
+                self._append_event(job_id, event_name, status, payload)
+            for fallback_payload in result["fallback_events"]:
+                session.add(FallbackEvent(**model_payload(FallbackEvent, fallback_payload)))
+            for asset_payload in result["asset_rows"]:
+                session.add(SceneAsset(**model_payload(SceneAsset, asset_payload)))
+            session.flush()
+            selected_assets = [
+                {
+                    "scene_id": asset.scene_id,
+                    "provider": asset.provider,
+                    "uri": asset.uri,
+                    "prompt_snapshot": asset.prompt_snapshot,
+                    "width": asset.width,
+                    "height": asset.height,
+                    **dict(asset.scores or {}),
+                }
+                for asset in session.scalars(
+                    select(SceneAsset).where(SceneAsset.job_id == job_id, SceneAsset.selected.is_(True)).order_by(SceneAsset.scene_id)
+                ).all()
+            ]
+            visual_contract = self.asset_pipeline._visual_contract_artifact_payload(job_id)
+            asset_visual_gate = self.asset_visual_gate.validate(selected_assets, scene_plan.scenes, visual_contract=visual_contract)
+            self.storage.persist_json(
+                job_id,
+                "asset_visual_gate.json",
+                {
+                    "reasons": asset_visual_gate.reasons,
+                    "metrics": asset_visual_gate.metrics,
+                    "selected_assets": selected_assets,
+                },
+            )
+            quality_summary = dict(job.quality_summary or {})
+            asset_metrics = dict(quality_summary.get("assets") or {})
+            verification_modes = sorted(
+                {
+                    str(asset.get("verification_mode") or "vision")
+                    for asset in selected_assets
+                    if str(asset.get("provider") or "").lower() in {"minimax", "ai", "mock_ai"}
+                }
+            )
+            quality_summary["assets"] = {
+                **asset_metrics,
+                "semantic_threshold_pass": True,
+                "asset_visual_gate_pass": asset_visual_gate.metrics.get("asset_visual_gate_pass", True),
+                "asset_visual_gate_checked": asset_visual_gate.metrics.get("checked", False),
+                "asset_visual_verification_modes": verification_modes,
+                "asset_visual_real_vision_checked": bool(verification_modes) and "prompt_heuristic" not in verification_modes,
+            }
+            job.quality_summary = quality_summary
+            self.storage.persist_json(
+                job_id,
+                "scene_regeneration.json",
+                self._serialize_for_json(
+                    {
+                        "job_id": job_id,
+                        "scene_id": scene_id,
+                        "created_at": utcnow(),
+                        "operator_instruction": instruction,
+                        "selected_asset": result["selected_asset"],
+                        "asset_visual_gate": {
+                            "passed": asset_visual_gate.passed,
+                            "reasons": asset_visual_gate.reasons,
+                        },
+                    }
+                ),
+            )
+            if not asset_visual_gate.passed:
+                job.status = "asset_quality_failed"
+                job.failure_reason = f"asset_generation: asset visual quality gate failed: {', '.join(asset_visual_gate.reasons[:6])}"
+                job.lease_owner = None
+                job.lease_expires_at = None
+                visual_gate_failure_message = f"asset visual quality gate failed: {', '.join(asset_visual_gate.reasons[:6])}"
+
+        if visual_gate_failure_message:
+            self._append_event(job_id, "scene.regeneration_failed", "failed", {"scene_id": scene_id, "message": visual_gate_failure_message})
+            raise RecoverableStepError(visual_gate_failure_message)
+
+        self._append_event(job_id, "scene.regenerated", "succeeded", {"scene_id": scene_id})
+        downstream_steps = [step for step in self._steps() if step.name in downstream_step_names]
+        step_names = [step.name for step in self._steps()]
+        for step in downstream_steps:
+            ok = self._run_step(job_id, step, step_index=step_names.index(step.name) + 1, total_steps=len(step_names))
+            if not ok:
+                with session_scope() as session:
+                    job = session.get(Job, job_id)
+                    if not job:
+                        raise KeyError(job_id)
+                    return job.status
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            assert job
+            monetization = (job.quality_summary or {}).get("monetization", {})
+            job.status = str(monetization.get("final_status") or "monetization_review")
+            job.current_step = "publish_to_review_hub"
+            job.lease_owner = None
+            job.lease_expires_at = None
+            self.topic_pipeline.upsert_topic_registry(session, job_id, approved=False)
+            self.publication_ops._refresh_retention_state(session, job)
+        self._append_event(job_id, "scene.regeneration_rerendered", "succeeded", {"scene_id": scene_id, "status": job.status})
+        return job.status
+
     def get_job_details(self, session: Session, job_id: str) -> dict[str, Any]:
         job = session.get(Job, job_id)
         if not job:
@@ -504,6 +711,7 @@ class JobOrchestrator:
             automation_source=automation_source,
         )
         assets = session.scalars(select(SceneAsset).where(SceneAsset.job_id == job_id).order_by(SceneAsset.scene_id, SceneAsset.provider)).all()
+        selected_assets_by_scene = {asset.scene_id: asset for asset in assets if asset.selected}
         fallbacks = session.scalars(select(FallbackEvent).where(FallbackEvent.job_id == job_id).order_by(FallbackEvent.created_at)).all()
         errors = session.scalars(select(ErrorLog).where(ErrorLog.job_id == job_id).order_by(ErrorLog.created_at)).all()
         reviews = session.scalars(select(ReviewRecord).where(ReviewRecord.job_id == job_id).order_by(ReviewRecord.created_at)).all()
@@ -514,6 +722,7 @@ class JobOrchestrator:
             subtitles = None
             background_music = None
             assets = []
+            selected_assets_by_scene = {}
         repair_telemetry = {
             "topic_plan": self._read_job_json(job_id, "topic_plan_repair_telemetry.json"),
             "script": self._read_job_json(job_id, "script_repair_telemetry.json"),
@@ -532,6 +741,7 @@ class JobOrchestrator:
             "script": script,
             "scene_plan": scene_plan,
             "assets": assets,
+            "selected_assets_by_scene": selected_assets_by_scene,
             "narration": narration,
             "subtitles": subtitles,
             "background_music": background_music,
@@ -552,10 +762,12 @@ class JobOrchestrator:
             "monetization_report": self._read_job_json(job_id, "monetization_report.json") or cleanup_snapshots.get("monetization_report", {}),
             "publish_package": self._read_job_json(job_id, "publish_package.json") or cleanup_snapshots.get("publish_package", {}),
             "asset_visual_gate": self._read_job_json(job_id, "asset_visual_gate.json"),
+            "visual_review_report": self._read_job_json(job_id, "visual_review_report.json"),
             "publish_result": self._read_job_json(job_id, "publish_result.json") or cleanup_snapshots.get("publish_result", {}),
             "publication_attempts": self._read_job_json(job_id, "youtube_publish_attempts.json").get("attempts", []) or cleanup_snapshots.get("publication_attempts", []),
             "retention_cleanup": retention_cleanup,
             "artifacts_cleaned": artifacts_cleaned,
+            "premium_finishing": {} if artifacts_cleaned else self.premium_finishing.context(job_id),
         }
 
     def build_job_progress(
@@ -663,6 +875,61 @@ class JobOrchestrator:
     def review_job(self, payload: dict[str, Any], job_id: str) -> str | None:
         return self.publication_ops.review_job(payload, job_id)
 
+    def delete_job(self, job_id: str) -> None:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            publication_schedule = session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job_id))
+            if job.status == "running" or job.lease_owner:
+                raise FatalStepError("Job em execucao. Aguarde terminar antes de excluir.")
+            if publication_schedule and publication_schedule.status == "publishing":
+                raise FatalStepError("Publicacao em andamento. Aguarde terminar antes de excluir.")
+            session.execute(update(Job).where(Job.retry_of_job_id == job_id).values(retry_of_job_id=None))
+            session.execute(
+                update(AutomationRun)
+                .where(AutomationRun.result_job_id == job_id)
+                .values(result_job_id=None, result_schedule_id=None)
+            )
+            session.execute(update(ReadyScriptItem).where(ReadyScriptItem.consumed_job_id == job_id).values(consumed_job_id=None))
+            for model in [
+                AutomationAttempt,
+                BackgroundMusicAsset,
+                ChannelPublication,
+                ErrorLog,
+                FallbackEvent,
+                NarrationAsset,
+                PerformanceMetric,
+                PublicationSchedule,
+                RenderOutput,
+                ReviewRecord,
+                SceneAsset,
+                ScenePlan,
+                Script,
+                StepExecution,
+                SubtitleTrack,
+                TopicPlan,
+                TopicRegistry,
+                TopicRequest,
+                YouTubeAnalyticsSnapshot,
+            ]:
+                session.execute(delete(model).where(model.job_id == job_id))
+            session.delete(job)
+        self.storage.remove_job_artifacts(job_id)
+
+    def approve_premium_for_publish(
+        self,
+        job_id: str,
+        reviewer_identity: str = "tailscale:local-reviewer",
+        *,
+        score_override_confirmed: bool = False,
+    ) -> None:
+        self.publication_ops.approve_premium_for_publish(
+            job_id,
+            reviewer_identity=reviewer_identity,
+            score_override_confirmed=score_override_confirmed,
+        )
+
     def publish_job(
         self,
         job_id: str,
@@ -677,6 +944,39 @@ class JobOrchestrator:
             youtube_url=youtube_url,
             trigger=trigger,
         )
+
+    def generate_premium_finishing(self, job_id: str) -> dict[str, Any]:
+        with session_scope() as session:
+            refresh_needed = self.premium_finishing.primary_tts_refresh_needed(session, job_id)
+            narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job_id)) if refresh_needed else None
+            current_provider = str(narration.provider) if narration else None
+        if refresh_needed:
+            self._append_event(
+                job_id,
+                "premium_finishing.primary_tts_refresh_requested",
+                "succeeded",
+                {
+                    "current_provider": current_provider,
+                    "expected_providers": sorted(self.premium_finishing.primary_tts_provider_names()),
+                },
+            )
+            self.reprocess_job_from_step(job_id, "tts")
+            with session_scope() as session:
+                self.premium_finishing.require_primary_tts(session, job_id)
+        with session_scope() as session:
+            return self.premium_finishing.generate_parallel_version(session, job_id)
+
+    def request_premium_finishing(self, job_id: str) -> None:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+        self.premium_finishing.mark_running(job_id, phase="queued", detail="Acabamento premium aguardando execução")
+        self._append_event(job_id, "premium_finishing.requested", "succeeded", {})
+
+    def record_premium_finishing_failure(self, job_id: str, error: str) -> None:
+        self.premium_finishing.mark_failed(job_id, error)
+        self._append_event(job_id, "premium_finishing.failed", "failed", {"message": error})
 
     def update_publish_metadata(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self.publication_ops.update_publish_metadata(job_id, payload)
@@ -1031,29 +1331,56 @@ class JobOrchestrator:
 
     def _worker_loop(self) -> None:
         while not self.stop_event.is_set():
-            if self.settings.artifact_retention_enabled:
-                should_sweep = time.monotonic() - self._last_retention_sweep_at >= self.settings.artifact_retention_sweep_seconds
-                if should_sweep:
-                    self.publication_ops._run_retention_sweep()
-            if self.publication_ops._youtube_api_mode_enabled():
-                self.publication_ops._sync_native_scheduled_publications()
-            if self.publication_ops._tiktok_auto_publish_enabled():
-                self.publication_ops._sync_tiktok_publication_statuses()
-                self.publication_ops._sync_tiktok_crosspost_queue()
-            with session_scope() as session:
-                claimed_job_id = self._claim_next_job(session)
-            if claimed_job_id:
-                self.process_job(claimed_job_id)
+            try:
+                did_work = self._worker_iteration()
+            except OperationalError:
+                logger.warning("worker iteration skipped after database operational error", exc_info=True)
+                time.sleep(max(1.0, self.settings.worker_poll_seconds))
                 continue
-            claimed_publication_job_id = self.publication_ops._claim_due_publication_schedule()
-            if claimed_publication_job_id:
-                self.publish_job(claimed_publication_job_id, trigger="schedule_worker")
+            except Exception:
+                logger.exception("worker iteration failed unexpectedly")
+                time.sleep(max(1.0, self.settings.worker_poll_seconds))
                 continue
-            claimed_tiktok_publication_id = self.publication_ops._claim_due_tiktok_publication()
-            if claimed_tiktok_publication_id:
-                self.publication_ops._publish_tiktok_channel_publication(claimed_tiktok_publication_id)
-                continue
-            time.sleep(self.settings.worker_poll_seconds)
+            if not did_work:
+                time.sleep(self.settings.worker_poll_seconds)
+
+    def _run_worker_task(self, task_name: str, callback: Callable[[], Any]) -> Any:
+        try:
+            return callback()
+        except OperationalError:
+            logger.warning("worker task %s skipped after database operational error", task_name, exc_info=True)
+            return None
+        except Exception:
+            logger.exception("worker task %s failed; worker will continue", task_name)
+            return None
+
+    def _worker_iteration(self) -> bool:
+        if self.settings.artifact_retention_enabled:
+            should_sweep = time.monotonic() - self._last_retention_sweep_at >= self.settings.artifact_retention_sweep_seconds
+            if should_sweep:
+                self._last_retention_sweep_at = time.monotonic()
+                self._run_worker_task("retention_sweep", self.publication_ops._run_retention_sweep)
+        if self.publication_ops._youtube_api_mode_enabled():
+            self._run_worker_task("youtube_native_schedule_sync", self.publication_ops._sync_native_scheduled_publications)
+        if self.publication_ops._tiktok_auto_publish_enabled():
+            self._run_worker_task("tiktok_status_sync", self.publication_ops._sync_tiktok_publication_statuses)
+            self._run_worker_task("tiktok_crosspost_queue_sync", self.publication_ops._sync_tiktok_crosspost_queue)
+        claimed_job_id = self._run_worker_task("job_claim", self._claim_next_job_with_retry)
+        if claimed_job_id:
+            self._run_worker_task("job_process", lambda: self.process_job(claimed_job_id))
+            return True
+        claimed_publication_job_id = self._run_worker_task("publication_schedule_claim", self.publication_ops._claim_due_publication_schedule)
+        if claimed_publication_job_id:
+            self._run_worker_task("publication_schedule_publish", lambda: self.publish_job(claimed_publication_job_id, trigger="schedule_worker"))
+            return True
+        claimed_tiktok_publication_id = self._run_worker_task("tiktok_publication_claim", self.publication_ops._claim_due_tiktok_publication)
+        if claimed_tiktok_publication_id:
+            self._run_worker_task(
+                "tiktok_publication_publish",
+                lambda: self.publication_ops._publish_tiktok_channel_publication(claimed_tiktok_publication_id),
+            )
+            return True
+        return False
 
     def _claim_next_job(self, session: Session) -> str | None:
         now = utcnow()
@@ -1081,5 +1408,8 @@ class JobOrchestrator:
             .returning(Job.job_id)
         )
         return session.execute(claim).scalar_one_or_none()
+
+    def _claim_next_job_with_retry(self) -> str | None:
+        return run_transaction_with_lock_retry(self._claim_next_job)
 
 orchestrator = JobOrchestrator()

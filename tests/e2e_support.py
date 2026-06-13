@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -46,7 +47,7 @@ import app.orchestrator as orchestrator_module  # noqa: E402
 
 import app.pipelines.script_fact_pack as script_fact_pack_module  # noqa: E402
 
-from app.automation import AutomationService  # noqa: E402
+from app.automation import AutomationService, PublishSlot  # noqa: E402
 
 from app.compliance.review import build_human_review_checklist  # noqa: E402
 

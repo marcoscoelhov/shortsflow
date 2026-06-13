@@ -40,6 +40,12 @@ PROVIDER_OPTIONS = (
     ("minimax", "MiniMax"),
 )
 
+TTS_PROVIDER_OPTIONS = (
+    ("gemini_tts", "Gemini TTS"),
+    ("elevenlabs", "ElevenLabs"),
+    ("edge_tts", "Edge TTS (emergencia)"),
+)
+
 OPERATIONAL_SETTING_SPECS = (
     OperationalSettingSpec("llm_primary_provider", "LLM principal", "LLM", "select", PROVIDER_OPTIONS),
     OperationalSettingSpec("llm_fallback_provider", "LLM fallback", "LLM", "select", PROVIDER_OPTIONS),
@@ -64,6 +70,14 @@ OPERATIONAL_SETTING_SPECS = (
     OperationalSettingSpec("background_music_enabled", "Trilha ativa", "Musica", "checkbox"),
     OperationalSettingSpec("music_bank_auto_populate", "Popular banco local", "Musica", "checkbox"),
     OperationalSettingSpec("allow_music_api_fallback", "Fallback para API", "Musica", "checkbox"),
+    OperationalSettingSpec(
+        "tts_primary_provider",
+        "TTS primario",
+        "Narracao",
+        "select",
+        TTS_PROVIDER_OPTIONS,
+        description="Gemini TTS e o padrao; ElevenLabs e equivalente. Edge TTS e emergencia e bloqueia elegibilidade automatizada.",
+    ),
     OperationalSettingSpec("youtube_publish_mode", "Modo YouTube", "Publicacao", "select", (("manual", "Manual"), ("api", "API"))),
     OperationalSettingSpec("youtube_api_enabled", "API YouTube ativa", "Publicacao", "checkbox"),
     OperationalSettingSpec("youtube_notify_subscribers", "Notificar inscritos", "Publicacao", "checkbox"),
@@ -157,7 +171,7 @@ def build_operational_settings_context(settings: Settings) -> dict[str, Any]:
     with SessionLocal() as session:
         saved_keys = set(load_operational_settings(session))
     groups: list[dict[str, Any]] = []
-    for group_name in ("LLM", "Imagem", "Musica", "Publicacao", "Automacao", "Crescimento"):
+    for group_name in ("LLM", "Imagem", "Musica", "Narracao", "Publicacao", "Automacao", "Crescimento"):
         fields = []
         for spec in OPERATIONAL_SETTING_SPECS:
             if spec.group != group_name:

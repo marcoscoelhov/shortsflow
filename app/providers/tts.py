@@ -120,6 +120,14 @@ GEMINI_TTS_VOICE_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 
+GEMINI_TTS_PROFILE_PRIORITY: dict[str, int] = {
+    "mystery_tension": 50,
+    "upbeat_viral": 40,
+    "science_explainer": 30,
+    "history_authority": 20,
+    "warm_curiosity": 10,
+}
+
 
 class LocalSpeechFallbackProvider:
     voice = "pt-BR-FranciscaNeural"
@@ -559,10 +567,33 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
 
     def _mark_gemini_fallback(self, fallback: dict[str, Any], reason: str) -> None:
         metadata = fallback.setdefault("provider_metadata", {})
+        existing_chain = metadata.get("fallback_chain")
+        if isinstance(existing_chain, list):
+            fallback_chain = list(existing_chain)
+        else:
+            fallback_chain = []
+            existing_from = metadata.get("fallback_from_provider")
+            existing_reason = metadata.get("fallback_reason")
+            if existing_from or existing_reason:
+                fallback_chain.append(
+                    {
+                        "from_provider": existing_from,
+                        "to_provider": metadata.get("fallback_provider"),
+                        "reason": existing_reason,
+                    }
+                )
         metadata["fallback_used"] = True
         metadata["fallback_from_provider"] = "gemini_tts"
         metadata["fallback_provider"] = fallback.get("provider")
         metadata["fallback_reason"] = reason
+        metadata["fallback_chain"] = [
+            {
+                "from_provider": "gemini_tts",
+                "to_provider": fallback.get("provider"),
+                "reason": reason,
+            },
+            *fallback_chain,
+        ]
 
     def _run_gemini(self, text: str, audio_path: Path, srt_path: Path, settings: Any, api_key: str, context: dict[str, Any] | None) -> dict[str, Any]:
         audio_path.parent.mkdir(parents=True, exist_ok=True)
@@ -687,14 +718,17 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
         corpus = self._voice_context_corpus(context)
         best_profile = "configured_default"
         best_score = 0
+        best_priority = -1
         best_matches: list[str] = []
         for profile_name, profile in GEMINI_TTS_VOICE_PROFILES.items():
             keywords = profile["keywords"]
             matches = sorted(keyword for keyword in keywords if self._normalized_voice_token(keyword) in corpus)
             score = len(matches)
-            if score > best_score:
+            priority = GEMINI_TTS_PROFILE_PRIORITY.get(profile_name, 0)
+            if score > best_score or (score == best_score and score > 0 and priority > best_priority):
                 best_profile = profile_name
                 best_score = score
+                best_priority = priority
                 best_matches = matches
         if best_score <= 0:
             return {

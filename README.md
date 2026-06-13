@@ -143,13 +143,14 @@ A geracao de imagens usa a mesma chave resolvida de texto MiniMax como credencia
 ```env
 YTS_MINIMAX_TEXT_API_KEY=...
 YTS_MINIMAX_IMAGE_API_KEY=...
+YTS_MINIMAX_IMAGE_ASPECT_RATIO=9:16
 ```
 
 `YTS_MINIMAX_IMAGE_API_KEY` e a **Chave Dedicada de Imagem**. Ela so e usada quando a chave de texto retorna limite de provedor, como quota, saldo, credito ou rate limit. Timeout, erro de conexao e `5xx` nao disparam troca de chave. Se nao houver chave de texto configurada, a chave dedicada de imagem e usada diretamente.
 
 ### TTS para narracao
 
-Em execucao real, o TTS primario pode ser Gemini TTS ou ElevenLabs. A saida continua sendo normalizada para WAV local e `raw.srt` para preservar o contrato das etapas de legendas, mixagem e render.
+Em execucao real, o TTS primario padrao e Gemini TTS. O Hub permite trocar o TTS primario entre Gemini TTS, ElevenLabs e Edge TTS em emergencia; a saida continua sendo normalizada para WAV local e `raw.srt` para preservar o contrato das etapas de legendas, mixagem e render.
 
 ```env
 YTS_TTS_PRIMARY_PROVIDER=gemini_tts
@@ -160,7 +161,23 @@ YTS_GEMINI_TTS_VOICE_ROTATION_ENABLED=true
 YTS_GEMINI_TTS_STYLE_PROMPT="Narre em portugues brasileiro natural, com ritmo humano de documentario curto, sem soar sintetico ou robotico."
 ```
 
-Se Gemini TTS falhar ou nao tiver chave, o pipeline tenta ElevenLabs; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados da narracao. Quando a rotacao esta ativa, `YTS_GEMINI_TTS_VOICE_NAME` vira fallback e o provider escolhe uma voz Gemini pelo perfil do roteiro.
+Se Gemini TTS falhar ou nao tiver chave, o pipeline tenta ElevenLabs; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados da narracao. Gemini TTS e ElevenLabs podem passar como narracao publicavel quando direitos comerciais estiverem confirmados; Edge TTS e emergencia e bloqueia elegibilidade automatizada. Quando a rotacao esta ativa, `YTS_GEMINI_TTS_VOICE_NAME` vira fallback e o provider escolhe uma voz Gemini pelo perfil de narrador do roteiro.
+
+Valide chave e creditos do Gemini TTS com um smoke test isolado:
+
+```bash
+.venv/bin/python scripts/smoke_gemini_tts.py
+```
+
+O teste so passa quando o provider final e `gemini_tts` e `fallback_used=False`; qualquer queda para ElevenLabs ou Edge retorna exit code diferente de zero e imprime o motivo do fallback sem expor a chave.
+
+Para recuperar um job que ficou bloqueado porque caiu em `edge_tts`, use o reparo dirigido a partir da etapa de TTS:
+
+```bash
+.venv/bin/python scripts/reprocess_job_from_step.py <job_id> --from-step tts
+```
+
+Esse comando preserva roteiro e assets, gera nova narração e recalcula legendas, mixagem, render e monetização. No Hub, jobs com `technical_tts_provider_not_publishable` também mostram a ação **Reprocessar TTS e render**.
 
 ```env
 YTS_TTS_PRIMARY_PROVIDER=elevenlabs

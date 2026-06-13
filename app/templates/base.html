@@ -47,7 +47,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     {% block head_extra %}{% endblock %}
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=hub-logo-20260613">
     <script src="/static/htmx.min.js" defer></script>
   </head>
   <body>
@@ -55,6 +55,7 @@
     <div class="app-frame">
       <header class="app-topbar" aria-label="Barra superior">
         <a class="topbar-product" href="/">
+          <img class="brand-mark" src="/static/shortsflow-mark.svg" width="40" height="40" alt="" aria-hidden="true">
           <span class="brand-full">ShortsFlow</span>
           <span class="brand-compact">SF</span>
         </a>
@@ -156,7 +157,7 @@
     </dialog>
     <dialog id="create-job-modal" class="schedule-picker-modal create-job-modal" aria-labelledby="create-job-title">
       <form method="post" action="/jobs" class="schedule-picker-card create-job-card job-form">
-        {{ ui.dialog_head("Entrada", "Criar vídeo", "create-job-title", "create-job", "Fechar criação") }}
+        {{ ui.dialog_head("Entrada", "Criar vídeo", "create-job-title", "create-job", "Fechar criação", "modal-sticky-head") }}
         <input type="hidden" name="niche_id" value="{{ hub_defaults.niche_id }}">
         <div class="field full">
           <label for="input_mode">Tipo de entrada</label>
@@ -275,6 +276,28 @@
         };
         mode.addEventListener("change", sync);
         sync();
+      })();
+      (() => {
+        const interactiveSelector = "a, button, input, select, textarea, summary, label, [role='button'], [data-open-create-job], [data-open-operational-settings]";
+        const openRow = (row) => {
+          const href = row.dataset.href;
+          if (!href) return;
+          window.location.href = href;
+        };
+        document.addEventListener("click", (event) => {
+          const row = event.target.closest(".job-row-card[data-href]");
+          if (!row) return;
+          const interactive = event.target.closest(interactiveSelector);
+          if (interactive && interactive !== row) return;
+          openRow(row);
+        });
+        document.addEventListener("keydown", (event) => {
+          if (!["Enter", " "].includes(event.key)) return;
+          const row = event.target.closest(".job-row-card[data-href]");
+          if (!row || event.target !== row) return;
+          event.preventDefault();
+          openRow(row);
+        });
       })();
     </script>
   </body>

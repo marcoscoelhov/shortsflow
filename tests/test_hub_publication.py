@@ -1,5 +1,40 @@
 from tests.e2e_support import *  # noqa: F403
 from app.publication_ops import build_growth_score
+from app.quality.premium_publish_gate import PremiumPublishGateResult
+
+
+def _premium_publish_audit_result(score: float = 9.5) -> dict:
+    return {
+        "target_score": 9.2,
+        "overall_min_score": score,
+        "passed_target": score >= 9.2,
+        "stages": [
+            {
+                "stage": "publish_readiness",
+                "score": score,
+                "target_pass": score >= 9.2,
+                "evidence": ["test premium publish audit"],
+                "gaps": [] if score >= 9.2 else ["score below target"],
+            }
+        ],
+    }
+
+
+def _allow_premium_publish_gate(monkeypatch, score: float = 9.5) -> None:
+    audit_payload = _premium_publish_audit_result(score)
+    monkeypatch.setattr(
+        orchestrator.publication_ops.premium_publish_gate,
+        "evaluate",
+        lambda *args, **kwargs: PremiumPublishGateResult(
+            passed=score >= 9.2,
+            score=score,
+            target_score=9.2,
+            reasons=[] if score >= 9.2 else ["premium_publish_score_below_threshold"],
+            audit=audit_payload,
+            visual_review_required=False,
+            visual_review_confirmed=True,
+        ),
+    )
 
 
 def test_artifact_url_maps_file_uri_to_static_route() -> None:
@@ -28,6 +63,139 @@ def test_artifact_url_does_not_embed_hub_auth_token(monkeypatch) -> None:
     artifact_path.write_bytes(b"video")
 
     assert artifact_url(artifact_path.as_uri()) == "/artifacts/job-1/render/final.mp4"
+
+def test_failure_diagnosis_explains_text_publish_audit_codes() -> None:
+    job = Job(
+        job_id="job-failure-diagnosis",
+        schema_version="1.0.0",
+        content_hash="failure-diagnosis",
+        status="failed",
+        current_step="script",
+        failure_reason="script: text publish audit failed: unsupported_claim, invented_source_fact_ids, low_retention",
+    )
+
+    diagnosis = main_module._failure_diagnosis(job)
+
+    assert diagnosis["visible"] is True
+    assert diagnosis["code"] == "unsupported_claim"
+    assert diagnosis["title"] == "Afirmação sem suporte suficiente"
+    assert "pacote de fatos" in diagnosis["cause"]
+    assert diagnosis["evidence"] == [job.failure_reason]
+
+def test_failure_diagnosis_explains_tts_duration_failure() -> None:
+    job = Job(
+        job_id="job-tts-duration",
+        schema_version="1.0.0",
+        content_hash="tts-duration",
+        status="failed",
+        current_step="tts",
+        failure_reason="tts: tts duration outside allowed range",
+    )
+
+    diagnosis = main_module._failure_diagnosis(job)
+
+    assert diagnosis["visible"] is True
+    assert diagnosis["code"] == "tts_duration_outside_allowed_range"
+    assert "35 e 55 segundos" in diagnosis["cause"]
+    assert "95 a 125 palavras" in diagnosis["action"]
+
+def test_failure_diagnosis_includes_tts_fallback_chain_for_technical_provider_block() -> None:
+    job = Job(
+        job_id="job-tts-chain",
+        schema_version="1.0.0",
+        content_hash="tts-chain",
+        status="blocked_for_monetization",
+        current_step="publish_to_review_hub",
+    )
+    narration = NarrationAsset(
+        narration_id="narration-tts-chain",
+        job_id=job.job_id,
+        schema_version="1.0.0",
+        content_hash="narration-chain",
+        provider="edge_tts",
+        voice="pt-BR-FranciscaNeural",
+        audio_uri="file:///tmp/narration.wav",
+        normalized_audio_uri="file:///tmp/narration.wav",
+        raw_subtitles_uri="file:///tmp/raw.srt",
+        duration_ms=44_784,
+        sample_rate_hz=24_000,
+        channels=1,
+        provider_metadata={
+            "fallback_used": True,
+            "fallback_chain": [
+                {
+                    "from_provider": "gemini_tts",
+                    "to_provider": "edge_tts",
+                    "reason": "gemini_tts failed after 2 attempts: RESOURCE_EXHAUSTED",
+                },
+                {
+                    "from_provider": "elevenlabs",
+                    "to_provider": "edge_tts",
+                    "reason": "elevenlabs failed after 2 attempts: quota_exceeded",
+                },
+            ],
+        },
+    )
+
+    diagnosis = main_module._failure_diagnosis(
+        job,
+        {"hard_blockers": ["technical_tts_provider_not_publishable"], "manual_required": ["visual_review_required"]},
+        narration,
+    )
+
+    assert diagnosis["visible"] is True
+    assert diagnosis["code"] == "technical_tts_provider_not_publishable"
+    assert diagnosis["evidence"] == [
+        "technical_tts_provider_not_publishable",
+        "visual_review_required",
+        "TTS fallback: gemini_tts -> edge_tts: gemini_tts failed after 2 attempts: RESOURCE_EXHAUSTED",
+        "TTS fallback: elevenlabs -> edge_tts: elevenlabs failed after 2 attempts: quota_exceeded",
+    ]
+
+def test_job_detail_explains_specific_monetization_blockers_in_plain_language() -> None:
+    client = TestClient(app)
+    job_id = "specific-blocker-message"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="blocked_for_monetization", seed_theme="Bloqueio específico")
+        session.commit()
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "passed": False,
+            "final_status": "blocked_for_monetization",
+            "hard_blockers": ["source_fact_mismatch", "minimax_audit_failed"],
+            "manual_required": [],
+            "warnings": ["weak_hashtags"],
+            "publish_readiness": {
+                "weak_hashtags": ["#fatos"],
+                "minimax_audit": {"passed": False, "error": "claim sem fonte confiável"},
+            },
+            "quality_checklist": {},
+        },
+    )
+
+    diagnosis = main_module._failure_diagnosis(
+        Job(
+            job_id=job_id,
+            schema_version="1.0.0",
+            content_hash="specific-blocker-message",
+            status="blocked_for_monetization",
+            topic_request_id=f"{job_id}-request",
+        ),
+        orchestrator._read_job_json(job_id, "monetization_report.json"),
+    )
+
+    assert diagnosis["title"] == "Roteiro não bate com as fontes"
+    assert diagnosis["problem_items"][0]["title"] == "Roteiro não bate com as fontes"
+    assert diagnosis["problem_items"][1]["cause"] == "A auditoria textual falhou com este erro: claim sem fonte confiável"
+
+    response = client.get(f"/jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert "Roteiro não bate com as fontes" in response.text
+    assert "claim sem fonte confiável" in response.text
+    assert "As hashtags fracas detectadas foram: #fatos." in response.text
 
 def test_hub_create_job_sends_title_mode_tone_angle_and_seo_notes(monkeypatch) -> None:
     captured: dict[str, object] = {}
@@ -123,7 +291,7 @@ def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch
             session.commit()
 
     monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
-    monkeypatch.setattr(service, "_first_vacant_day", lambda: target_day)
+    monkeypatch.setattr(service, "_vacant_publish_slots", lambda: [PublishSlot(target_day, "11:00", "America/Sao_Paulo")])
     monkeypatch.setattr(service, "_select_ready_script_item", lambda: None)
     monkeypatch.setattr(service, "_automatic_topic_payload", lambda: {"seed_theme": "Automacao sucesso"})
     monkeypatch.setattr(orchestrator, "create_job", fake_create_job)
@@ -151,6 +319,726 @@ def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch
     assert attempt is not None
     assert attempt.status == "scheduled"
     assert attempt.score == 0.93
+
+def test_automation_schedules_visual_review_only_backlog_job(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    service.set_automation_enabled(True)
+    job_id = "automation-backlog-visual-review"
+    target_day = datetime(2099, 6, 11).date()
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="monetization_review",
+            seed_theme="Backlog com revisao visual automatizavel",
+            quality_summary={
+                "assets": {
+                    "semantic_threshold_pass": True,
+                    "asset_visual_gate_pass": True,
+                    "asset_visual_gate_checked": True,
+                    "asset_visual_verification_modes": ["vision"],
+                },
+                "monetization": {
+                    "passed": False,
+                    "final_status": "monetization_review",
+                    "hard_blockers": [],
+                    "manual_required": ["visual_review_required"],
+                },
+            },
+            artifact_index={"render": "render/final.mp4", "publish_package": "publish_package.json"},
+        )
+        session.add(
+            SceneAsset(
+                asset_id=f"{job_id}-asset",
+                job_id=job_id,
+                scene_id="scene-1",
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-asset",
+                provider="mock",
+                kind="image",
+                uri="file:///tmp/automation-backlog-visual-review.png",
+                width=1080,
+                height=1920,
+                selected=True,
+                scores={"vision_aligned": True, "total_score": 0.92},
+            )
+        )
+        session.add(
+            RenderOutput(
+                render_id=f"{job_id}-render",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-render",
+                video_uri="file:///tmp/automation-backlog-visual-review.mp4",
+                duration_ms=40_000,
+                resolution="1080x1920",
+                video_codec="h264",
+                audio_codec="aac",
+                filesize_bytes=1024,
+                ffmpeg_log_uri="file:///tmp/automation-backlog-visual-review.log",
+            )
+        )
+        session.commit()
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "passed": False,
+            "final_status": "monetization_review",
+            "hard_blockers": [],
+            "manual_required": ["visual_review_required"],
+            "publish_readiness": {"passed": True},
+        },
+    )
+    orchestrator.storage.persist_json(job_id, "publish_package.json", {"job_id": job_id})
+    calls = {"create_job": 0}
+
+    def fake_build_report(session, job, confirmations=None):
+        assert confirmations == {"visual_review_confirmed"}
+        return {
+            "passed": True,
+            "final_status": "ready_for_upload",
+            "hard_blockers": [],
+            "manual_required": [],
+            "warnings": [],
+            "publish_readiness": {"passed": True},
+        }
+
+    def fake_review_job(payload: dict, reviewed_job_id: str) -> None:
+        assert reviewed_job_id == job_id
+        assert "visual_review_confirmed" in payload["reason_codes"]
+        with SessionLocal() as session:
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.status = "approved_for_publish"
+            job.review_state = "approved"
+            session.commit()
+
+    def fake_schedule_publication(scheduled_job_id: str, payload: dict) -> None:
+        assert scheduled_job_id == job_id
+        assert payload["youtube_visibility"] == "public"
+        with SessionLocal() as session:
+            session.add(
+                PublicationSchedule(
+                    schedule_id=f"{job_id}-schedule",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"{job_id}-schedule",
+                    scheduled_for_utc=datetime(2099, 6, 11, 14, 0, tzinfo=UTC),
+                    timezone="America/Sao_Paulo",
+                    youtube_visibility="public",
+                    status="scheduled",
+                )
+            )
+            session.commit()
+
+    monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
+    monkeypatch.setattr(service, "_vacant_publish_slots", lambda: [PublishSlot(target_day, "11:00", "America/Sao_Paulo")])
+    monkeypatch.setattr(orchestrator.monetization_pipeline, "build_monetization_report", fake_build_report)
+    monkeypatch.setattr(service, "evaluate_autoapproval", lambda _job_id: {"eligible": True, "score": 0.95, "reasons": []})
+    monkeypatch.setattr(orchestrator, "review_job", fake_review_job)
+    monkeypatch.setattr(orchestrator, "schedule_publication", fake_schedule_publication)
+    monkeypatch.setattr(
+        orchestrator,
+        "create_job",
+        lambda _payload: calls.__setitem__("create_job", calls["create_job"] + 1) or "unexpected-job",
+    )
+
+    run_result = service.run_daily_cycle(force=True)
+
+    assert run_result["status"] == "succeeded"
+    assert run_result["result_job_id"] == job_id
+    assert calls["create_job"] == 0
+    artifact = orchestrator._read_job_json(job_id, "auto_visual_review.json")
+    assert artifact["passed"] is True
+    assert artifact["reviewer"] == "automation_visual_review"
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.job_id == job_id))
+    assert job is not None
+    assert job.quality_summary["assets"]["asset_visual_real_vision_checked"] is True
+    assert "automation_visual_review" in job.quality_summary["assets"]["asset_visual_verification_modes"]
+    assert attempt is not None
+    assert attempt.score_report["classification"] == "visual_review_repairable"
+
+
+def test_auto_visual_review_rejects_prompt_heuristic_only_assets() -> None:
+    service = AutomationService(orchestrator)
+    job_id = "automation-auto-visual-prompt-only"
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="monetization_review",
+            seed_theme="Visual heuristic only",
+            quality_summary={
+                "assets": {
+                    "semantic_threshold_pass": True,
+                    "asset_visual_gate_pass": True,
+                    "asset_visual_gate_checked": True,
+                    "asset_visual_verification_modes": ["prompt_heuristic"],
+                }
+            },
+        )
+        session.add(
+            SceneAsset(
+                asset_id=f"{job_id}-asset",
+                job_id=job_id,
+                scene_id="scene-1",
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-asset",
+                provider="mock",
+                kind="image",
+                uri="file:///tmp/automation-auto-visual-prompt-only.png",
+                width=1080,
+                height=1920,
+                selected=True,
+                scores={"verification_mode": "prompt_heuristic", "verification_fallback_reason": "vision verifier unavailable"},
+            )
+        )
+        session.add(
+            RenderOutput(
+                render_id=f"{job_id}-render",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-render",
+                video_uri="file:///tmp/automation-auto-visual-prompt-only.mp4",
+                duration_ms=40_000,
+                resolution="1080x1920",
+                video_codec="h264",
+                audio_codec="aac",
+                filesize_bytes=1024,
+                ffmpeg_log_uri="file:///tmp/automation-auto-visual-prompt-only.log",
+            )
+        )
+        session.commit()
+
+    result = service._run_auto_visual_review(job_id)
+
+    assert result["passed"] is False
+    assert "real_visual_evidence_missing" in result["reasons"]
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+    assert job is not None
+    assert "asset_visual_real_vision_checked" not in job.quality_summary["assets"]
+
+
+def test_publishable_backlog_allows_cancelled_schedule() -> None:
+    service = AutomationService(orchestrator)
+    job_id = "automation-backlog-cancelled-schedule"
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="approved_for_publish",
+            seed_theme="Backlog reagendavel",
+            artifact_index={"render": "render/final.mp4", "publish_package": "publish_package.json"},
+        )
+        session.add(
+            RenderOutput(
+                render_id=f"{job_id}-render",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-render",
+                video_uri="file:///tmp/automation-backlog-cancelled-schedule.mp4",
+                duration_ms=40_000,
+                resolution="1080x1920",
+                video_codec="h264",
+                audio_codec="aac",
+                filesize_bytes=1024,
+                ffmpeg_log_uri="file:///tmp/automation-backlog-cancelled-schedule.log",
+            )
+        )
+        session.add(
+            PublicationSchedule(
+                schedule_id=f"{job_id}-old-schedule",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-old-schedule",
+                scheduled_for_utc=datetime(2099, 6, 10, 14, 0, tzinfo=UTC),
+                timezone="America/Sao_Paulo",
+                youtube_visibility="public",
+                status="cancelled",
+            )
+        )
+        session.commit()
+    orchestrator.storage.persist_json(job_id, "publish_package.json", {"job_id": job_id})
+
+    candidates = service._publishable_backlog_candidates()
+
+    assert any(candidate["job_id"] == job_id for candidate in candidates)
+
+
+def test_automation_fills_multiple_backlog_slots_before_generating(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    service.set_automation_enabled(True)
+    _allow_premium_publish_gate(monkeypatch)
+    job_ids = ["automation-backlog-fill-1", "automation-backlog-fill-2", "automation-backlog-fill-3"]
+    slots = [
+        PublishSlot(datetime(2099, 6, 10).date(), "11:00", "America/Sao_Paulo"),
+        PublishSlot(datetime(2099, 6, 11).date(), "11:00", "America/Sao_Paulo"),
+        PublishSlot(datetime(2099, 6, 10).date(), "18:00", "America/Sao_Paulo"),
+    ]
+    with SessionLocal() as session:
+        for index, job_id in enumerate(job_ids, start=1):
+            _create_basic_job(
+                session,
+                job_id=job_id,
+                status="approved_for_publish",
+                seed_theme=f"Backlog rapido {index}",
+                artifact_index={"render": "render/final.mp4", "publish_package": "publish_package.json"},
+                updated_at=datetime(2099, 1, index, tzinfo=UTC),
+            )
+            session.add(
+                RenderOutput(
+                    render_id=f"{job_id}-render",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"{job_id}-render",
+                    video_uri=f"file:///tmp/{job_id}.mp4",
+                    duration_ms=40_000,
+                    resolution="1080x1920",
+                    video_codec="h264",
+                    audio_codec="aac",
+                    filesize_bytes=1024,
+                    ffmpeg_log_uri=f"file:///tmp/{job_id}.log",
+                )
+            )
+            orchestrator.storage.persist_json(job_id, "publish_package.json", {"job_id": job_id})
+        session.commit()
+
+    scheduled_payloads: list[tuple[str, dict]] = []
+
+    def fake_schedule_publication(scheduled_job_id: str, payload: dict) -> None:
+        scheduled_payloads.append((scheduled_job_id, payload))
+        scheduled_for_utc = datetime.fromisoformat(payload["scheduled_for_local"]).replace(tzinfo=ZoneInfo(payload["timezone"])).astimezone(UTC)
+        with SessionLocal() as session:
+            session.add(
+                PublicationSchedule(
+                    schedule_id=f"{scheduled_job_id}-schedule",
+                    job_id=scheduled_job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"{scheduled_job_id}-schedule",
+                    scheduled_for_utc=scheduled_for_utc,
+                    timezone=payload["timezone"],
+                    youtube_visibility=payload["youtube_visibility"],
+                    status="scheduled",
+                    notes=payload["notes"],
+                )
+            )
+            session.commit()
+
+    monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
+    monkeypatch.setattr(service, "_vacant_publish_slots", lambda: slots)
+    monkeypatch.setattr(service, "_automatic_topic_payload", lambda: (_ for _ in ()).throw(AssertionError("should not generate")))
+    monkeypatch.setattr(orchestrator, "schedule_publication", fake_schedule_publication)
+
+    run_result = service.run_daily_cycle(force=True)
+
+    assert run_result["status"] == "succeeded"
+    assert run_result["metadata"]["scheduled_count"] == 3
+    assert [payload["scheduled_for_local"] for _, payload in scheduled_payloads] == [
+        "2099-06-10T11:00",
+        "2099-06-11T11:00",
+        "2099-06-10T18:00",
+    ]
+    with SessionLocal() as session:
+        assert session.query(PublicationSchedule).filter(PublicationSchedule.job_id.in_(job_ids)).count() == 3
+
+
+def test_automation_does_not_schedule_backlog_hard_blocker(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    job_id = "automation-backlog-hard-blocker"
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="blocked_for_monetization",
+            seed_theme="Backlog bloqueado factual",
+            quality_summary={
+                "monetization": {
+                    "passed": False,
+                    "final_status": "blocked_for_monetization",
+                    "hard_blockers": ["unsupported_claim"],
+                    "manual_required": [],
+                }
+            },
+            artifact_index={"render": "render/final.mp4", "publish_package": "publish_package.json"},
+        )
+        session.add(
+            RenderOutput(
+                render_id=f"{job_id}-render",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-render",
+                video_uri="file:///tmp/automation-backlog-hard-blocker.mp4",
+                duration_ms=40_000,
+                resolution="1080x1920",
+                video_codec="h264",
+                audio_codec="aac",
+                filesize_bytes=1024,
+                ffmpeg_log_uri="file:///tmp/automation-backlog-hard-blocker.log",
+            )
+        )
+        session.commit()
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "passed": False,
+            "final_status": "blocked_for_monetization",
+            "hard_blockers": ["unsupported_claim"],
+            "manual_required": [],
+            "publish_readiness": {"passed": False, "reasons": ["unsupported_claim"]},
+        },
+    )
+    orchestrator.storage.persist_json(job_id, "publish_package.json", {"job_id": job_id})
+    scheduled: list[str] = []
+    monkeypatch.setattr(orchestrator, "schedule_publication", lambda scheduled_job_id, _payload: scheduled.append(scheduled_job_id))
+
+    candidates = service._publishable_backlog_candidates()
+
+    assert all(candidate["job_id"] != job_id for candidate in candidates)
+    assert scheduled == []
+
+def test_ready_script_is_released_after_scene_plan_technical_failure(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    service.set_automation_enabled(True)
+    target_day = datetime(2099, 6, 12).date()
+    job_id = "automation-ready-script-scene-failure"
+    import_result = service.import_ready_script_batch(
+        """Título: Roteiro reutilizavel apos falha tecnica
+Hook: Uma falha técnica não deve queimar este roteiro.
+Loop: O que acontece depois da tentativa?
+Beats: O job falha no plano de cenas.
+O roteiro volta ao banco.
+Payoff: A próxima execução pode tentar novamente.
+Fechamento: O estado fica explícito.
+Hashtags: #curiosidades #shorts""",
+        fact_check_confirmed=True,
+        source="test-retry-lifecycle",
+    )
+    assert import_result.imported == 1
+
+    def fake_create_job(_payload):
+        with SessionLocal() as session:
+            _create_basic_job(session, job_id=job_id, status="queued", seed_theme="Falha técnica")
+            session.commit()
+        return job_id
+
+    def fake_process_job(_job_id):
+        with SessionLocal() as session:
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.status = "scene_plan_quality_failed"
+            job.failure_reason = "scene_plan: scene quality gate failed: scene-1:disallowed_split_or_collage_composition"
+            session.commit()
+        return "scene_plan_quality_failed"
+
+    monkeypatch.setattr(orchestrator.settings, "automation_max_generation_attempts", 1)
+    monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
+    monkeypatch.setattr(service, "_vacant_publish_slots", lambda: [PublishSlot(target_day, "11:00", "America/Sao_Paulo")])
+    monkeypatch.setattr(service, "_run_publishable_backlog", lambda _run_id, _target_day: False)
+    monkeypatch.setattr(orchestrator, "create_job", fake_create_job)
+    monkeypatch.setattr(orchestrator, "process_job", fake_process_job)
+    monkeypatch.setattr(orchestrator, "reprocess_job_from_step", lambda _job_id, _step: "scene_plan_quality_failed")
+
+    run_result = service.run_daily_cycle(force=True)
+
+    assert run_result["status"] == "failed"
+    with SessionLocal() as session:
+        item = session.scalar(select(ReadyScriptItem).where(ReadyScriptItem.title == "Roteiro reutilizavel apos falha tecnica"))
+        attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.job_id == job_id))
+    assert item is not None
+    assert item.status == "available"
+    assert item.consumed_job_id is None
+    assert item.last_skip_reason == "scene_plan_repairable"
+    assert attempt is not None
+    assert attempt.score_report["classification"] == "scene_plan_repairable"
+    assert attempt.score_report["retry"]["attempted"] is True
+    assert attempt.score_report["retry"]["from_step"] == "scene_plan"
+
+def test_automation_failure_classifies_subtitle_and_scene_repairable() -> None:
+    service = AutomationService(orchestrator)
+
+    subtitle = service.classify_failure(
+        "subtitle_quality_failed",
+        "subtitle_alignment: subtitle quality gate failed: p95_timing_drift_too_high, max_timing_drift_too_high",
+        {},
+    )
+    scene = service.classify_failure(
+        "scene_plan_quality_failed",
+        "scene_plan: scene quality gate failed: disallowed_split_or_collage_composition",
+        {},
+    )
+
+    assert subtitle["classification"] == "subtitle_repairable"
+    assert subtitle["retry_from_step"] == "subtitle_alignment"
+    assert scene["classification"] == "scene_plan_repairable"
+    assert scene["retry_from_step"] == "scene_plan"
+
+def test_automation_ready_script_bank_score_is_diagnostic_and_schedules(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    service.set_automation_enabled(True)
+    job_id = "automation-ready-script-bank-score-diagnostic"
+    target_day = datetime(2099, 6, 10).date()
+    with SessionLocal() as session:
+        for item in session.scalars(select(ReadyScriptItem).where(ReadyScriptItem.status == "available")).all():
+            item.status = "needs_review"
+        session.commit()
+    import_result = service.import_ready_script_batch(
+        """Título: Banco priorizado mesmo com score baixo
+Hook: O roteiro validado não deve cair para tema automático.
+Loop: O que acontece se o score editorial discordar?
+Beats: O banco é a fonte primária do ciclo diário.
+O score vira diagnóstico para auditoria.
+Payoff: Só bloqueio técnico deve parar o publish.
+Fechamento: O cron registra o aviso e agenda.
+Hashtags: #curiosidades #shorts""",
+        fact_check_confirmed=True,
+        source="test-autoapproval",
+    )
+    assert import_result.imported == 1
+    calls = {"automatic_topic": 0}
+
+    def fake_create_job(payload):
+        assert payload["job_origin"] == "ready_script_bank"
+        assert payload["creation_via"] == "daily_cycle"
+        assert "[[YTS_READY_SCRIPT_BEGIN]]" in str(payload["notes"])
+        with SessionLocal() as session:
+            _create_basic_job(session, job_id=job_id, status="queued", seed_theme="Roteiro do banco")
+            session.flush()
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.job_origin = "ready_script_bank"
+            job.creation_via = "daily_cycle"
+            session.commit()
+        return job_id
+
+    def fake_process_job(created_job_id: str) -> str:
+        assert created_job_id == job_id
+        with SessionLocal() as session:
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.status = "ready_for_upload"
+            job.quality_summary = {
+                "assets": {"asset_semantic_score_avg": 0.93},
+                "monetization": {"passed": True, "final_status": "ready_for_upload", "hard_blockers": [], "manual_required": []},
+            }
+            session.add(
+                Script(
+                    script_id=f"{job_id}-script",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"{job_id}-script",
+                    title="Banco priorizado mesmo com score baixo",
+                    hook="O roteiro validado não deve cair para tema automático.",
+                    body_beats=["O banco é a fonte primária do ciclo diário.", "O score vira diagnóstico para auditoria."],
+                    ending="O cron registra o aviso e agenda.",
+                    cta=None,
+                    full_narration="O roteiro validado não deve cair para tema automático. O banco é a fonte primária do ciclo diário. O score vira diagnóstico para auditoria. O cron registra o aviso e agenda.",
+                    estimated_duration_sec=35,
+                    key_facts=[],
+                    token_count=28,
+                    language="pt-BR",
+                    qa_metrics={
+                        "ready_script": True,
+                        "fact_check_confirmed": True,
+                        "hook_score": 0.2,
+                        "information_density_score": 0.2,
+                    },
+                    prompt_version="test",
+                )
+            )
+            session.commit()
+        orchestrator.storage.persist_json(
+            job_id,
+            "monetization_report.json",
+            {
+                "passed": True,
+                "manual_confirmations": ["fact_review_confirmed", "publish_audit_confirmed", "originality_confirmed", "metadata_confirmed"],
+                "channel_repetition_report": {"repetition_risk": "high", "max_similarity": 0.98},
+                "metadata_review": {"requires_metadata_review": True},
+                "fact_claims_report": {"requires_fact_review": False},
+                "publish_readiness": {
+                    "minimax_audit": {
+                        "factual_score": 0.2,
+                        "retention_score": 0.2,
+                        "metadata_score": 0.2,
+                    }
+                },
+            },
+        )
+        orchestrator.storage.persist_json(
+            job_id,
+            "script.json",
+            {
+                "qa_metrics": {"ready_script": True, "fact_check_confirmed": True},
+                "title": "Banco priorizado mesmo com score baixo",
+            },
+        )
+        return "ready_for_upload"
+
+    def fake_review_job(payload: dict, reviewed_job_id: str) -> None:
+        assert reviewed_job_id == job_id
+        assert payload["action"] == "approve"
+        with SessionLocal() as session:
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.status = "approved_for_publish"
+            job.review_state = "approved"
+            session.commit()
+
+    def fake_schedule_publication(scheduled_job_id: str, payload: dict) -> None:
+        assert scheduled_job_id == job_id
+        with SessionLocal() as session:
+            session.add(
+                PublicationSchedule(
+                    schedule_id=f"{job_id}-schedule",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"{job_id}-schedule",
+                    scheduled_for_utc=datetime(2099, 6, 10, 14, 0, tzinfo=UTC),
+                    timezone="America/Sao_Paulo",
+                    youtube_visibility="public",
+                    status="scheduled",
+                    youtube_video_id="yt-ready-script-bank",
+                    notes=payload["notes"],
+                )
+            )
+            session.commit()
+
+    monkeypatch.setattr(orchestrator.settings, "automation_max_generation_attempts", 1)
+    monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
+    monkeypatch.setattr(service, "_vacant_publish_slots", lambda: [PublishSlot(target_day, "11:00", "America/Sao_Paulo")])
+    monkeypatch.setattr(service, "_ready_script_repetition_report", lambda _session, _item: {"repetition_risk": "high", "max_similarity": 0.98})
+    monkeypatch.setattr(service, "_automatic_topic_payload", lambda: calls.__setitem__("automatic_topic", calls["automatic_topic"] + 1) or {"seed_theme": "nao usar"})
+    monkeypatch.setattr(orchestrator, "create_job", fake_create_job)
+    monkeypatch.setattr(orchestrator, "process_job", fake_process_job)
+    monkeypatch.setattr(orchestrator, "review_job", fake_review_job)
+    monkeypatch.setattr(orchestrator, "schedule_publication", fake_schedule_publication)
+
+    run_result = service.run_daily_cycle(force=True)
+
+    assert run_result["status"] == "succeeded"
+    assert run_result["result_job_id"] == job_id
+    assert run_result["result_schedule_id"] == f"{job_id}-schedule"
+    assert calls["automatic_topic"] == 0
+    with SessionLocal() as session:
+        item = session.scalar(select(ReadyScriptItem).where(ReadyScriptItem.title == "Banco priorizado mesmo com score baixo"))
+        attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.job_id == job_id))
+        schedule = session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job_id))
+
+    assert item is not None
+    assert item.status == "scheduled"
+    assert item.consumed_job_id == job_id
+    assert item.last_skip_reason == "high_narrative_similarity_warning"
+    assert attempt is not None
+    assert attempt.status == "scheduled"
+    assert attempt.score is not None
+    assert attempt.score < orchestrator.settings.automation_score_threshold
+    assert attempt.score_report["eligible"] is True
+    assert attempt.score_report["reasons"] == []
+    assert "automation_score_below_threshold" in attempt.score_report["diagnostic_reasons"]
+    assert attempt.score_report["ready_script_bank_policy"] == "score_diagnostic_only"
+    assert schedule is not None
+    assert schedule.status == "scheduled"
+
+def test_ready_script_bank_monetization_embeds_human_editorial_confirmations() -> None:
+    job_id = "ready-script-bank-human-confirmations"
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="running",
+            seed_theme="Metadados ruins mas validados",
+            quality_summary={
+                "script": {"script_quality_gate_pass": True},
+                "scene_plan": {"scene_plan_gate_pass": True},
+                "assets": {"semantic_threshold_pass": True},
+                "subtitles": {"subtitle_gate_pass": True},
+                "render": {"render_gate_pass": True},
+            },
+        )
+        session.flush()
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.job_origin = "ready_script_bank"
+        session.add(
+            TopicPlan(
+                topic_id=f"{job_id}-topic",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-topic",
+                canonical_topic="Metadados ruins mas validados",
+                angle="teste",
+                hook_promise="teste",
+                entities=[],
+                search_terms=[],
+                title_candidates=[],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"{job_id}-script",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-script",
+                title="Curto",
+                hook="Um roteiro aprovado pode ter título curto.",
+                body_beats=["A validação humana cobre metadados editoriais."],
+                ending="A parte técnica continua separada.",
+                cta=None,
+                full_narration="Um roteiro aprovado pode ter título curto. A validação humana cobre metadados editoriais. A parte técnica continua separada.",
+                estimated_duration_sec=35,
+                key_facts=[],
+                token_count=18,
+                language="pt-BR",
+                qa_metrics={
+                    "ready_script": True,
+                    "fact_check_confirmed": True,
+                    "declared_hashtags": ["#curiosidades", "#shorts"],
+                },
+                prompt_version="test",
+            )
+        )
+        session.commit()
+
+    orchestrator.storage.persist_json(
+        job_id,
+        "fact_pack.json",
+        {
+            "status": "verified",
+            "provider": "user_declared_fact_check",
+            "facts": [],
+            "sources": [{"kind": "human_confirmation"}],
+        },
+    )
+    orchestrator.storage.persist_json(
+        job_id,
+        "script.json",
+        {
+            "title": "Curto",
+            "qa_metrics": {
+                "ready_script": True,
+                "fact_check_confirmed": True,
+                "declared_hashtags": ["#curiosidades", "#shorts"],
+            },
+        },
+    )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        report = orchestrator.monetization_pipeline.build_monetization_report(session, job)
+
+    assert report["passed"] is True
+    assert report["final_status"] == "ready_for_upload"
+    assert "metadata_confirmed" in report["manual_confirmations"]
+    assert "metadata_review_required" not in report["manual_required"]
+    assert report["metadata_review"]["requires_metadata_review"] is True
+    assert report["ready_script_publish_policy"] == "human_validated_bank_script_editorial_warnings_only"
 
 def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: Path) -> None:
     prompt_path = tmp_path / "hub_settings.json"
@@ -200,7 +1088,6 @@ def test_default_viral_prompt_avoids_generic_changes_how_you_see_formula() -> No
     assert "virada verificavel" in prompt
 
 def test_publish_audit_is_cached_by_input_hash(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", False)
     calls = {"count": 0}
 
     def audit_publish_package(payload):
@@ -311,6 +1198,146 @@ def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
     assert "pagehub-job-2" not in second_page.text
     assert "Página 2 de 2" in second_page.text
 
+
+def test_jobs_route_serves_full_page_and_htmx_fragment() -> None:
+    client = TestClient(app)
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id="jobs-route-shell", status="monetization_review", seed_theme="Fila com shell")
+
+    full_page = client.get("/jobs?search=jobs-route-shell")
+    assert full_page.status_code == 200
+    assert 'href="/static/styles.css' in full_page.text
+    assert "Jobs prioritários" in full_page.text
+    assert "jobs-route-shell" in full_page.text
+
+    fragment = client.get("/jobs?search=jobs-route-shell", headers={"HX-Request": "true"})
+    assert fragment.status_code == 200
+    assert 'href="/static/styles.css' not in fragment.text
+    assert 'id="jobs-table"' in fragment.text
+    assert "jobs-route-shell" in fragment.text
+
+
+def test_delete_job_removes_dependencies_references_and_artifacts() -> None:
+    job_id = "delete-job-cleanup"
+    run_id = "delete-job-run"
+    schedule_id = "delete-job-schedule"
+    script_item_id = "delete-job-script-item"
+    artifact = _write_job_artifact(job_id, "render/final.mp4", "video")
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="approved_for_publish", seed_theme="Job para excluir")
+        session.add(
+            Script(
+                script_id=f"{job_id}-script",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-script",
+                title="Job para excluir",
+                hook="Hook",
+                body_beats=["beat"],
+                ending="fim",
+                full_narration="Hook. Beat. Fim.",
+                estimated_duration_sec=35,
+                key_facts=["fato"],
+                token_count=3,
+                language="pt-BR",
+                qa_metrics={},
+            )
+        )
+        session.add(
+            PublicationSchedule(
+                schedule_id=schedule_id,
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-schedule",
+                scheduled_for_utc=utcnow() + timedelta(days=1),
+                timezone="UTC",
+                youtube_visibility="private",
+                status="scheduled",
+            )
+        )
+        session.add(
+            AutomationRun(
+                run_id=run_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-run",
+                local_date="2026-06-13",
+                status="completed",
+                result_job_id=job_id,
+                result_schedule_id=schedule_id,
+            )
+        )
+        session.add(
+            AutomationAttempt(
+                attempt_id=f"{job_id}-attempt",
+                run_id=run_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-attempt",
+                attempt_number=1,
+                source="ready_script_bank",
+                status="completed",
+                job_id=job_id,
+            )
+        )
+        session.add(
+            ReadyScriptItem(
+                script_item_id=script_item_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-ready-script",
+                status="consumed",
+                source="batch",
+                title="Roteiro consumido",
+                raw_text="Roteiro consumido",
+                parsed_script={"title": "Roteiro consumido"},
+                hashtags=[],
+                fact_check_confirmed=True,
+                consumed_at=utcnow(),
+                consumed_job_id=job_id,
+            )
+        )
+        session.commit()
+
+    orchestrator.delete_job(job_id)
+
+    with SessionLocal() as session:
+        assert session.get(Job, job_id) is None
+        assert session.scalar(select(TopicRequest).where(TopicRequest.job_id == job_id)) is None
+        assert session.scalar(select(Script).where(Script.job_id == job_id)) is None
+        assert session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job_id)) is None
+        assert session.scalar(select(AutomationAttempt).where(AutomationAttempt.job_id == job_id)) is None
+        run = session.get(AutomationRun, run_id)
+        assert run.result_job_id is None
+        assert run.result_schedule_id is None
+        item = session.get(ReadyScriptItem, script_item_id)
+        assert item.status == "consumed"
+        assert item.consumed_job_id is None
+    assert not artifact.parent.parent.exists()
+
+
+def test_job_detail_exposes_delete_action_and_post_deletes_job() -> None:
+    client = TestClient(app)
+    job_id = "delete-route-job"
+    artifact = _write_job_artifact(job_id, "request.json", "{}")
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="failed", seed_theme="Excluir pela interface")
+        session.commit()
+
+    detail = client.get(f"/jobs/{job_id}")
+    assert detail.status_code == 200
+    assert f'action="/jobs/{job_id}/delete"' in detail.text
+    assert "Excluir job" in detail.text
+
+    response = client.post(f"/jobs/{job_id}/delete", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/?deleted_job=delete-r"
+    with SessionLocal() as session:
+        assert session.get(Job, job_id) is None
+    assert not artifact.parent.exists()
+
+    redirected = client.get(response.headers["location"])
+    assert redirected.status_code == 200
+    assert "Job excluído." in redirected.text
+
+
 def test_hub_filters_jobs_by_origin_and_shows_portuguese_labels() -> None:
     client = TestClient(app)
     with SessionLocal() as session:
@@ -392,6 +1419,61 @@ def test_jobs_queue_uses_publication_schedule_for_operational_state() -> None:
     assert "Job programado real" not in unscheduled_response.text
     assert "Aprovado sem agenda" in unscheduled_response.text
 
+def test_jobs_needs_action_filter_links_review_and_schedule_backlog() -> None:
+    client = TestClient(app)
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id="needs-action-approve",
+            status="ready_for_upload",
+            seed_theme="Aprovar direto",
+            quality_summary={"monetization": {"hard_blockers": [], "manual_required": []}},
+        )
+        _create_basic_job(
+            session,
+            job_id="needs-action-review",
+            status="monetization_review",
+            seed_theme="Aproveitar com checklist",
+            quality_summary={"monetization": {"hard_blockers": [], "manual_required": ["visual_review_required"]}},
+        )
+        _create_basic_job(session, job_id="needs-action-schedule", status="approved_for_publish", seed_theme="Aprovado sem horario")
+        _create_basic_job(session, job_id="needs-action-failed", status="script_quality_failed", seed_theme="Regenerar falha")
+        _create_basic_job(session, job_id="needs-action-rejected", status="rejected", seed_theme="Excluir rejeitado")
+        _create_basic_job(session, job_id="needs-action-scheduled", status="approved_for_publish", seed_theme="Aprovado com agenda")
+        _create_basic_job(session, job_id="needs-action-published", status="published", seed_theme="Publicado fora da acao")
+        session.add(
+            PublicationSchedule(
+                schedule_id="needs-action-scheduled-schedule",
+                job_id="needs-action-scheduled",
+                schema_version="1.0.0",
+                content_hash="needs-action-scheduled-schedule-hash",
+                scheduled_for_utc=datetime(2099, 7, 1, 14, 0, tzinfo=UTC),
+                timezone="America/Sao_Paulo",
+                youtube_visibility="public",
+                status="scheduled",
+            )
+        )
+        session.commit()
+
+    full_page = client.get("/jobs")
+    assert 'href="/jobs?status=needs_action' in full_page.text
+
+    response = client.get("/jobs?status=needs_action&per_page=20")
+    assert response.status_code == 200
+    assert "Aprovar direto" in response.text
+    assert "Aproveitar com checklist" in response.text
+    assert "Aprovado sem horario" in response.text
+    assert "Regenerar falha" in response.text
+    assert "Excluir rejeitado" in response.text
+    assert "Aprovado com agenda" not in response.text
+    assert "Publicado fora da acao" not in response.text
+    assert "Ação sugerida" in response.text
+    assert "Só aprovar" in response.text
+    assert "Regenerar" in response.text
+    assert "Excluir" in response.text
+    assert "Faltam 1 confirmação" in response.text
+    assert "Falta data, hora e visibilidade" in response.text
+
 def test_job_detail_accepts_unique_short_job_prefix() -> None:
     client = TestClient(app)
     job_id = "prefix-open-job-123456789"
@@ -467,7 +1549,8 @@ def test_manual_publish_requires_youtube_reference() -> None:
     assert response.status_code == 303
     assert "publish_error=manual+publish+requires+youtube_video_id+or+youtube_url" in response.headers["location"]
 
-def test_schedule_publication_persists_row_and_appears_in_calendar() -> None:
+def test_schedule_publication_persists_row_and_appears_in_calendar(monkeypatch) -> None:
+    _allow_premium_publish_gate(monkeypatch)
     client = TestClient(app)
     job_id = "scheduled-calendar-job"
     topic_request_id = "scheduled-calendar-job-request"
@@ -549,6 +1632,7 @@ def test_schedule_publication_persists_row_and_appears_in_calendar() -> None:
 
 def test_schedule_publication_queues_tiktok_crosspost_when_enabled(monkeypatch) -> None:
     job_id = "scheduled-tiktok-crosspost"
+    _allow_premium_publish_gate(monkeypatch)
     monkeypatch.setattr(orchestrator.settings, "tiktok_auto_publish_enabled", True)
     monkeypatch.setattr(orchestrator.settings, "tiktok_privacy_level", "PUBLIC_TO_EVERYONE")
     with SessionLocal() as session:
@@ -576,6 +1660,7 @@ def test_schedule_publication_queues_tiktok_crosspost_when_enabled(monkeypatch) 
 
 def test_due_tiktok_publication_uses_real_publisher_and_persists_processing(monkeypatch, tmp_path) -> None:
     job_id = "due-tiktok-publish"
+    _allow_premium_publish_gate(monkeypatch)
     video_path = tmp_path / "final.mp4"
     video_path.write_bytes(b"fake mp4")
     monkeypatch.setattr(orchestrator.settings, "tiktok_auto_publish_enabled", True)
@@ -664,7 +1749,8 @@ def test_calendar_quick_add_lists_only_unscheduled_approved_jobs() -> None:
     assert "Job publicado fora da lista" not in response.text
     assert "Job já agendado fora da lista" not in response.text
 
-def test_calendar_quick_add_schedules_job_on_selected_day() -> None:
+def test_calendar_quick_add_schedules_job_on_selected_day(monkeypatch) -> None:
+    _allow_premium_publish_gate(monkeypatch)
     client = TestClient(app)
     job_id = "calendar-quick-post"
     with SessionLocal() as session:
@@ -795,7 +1881,8 @@ def test_schedule_publication_requires_approved_job() -> None:
     assert response.status_code == 409
     assert "approved_for_publish" in response.text
 
-def test_manual_publish_marks_publication_schedule_as_published() -> None:
+def test_manual_publish_marks_publication_schedule_as_published(monkeypatch) -> None:
+    _allow_premium_publish_gate(monkeypatch)
     client = TestClient(app)
     job_id = "scheduled-publish-job"
     topic_request_id = "scheduled-publish-job-request"
@@ -1005,6 +2092,44 @@ def test_job_detail_schedule_uses_modal_picker_for_publication_time() -> None:
     assert 'data-schedule-time-chips' in response.text
     assert 'name="scheduled_for_local" type="hidden" value=""' in response.text
     assert 'type="datetime-local"' not in response.text
+
+
+def test_job_detail_shows_visual_review_report_as_auxiliary_evidence() -> None:
+    client = TestClient(app)
+    job_id = "visual-review-report-job"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Revisão visual")
+        session.commit()
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "final_status": "monetization_review",
+            "hard_blockers": [],
+            "manual_required": ["visual_review_required"],
+            "passed": False,
+            "human_review_checklist": {"items": []},
+        },
+    )
+    orchestrator.storage.persist_json(
+        job_id,
+        "visual_review_report.json",
+        {
+            "reviewer": "codex_vision",
+            "passed": True,
+            "summary": "Frames revisados sem desvio visual relevante.",
+            "status_effect": "evidence_only_no_job_status_change",
+        },
+    )
+
+    response = client.get(f"/jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert "Revisão visual auxiliar" in response.text
+    assert "codex_vision" in response.text
+    assert "Frames revisados sem desvio visual relevante." in response.text
+    assert "Aprovar e liberar agenda" in response.text
+
 
 def test_retention_sweep_keeps_publishable_jobs_longer_and_job_detail_handles_cleanup() -> None:
     client = TestClient(app)
@@ -1560,6 +2685,7 @@ def test_schedule_publication_requires_connected_youtube_in_api_mode(monkeypatch
     assert "OAuth" in response.text
 
 def test_schedule_publication_uploads_video_immediately_in_api_mode(monkeypatch) -> None:
+    _allow_premium_publish_gate(monkeypatch)
     client = TestClient(app)
     job_id = "scheduled-native-youtube-job"
     topic_request_id = "scheduled-native-youtube-job-request"
@@ -1651,6 +2777,7 @@ def test_schedule_publication_rejects_non_public_visibility_in_api_mode(monkeypa
     assert "requires visibility public" in response.text
 
 def test_api_publish_uploads_video_without_manual_url(monkeypatch) -> None:
+    _allow_premium_publish_gate(monkeypatch)
     client = TestClient(app)
     job_id = "api-publish-job"
     topic_request_id = "api-publish-job-request"
@@ -2054,6 +3181,12 @@ def test_publication_dashboard_fragment_focuses_on_growth_analytics() -> None:
     response = client.get("/publication-hub/fragment")
 
     assert response.status_code == 200
+    assert 'data-auto-refresh="true"' in response.text
+    assert 'data-refresh-interval-ms="30000"' in response.text
+    assert 'hx-get="/publication-hub/fragment"' in response.text
+    assert 'hx-trigger="every 30s"' in response.text
+    assert 'hx-sync="this:replace"' in response.text
+    assert "Atualizado " in response.text
     assert "Centro de Crescimento do Canal" in response.text
     assert "Linhas editoriais por retenção" in response.text
     assert "Recomendações rápidas" in response.text
@@ -2435,8 +3568,7 @@ def test_publish_audit_failures_become_automatic_hard_blockers() -> None:
 
     assert blockers == ["source_fact_mismatch", "unsupported_claim", "claim_trace_grounding_missing", "low_retention_hook"]
 
-def test_build_monetization_report_turns_skipped_publish_audit_into_manual_review(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
+def test_build_monetization_report_turns_publish_audit_failure_into_manual_review(monkeypatch) -> None:
     job_id = orchestrator.create_job(
         {
             "seed_theme": "paisagens extremas",
@@ -2500,13 +3632,12 @@ def test_build_monetization_report_turns_skipped_publish_audit_into_manual_revie
         "publish_readiness_report",
         lambda *args, **kwargs: {
             "passed": False,
-            "reasons": ["text_publish_audit_skipped"],
-            "fact_pack_status": "skipped",
+            "reasons": ["minimax_audit_failed"],
+            "fact_pack_status": "limited",
             "hashtag_count": 3,
             "weak_hashtags": [],
-            "fact_risk": {"blocked": False, "claim_count": 0, "simple_shorts_mode": True},
-            "minimax_audit": {"passed": True, "skipped": True},
-            "simple_shorts_mode": True,
+            "fact_risk": {"blocked": False, "claim_count": 0},
+            "minimax_audit": {"passed": False, "reasons": ["minimax_audit_failed"]},
         },
     )
 
@@ -2515,13 +3646,11 @@ def test_build_monetization_report_turns_skipped_publish_audit_into_manual_revie
         assert job is not None
         report = orchestrator.monetization_pipeline.build_monetization_report(session, job)
 
-    assert report["final_status"] == "monetization_review"
+    assert report["final_status"] == "blocked_for_monetization"
     assert report["passed"] is False
-    assert report["hard_blockers"] == []
-    assert "publish_audit_required" in report["manual_required"]
+    assert "minimax_audit_failed" in report["hard_blockers"]
 
 def test_build_monetization_report_allows_manual_publish_audit_confirmation(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
     job_id = orchestrator.create_job(
         {
             "seed_theme": "paisagens extremas",
@@ -2586,12 +3715,11 @@ def test_build_monetization_report_allows_manual_publish_audit_confirmation(monk
         lambda *args, **kwargs: {
             "passed": False,
             "reasons": ["text_publish_audit_skipped"],
-            "fact_pack_status": "skipped",
+            "fact_pack_status": "limited",
             "hashtag_count": 3,
             "weak_hashtags": [],
-            "fact_risk": {"blocked": False, "claim_count": 0, "simple_shorts_mode": True},
+            "fact_risk": {"blocked": False, "claim_count": 0},
             "minimax_audit": {"passed": True, "skipped": True},
-            "simple_shorts_mode": True,
         },
     )
     monkeypatch.setattr(

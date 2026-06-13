@@ -41,6 +41,49 @@
     <span><span class="badge published">Publicado</span> concluído</span>
   </div>
 
+  <section class="calendar-mobile-agenda" aria-label="Agenda em lista">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Próximos dias</p>
+        <h3>Agenda rápida</h3>
+      </div>
+      <p class="section-note">No celular, a lista mostra o que exige ação sem atravessar a grade mensal inteira.</p>
+    </div>
+    <div class="calendar-agenda-list">
+      {% for week in weeks %}
+        {% for day in week %}
+          {% if day.is_current_month and day.entries %}
+          <article class="calendar-agenda-day">
+            <header>
+              <strong>{{ day.day_number }} de {{ month_label }}</strong>
+              <button
+                type="button"
+                class="ghost calendar-cell-action"
+                data-open-calendar-schedule
+                data-calendar-date="{{ day.iso_date }}"
+                data-calendar-label="{{ day.day_number }} de {{ month_label }}"
+              >Agendar</button>
+            </header>
+            {% for entry in day.entries %}
+            <a class="calendar-card" href="/jobs/{{ entry.job_id }}">
+              <strong>{{ entry.title }}</strong>
+              <span>{{ entry.local_time }} · {{ ui.youtube_visibility_label(entry.youtube_visibility) }}</span>
+              <small>{{ schedule_status_label(entry.schedule_status) }} · {{ job_status_label(entry.job_status) }}</small>
+            </a>
+            {% endfor %}
+          </article>
+          {% endif %}
+        {% endfor %}
+      {% endfor %}
+      {% if not scheduled_count and not published_count %}
+      <div class="empty-state-card">
+        <strong>Nenhuma publicação neste mês.</strong>
+        <p>Escolha um dia livre para agendar o próximo vídeo aprovado.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
   <datalist id="calendar_timezones">
     {% for timezone_name in common_schedule_timezones %}
     <option value="{{ timezone_name }}"></option>

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.db import session_scope
 from app.editorial.repetition import build_channel_repetition_report
 from app.job_origin import CREATION_VIA_DAILY_CYCLE, JOB_ORIGIN_AUTOMATIC_TOPIC, JOB_ORIGIN_READY_SCRIPT_BANK
-from app.manual_script import build_ready_script_notes, parse_ready_script
+from app.manual_script import build_ready_script_notes, normalize_ready_script_text, parse_ready_script
 from app.models import (
     AutomationAttempt,
     AutomationRun,
@@ -21,9 +21,12 @@ from app.models import (
     Job,
     PublicationSchedule,
     ReadyScriptItem,
+    RenderOutput,
     Script,
+    SceneAsset,
     TopicRequest,
 )
+from app.quality.auto_visual_review import AutoVisualReviewService
 from app.schemas import TopicRequestCreate
 from app.trends import TrendResearcher
 from app.utils import new_id, stable_hash, utcnow
@@ -34,7 +37,13 @@ AUTOMATION_ENABLED_KEY = "automation_enabled"
 AUTOMATION_SOURCE_READY_SCRIPT = JOB_ORIGIN_READY_SCRIPT_BANK
 AUTOMATION_SOURCE_AUTO_TOPIC = JOB_ORIGIN_AUTOMATIC_TOPIC
 AUTOMATION_SOURCE_RESUME = "resume_publish"
+AUTOMATION_SOURCE_BACKLOG = "publishable_backlog"
 ACTIVE_SCHEDULE_STATUSES = {"scheduled", "publishing", "published"}
+SECONDARY_AUTOMATION_PUBLISH_TIME = "18:00"
+VISUAL_REVIEW_REQUIREMENTS = {"visual_review_required", "asset_visual_review_required"}
+TEXTUAL_REPAIR_REASONS = {"unsupported_claim", "invented_source_fact_ids", "off_topic", "weak_ending"}
+SCENE_PLAN_REPAIR_REASONS = {"disallowed_split_or_collage_composition"}
+SUBTITLE_REPAIR_REASONS = {"p95_timing_drift_too_high", "max_timing_drift_too_high"}
 DEFAULT_AUTOMATION_TOPIC_POOL = [
     "curiosidades espaciais",
     "tecnologia que parece ficcao",
@@ -55,10 +64,26 @@ class ReadyScriptImportResult:
     errors: list[str]
 
 
+@dataclass(frozen=True)
+class PublishSlot:
+    local_date: date
+    local_time: str
+    timezone: str
+
+    @property
+    def scheduled_for_local(self) -> str:
+        return f"{self.local_date.isoformat()}T{self.local_time}"
+
+    def scheduled_for_utc(self) -> datetime:
+        local_tz = ZoneInfo(self.timezone)
+        return datetime.fromisoformat(self.scheduled_for_local).replace(tzinfo=local_tz).astimezone(UTC)
+
+
 class AutomationService:
     def __init__(self, orchestrator: Any) -> None:
         self.orchestrator = orchestrator
         self.settings = orchestrator.settings
+        self.auto_visual_review = AutoVisualReviewService(orchestrator.storage)
 
     def automation_enabled(self, session: Session) -> bool:
         row = session.get(AutomationSetting, AUTOMATION_ENABLED_KEY)
@@ -159,25 +184,62 @@ class AutomationService:
                 run = self._finish_run(run.run_id, status="failed", error="; ".join(preflight["missing_items"]))
                 return serialize_run(run)
 
-            target_day = self._first_vacant_day()
-            if target_day is None:
+            target_slots = self._vacant_publish_slots()
+            if not target_slots:
                 run = self._finish_run(run.run_id, status="skipped", skipped_reason="no_vacant_day")
                 return serialize_run(run)
-            target_local = datetime.fromisoformat(f"{target_day.isoformat()}T{self.settings.automation_publish_time}").replace(tzinfo=local_tz)
-            target_utc = target_local.astimezone(UTC)
-            self._set_run_target(run.run_id, target_day, target_utc)
+            self._set_run_target(run.run_id, target_slots[0].local_date, target_slots[0].scheduled_for_utc())
 
-            resumed = self._resume_publishable_job(run.run_id, target_day)
-            if resumed:
+            scheduled_results: list[dict[str, str]] = []
+            backlog_result = self._run_publishable_backlog(run.run_id, target_slots)
+            if isinstance(backlog_result, list):
+                scheduled_results.extend(backlog_result)
+            elif backlog_result:
                 return serialize_run(self._get_run(run.run_id))
 
-            for attempt_number in range(1, self.settings.automation_max_generation_attempts + 1):
-                attempt_result = self._run_generation_attempt(run.run_id, attempt_number, target_day)
+            remaining_slots = target_slots[len(scheduled_results) :]
+
+            for _ in range(1, self.settings.automation_max_generation_attempts + 1):
+                if not remaining_slots:
+                    break
+                attempt_result = self._run_generation_attempt(
+                    run.run_id,
+                    self._next_attempt_number(run.run_id),
+                    remaining_slots[0],
+                    finish_run=False,
+                )
                 if attempt_result.get("scheduled"):
-                    return serialize_run(self._get_run(run.run_id))
+                    scheduled_results.append(
+                        {
+                            "job_id": str(attempt_result.get("job_id") or ""),
+                            "schedule_id": str(attempt_result.get("schedule_id") or ""),
+                            "scheduled_for_local": remaining_slots[0].scheduled_for_local,
+                        }
+                    )
+                    remaining_slots = remaining_slots[1:]
+                    continue
                 if attempt_result.get("provider_limit"):
-                    return serialize_run(self._finish_run(run.run_id, status="failed", error=str(attempt_result.get("error") or "provider_limit")))
-            return serialize_run(self._finish_run(run.run_id, status="failed", error="max_generation_attempts_exhausted"))
+                    error = str(attempt_result.get("error") or "provider_limit")
+                    if scheduled_results:
+                        return serialize_run(self._finish_successful_schedule_run(run.run_id, scheduled_results, target_slots))
+                    return serialize_run(
+                        self._finish_run(
+                            run.run_id,
+                            status="failed",
+                            error=error,
+                            run_metadata=self._automation_failure_metadata(run.run_id, final_reason=error),
+                        )
+                    )
+            if scheduled_results:
+                return serialize_run(self._finish_successful_schedule_run(run.run_id, scheduled_results, target_slots))
+            return serialize_run(
+                self._finish_run(
+                    run.run_id,
+                    status="failed",
+                    error="max_generation_attempts_exhausted",
+                    run_metadata=self._automation_failure_metadata(run.run_id, final_reason="max_generation_attempts_exhausted"),
+                )
+            )
         except Exception as exc:  # noqa: BLE001
             return serialize_run(self._finish_run(run.run_id, status="failed", error=str(exc)))
 
@@ -219,6 +281,7 @@ class AutomationService:
         error: str | None = None,
         result_job_id: str | None = None,
         result_schedule_id: str | None = None,
+        run_metadata: dict[str, Any] | None = None,
     ) -> AutomationRun:
         with session_scope() as session:
             run = session.get(AutomationRun, run_id)
@@ -228,6 +291,10 @@ class AutomationService:
             run.finished_at = utcnow()
             run.skipped_reason = skipped_reason
             run.error = error
+            if run_metadata:
+                merged_metadata = dict(run.run_metadata or {})
+                merged_metadata.update(run_metadata)
+                run.run_metadata = merged_metadata
             if result_job_id:
                 run.result_job_id = result_job_id
             if result_schedule_id:
@@ -249,6 +316,26 @@ class AutomationService:
             run.target_publish_date = target_day.isoformat()
             run.target_publish_at_utc = target_utc
 
+    def _finish_successful_schedule_run(
+        self,
+        run_id: str,
+        scheduled_results: list[dict[str, str]],
+        target_slots: list[PublishSlot],
+    ) -> AutomationRun:
+        last_result = scheduled_results[-1]
+        return self._finish_run(
+            run_id,
+            status="succeeded",
+            result_job_id=last_result.get("job_id") or None,
+            result_schedule_id=last_result.get("schedule_id") or None,
+            run_metadata={
+                "scheduled_count": len(scheduled_results),
+                "scheduled_jobs": scheduled_results,
+                "vacant_slots_considered": len(target_slots),
+                "publish_times": self._automation_publish_times(),
+            },
+        )
+
     def _youtube_preflight(self) -> dict[str, Any]:
         missing_items: list[str] = []
         if not self.settings.youtube_api_enabled:
@@ -262,7 +349,16 @@ class AutomationService:
         missing_items.extend(item for item in status.missing_items if item not in missing_items)
         return {"passed": not missing_items and status.connected, "missing_items": missing_items, "connected": status.connected}
 
-    def _first_vacant_day(self) -> date | None:
+    def _automation_publish_times(self) -> list[str]:
+        times: list[str] = []
+        for raw_time in [self.settings.automation_publish_time, SECONDARY_AUTOMATION_PUBLISH_TIME]:
+            parsed = datetime.strptime(str(raw_time), "%H:%M")
+            normalized = parsed.strftime("%H:%M")
+            if normalized not in times:
+                times.append(normalized)
+        return times
+
+    def _vacant_publish_slots(self) -> list[PublishSlot]:
         local_tz = ZoneInfo(self.settings.automation_daily_timezone)
         today = datetime.now(local_tz).date()
         with session_scope() as session:
@@ -270,12 +366,19 @@ class AutomationService:
         occupied = set()
         for schedule in rows:
             scheduled_at = schedule.scheduled_for_utc if schedule.scheduled_for_utc.tzinfo else schedule.scheduled_for_utc.replace(tzinfo=UTC)
-            occupied.add(scheduled_at.astimezone(local_tz).date())
-        for offset in range(1, self.settings.automation_fill_window_days + 1):
-            candidate = today + timedelta(days=offset)
-            if candidate not in occupied:
-                return candidate
-        return None
+            local_dt = scheduled_at.astimezone(local_tz)
+            occupied.add((local_dt.date(), local_dt.strftime("%H:%M")))
+        slots: list[PublishSlot] = []
+        for publish_time in self._automation_publish_times():
+            for offset in range(1, self.settings.automation_fill_window_days + 1):
+                candidate = today + timedelta(days=offset)
+                if (candidate, publish_time) not in occupied:
+                    slots.append(PublishSlot(local_date=candidate, local_time=publish_time, timezone=self.settings.automation_daily_timezone))
+        return slots
+
+    def _first_vacant_day(self) -> date | None:
+        slot = next(iter(self._vacant_publish_slots()), None)
+        return slot.local_date if slot else None
 
     def _resume_publishable_job(self, run_id: str, target_day: date) -> bool:
         with session_scope() as session:
@@ -309,40 +412,221 @@ class AutomationService:
         self._finish_run(run_id, status="succeeded", result_job_id=job_id, result_schedule_id=schedule_id)
         return True
 
-    def _run_generation_attempt(self, run_id: str, attempt_number: int, target_day: date) -> dict[str, Any]:
+    def _run_publishable_backlog(self, run_id: str, target_slots: list[PublishSlot] | date) -> list[dict[str, str]]:
+        slots = self._coerce_publish_slots(target_slots)
+        if not slots:
+            return []
+        candidates = self._publishable_backlog_candidates()
+        scheduled_results: list[dict[str, str]] = []
+        for candidate in candidates:
+            if len(scheduled_results) >= len(slots):
+                break
+            job_id = candidate["job_id"]
+            classification = candidate["classification"]
+            attempt = self._create_attempt(run_id, self._next_attempt_number(run_id), AUTOMATION_SOURCE_BACKLOG, job_id=job_id)
+            self._merge_attempt_report(attempt.attempt_id, classification)
+            try:
+                status = candidate["status"]
+                confirmation_codes: list[str] = []
+                if status == "monetization_review":
+                    visual_result = self._run_auto_visual_review(job_id)
+                    self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
+                    if not visual_result["passed"]:
+                        self._finish_attempt(
+                            attempt.attempt_id,
+                            status="not_eligible",
+                            error="automatic_visual_review_failed: " + ", ".join(visual_result["reasons"]),
+                        )
+                        continue
+                    self._refresh_monetization_after_visual_review(job_id)
+                    status = self._job_status(job_id)
+                    confirmation_codes.append("visual_review_confirmed")
+
+                if status == "ready_for_upload":
+                    score_report = self.evaluate_autoapproval(job_id)
+                    self._set_attempt_score(attempt.attempt_id, score_report)
+                    if not score_report["eligible"]:
+                        self._finish_attempt(
+                            attempt.attempt_id,
+                            status="score_failed",
+                            error=self._automation_score_error(AUTOMATION_SOURCE_BACKLOG, score_report["reasons"]),
+                        )
+                        continue
+                elif status != "approved_for_publish":
+                    self._finish_attempt(attempt.attempt_id, status="not_eligible", error=f"job_status={status}")
+                    continue
+
+                target_slot = slots[len(scheduled_results)]
+                schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
+            except Exception as exc:  # noqa: BLE001
+                self._finish_attempt(attempt.attempt_id, status="publish_failed", error=str(exc))
+                continue
+            self._finish_attempt(attempt.attempt_id, status="scheduled")
+            scheduled_results.append(
+                {
+                    "job_id": job_id,
+                    "schedule_id": schedule_id,
+                    "scheduled_for_local": target_slot.scheduled_for_local,
+                }
+            )
+        return scheduled_results
+
+    def _publishable_backlog_candidates(self) -> list[dict[str, Any]]:
+        with session_scope() as session:
+            jobs = session.scalars(
+                select(Job)
+                .where(Job.status.in_(["monetization_review", "ready_for_upload", "approved_for_publish"]))
+                .order_by(Job.updated_at.desc(), Job.created_at.desc())
+                .limit(25)
+            ).all()
+            candidates: list[dict[str, Any]] = []
+            for job in jobs:
+                active_schedule = session.scalar(
+                    select(PublicationSchedule.schedule_id)
+                    .where(PublicationSchedule.job_id == job.job_id)
+                    .where(PublicationSchedule.status.in_(ACTIVE_SCHEDULE_STATUSES))
+                )
+                render_exists = session.scalar(select(RenderOutput.render_id).where(RenderOutput.job_id == job.job_id))
+                package_exists = bool((job.artifact_index or {}).get("publish_package")) or (
+                    self.orchestrator.storage.job_dir(job.job_id, create=False) / "publish_package.json"
+                ).exists()
+                if active_schedule or not render_exists or not package_exists:
+                    continue
+
+                report = self._monetization_report(job)
+                classification = self.classify_failure(job.status, job.failure_reason, report)
+                if job.status == "approved_for_publish":
+                    candidates.append({"job_id": job.job_id, "status": job.status, "classification": classification})
+                    continue
+                if job.status == "ready_for_upload":
+                    if not report.get("hard_blockers"):
+                        candidates.append({"job_id": job.job_id, "status": job.status, "classification": classification})
+                    continue
+                if self._only_safe_visual_review_remains(report):
+                    candidates.append({"job_id": job.job_id, "status": job.status, "classification": classification})
+            return candidates
+
+    def _only_safe_visual_review_remains(self, report: dict[str, Any]) -> bool:
+        manual_required = {str(item) for item in report.get("manual_required") or []}
+        return (
+            not report.get("hard_blockers")
+            and (report.get("publish_readiness") or {}).get("passed") is True
+            and bool(manual_required)
+            and manual_required.issubset(VISUAL_REVIEW_REQUIREMENTS)
+        )
+
+    def _run_auto_visual_review(self, job_id: str) -> dict[str, Any]:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            return self.auto_visual_review.review(session, job)
+
+    def _refresh_monetization_after_visual_review(self, job_id: str) -> dict[str, Any]:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            report = self.orchestrator.monetization_pipeline.build_monetization_report(
+                session,
+                job,
+                {"visual_review_confirmed"},
+            )
+            self.orchestrator.storage.persist_json(
+                job_id,
+                "monetization_report.json",
+                self.orchestrator._serialize_for_json(report),
+            )
+            quality_summary = dict(job.quality_summary or {})
+            quality_summary["monetization"] = {
+                "passed": report["passed"],
+                "final_status": report["final_status"],
+                "hard_blockers": report["hard_blockers"],
+                "manual_required": report["manual_required"],
+                "warnings": report.get("warnings", []),
+                "content_hash": stable_hash(report),
+            }
+            job.quality_summary = quality_summary
+            job.status = str(report["final_status"])
+            return report
+
+    def _run_generation_attempt(
+        self,
+        run_id: str,
+        attempt_number: int,
+        target_slot: PublishSlot | date,
+        *,
+        finish_run: bool = True,
+    ) -> dict[str, Any]:
         selected_script = self._select_ready_script_item()
         source = AUTOMATION_SOURCE_READY_SCRIPT if selected_script else AUTOMATION_SOURCE_AUTO_TOPIC
         attempt = self._create_attempt(run_id, attempt_number, source, ready_script_item_id=selected_script.script_item_id if selected_script else None)
+        job_id: str | None = None
         try:
             payload = self._job_payload_from_ready_script(selected_script) if selected_script else self._automatic_topic_payload()
             job_id = self.orchestrator.create_job(payload)
             self._attach_job_to_attempt(attempt.attempt_id, job_id)
             if selected_script:
-                self._consume_ready_script(selected_script.script_item_id, job_id)
+                self._mark_ready_script_in_progress(selected_script.script_item_id)
             status = self.orchestrator.process_job(job_id)
+            classification = self._classify_job_failure(job_id, status)
+            retry_report = {"attempted": False}
+            if classification.get("retry_from_step"):
+                retry_report = {
+                    "attempted": True,
+                    "from_step": classification["retry_from_step"],
+                    "initial_status": status,
+                }
+                status = self.orchestrator.reprocess_job_from_step(job_id, classification["retry_from_step"])
+                retry_report["result_status"] = status
+                classification = self._classify_job_failure(job_id, status)
+            self._merge_attempt_report(
+                attempt.attempt_id,
+                {
+                    **classification,
+                    "retry": retry_report,
+                },
+            )
+            if status == "monetization_review" and classification["classification"] == "visual_review_repairable":
+                visual_result = self._run_auto_visual_review(job_id)
+                self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
+                if visual_result["passed"]:
+                    self._refresh_monetization_after_visual_review(job_id)
+                    status = self._job_status(job_id)
             if status != "ready_for_upload":
-                error = self._job_status_error(job_id, status)
+                error = self._automation_attempt_error(job_id, status, source)
                 self._finish_attempt(attempt.attempt_id, status="not_eligible", error=error)
                 if selected_script:
-                    self._mark_ready_script_needs_review(selected_script.script_item_id)
+                    self._finalize_ready_script_failure(selected_script.script_item_id, classification, error)
                 return {"scheduled": False, "provider_limit": self._is_provider_limit_error(error), "error": error}
             score_report = self.evaluate_autoapproval(job_id)
             self._set_attempt_score(attempt.attempt_id, score_report)
             if not score_report["eligible"]:
-                self._finish_attempt(attempt.attempt_id, status="score_failed", error="; ".join(score_report["reasons"]))
+                error = self._automation_score_error(source, score_report["reasons"])
+                self._finish_attempt(attempt.attempt_id, status="score_failed", error=error)
                 if selected_script:
-                    self._mark_ready_script_needs_review(selected_script.script_item_id)
+                    self._finalize_ready_script_failure(
+                        selected_script.script_item_id,
+                        {"classification": "editorial_review_required"},
+                        error,
+                    )
                 return {"scheduled": False}
-            schedule_id = self._approve_and_schedule(job_id, target_day)
+            confirmation_codes = ["visual_review_confirmed"] if status == "ready_for_upload" and classification["classification"] == "visual_review_repairable" else []
+            schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
         except Exception as exc:  # noqa: BLE001
             self._finish_attempt(attempt.attempt_id, status="failed", error=str(exc))
             if selected_script:
-                self._mark_ready_script_needs_review(selected_script.script_item_id)
+                self._finalize_ready_script_failure(
+                    selected_script.script_item_id,
+                    {"classification": "technical_retry_pending"},
+                    str(exc),
+                )
             return {"scheduled": False}
         self._finish_attempt(attempt.attempt_id, status="scheduled")
         if selected_script:
-            self._mark_ready_script_scheduled(selected_script.script_item_id)
-        self._finish_run(run_id, status="succeeded", result_job_id=job_id, result_schedule_id=schedule_id)
+            self._mark_ready_script_scheduled(selected_script.script_item_id, job_id)
+        if finish_run:
+            self._finish_run(run_id, status="succeeded", result_job_id=job_id, result_schedule_id=schedule_id)
         return {"scheduled": True, "job_id": job_id, "schedule_id": schedule_id}
 
     def _job_status_error(self, job_id: str, status: str) -> str:
@@ -351,6 +635,127 @@ class AutomationService:
             if job and job.failure_reason:
                 return f"job_status={status}; {job.failure_reason}"
         return f"job_status={status}"
+
+    def _automation_attempt_error(self, job_id: str, status: str, source: str) -> str:
+        base_error = self._job_status_error(job_id, status)
+        if source == AUTOMATION_SOURCE_READY_SCRIPT:
+            return (
+                "Banco de roteiros: roteiro validado pelo usuário. Não houve publish porque o job "
+                f"não ficou tecnicamente publicável ({base_error})"
+            )
+        return f"Tema automático: bloqueado antes do publish ({base_error})"
+
+    def _automation_score_error(self, source: str, reasons: list[str]) -> str:
+        base_error = "; ".join(reasons) or "autoapproval_score_failed"
+        if source == AUTOMATION_SOURCE_READY_SCRIPT:
+            return (
+                "Banco de roteiros: score registrado como diagnóstico. Não houve publish porque "
+                f"restaram bloqueios técnicos ({base_error})"
+            )
+        return f"Tema automático: bloqueado antes do publish pelo score de autoaprovação ({base_error})"
+
+    def _monetization_report(self, job: Job) -> dict[str, Any]:
+        report = self.orchestrator._read_job_json(job.job_id, "monetization_report.json") or {}
+        if report:
+            return report
+        summary = dict((job.quality_summary or {}).get("monetization") or {})
+        return {
+            "passed": summary.get("passed"),
+            "final_status": summary.get("final_status"),
+            "hard_blockers": list(summary.get("hard_blockers") or []),
+            "manual_required": list(summary.get("manual_required") or []),
+            "publish_readiness": dict(summary.get("publish_readiness") or {}),
+        }
+
+    def _classify_job_failure(self, job_id: str, status: str) -> dict[str, Any]:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            return self.classify_failure(status, job.failure_reason, self._monetization_report(job))
+
+    def classify_failure(
+        self,
+        status: str,
+        failure_reason: str | None,
+        monetization_report: dict[str, Any],
+    ) -> dict[str, Any]:
+        evidence = " ".join(
+            [
+                str(failure_reason or ""),
+                " ".join(str(item) for item in monetization_report.get("hard_blockers") or []),
+                " ".join(str(item) for item in monetization_report.get("manual_required") or []),
+                " ".join(str(item) for item in (monetization_report.get("publish_readiness") or {}).get("reasons") or []),
+            ]
+        ).lower()
+        matched_reasons: list[str] = []
+        for reason in sorted(TEXTUAL_REPAIR_REASONS | SCENE_PLAN_REPAIR_REASONS | SUBTITLE_REPAIR_REASONS):
+            if reason in evidence:
+                matched_reasons.append(reason)
+
+        hard_blockers = [str(item) for item in monetization_report.get("hard_blockers") or []]
+        if status == "blocked_for_monetization" or hard_blockers:
+            return {
+                "classification": "hard_blocker",
+                "matched_reasons": matched_reasons or hard_blockers,
+                "retry_from_step": None,
+            }
+        if status == "monetization_review" and self._only_safe_visual_review_remains(monetization_report):
+            return {
+                "classification": "visual_review_repairable",
+                "matched_reasons": list(monetization_report.get("manual_required") or []),
+                "retry_from_step": None,
+            }
+        if status == "script_quality_failed" and any(reason in TEXTUAL_REPAIR_REASONS for reason in matched_reasons):
+            return {
+                "classification": "textual_repairable",
+                "matched_reasons": matched_reasons,
+                "retry_from_step": "script",
+            }
+        if status == "scene_plan_quality_failed" and any(reason in SCENE_PLAN_REPAIR_REASONS for reason in matched_reasons):
+            return {
+                "classification": "scene_plan_repairable",
+                "matched_reasons": matched_reasons,
+                "retry_from_step": "scene_plan",
+            }
+        if status == "subtitle_quality_failed" and any(reason in SUBTITLE_REPAIR_REASONS for reason in matched_reasons):
+            return {
+                "classification": "subtitle_repairable",
+                "matched_reasons": matched_reasons,
+                "retry_from_step": "subtitle_alignment",
+            }
+        if status in {"ready_for_upload", "approved_for_publish"}:
+            return {"classification": "publishable", "matched_reasons": [], "retry_from_step": None}
+        return {"classification": "unclassified_failure", "matched_reasons": matched_reasons, "retry_from_step": None}
+
+    def _automation_failure_metadata(self, run_id: str, *, final_reason: str) -> dict[str, Any]:
+        with session_scope() as session:
+            attempts = session.scalars(
+                select(AutomationAttempt)
+                .where(AutomationAttempt.run_id == run_id)
+                .order_by(AutomationAttempt.attempt_number.asc(), AutomationAttempt.created_at.asc())
+            ).all()
+            blockers = [
+                {
+                    "attempt_number": attempt.attempt_number,
+                    "source": attempt.source,
+                    "source_label": "Banco de roteiros" if attempt.source == AUTOMATION_SOURCE_READY_SCRIPT else "Tema automático",
+                    "job_id": attempt.job_id,
+                    "status": attempt.status,
+                    "reason": attempt.error,
+                }
+                for attempt in attempts
+                if attempt.status not in {"scheduled"} or attempt.error
+            ]
+        return {
+            "final_reason": final_reason,
+            "publish_blockers": blockers,
+            "ready_script_publish_policy": (
+                "Roteiros do banco preservam a aprovação humana do texto. Editorial, factualidade, metadados, "
+                "retenção narrativa, similaridade e score viram diagnóstico; publicação automática só pode parar "
+                "por bloqueios técnicos, visuais, direitos, disclosure, duração, áudio, render ou YouTube."
+            ),
+        }
 
     def _is_provider_limit_error(self, message: str) -> bool:
         normalized = message.lower()
@@ -395,6 +800,13 @@ class AutomationService:
                 run.attempts_used = max(run.attempts_used or 0, attempt_number)
             return attempt
 
+    def _next_attempt_number(self, run_id: str) -> int:
+        with session_scope() as session:
+            run = session.get(AutomationRun, run_id)
+            if not run:
+                raise KeyError(run_id)
+            return int(run.attempts_used or 0) + 1
+
     def _attach_job_to_attempt(self, attempt_id: str, job_id: str) -> None:
         with session_scope() as session:
             attempt = session.get(AutomationAttempt, attempt_id)
@@ -406,7 +818,17 @@ class AutomationService:
             attempt = session.get(AutomationAttempt, attempt_id)
             if attempt:
                 attempt.score = float(score_report.get("score") or 0.0)
-                attempt.score_report = score_report
+                merged_report = dict(attempt.score_report or {})
+                merged_report.update(score_report)
+                attempt.score_report = merged_report
+
+    def _merge_attempt_report(self, attempt_id: str, metadata: dict[str, Any]) -> None:
+        with session_scope() as session:
+            attempt = session.get(AutomationAttempt, attempt_id)
+            if attempt:
+                report = dict(attempt.score_report or {})
+                report.update(metadata)
+                attempt.score_report = report
 
     def _finish_attempt(self, attempt_id: str, *, status: str, error: str | None = None) -> AutomationAttempt:
         with session_scope() as session:
@@ -425,9 +847,9 @@ class AutomationService:
             for item in items:
                 report = self._ready_script_repetition_report(session, item)
                 if report.get("repetition_risk") == "high":
-                    item.last_skip_reason = "high_narrative_similarity"
+                    item.last_skip_reason = "high_narrative_similarity_warning"
                     item.last_similarity_score = float(report.get("max_similarity") or 0.0)
-                    continue
+                    return item
                 item.last_skip_reason = None
                 item.last_similarity_score = None
                 return item
@@ -463,13 +885,14 @@ class AutomationService:
             recent_rows=recent_rows,
         )
 
-    def _consume_ready_script(self, script_item_id: str, job_id: str) -> None:
+    def _mark_ready_script_in_progress(self, script_item_id: str) -> None:
         with session_scope() as session:
             item = session.get(ReadyScriptItem, script_item_id)
             if item:
-                item.status = "consumed"
-                item.consumed_at = utcnow()
-                item.consumed_job_id = job_id
+                item.status = "in_progress"
+                # Preserve diagnostic selection notes such as high narrative similarity.
+                # The final lifecycle transition decides whether the script was scheduled,
+                # released for retry, or needs human review.
 
     def _mark_ready_script_needs_review(self, script_item_id: str) -> None:
         with session_scope() as session:
@@ -477,11 +900,32 @@ class AutomationService:
             if item and item.status != "scheduled":
                 item.status = "needs_review"
 
-    def _mark_ready_script_scheduled(self, script_item_id: str) -> None:
+    def _finalize_ready_script_failure(
+        self,
+        script_item_id: str,
+        classification: dict[str, Any],
+        error: str,
+    ) -> None:
+        failure_class = str(classification.get("classification") or "unclassified_failure")
+        with session_scope() as session:
+            item = session.get(ReadyScriptItem, script_item_id)
+            if not item or item.status == "scheduled":
+                return
+            if failure_class in {"hard_blocker", "textual_repairable", "editorial_review_required"}:
+                item.status = "needs_review"
+            else:
+                item.status = "available"
+            item.last_skip_reason = failure_class
+            item.consumed_job_id = None
+            item.consumed_at = None
+
+    def _mark_ready_script_scheduled(self, script_item_id: str, job_id: str) -> None:
         with session_scope() as session:
             item = session.get(ReadyScriptItem, script_item_id)
             if item:
                 item.status = "scheduled"
+                item.consumed_job_id = job_id
+                item.consumed_at = utcnow()
 
     def _job_payload_from_ready_script(self, item: ReadyScriptItem) -> dict[str, Any]:
         return TopicRequestCreate(
@@ -536,6 +980,7 @@ class AutomationService:
             quality_summary = dict(job.quality_summary or {})
             asset_summary = dict(quality_summary.get("assets") or {})
             qa_metrics = dict(script.qa_metrics or {}) if script else {}
+            ready_script_bank_job = job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK
 
         reasons: list[str] = []
         if job.status != "ready_for_upload":
@@ -577,11 +1022,28 @@ class AutomationService:
         score = max(0.0, round(composite - penalty, 3))
         if score < self.settings.automation_score_threshold:
             reasons.append("automation_score_below_threshold")
+        diagnostic_reasons: list[str] = []
+        if ready_script_bank_job:
+            editorial_diagnostic_reasons = {
+                "high_narrative_similarity",
+                "factual_score_below_threshold",
+                "retention_score_below_threshold",
+                "metadata_score_below_threshold",
+                "automation_score_below_threshold",
+            }
+            diagnostic_reasons = [reason for reason in reasons if reason in editorial_diagnostic_reasons]
+            reasons = [reason for reason in reasons if reason not in editorial_diagnostic_reasons]
         report = {
             "eligible": not reasons,
             "score": score,
             "threshold": self.settings.automation_score_threshold,
             "reasons": list(dict.fromkeys(reasons)),
+            "diagnostic_reasons": list(dict.fromkeys(diagnostic_reasons)),
+            "ready_script_bank_policy": (
+                "score_diagnostic_only"
+                if ready_script_bank_job
+                else "score_blocks_automatic_publication"
+            ),
             "components": {
                 "factual_score": round(factual_score, 3),
                 "retention_score": round(retention_score, 3),
@@ -595,7 +1057,14 @@ class AutomationService:
         self.orchestrator.storage.persist_json(job_id, "autoapproval_score.json", self.orchestrator._serialize_for_json(report))
         return report
 
-    def _approve_and_schedule(self, job_id: str, target_day: date) -> str:
+    def _approve_and_schedule(
+        self,
+        job_id: str,
+        target_slot: PublishSlot | date,
+        *,
+        confirmation_codes: list[str] | None = None,
+    ) -> str:
+        slot = self._coerce_publish_slot(target_slot)
         with session_scope() as session:
             job = session.get(Job, job_id)
             if not job:
@@ -605,18 +1074,19 @@ class AutomationService:
             elif job.status != "approved_for_publish":
                 raise RuntimeError(f"job_status_not_publishable={job.status}")
         if self._job_status(job_id) == "ready_for_upload":
+            reason_codes = ["automation_score_confirmed", *(confirmation_codes or [])]
             self.orchestrator.review_job(
                 {
                     "reviewer_identity": "automation:daily-cycle",
                     "action": "approve",
-                    "reason_codes": ["automation_score_confirmed"],
+                    "reason_codes": list(dict.fromkeys(reason_codes)),
                     "notes": "Aprovado automaticamente por Score de Autoaprovacao.",
                 },
                 job_id,
             )
         payload = {
-            "scheduled_for_local": f"{target_day.isoformat()}T{self.settings.automation_publish_time}",
-            "timezone": self.settings.automation_daily_timezone,
+            "scheduled_for_local": slot.scheduled_for_local,
+            "timezone": slot.timezone,
             "youtube_visibility": "public",
             "notes": "Agendado automaticamente pelo Ciclo Diario de Automacao.",
         }
@@ -634,6 +1104,20 @@ class AutomationService:
             raise last_error
         raise RuntimeError("publication_schedule_failed")
 
+    def _coerce_publish_slot(self, target_slot: PublishSlot | date) -> PublishSlot:
+        if isinstance(target_slot, PublishSlot):
+            return target_slot
+        return PublishSlot(
+            local_date=target_slot,
+            local_time=datetime.strptime(str(self.settings.automation_publish_time), "%H:%M").strftime("%H:%M"),
+            timezone=self.settings.automation_daily_timezone,
+        )
+
+    def _coerce_publish_slots(self, target_slots: list[PublishSlot] | date) -> list[PublishSlot]:
+        if isinstance(target_slots, date):
+            return [self._coerce_publish_slot(target_slots)]
+        return [self._coerce_publish_slot(slot) for slot in target_slots]
+
     def _publication_schedule_id(self, job_id: str) -> str | None:
         with session_scope() as session:
             schedule = session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job_id))
@@ -648,7 +1132,7 @@ class AutomationService:
 
 
 def split_ready_script_batch(raw_text: str) -> list[str]:
-    text = (raw_text or "").strip()
+    text = normalize_ready_script_text(raw_text)
     if not text:
         return []
     starts = [match.start() for match in READY_SCRIPT_SPLIT_RE.finditer(text)]

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.compliance.review import build_human_review_checklist
 from app.db import session_scope
 from app.job_origin import CREATION_VIA_RECREATION, JOB_ORIGIN_UNKNOWN, infer_job_origin_from_notes, normalize_job_origin
-from app.models import ChannelPublication, Job, PerformanceMetric, PublicationSchedule, ReviewRecord, Script, TopicPlan, TopicRequest, YouTubeAnalyticsSnapshot
+from app.models import ChannelPublication, Job, PerformanceMetric, PublicationSchedule, RenderOutput, ReviewRecord, Script, TopicPlan, TopicRequest, YouTubeAnalyticsSnapshot
 from app.pipelines.common import FatalStepError, model_payload
 from app.schemas import PublicationSchedulePayload
 from app.tiktok_api import TikTokIntegrationError
@@ -129,6 +129,13 @@ def build_growth_score(
 class PublicationOperations:
     def __init__(self, owner: Any) -> None:
         self.owner = owner
+        storage = getattr(owner, "storage", None)
+        if storage is None:
+            self.premium_publish_gate = None
+        else:
+            from app.quality.premium_publish_gate import PremiumPublishGate
+
+            self.premium_publish_gate = PremiumPublishGate(settings=owner.settings, storage=storage)
 
     @property
     def settings(self) -> Any:
@@ -458,6 +465,18 @@ class PublicationOperations:
             if not job:
                 raise KeyError(publication.job_id)
             job_id = job.job_id
+            gate_result = self._run_premium_publish_gate(session, job, context="tiktok_publish")
+            if not gate_result.passed:
+                message = self._block_job_for_premium_publish_gate(job, gate_result)
+                publication.status = "publish_failed"
+                publication.last_error = message
+                publication.channel_metadata = {"error": message}
+                publication.last_attempt_at = utcnow()
+                self._refresh_channel_publication_hash(publication)
+                self._persist_channel_publication_artifact(job, publication)
+                self._refresh_retention_state(session, job)
+                session.commit()
+                raise FatalStepError(message)
             package = self.monetization_pipeline.build_publish_package(session, job)
             video_uri = str(package.get("video_uri") or "")
             video_path = path_from_uri(video_uri)
@@ -750,6 +769,59 @@ class PublicationOperations:
         self.storage.persist_json(job.job_id, "monetization_report.json", self._serialize_for_json(report))
         return report
 
+    def _premium_publish_confirmations(self, session: Session, job_id: str, extra_confirmations: set[str] | None = None) -> set[str]:
+        confirmations = set(self.monetization_pipeline.manual_monetization_confirmations(session, job_id))
+        review_records = session.scalars(select(ReviewRecord).where(ReviewRecord.job_id == job_id)).all()
+        for review in review_records:
+            confirmations.update(str(reason) for reason in (review.reason_codes or []) if reason)
+        confirmations.update(extra_confirmations or set())
+        return confirmations
+
+    def _premium_publish_gate_block_message(self, result: Any) -> str:
+        reasons = ", ".join(result.reasons[:6]) if result.reasons else "premium publish gate failed"
+        return f"premium publish gate failed: score={result.score:.1f}, target={result.target_score:.1f}; {reasons}"
+
+    def _run_premium_publish_gate(
+        self,
+        session: Session,
+        job: Job,
+        *,
+        context: str,
+        extra_confirmations: set[str] | None = None,
+    ) -> Any:
+        if self.premium_publish_gate is None:
+            raise FatalStepError("premium publish gate unavailable")
+        confirmations = self._premium_publish_confirmations(session, job.job_id, extra_confirmations)
+        result = self.premium_publish_gate.evaluate(
+            job,
+            confirmations=confirmations,
+            visual_review_required=self.monetization_pipeline.visual_review_required_for_assets(job),
+        )
+        self.premium_publish_gate.persist(job, result, context=context)
+        event_payload = {
+            "context": context,
+            "passed": result.passed,
+            "score": result.score,
+            "target_score": result.target_score,
+            "reasons": result.reasons,
+            "visual_review_required": result.visual_review_required,
+            "visual_review_confirmed": result.visual_review_confirmed,
+        }
+        self._append_event(
+            job.job_id,
+            "premium_publish_gate.passed" if result.passed else "premium_publish_gate.blocked",
+            "succeeded" if result.passed else "failed",
+            event_payload,
+        )
+        return result
+
+    def _block_job_for_premium_publish_gate(self, job: Job, result: Any) -> str:
+        message = self._premium_publish_gate_block_message(result)
+        job.status = "blocked_for_monetization"
+        job.review_state = "blocked"
+        job.failure_reason = message
+        return message
+
     def _upload_publish_package(self, package: dict[str, Any], visibility: str) -> dict[str, Any]:
         video_uri = str(package.get("video_uri") or "").strip()
         if not video_uri:
@@ -983,6 +1055,7 @@ class PublicationOperations:
                     job.quality_summary = quality_summary
                     job.status = report["final_status"]
                     self._refresh_retention_state(session, job)
+                    session.commit()
                     raise FatalStepError(f"monetization readiness incomplete: {', '.join(report['hard_blockers'] + report['manual_required'])}")
                 self.storage.persist_json(job.job_id, "monetization_report.json", self._serialize_for_json(report))
                 quality_summary = dict(job.quality_summary or {})
@@ -995,16 +1068,29 @@ class PublicationOperations:
                     "content_hash": stable_hash(report),
                 }
                 job.quality_summary = quality_summary
+                gate_result = self._run_premium_publish_gate(
+                    session,
+                    job,
+                    context="review_approve",
+                    extra_confirmations=set(payload.get("reason_codes") or []),
+                )
+                if not gate_result.passed:
+                    message = self._block_job_for_premium_publish_gate(job, gate_result)
+                    self._refresh_retention_state(session, job)
+                    session.commit()
+                    raise FatalStepError(message)
                 job.status = "approved_for_publish"
                 job.review_state = "approved"
                 self.topic_pipeline.upsert_topic_registry(session, job_id, approved=True)
                 self._refresh_retention_state(session, job)
+                self._persist_human_review_artifact(job_id, payload, action="approve", review_id=review.review_id)
                 self._append_event(job_id, "review.approved", "succeeded", payload)
                 return None
             if payload["action"] == "reject":
                 job.status = "rejected"
                 job.review_state = "rejected"
                 self._refresh_retention_state(session, job)
+                self._persist_human_review_artifact(job_id, payload, action="reject", review_id=review.review_id)
                 self._append_event(job_id, "review.rejected", "succeeded", payload)
                 return None
             request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job_id))
@@ -1032,7 +1118,34 @@ class PublicationOperations:
             "succeeded",
             {"new_job_id": new_job_id, "retry_mode": "full_clone"},
         )
+        self._persist_human_review_artifact(
+            job_id,
+            {**payload, "new_job_id": new_job_id, "retry_mode": "full_clone"},
+            action="retry",
+            review_id=review.review_id,
+        )
         return new_job_id
+
+    def _persist_human_review_artifact(self, job_id: str, payload: dict[str, Any], *, action: str, review_id: str) -> None:
+        self.storage.persist_json(
+            job_id,
+            "human_review.json",
+            self._serialize_for_json(
+                {
+                    "schema_version": self.settings.schema_version,
+                    "job_id": job_id,
+                    "review_id": review_id,
+                    "created_at": iso_now(),
+                    "action": action,
+                    "reviewer_identity": payload.get("reviewer_identity"),
+                    "reason_codes": payload.get("reason_codes", []),
+                    "notes": payload.get("notes"),
+                    "new_job_id": payload.get("new_job_id"),
+                    "retry_mode": payload.get("retry_mode"),
+                    "content_hash": stable_hash(payload),
+                }
+            ),
+        )
 
     def _validate_review_action(self, job: Job, action: str) -> None:
         reviewable_statuses = {"monetization_review", "blocked_for_monetization", "ready_for_upload"}
@@ -1054,6 +1167,112 @@ class PublicationOperations:
             raise FatalStepError(f"job status {job.status} cannot be rejected")
         if action == "retry" and job.status not in retryable_statuses:
             raise FatalStepError(f"job status {job.status} cannot be retried")
+
+    def approve_premium_for_publish(
+        self,
+        job_id: str,
+        reviewer_identity: str = "tailscale:local-reviewer",
+        *,
+        score_override_confirmed: bool = False,
+    ) -> None:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            self._validate_review_action(job, "approve")
+            render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job_id))
+            if not render:
+                raise FatalStepError("job nao tem render final para substituir pela versao premium")
+            premium_report = self._read_job_json(job_id, "premium_finishing_report.json")
+            premium_video_uri = str(premium_report.get("video_uri") or "").strip()
+            premium_path = path_from_uri(premium_video_uri) if premium_video_uri else self.storage.job_dir(job_id, create=False) / "render" / "premium.mp4"
+            if not premium_path.exists():
+                raise FatalStepError("versao premium ainda nao foi gerada")
+            if not premium_report or not bool(premium_report.get("passed")):
+                raise FatalStepError("versao premium nao passou no gate de acabamento")
+            confirmations = {"premium_version_selected", "visual_review_confirmed"}
+            if score_override_confirmed:
+                confirmations.add("premium_publish_score_accepted")
+            payload = {
+                "reviewer_identity": reviewer_identity,
+                "action": "approve_premium",
+                "reason_codes": sorted(confirmations),
+                "notes": (
+                    "Versao premium selecionada como arquivo final para publicacao; "
+                    "score premium abaixo do alvo aceito por revisao humana explicita."
+                    if score_override_confirmed
+                    else "Versao premium selecionada como arquivo final para publicacao."
+                ),
+            }
+            original_video_uri = render.video_uri
+            render.video_uri = file_uri(premium_path)
+            render.filesize_bytes = premium_path.stat().st_size
+            render.content_hash = stable_hash({"premium_video_uri": render.video_uri, "previous_video_uri": original_video_uri})
+            artifact_index = dict(job.artifact_index or {})
+            job_dir = self.storage.job_dir(job_id, create=False)
+            try:
+                original_render_ref = str(path_from_uri(original_video_uri).resolve().relative_to(job_dir.resolve()))
+            except (OSError, ValueError):
+                original_render_ref = str(artifact_index.get("render") or original_video_uri)
+            if original_render_ref and original_render_ref != "render/premium.mp4":
+                artifact_index["standard_render"] = str(artifact_index.get("standard_render") or original_render_ref)
+            elif not artifact_index.get("standard_render"):
+                artifact_index["standard_render"] = "render/final.mp4"
+            artifact_index["render"] = "render/premium.mp4"
+            artifact_index["premium_video"] = "render/premium.mp4"
+            job.artifact_index = artifact_index
+            report = self.monetization_pipeline.build_monetization_report(session, job, confirmations)
+            if not report["passed"]:
+                self.storage.persist_json(job.job_id, "monetization_report.json", self._serialize_for_json(report))
+                job.status = report["final_status"]
+                self._refresh_retention_state(session, job)
+                raise FatalStepError(f"monetization readiness incomplete: {', '.join(report['hard_blockers'] + report['manual_required'])}")
+            self.storage.persist_json(job.job_id, "monetization_report.json", self._serialize_for_json(report))
+            gate_result = self._run_premium_publish_gate(
+                session,
+                job,
+                context="premium_review_approve",
+                extra_confirmations=confirmations,
+            )
+            if not gate_result.passed:
+                message = self._block_job_for_premium_publish_gate(job, gate_result)
+                self._refresh_retention_state(session, job)
+                session.commit()
+                raise FatalStepError(message)
+            quality_summary = dict(job.quality_summary or {})
+            quality_summary["monetization"] = {
+                "passed": report["passed"],
+                "final_status": report["final_status"],
+                "hard_blockers": report["hard_blockers"],
+                "manual_required": report["manual_required"],
+                "warnings": report["warnings"],
+                "content_hash": stable_hash(report),
+            }
+            quality_summary["selected_render"] = {"variant": "premium", "previous_video_uri": original_video_uri, "video_uri": render.video_uri}
+            job.quality_summary = quality_summary
+            package = self.monetization_pipeline.build_publish_package(session, job)
+            package["selected_render"] = "premium"
+            package["standard_video_uri"] = original_video_uri
+            self.storage.persist_json(job.job_id, "publish_package.json", self._serialize_for_json(package))
+            job.status = "approved_for_publish"
+            job.review_state = "approved"
+            review = ReviewRecord(
+                review_id=new_id(),
+                job_id=job_id,
+                schema_version=self.settings.schema_version,
+                content_hash=stable_hash(payload),
+                created_at=utcnow(),
+                reviewer_identity=reviewer_identity,
+                action="approve_premium",
+                reason_codes=payload["reason_codes"],
+                notes=payload["notes"],
+                retry_step=None,
+            )
+            session.add(review)
+            self.topic_pipeline.upsert_topic_registry(session, job_id, approved=True)
+            self._refresh_retention_state(session, job)
+            self._persist_human_review_artifact(job_id, payload, action="approve_premium", review_id=review.review_id)
+            self._append_event(job_id, "review.premium_approved", "succeeded", {"video_uri": render.video_uri, "previous_video_uri": original_video_uri})
 
     def publish_job(
         self,
@@ -1081,6 +1300,12 @@ class PublicationOperations:
                 self._ensure_youtube_api_ready()
             elif not (str(youtube_video_id or "").strip() or str(youtube_url or "").strip()):
                 raise FatalStepError("manual publish requires youtube_video_id or youtube_url")
+            gate_result = self._run_premium_publish_gate(session, job, context=f"publish_{trigger}")
+            if not gate_result.passed:
+                message = self._block_job_for_premium_publish_gate(job, gate_result)
+                self._refresh_retention_state(session, job, schedule)
+                session.commit()
+                raise FatalStepError(message)
             package = self.monetization_pipeline.build_publish_package(session, job)
             published_at = utcnow()
             if schedule is None:
@@ -1300,6 +1525,12 @@ class PublicationOperations:
                 raise KeyError(job_id)
             if job.status != "approved_for_publish":
                 raise FatalStepError("job must be approved_for_publish before entering the publication schedule")
+            gate_result = self._run_premium_publish_gate(session, job, context="schedule_publication")
+            if not gate_result.passed:
+                message = self._block_job_for_premium_publish_gate(job, gate_result)
+                self._refresh_retention_state(session, job)
+                session.commit()
+                raise FatalStepError(message)
             schedule = session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job_id))
             package = self.monetization_pipeline.build_publish_package(session, job) if self._youtube_api_mode_enabled() and (schedule is None or not schedule.youtube_video_id) else None
             if schedule is not None:

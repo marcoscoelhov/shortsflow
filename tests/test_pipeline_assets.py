@@ -12,9 +12,16 @@ def test_operational_settings_context_separates_scene_planner_from_image_generat
     assert fields["llm_scene_provider"]["label"] == "Planejador de cenas (LLM)"
     assert "nao gera imagens" in fields["llm_scene_provider"]["description"]
     assert "Imagem" in group_names
+    assert "Narracao" in group_names
     assert fields["image_generation_provider"]["label"] == "Gerador de imagens"
     assert fields["image_generation_provider"]["input_type"] == "readonly"
     assert fields["image_generation_provider"]["value"] == "MiniMax"
+    assert fields["tts_primary_provider"]["label"] == "TTS primario"
+    assert fields["tts_primary_provider"]["options"] == [
+        {"value": "gemini_tts", "label": "Gemini TTS"},
+        {"value": "elevenlabs", "label": "ElevenLabs"},
+        {"value": "edge_tts", "label": "Edge TTS (emergencia)"},
+    ]
 
 def test_llm_registry_uses_deepseek_for_repair_and_scene_defaults(monkeypatch) -> None:
     monkeypatch.setattr(
@@ -59,6 +66,25 @@ def test_scene_plan_gate_rejects_generic_prompt_without_no_text_constraint() -> 
     )
     assert not result.passed
     assert any("missing_no_text_constraint" in reason for reason in result.reasons)
+
+def test_scene_plan_gate_rejects_split_screen_composition() -> None:
+    result = ScenePlanGate().validate(
+        [
+            {
+                "scene_id": "scene-1",
+                "order": 1,
+                "narration_text": "A tempestade de Júpiter dura muito mais que um furacão terrestre.",
+                "token_start": 0,
+                "token_end": 10,
+                "primary_subject": "Júpiter",
+                "image_prompt": "split screen showing Earth hurricane and Jupiter storm, no readable text anywhere",
+            }
+        ],
+        expected_scene_count=1,
+    )
+
+    assert not result.passed
+    assert "scene-1:disallowed_split_or_collage_composition" in result.reasons
 
 def test_scene_plan_gate_rejects_hook_intent_that_violates_visual_contract() -> None:
     visual_contract = {
@@ -517,6 +543,21 @@ def test_non_science_visual_domain_removes_scientific_prompt_style() -> None:
     assert "scientific image" not in prompt
     assert "clean vertical cinematic scientific image" not in prompt
 
+
+def test_minimax_safe_image_prompt_includes_shorts_ratio() -> None:
+    prompt = orchestrator.asset_pipeline.image_assets.minimax_safe_image_prompt(
+        "vertical cinematic test of a city scene",
+        {
+            "primary_subject": "cidade abandonada",
+            "topic_hint": "cidade abandonada",
+            "visual_domain": "urban documentary realism",
+            "narration_text": "Uma maquete urbana em miniatura.",
+        },
+    )
+
+    assert "vertical 9:16 frame for YouTube Shorts" in prompt
+
+
 def test_minimax_image_provider_prefers_text_key_before_dedicated_key(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
@@ -557,13 +598,16 @@ def test_minimax_image_provider_falls_back_to_dedicated_key_on_quota(monkeypatch
         minimax_image_api_key="image-key",
         resolved_minimax_image_api_key="image-key",
         minimax_image_base_url="https://image.example/v1/image_generation",
+        minimax_image_aspect_ratio="9:16",
     )
     request = httpx.Request("POST", settings.minimax_image_base_url)
     tiny_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lCw3GQAAAABJRU5ErkJggg=="
     calls: list[str] = []
+    request_payloads: list[dict[str, object]] = []
 
     def fake_post(url, headers, json, timeout):  # noqa: ANN001
         calls.append(headers["Authorization"])
+        request_payloads.append(json)
         if len(calls) == 1:
             return httpx.Response(429, request=request, text="quota exceeded")
         return httpx.Response(
@@ -589,6 +633,37 @@ def test_minimax_image_provider_falls_back_to_dedicated_key_on_quota(monkeypatch
     assert result["provider_metadata"]["fallback_from_text_key"] is True
     assert result["provider_metadata"]["text_key_exhausted_for_job"] is True
     assert second["provider_metadata"]["credential_role"] == "image_dedicated"
+    assert all(payload["aspect_ratio"] == "9:16" for payload in request_payloads)
+
+
+def test_minimax_scene_prompt_ratio_mentioned_for_short_visuals(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_json_completion(self, prompt: str) -> list[dict[str, object]]:
+        captured["prompt"] = prompt
+        return [
+            {
+                "scene_id": "scene-1",
+                "order": 1,
+                "narration_text": "Cena em pt-BR.",
+                "token_start": 0,
+                "token_end": 5,
+                "estimated_duration_sec": 5,
+                "visual_intent": "subject_closeup",
+                "primary_subject": "animal real",
+                "image_prompt": "high-impact vertical first-frame hook of a real animal, no readable text anywhere",
+                "fallback_queries": ["animal real"],
+            }
+        ]
+
+    monkeypatch.setattr(MinimaxCreativeProvider, "_json_completion", fake_json_completion)
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.plan_scenes(
+        {"title": "Teste", "hook": "Um animal muda de aparência.", "full_narration": "Cena em pt-BR.", "estimated_duration_sec": 5},
+        1,
+    )
+
+    assert "9:16" in captured["prompt"]
 
 def test_minimax_image_provider_does_not_use_dedicated_key_for_timeout(monkeypatch, tmp_path) -> None:
     settings = SimpleNamespace(
@@ -1203,6 +1278,35 @@ def test_pipelines_use_explicit_base_dependencies_and_asset_helpers() -> None:
     assert test_orchestrator.monetization_pipeline.build_publish_package.__self__ is test_orchestrator.monetization_pipeline
     assert test_orchestrator.monetization_pipeline.provider_publish_audit.__self__ is test_orchestrator.monetization_pipeline
 
+def test_render_motion_plan_uses_stable_scene_framing() -> None:
+    scenes = [
+        {"scene_id": "scene-1", "order": 1, "actual_start_ms": 0, "actual_end_ms": 10_000},
+        {"scene_id": "scene-2", "order": 2, "actual_start_ms": 10_000, "actual_end_ms": 20_000},
+        {"scene_id": "scene-3", "order": 3, "actual_start_ms": 20_000, "actual_end_ms": 30_000},
+        {"scene_id": "scene-4", "order": 4, "actual_start_ms": 30_000, "actual_end_ms": 40_000},
+    ]
+
+    plan = orchestrator.render_pipeline.build_render_motion_plan("motion-job", scenes)
+
+    assert plan["motion_policy"] == "stable_scene_framing"
+    assert [scene["mode"] for scene in plan["scenes"]] == ["stable_hold", "stable_hold", "stable_hold", "stable_hold"]
+    assert plan["summary"]["enabled"] is False
+    assert plan["summary"]["modes"] == {"stable_hold": 4}
+    assert plan["summary"]["max_zoom_delta"] == 0.0
+    assert plan["scenes"][0]["start_zoom"] == 1.0
+    assert plan["scenes"][1]["start_zoom"] == plan["scenes"][1]["end_zoom"]
+
+def test_render_motion_filter_uses_stable_frames_without_zoompan() -> None:
+    motion = {"start_zoom": 1.0, "end_zoom": 1.0}
+
+    filter_graph = orchestrator.render_pipeline._scene_motion_filter(0, 5.0, motion)
+
+    assert "zoompan" not in filter_graph
+    assert "crop=1080:1920,fps=30" in filter_graph
+    assert "trim=duration=5.000" in filter_graph
+    assert "setpts=PTS-STARTPTS" in filter_graph
+    assert filter_graph.endswith("format=yuv420p[v0]")
+
 def test_scene_timings_fall_back_to_token_boundaries() -> None:
     scenes = [
         {"scene_id": "scene-1", "token_start": 0, "token_end": 9},
@@ -1373,6 +1477,19 @@ def test_subtitle_boundary_repair_can_pull_words_from_next_chunk() -> None:
 
     assert repaired[0]["text"] == "predadores e muda de cor"
     assert repaired[1]["text"] == "em segundos."
+    assert SubtitleGate().validate(repaired, 1.0).passed
+
+def test_subtitle_boundary_repair_resplits_pair_when_weak_ending_cannot_fit_next_word() -> None:
+    items = [
+        {"idx": 11, "start_ms": 25_714, "end_ms": 28_286, "text": "nada, o coração principal para", "token_start": 63, "token_end": 67},
+        {"idx": "12.1", "start_ms": 28_286, "end_ms": 30_214, "text": "temporariamente. Esse movimento", "token_start": 68, "token_end": 70},
+        {"idx": "12.2", "start_ms": 30_214, "end_ms": 30_857, "text": "elegante", "token_start": 71, "token_end": 71},
+    ]
+
+    repaired = orchestrator.asset_pipeline.subtitles.repair_subtitle_item_boundaries(items)
+
+    assert all(not word_tokens(item["text"])[-1].lower() in {"para", "e"} for item in repaired)
+    assert "nada, o coração principal" in [item["text"] for item in repaired]
     assert SubtitleGate().validate(repaired, 1.0).passed
 
 def test_subtitle_split_avoids_semantic_orphan_fragments_from_audit_job() -> None:

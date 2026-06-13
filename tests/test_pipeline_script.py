@@ -38,6 +38,43 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
     assert "[[YTS_READY_SCRIPT_BEGIN]]" in str(captured["notes"])
     assert "ready_script_fact_check_confirmed=true" in str(captured["notes"])
 
+def test_hub_create_job_normalizes_markdown_ready_script(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    ready_script = """**Título**: Venus: o planeta onde um dia dura mais que um ano
+**Hook**: **243 dias** para girar uma vez, mas só 225 para orbitar o Sol.
+**Loop**: Como um planeta pode envelhecer antes de terminar o próprio dia?
+**Beats**:
+Em Venus, o relógio não acompanha o calendário.
+O planeta gira tão devagar que o Sol parece quase travado.
+Enquanto isso, ele completa uma volta inteira ao redor do Sol.
+**Payoff**: O dia venusiano é maior que o ano venusiano.
+**Fechamento**: Em Venus, aniversário chega antes do pôr do sol.
+**Hashtags**: #curiosidades #shorts"""
+
+    def fake_create_job(payload: dict[str, object]) -> str:
+        captured.update(payload)
+        return "job-ready-script-markdown"
+
+    monkeypatch.setattr(main_module.orchestrator, "create_job", fake_create_job)
+    client = TestClient(app)
+    response = client.post(
+        "/jobs",
+        data={
+            "input_mode": "script",
+            "ready_script_text": ready_script,
+            "ready_script_fact_check_confirmed": "true",
+            "target_duration_sec": 35,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/jobs/job-ready-script-markdown"
+    notes = str(captured["notes"])
+    assert "Título: Venus: o planeta onde um dia dura mais que um ano" in notes
+    assert "Hook: 243 dias para girar uma vez" in notes
+    assert "**" not in notes
+
 def test_hub_ready_script_mode_hides_tone_control() -> None:
     client = TestClient(app)
     response = client.get("/")
@@ -101,6 +138,46 @@ Hashtags: #curiosidades #shorts"""
     assert "Terremoto teste lote B" in page.text
     assert "2 disponíveis" in page.text
 
+def test_ready_script_batch_import_normalizes_markdown_blocks() -> None:
+    client = TestClient(app)
+    batch = """**Título**: Lote markdown A
+**Hook**: **Um** roteiro em Markdown ainda deve entrar.
+**Loop**: O formato visual deveria quebrar o banco?
+**Beats**:
+O autor pode colar texto vindo de outra IA.
+A sintaxe muda, mas os rótulos continuam claros.
+**Payoff**: O importador normaliza a sintaxe antes de persistir.
+**Fechamento**: O banco recebe texto canônico.
+**Hashtags**: #curiosidades #shorts
+
+---
+
+**Título**: Lote markdown B
+**Hook**: Outro bloco separado por traços.
+**Loop**: O separador precisa virar bloco novo?
+**Beats**:
+O lote usa três traços entre roteiros.
+Depois da normalização, cada título inicia um bloco.
+**Payoff**: O lote entra como dois roteiros separados.
+**Fechamento**: A importação fica tolerante sem reescrever fatos.
+**Hashtags**: #curiosidades #shorts"""
+
+    response = client.post(
+        "/automation/ready-scripts/import",
+        data={"ready_script_batch": batch, "fact_check_confirmed": "true", "return_to": "/library"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/library?imported=2"
+    with SessionLocal() as session:
+        rows = session.scalars(select(ReadyScriptItem).where(ReadyScriptItem.title.in_(["Lote markdown A", "Lote markdown B"]))).all()
+
+    assert len(rows) == 2
+    assert all(row.status == "available" for row in rows)
+    assert all("**" not in row.raw_text for row in rows)
+    assert all("---" not in row.raw_text for row in rows)
+
 def test_automation_preflight_fails_before_consuming_ready_script() -> None:
     service = AutomationService(orchestrator)
     service.set_automation_enabled(True)
@@ -135,6 +212,8 @@ def test_ready_script_selection_clears_stale_similarity_skip() -> None:
     service = AutomationService(orchestrator)
     item_id = "ready-script-stale-skip"
     with SessionLocal() as session:
+        for item in session.scalars(select(ReadyScriptItem).where(ReadyScriptItem.status == "available")).all():
+            item.status = "needs_review"
         session.add(
             ReadyScriptItem(
                 script_item_id=item_id,
@@ -186,6 +265,58 @@ Hashtags: #curiosidades #shorts""",
     assert item is not None
     assert item.last_skip_reason is None
     assert item.last_similarity_score is None
+
+def test_ready_script_selection_treats_high_similarity_as_warning() -> None:
+    service = AutomationService(orchestrator)
+    item_id = "ready-script-high-similarity-warning"
+    with SessionLocal() as session:
+        for item in session.scalars(select(ReadyScriptItem).where(ReadyScriptItem.status == "available")).all():
+            item.status = "needs_review"
+        session.add(
+            ReadyScriptItem(
+                script_item_id=item_id,
+                schema_version="1.0.0",
+                content_hash="ready-script-high-similarity-warning",
+                status="available",
+                source="test",
+                title="Roteiro do banco com similaridade alta",
+                raw_text="""Título: Roteiro do banco com similaridade alta
+Hook: O banco deve continuar prioritário.
+Loop: Similaridade vira aviso, não fallback.
+Beats:
+- O roteiro já foi validado.
+- O cron não deve gerar tema automático.
+Payoff: Banco disponível continua sendo a fonte primária.
+Fechamento: O sistema registra o risco e segue o fluxo.
+Hashtags: #curiosidades #shorts""",
+                parsed_script={
+                    "title": "Roteiro do banco com similaridade alta",
+                    "hook": "O banco deve continuar prioritário.",
+                    "loop": "Similaridade vira aviso, não fallback.",
+                    "body_beats": ["O roteiro já foi validado.", "O cron não deve gerar tema automático."],
+                    "ending": "O sistema registra o risco e segue o fluxo.",
+                    "full_narration": "O banco deve continuar prioritário. O roteiro já foi validado. O cron não deve gerar tema automático. O sistema registra o risco e segue o fluxo.",
+                    "estimated_duration_sec": 35,
+                },
+                hashtags=["#curiosidades", "#shorts"],
+                fact_check_confirmed=True,
+            )
+        )
+        session.commit()
+
+    service._ready_script_repetition_report = lambda _session, _item: {"repetition_risk": "high", "max_similarity": 0.97}
+
+    selected = service._select_ready_script_item()
+
+    assert selected is not None
+    assert selected.script_item_id == item_id
+    with SessionLocal() as session:
+        item = session.get(ReadyScriptItem, item_id)
+
+    assert item is not None
+    assert item.status == "available"
+    assert item.last_skip_reason == "high_narrative_similarity_warning"
+    assert item.last_similarity_score == 0.97
 
 def test_minimax_script_prompt_requires_pt_br_for_all_text_fields(monkeypatch) -> None:
     captured: dict[str, str] = {}
@@ -812,9 +943,8 @@ def test_script_pipeline_uses_verified_fact_pack_deterministic_fallback(monkeypa
     assert metrics["script_repair_fact_pack_fallback_used"] is True
     assert script["source_fact_ids"] == ["F3", "F4", "F5"]
 
-def test_step_script_disables_simple_prompt_rules_when_fact_pack_is_required(monkeypatch) -> None:
+def test_step_script_uses_strict_prompt_rules_when_fact_pack_is_required(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
-    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", True)
     monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
     captured: dict[str, object] = {}
     job_id = orchestrator.create_job(
@@ -886,7 +1016,6 @@ def test_step_script_disables_simple_prompt_rules_when_fact_pack_is_required(mon
 
         pipeline.step_script(session, job, 1)
 
-    assert captured["simple_shorts_mode"] is False
     assert captured["editorial_mode"] == "factual_strict"
     contract = captured["structured_viral_contract"]
     assert contract["contract_name"] == "Pauta Viral Estruturada"
@@ -1197,25 +1326,23 @@ def test_script_gate_blocks_conservative_filler_visible_text() -> None:
     assert result.passed is False
     assert "placeholder_source_language" in result.reasons
 
-def test_simple_shorts_mode_blocks_critical_script_warnings(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", True)
+def test_strict_script_validation_blocks_critical_script_warnings() -> None:
     script = _base_script(
         "Em geral, depressão danakil mostra uma escala incomum, sem depender de número exato. "
         "O povo Afar vive em uma região extrema de sal, calor e atividade geotérmica. "
         "A cena inicial muda quando você percebe que esse lugar também é casa."
     )
-    plan_dict = {"canonical_topic": "depressão de danakil", "fact_pack": {"status": "skipped", "facts": []}}
+    plan_dict = {"canonical_topic": "depressão de danakil", "fact_pack": {"status": "limited", "facts": []}}
 
     try:
         orchestrator.script_pipeline._validate_or_repair_script(script, plan_dict, 45, "none")
     except RecoverableStepError as exc:
         assert "placeholder_source_language" in str(exc)
     else:
-        raise AssertionError("expected simple mode to block critical script warning")
+        raise AssertionError("expected strict validation to block critical script warning")
 
 def test_text_publish_audit_has_hard_timeout(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
-    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", False)
     monkeypatch.setattr(pipeline.settings, "llm_publish_audit_timeout_sec", 0.01)
 
     def slow_auditor(payload: dict) -> dict:
@@ -1235,7 +1362,6 @@ def test_text_publish_audit_has_hard_timeout(monkeypatch) -> None:
 
 def test_text_publish_audit_allows_resilient_fallback_window(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
-    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", False)
     monkeypatch.setattr(pipeline.settings, "llm_publish_audit_timeout_sec", 0.01)
 
     class ResilientLikeAuditor:
@@ -1259,7 +1385,6 @@ def test_text_publish_audit_allows_resilient_fallback_window(monkeypatch) -> Non
 
 def test_text_publish_audit_ignores_early_weak_hashtags(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
-    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", False)
 
     def auditor(payload: dict) -> dict:
         assert payload["audit_phase"] == "text_before_assets"
@@ -1277,26 +1402,151 @@ def test_text_publish_audit_ignores_early_weak_hashtags(monkeypatch) -> None:
     assert audit["reasons"] == []
     assert audit["ignored_reasons"] == ["weak_hashtags"]
 
-def test_simple_shorts_mode_skips_text_publish_audit(monkeypatch) -> None:
+def test_text_publish_audit_runs_even_when_fact_pack_is_limited(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
-    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", True)
+    calls = {"count": 0}
 
     def auditor(payload: dict) -> dict:
-        raise AssertionError("auditor should be skipped in simple shorts mode")
+        calls["count"] += 1
+        assert payload["fact_pack"]["status"] == "limited"
+        return {"passed": True, "reasons": [], "provider": "test"}
 
     monkeypatch.setattr(orchestrator.providers.creative, "audit_publish_package", auditor)
 
     audit = pipeline._text_publish_audit(
         "job-simple-audit",
         {"title": "Teste", "hook": "Teste", "ending": "Final forte", "full_narration": "Teste simples."},
-        {"status": "skipped", "facts": []},
+        {"status": "limited", "facts": []},
     )
 
-    assert audit == {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True}
+    assert audit["passed"] is True
+    assert audit["provider"] == "test"
+    assert calls["count"] == 1
+
+def test_text_publish_audit_receives_explicit_topic_context(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    captured: dict[str, object] = {}
+
+    def auditor(payload: dict) -> dict:
+        captured.update(payload)
+        return {"passed": True, "reasons": [], "provider": "test"}
+
+    monkeypatch.setattr(orchestrator.providers.creative, "audit_publish_package", auditor)
+
+    audit = pipeline._text_publish_audit(
+        "job-topic-context",
+        {"title": "Polvos", "hook": "O braço se dobra.", "ending": "A dobra era a pista.", "full_narration": "O braço se dobra."},
+        {"status": "verified", "facts": [{"fact_id": "F1", "claim": "A bend propagates along the arm."}]},
+        {"canonical_topic": "movimento dos braços de polvos", "angle": "controle do movimento"},
+    )
+
+    assert audit["passed"] is True
+    assert captured["topic"] == {
+        "canonical_topic": "movimento dos braços de polvos",
+        "angle": "controle do movimento",
+    }
+
+def test_post_audit_repair_is_revalidated_and_reaudited(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    original = _base_script("O braço do polvo parece livre. A dobra viaja pelo braço. No começo, a dobra já era a pista.")
+    repaired = {**original, "ending": "Na segunda olhada, a dobra do começo já explicava o movimento."}
+    calls: list[object] = []
+
+    monkeypatch.setattr(
+        orchestrator.providers.creative,
+        "repair_script",
+        lambda script, reasons, plan: calls.append(("repair", reasons, plan["canonical_topic"])) or repaired,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_validate_or_repair_script",
+        lambda script, *_args, **_kwargs: calls.append(("validate", script["ending"])) or (script, {"script_quality_gate_pass": True}),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_text_publish_audit",
+        lambda job_id, script, fact_pack, topic: calls.append(("audit", topic["canonical_topic"])) or {"passed": True, "reasons": [], "provider": "test"},
+    )
+
+    final_script, metrics, audit, artifact = pipeline._repair_after_text_audit(
+        job_id="job-post-audit-repair",
+        script=original,
+        metrics={"script_quality_gate_pass": True},
+        audit={"passed": False, "reasons": ["weak_ending"], "provider": "test"},
+        plan_dict={
+            "canonical_topic": "movimento dos braços de polvos",
+            "fact_pack": {"status": "verified", "facts": [{"fact_id": "F1", "claim": "A bend propagates along the arm."}]},
+        },
+        target_duration_sec=35,
+        cta_style="none",
+        topic_context={"canonical_topic": "movimento dos braços de polvos"},
+    )
+
+    assert final_script["ending"] == repaired["ending"]
+    assert metrics["text_audit_repair_used"] is True
+    assert metrics["text_audit_repair_initial_reasons"] == ["weak_ending"]
+    assert audit["passed"] is True
+    assert artifact == "text_publish_audit_repair.json"
+    assert [call[0] for call in calls] == ["repair", "validate", "audit"]
+
+def test_post_audit_repair_stays_blocked_when_reaudit_fails(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    original = _base_script("O braço do polvo parece livre. A dobra viaja pelo braço. No começo, a dobra já era a pista.")
+    repaired = {**original, "ending": "Na segunda olhada, a dobra do começo já explicava o movimento."}
+
+    monkeypatch.setattr(orchestrator.providers.creative, "repair_script", lambda *_args, **_kwargs: repaired)
+    monkeypatch.setattr(
+        pipeline,
+        "_validate_or_repair_script",
+        lambda script, *_args, **_kwargs: (script, {"script_quality_gate_pass": True}),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_text_publish_audit",
+        lambda *_args, **_kwargs: {"passed": False, "reasons": ["unsupported_claim"], "provider": "test"},
+    )
+
+    final_script, metrics, audit, artifact = pipeline._repair_after_text_audit(
+        job_id="job-post-audit-repair-failed",
+        script=original,
+        metrics={"script_quality_gate_pass": True},
+        audit={"passed": False, "reasons": ["unsupported_claim"], "provider": "test"},
+        plan_dict={
+            "canonical_topic": "movimento dos braços de polvos",
+            "fact_pack": {"status": "verified", "facts": [{"fact_id": "F1", "claim": "A bend propagates along the arm."}]},
+        },
+        target_duration_sec=35,
+        cta_style="none",
+        topic_context={"canonical_topic": "movimento dos braços de polvos"},
+    )
+
+    assert final_script is original
+    assert metrics == {"script_quality_gate_pass": True}
+    assert audit["passed"] is False
+    assert audit["reasons"] == ["unsupported_claim"]
+    assert artifact == "text_publish_audit_repair.json"
+
+def test_source_fact_id_sanitizer_removes_invented_ids() -> None:
+    script = {
+        "source_fact_ids": ["F1", "F999", "F1"],
+        "claim_trace": [
+            {"text": "Claim válido.", "source_fact_ids": ["F1"], "grounding": "fact_pack"},
+            {"text": "Claim inventado.", "source_fact_ids": ["F999"], "grounding": "fact_pack"},
+        ],
+    }
+
+    sanitized = orchestrator.script_pipeline.repair_domain._sanitize_source_fact_ids(
+        script,
+        {"status": "verified", "facts": [{"fact_id": "F1", "claim": "Claim válido."}]},
+    )
+
+    assert sanitized["source_fact_ids"] == ["F1"]
+    assert sanitized["claim_trace"][0]["source_fact_ids"] == ["F1"]
+    assert sanitized["claim_trace"][1]["source_fact_ids"] == []
+    assert sanitized["claim_trace"][1]["grounding"] == "missing"
 
 def test_ready_script_declared_fact_check_skips_text_publish_audit(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
-    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", False)
 
     def auditor(payload: dict) -> dict:
         raise AssertionError("ready script fact confirmation should not call publish auditor")
@@ -1321,9 +1571,8 @@ def test_ready_script_declared_fact_check_skips_text_publish_audit(monkeypatch) 
         "scope": "ready_script_human_fact_confirmation",
     }
 
-def test_simple_shorts_mode_runs_text_publish_audit_for_verified_fact_pack(monkeypatch) -> None:
+def test_text_publish_audit_runs_for_verified_fact_pack(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
-    monkeypatch.setattr(pipeline.settings, "simple_shorts_mode", True)
     captured: dict[str, object] = {}
 
     def auditor(payload: dict) -> dict:
@@ -1342,12 +1591,11 @@ def test_simple_shorts_mode_runs_text_publish_audit_for_verified_fact_pack(monke
     assert audit["provider"] == "test"
     assert captured["audit_phase"] == "text_before_assets"
 
-def test_simple_shorts_mode_publish_readiness_requires_manual_publish_audit(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
+def test_publish_readiness_blocks_limited_fact_pack_without_manual_review() -> None:
     readiness = orchestrator.monetization_pipeline.publish_readiness_report(
         None,
         SimpleNamespace(canonical_topic="paisagens extremas", angle="curiosidades visuais"),
-        {"status": "skipped", "facts": []},
+        {"status": "limited", "facts": []},
         ["#shorts", "#curiosidades", "#paisagens"],
         {
             "script_gate_pass": True,
@@ -1360,11 +1608,11 @@ def test_simple_shorts_mode_publish_readiness_requires_manual_publish_audit(monk
             **_base_script("Paisagens extremas parecem de outro planeta."),
             "claim_trace": [{"text": "Paisagens extremas parecem de outro planeta.", "source_fact_ids": [], "grounding": "conservative"}],
         },
-        {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True},
+        {"passed": True, "reasons": [], "provider": "test"},
     )
 
     assert readiness["passed"] is False
-    assert readiness["reasons"] == ["text_publish_audit_skipped"]
+    assert "manual_review_required" in readiness["reasons"]
 
 def test_publish_readiness_blocks_asset_visual_gate_failure() -> None:
     readiness = orchestrator.monetization_pipeline.publish_readiness_report(
@@ -1437,12 +1685,11 @@ def test_visual_review_not_required_after_real_vision_check() -> None:
 
     assert orchestrator.monetization_pipeline.visual_review_required_for_assets(job) is False
 
-def test_simple_shorts_mode_publish_readiness_blocks_factual_topic_without_grounding(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
+def test_publish_readiness_blocks_factual_topic_without_fact_pack() -> None:
     readiness = orchestrator.monetization_pipeline.publish_readiness_report(
         None,
         SimpleNamespace(canonical_topic="Suplemento para ansiedade funciona mesmo", angle="saude", quality_metrics={"editorial_mode": "factual_strict"}),
-        {"status": "skipped", "facts": []},
+        {"status": "limited", "facts": []},
         ["#shorts", "#ciencia", "#cerebro"],
         {
             "script_gate_pass": True,
@@ -1453,6 +1700,12 @@ def test_simple_shorts_mode_publish_readiness_blocks_factual_topic_without_groun
         },
         {
             **_base_script("A cafeina bloqueia os receptores de adenosina no cerebro."),
+            "full_narration": (
+                "A cafeina bloqueia os receptores de adenosina no cerebro. "
+                "Esse tema de saude exige lastro factual antes de publicacao automatizada. "
+                "Sem fonte verificada, a automacao deve parar. "
+                "O roteiro tambem menciona suplemento, ansiedade, efeito biologico, mecanismo no corpo humano e uma conclusao que poderia influenciar decisao de saude."
+            ),
             "source_fact_ids": [],
             "claim_trace": [
                 {
@@ -1462,20 +1715,18 @@ def test_simple_shorts_mode_publish_readiness_blocks_factual_topic_without_groun
                 }
             ],
         },
-        {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True},
+        {"passed": True, "reasons": [], "provider": "test"},
     )
 
     assert readiness["passed"] is False
-    assert "text_publish_audit_skipped" in readiness["reasons"]
     assert "fact_pack_missing_for_factual_topic" in readiness["reasons"]
-    assert "claim_trace_grounding_missing" in readiness["reasons"]
+    assert "manual_review_required" in readiness["reasons"]
 
-def test_simple_shorts_mode_publish_readiness_keeps_viral_curiosidades_lightweight(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
+def test_publish_readiness_requires_verified_fact_pack_for_viral_curiosidades() -> None:
     readiness = orchestrator.monetization_pipeline.publish_readiness_report(
         None,
         SimpleNamespace(canonical_topic="Por que os flamingos ficam rosa", angle="curiosidade visual", quality_metrics={"editorial_mode": "viral_curiosidades"}),
-        {"status": "skipped", "facts": []},
+        {"status": "limited", "facts": []},
         ["#shorts", "#curiosidades", "#flamingos"],
         {
             "script_gate_pass": True,
@@ -1489,66 +1740,28 @@ def test_simple_shorts_mode_publish_readiness_keeps_viral_curiosidades_lightweig
             "source_fact_ids": [],
             "claim_trace": [{"text": "Flamingos parecem pintados.", "source_fact_ids": [], "grounding": "conservative"}],
         },
-        {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True},
+        {"passed": True, "reasons": [], "provider": "test"},
     )
 
     assert readiness["passed"] is False
-    assert readiness["reasons"] == ["text_publish_audit_skipped"]
+    assert "manual_review_required" in readiness["reasons"]
 
-def test_simple_shorts_mode_makes_script_gate_non_blocking(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", True)
+def test_strict_validation_keeps_script_gate_blocking() -> None:
     script = _base_script(
         "Você sabia que café tira o sono? "
         "A cafeína muda sua energia. "
         "Agora tudo faz sentido."
     )
-    plan_dict = {"canonical_topic": "café", "fact_pack": {"status": "skipped", "facts": []}}
+    plan_dict = {"canonical_topic": "café", "fact_pack": {"status": "limited", "facts": []}}
 
-    processed, metrics = orchestrator.script_pipeline._validate_or_repair_script(script, plan_dict, 35, "none")
+    try:
+        orchestrator.script_pipeline._validate_or_repair_script(script, plan_dict, 35, "none")
+    except RecoverableStepError as exc:
+        assert "generic_hook_opening" in str(exc) or "weak_ending" in str(exc)
+    else:
+        raise AssertionError("expected RecoverableStepError")
 
-    assert processed["full_narration"]
-    assert metrics["script_quality_gate_pass"] is True
-    assert metrics["script_quality_gate_blocking"] is False
-    assert metrics["simple_shorts_mode"] is True
-
-def test_simple_shorts_mode_runs_local_repair_for_soft_warnings(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", True)
-    script = _base_script("O tema parece simples. Depois a mesma pista fecha melhor no fim.")
-    plan_dict = {"canonical_topic": "tiranossauro rex", "fact_pack": {"status": "skipped", "facts": []}}
-
-    def fake_validate(candidate: dict[str, object], _target_duration_sec: int):
-        if candidate.get("ending") == "Agora o começo fecha melhor no fim.":
-            return SimpleNamespace(
-                passed=True,
-                reasons=[],
-                metrics={"fact_risk": {"blocked": False, "claim_count": 0}},
-            )
-        return SimpleNamespace(
-            passed=False,
-            reasons=["weak_loop_closure", "factual_claim_trace_missing"],
-            metrics={"fact_risk": {"blocked": False, "claim_count": 1}},
-        )
-
-    def fake_postprocess(candidate: dict[str, object], _plan_dict: dict[str, object], gate_reasons: list[str]):
-        if not gate_reasons:
-            return dict(candidate)
-        assert "weak_loop_closure" in gate_reasons
-        updated = dict(candidate)
-        updated["ending"] = "Agora o começo fecha melhor no fim."
-        return updated
-
-    monkeypatch.setattr(orchestrator.script_pipeline.script_gate, "validate", fake_validate)
-    monkeypatch.setattr(orchestrator.script_pipeline.repair_domain, "_postprocess_script_for_quality", fake_postprocess)
-    monkeypatch.setattr(orchestrator.script_pipeline.repair_domain, "_fact_pack_consistency_reasons", lambda *_args, **_kwargs: [])
-
-    processed, metrics = orchestrator.script_pipeline._validate_or_repair_script(script, plan_dict, 45, "none")
-
-    assert processed["ending"] == "Agora o começo fecha melhor no fim."
-    assert metrics["script_quality_gate_warnings"] == []
-    assert metrics["script_repair_attempts_log"][1]["repair_strategy"] == "simple_mode_local"
-
-def test_simple_shorts_mode_verified_fact_pack_keeps_script_gate_blocking(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", True)
+def test_verified_fact_pack_keeps_script_gate_blocking(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator.settings, "llm_script_repair_attempts", 0)
     monkeypatch.setattr(
         orchestrator.script_pipeline.script_gate,
@@ -1576,8 +1789,7 @@ def test_simple_shorts_mode_verified_fact_pack_keeps_script_gate_blocking(monkey
     else:
         raise AssertionError("expected RecoverableStepError")
 
-def test_build_monetization_report_keeps_fact_review_in_simple_mode_with_verified_fact_pack(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", True)
+def test_build_monetization_report_keeps_fact_review_with_verified_fact_pack(monkeypatch) -> None:
     job_id = orchestrator.create_job(
         {
             "seed_theme": "por que cafe tira o sono",
@@ -1953,7 +2165,6 @@ def test_script_gate_rejects_generic_loop_ending_template() -> None:
 
 def test_validate_or_repair_script_recovers_simple_loop_closure(monkeypatch) -> None:
     original_repair_attempts = orchestrator.settings.llm_script_repair_attempts
-    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", False)
     monkeypatch.setattr(orchestrator.settings, "llm_script_repair_attempts", 1)
     monkeypatch.setattr(orchestrator.providers.creative, "repair_script", lambda script, reasons, plan: dict(script))
     script = _base_script(
@@ -1976,7 +2187,6 @@ def test_validate_or_repair_script_recovers_simple_loop_closure(monkeypatch) -> 
     assert "no replay" not in repaired["ending"].lower()
 
 def test_validate_or_repair_script_rewrites_weak_fact_pack_conservatively(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", False)
     monkeypatch.setattr(orchestrator.providers.creative, "repair_script", lambda script, reasons, plan: dict(script))
     script = _base_script(
         "O cérebro apaga exatamente 73% das memórias durante o sono. "
@@ -2077,7 +2287,6 @@ def test_postprocess_conservative_verified_fact_pack_keeps_narration_pt_br() -> 
     assert processed["claim_trace"][0]["source_fact_ids"] == ["F1"]
 
 def test_validate_or_repair_script_accepts_fractional_string_scores(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.settings, "simple_shorts_mode", False)
     monkeypatch.setattr(orchestrator.providers.creative, "repair_script", lambda script, reasons, plan: dict(script))
     script = _base_script(
         "A imagem está parada. Mesmo assim, parece girar. "
@@ -2838,7 +3047,6 @@ def test_build_publish_description_prefers_concise_summary_over_full_narration()
     assert "#shorts #curiosidades #danakil #etiopia #geografia" in description
 
 def test_publish_readiness_blocks_limited_fact_pack_with_invented_source_ids(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.monetization_pipeline.settings, "simple_shorts_mode", False)
     script_artifact = {
         **_base_script(
             "Flamingos ficam rosas por pigmentos na alimentação. "

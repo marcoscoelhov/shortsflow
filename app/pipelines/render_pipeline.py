@@ -15,6 +15,10 @@ from app.pipelines.timeline import normalize_scene_timings
 from app.utils import ensure_dir, file_uri, new_id, path_from_uri, stable_hash, utcnow
 
 
+RENDER_MOTION_FPS = 30
+RENDER_MOTION_MODES = ("stable_hold",)
+
+
 class RenderPipeline(BasePipeline):
     def step_render(self, session: Session, job: Job, attempt: int) -> list[str]:
         scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job.job_id))
@@ -25,6 +29,42 @@ class RenderPipeline(BasePipeline):
             select(SceneAsset).where(SceneAsset.job_id == job.job_id, SceneAsset.selected.is_(True)).order_by(SceneAsset.scene_id)
         ).all()
         assert scene_plan and narration and subtitles and selected_assets
+        if str(getattr(self.settings, "render_primary_backend", "ffmpeg") or "ffmpeg").lower() == "remotion":
+            report = self.owner.premium_finishing.generate_primary_render(session, job.job_id)
+            render_telemetry_file = self._persist_repair_telemetry(
+                job.job_id,
+                "render",
+                {
+                    "job_id": job.job_id,
+                    "attempt": attempt,
+                    "backend": "remotion",
+                    "final_passed": True,
+                    "attempts": [{"strategy": "remotion_primary", "passed": True}],
+                },
+            )
+            quality_summary = dict(job.quality_summary or {})
+            render_metrics = dict(report.get("metrics") or {})
+            quality_summary["render"] = {
+                **render_metrics,
+                "render_gate_pass": True,
+                "duration_ms": render_metrics.get("duration_ms") or narration.duration_ms,
+                "resolution": "1080x1920",
+                "audio_loudness_target_lufs": -16.0,
+                "audio_true_peak_limit_db": -1.5,
+                "background_music_mixed": bool(background_music and background_music.mixed_audio_uri),
+                "render_repair_used": False,
+                "backend": "remotion",
+            }
+            job.quality_summary = quality_summary
+            return [
+                "render/final.mp4",
+                "render/poster.jpg",
+                "render/edit_plan.json",
+                "render/remotion.log",
+                "render_output.json",
+                "premium_finishing_report.json",
+                render_telemetry_file,
+            ]
         final_video = self.storage.job_dir(job.job_id) / "render" / "final.mp4"
         poster = self.storage.job_dir(job.job_id) / "render" / "poster.jpg"
         ffmpeg_log = self.storage.job_dir(job.job_id) / "render" / "ffmpeg.log"
@@ -55,16 +95,15 @@ class RenderPipeline(BasePipeline):
                     }
                 ),
             )
+        motion_plan = self.build_render_motion_plan(job.job_id, scene_segments)
+        motion_artifact = self.storage.persist_json(job.job_id, "render_motion_plan.json", self._serialize_for_json(motion_plan))
         for index, scene in enumerate(scene_segments):
             asset = next(item for item in selected_assets if item.scene_id == scene["scene_id"])
             start = scene["actual_start_ms"] / 1000
             end = scene["actual_end_ms"] / 1000
             duration = max(0.5, end - start)
             command.extend(["-loop", "1", "-t", f"{duration:.3f}", "-i", str(path_from_uri(asset.uri))])
-            filter_parts.append(
-                f"[{index}:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-                f"crop=1080:1920,setsar=1,format=yuv420p[v{index}]"
-            )
+            filter_parts.append(self._scene_motion_filter(index, duration, motion_plan["scenes"][index]))
             concat_inputs.append(f"[v{index}]")
         command.extend(["-i", str(audio_path)])
         filter_parts.append(f"{''.join(concat_inputs)}concat=n={len(selected_assets)}:v=1:a=0[video]")
@@ -130,10 +169,26 @@ class RenderPipeline(BasePipeline):
             "audio_codec": "AAC",
             "filesize_bytes": final_video.stat().st_size,
             "ffmpeg_log_uri": file_uri(ffmpeg_log),
+            "motion_plan_uri": motion_artifact.uri,
+            "motion_summary": motion_plan["summary"],
         }
         session.execute(delete(RenderOutput).where(RenderOutput.job_id == job.job_id))
         session.add(RenderOutput(**model_payload(RenderOutput, payload)))
         self.storage.persist_json(job.job_id, "render_output.json", self._serialize_for_json(payload))
+        primary_artifacts: list[str] = []
+        if str(getattr(self.settings, "render_primary_backend", "ffmpeg") or "ffmpeg").lower() == "remotion":
+            session.flush()
+            try:
+                self.owner.premium_finishing.generate_parallel_version(session, job.job_id)
+                self.owner.premium_finishing.promote_as_primary_render(
+                    session,
+                    job.job_id,
+                    previous_video_uri=file_uri(final_video),
+                    source="render_pipeline_primary",
+                )
+                primary_artifacts = ["render/premium.mp4", "render/edit_plan.json", "premium_finishing_report.json", "render/remotion.log"]
+            except Exception as exc:  # noqa: BLE001
+                raise RecoverableStepError(f"remotion primary render failed: {exc}") from exc
         render_telemetry_file = self._persist_repair_telemetry(
             job.job_id,
             "render",
@@ -154,9 +209,60 @@ class RenderPipeline(BasePipeline):
             "audio_true_peak_limit_db": -1.5,
             "background_music_mixed": bool(background_music and background_music.mixed_audio_uri),
             "render_repair_used": len(render_gate.metrics.get("render_attempts_log", [])) > 1,
+            "motion_summary": motion_plan["summary"],
         }
         job.quality_summary = quality_summary
-        return ["render/final.mp4", "render/poster.jpg", "render/ffmpeg.log", "render_output.json", render_telemetry_file]
+        return [
+            "render/final.mp4",
+            "render/poster.jpg",
+            "render/ffmpeg.log",
+            "render_output.json",
+            "render_motion_plan.json",
+            render_telemetry_file,
+            *primary_artifacts,
+        ]
+
+    def build_render_motion_plan(self, job_id: str, scene_segments: list[dict[str, Any]]) -> dict[str, Any]:
+        scenes: list[dict[str, Any]] = []
+        mode_counts = {mode: 0 for mode in RENDER_MOTION_MODES}
+        for index, scene in enumerate(scene_segments):
+            mode = RENDER_MOTION_MODES[index % len(RENDER_MOTION_MODES)]
+            start_zoom, end_zoom = self._zoom_bounds_for_mode(mode)
+            mode_counts[mode] += 1
+            scenes.append(
+                {
+                    "scene_id": str(scene.get("scene_id") or f"scene-{index + 1}"),
+                    "order": int(scene.get("order") or index + 1),
+                    "mode": mode,
+                    "start_zoom": start_zoom,
+                    "end_zoom": end_zoom,
+                    "fps": RENDER_MOTION_FPS,
+                    "duration_ms": max(500, int(scene.get("actual_end_ms", 0) or 0) - int(scene.get("actual_start_ms", 0) or 0)),
+                }
+            )
+        return {
+            "schema_version": self.settings.schema_version,
+            "job_id": job_id,
+            "motion_policy": "stable_scene_framing",
+            "summary": {
+                "enabled": False,
+                "fps": RENDER_MOTION_FPS,
+                "scene_count": len(scenes),
+                "modes": mode_counts,
+                "max_zoom_delta": 0.0,
+            },
+            "scenes": scenes,
+        }
+
+    def _zoom_bounds_for_mode(self, mode: str) -> tuple[float, float]:
+        return 1.0, 1.0
+
+    def _scene_motion_filter(self, index: int, duration: float, motion: dict[str, Any]) -> str:
+        return (
+            f"[{index}:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+            f"crop=1080:1920,fps={RENDER_MOTION_FPS},"
+            f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v{index}]"
+        )
 
     def render_with_repair(
         self,
