@@ -137,10 +137,16 @@ def _media_src(uri: str, *, media_base_url: str | None, artifacts_dir: Path | No
 
 def _caption_item(item: dict[str, Any]) -> dict[str, Any]:
     text = " ".join(str(item.get("text") or "").split())
+    start_ms = max(0, int(item.get("start_ms") or 0))
+    end_ms = max(1, int(item.get("end_ms") or 0))
     return {
         "idx": str(item.get("idx") or ""),
-        "start_ms": max(0, int(item.get("start_ms") or 0)),
-        "end_ms": max(1, int(item.get("end_ms") or 0)),
+        "startMs": start_ms,
+        "endMs": end_ms,
+        "timestampMs": start_ms,
+        "confidence": None,
+        "start_ms": start_ms,
+        "end_ms": end_ms,
         "text": text,
         "emphasis": _caption_emphasis(text),
     }

@@ -346,6 +346,38 @@ def test_remotion_cli_renderer_uses_absolute_artifact_paths(tmp_path, monkeypatc
     assert log_path.read_text(encoding="utf-8").strip() == "ok"
 
 
+def test_remotion_cli_renderer_rejects_missing_local_media_before_render(tmp_path, monkeypatch) -> None:
+    project_dir = tmp_path / "remotion"
+    remotion_bin = project_dir / "node_modules" / ".bin" / "remotion"
+    entrypoint = project_dir / "src" / "index.ts"
+    remotion_bin.parent.mkdir(parents=True)
+    entrypoint.parent.mkdir(parents=True)
+    remotion_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    entrypoint.write_text("export {};\n", encoding="utf-8")
+    plan_path = tmp_path / "data" / "artifacts" / "job" / "render" / "edit_plan.json"
+    output_path = tmp_path / "data" / "artifacts" / "job" / "render" / "premium.mp4"
+    log_path = tmp_path / "data" / "artifacts" / "job" / "render" / "remotion.log"
+    missing_asset = tmp_path / "data" / "artifacts" / "job" / "assets" / "missing.png"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text(
+        json.dumps(
+            {
+                "scenes": [{"asset_uri": missing_asset.as_uri()}],
+                "audio": {"uri": "https://example.test/audio.mp3"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run(*_args, **_kwargs):
+        raise AssertionError("remotion render should not be called")
+
+    monkeypatch.setattr("app.premium_finishing.subprocess.run", fake_run)
+
+    with pytest.raises(FatalStepError, match="assets locais do Remotion ausentes"):
+        RemotionCliRenderer(project_dir=project_dir).render(plan_path=plan_path, output_path=output_path, log_path=log_path)
+
+
 def test_premium_finishing_gate_accepts_controlled_editorial_motion(tmp_path: Path) -> None:
     class PassingRenderGate:
         def validate(self, video_path: Path, expected_duration_ms: int) -> RenderGateResult:
@@ -425,6 +457,10 @@ def test_finish_plan_limits_caption_emphasis_to_data_only() -> None:
 
     caption = plan["caption_track"]["items"][0]
     assert caption["emphasis"]
+    assert caption["startMs"] == 0
+    assert caption["endMs"] == 35_000
+    assert caption["timestampMs"] == 0
+    assert caption["confidence"] is None
     assert "\n" not in caption["text"]
 
 
@@ -433,19 +469,28 @@ def test_premium_caption_highlight_uses_only_current_word() -> None:
 
     assert "caption.emphasis.includes" not in source
     assert "index === activeWordIndex" in source
+    assert "transition: 'transform" not in source
+    assert "wordHighlightProgress" in source
 
 
-def test_job_detail_shows_manual_premium_action() -> None:
+def test_premium_component_prefers_local_media_for_cli_render() -> None:
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
+
+    assert "scene.asset_uri || scene.asset_src" in source
+    assert "plan.audio.uri || plan.audio.src" in source
+
+
+def test_job_detail_hides_manual_premium_action() -> None:
     job_id = "premium-action"
     _create_rendered_job(job_id)
 
     response = TestClient(app).get(f"/jobs/{job_id}")
 
     assert response.status_code == 200
-    assert "Prova premium" in response.text
-    assert "Gerar versão premium" in response.text
-    assert f'action="/jobs/{job_id}/premium-finish"' in response.text
-    assert 'data-premium-progress' in response.text
+    assert "Comparar acabamento editorial" not in response.text
+    assert "Gerar versão premium" not in response.text
+    assert f'action="/jobs/{job_id}/premium-finish"' not in response.text
+    assert "data-premium-progress" not in response.text
 
 
 def test_premium_action_route_starts_background_generation(monkeypatch) -> None:
@@ -470,7 +515,7 @@ def test_premium_action_route_starts_background_generation(monkeypatch) -> None:
     assert details["premium_finishing"]["running"] is True
 
 
-def test_job_detail_polls_and_shows_premium_progress_when_generation_is_running() -> None:
+def test_job_detail_hides_premium_progress_when_generation_is_running() -> None:
     job_id = "premium-progress"
     _create_rendered_job(job_id)
     orchestrator.premium_finishing.mark_running(job_id, phase="rendering", detail="Render premium em andamento")
@@ -478,13 +523,13 @@ def test_job_detail_polls_and_shows_premium_progress_when_generation_is_running(
     response = TestClient(app).get(f"/jobs/{job_id}")
 
     assert response.status_code == 200
-    assert 'hx-trigger="every 4s"' in response.text
-    assert "Gerando versão premium" in response.text
-    assert "Render premium em andamento" in response.text
-    assert 'data-premium-progress' in response.text
+    assert 'hx-trigger="every 4s"' not in response.text
+    assert "Gerando versão premium" not in response.text
+    assert "Render premium em andamento" not in response.text
+    assert "data-premium-progress" not in response.text
 
 
-def test_job_detail_shows_premium_comparison_when_parallel_video_exists() -> None:
+def test_job_detail_hides_premium_comparison_when_parallel_video_exists() -> None:
     job_id = "premium-comparison"
     _create_rendered_job(job_id)
     premium_path = _write_job_artifact(job_id, "render/premium.mp4", "premium")
@@ -498,11 +543,11 @@ def test_job_detail_shows_premium_comparison_when_parallel_video_exists() -> Non
     response = TestClient(app).get(f"/jobs/{job_id}")
 
     assert response.status_code == 200
-    assert "Versão premium" in response.text
-    assert "Critérios aprovados" in response.text
-    assert "Abrir premium" in response.text
-    assert "Aprovar premium e liberar agenda" in response.text
-    assert f'action="/jobs/{job_id}/premium-approve"' in response.text
+    assert "Versão premium" not in response.text
+    assert "Critérios aprovados" not in response.text
+    assert "Abrir premium" not in response.text
+    assert "Aprovar premium e liberar agenda" not in response.text
+    assert f'action="/jobs/{job_id}/premium-approve"' not in response.text
 
 
 def test_premium_approval_promotes_premium_video_to_publish_package(monkeypatch) -> None:

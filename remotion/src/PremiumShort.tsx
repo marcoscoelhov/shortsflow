@@ -1,5 +1,7 @@
 import React from 'react';
-import {AbsoluteFill, Audio, Img, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig} from 'remotion';
+import type {Caption as RemotionCaption} from '@remotion/captions';
+import {Audio} from '@remotion/media';
+import {AbsoluteFill, Img, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig} from 'remotion';
 
 type SceneMotion = {
   kind: string;
@@ -34,12 +36,11 @@ type ScenePlan = {
   overlays: SceneOverlay[];
 };
 
-type CaptionItem = {
+type CaptionItem = RemotionCaption & {
   idx: string;
-  start_ms: number;
-  end_ms: number;
-  text: string;
   emphasis: string[];
+  start_ms?: number;
+  end_ms?: number;
 };
 
 export type FinishPlan = {
@@ -68,9 +69,10 @@ export type FinishPlan = {
 export const PremiumShort: React.FC<FinishPlan> = (plan) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
+  const audioSource = plan.audio.uri || plan.audio.src || '';
   const activeCaption = plan.caption_track.items.find((item) => {
-    const start = msToFrame(item.start_ms, fps);
-    const end = msToFrame(item.end_ms, fps);
+    const start = msToFrame(captionStartMs(item), fps);
+    const end = msToFrame(captionEndMs(item), fps);
     return frame >= start && frame < end;
   });
 
@@ -81,7 +83,7 @@ export const PremiumShort: React.FC<FinishPlan> = (plan) => {
       ))}
       <Vignette />
       {activeCaption ? <Caption caption={activeCaption} plan={plan} fps={fps} /> : null}
-      {plan.audio.src || plan.audio.uri ? <Audio src={plan.audio.src || plan.audio.uri} /> : null}
+      {audioSource ? <Audio src={audioSource} /> : null}
     </AbsoluteFill>
   );
 };
@@ -124,12 +126,13 @@ const SceneLayer: React.FC<{scene: ScenePlan; fps: number; accent: string}> = ({
     : scene.retention_role === 'turn_or_payoff' || scene.retention_role === 'loop_close'
       ? 'contrast(1.1) saturate(1.08)'
       : 'contrast(1.04) saturate(1.04)';
+  const assetSource = scene.asset_uri || scene.asset_src || scene.asset_path;
 
   return (
     <Sequence from={startFrame} durationInFrames={durationFrames + transitionFrames}>
       <AbsoluteFill style={{opacity, clipPath}}>
         <Img
-          src={scene.asset_src || scene.asset_uri}
+          src={assetSource}
           style={{
             width: '100%',
             height: '100%',
@@ -200,8 +203,8 @@ const Overlay: React.FC<{overlay: SceneOverlay; fps: number; localFrame: number;
 
 const Caption: React.FC<{caption: CaptionItem; plan: FinishPlan; fps: number}> = ({caption, plan, fps}) => {
   const frame = useCurrentFrame();
-  const start = msToFrame(caption.start_ms, fps);
-  const end = msToFrame(caption.end_ms, fps);
+  const start = msToFrame(captionStartMs(caption), fps);
+  const end = msToFrame(captionEndMs(caption), fps);
   const words = caption.text.split(' ');
   const localProgress = Math.min(0.999, Math.max(0, (frame - start) / Math.max(1, end - start)));
   const activeWordIndex = weightedActiveWordIndex(words, localProgress);
@@ -245,14 +248,14 @@ const Caption: React.FC<{caption: CaptionItem; plan: FinishPlan; fps: number}> =
       >
         {words.map((word, index) => {
           const emphasized = index === activeWordIndex;
+          const highlight = wordHighlightProgress(frame, start, end, index, words.length);
           return (
             <React.Fragment key={`${word}-${index}`}>
               <span
                 style={{
                   display: 'inline-block',
                   color: emphasized ? 'oklch(0.86 0.17 88)' : plan.style.palette.text,
-                  transform: index === activeWordIndex ? 'translateY(-2px) scale(1.06)' : 'translateY(0) scale(1)',
-                  transition: 'transform 35ms linear, color 35ms linear'
+                  transform: `translateY(${-2 * highlight}px) scale(${1 + 0.06 * highlight})`
                 }}
               >
                 {word}
@@ -303,6 +306,10 @@ const Vignette: React.FC = () => (
 
 const msToFrame = (ms: number, fps: number) => Math.round((ms / 1000) * fps);
 
+const captionStartMs = (caption: CaptionItem) => caption.startMs ?? caption.start_ms ?? 0;
+
+const captionEndMs = (caption: CaptionItem) => caption.endMs ?? caption.end_ms ?? Math.max(1, captionStartMs(caption) + 1);
+
 const easeInOutCubic = (value: number) => {
   const t = Math.min(1, Math.max(0, value));
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -327,6 +334,17 @@ const weightedActiveWordIndex = (words: string[], progress: number) => {
     }
   }
   return words.length - 1;
+};
+
+const wordHighlightProgress = (frame: number, start: number, end: number, index: number, wordCount: number) => {
+  const duration = Math.max(1, end - start);
+  const wordStart = start + (duration * index) / Math.max(1, wordCount);
+  const wordEnd = start + (duration * (index + 1)) / Math.max(1, wordCount);
+  const ramp = Math.max(2, Math.min(5, Math.round(duration / Math.max(1, wordCount) / 4)));
+  return interpolate(frame, [wordStart - ramp, wordStart, wordEnd, wordEnd + ramp], [0, 1, 1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  });
 };
 
 const transitionOffset = (kind: string, progress: number) => {

@@ -60,6 +60,7 @@ class RemotionCliRenderer:
             "--log",
             "info",
         ]
+        self._preflight_local_media(resolved_plan_path)
         ensure_dir(resolved_output_path.parent)
         try:
             result = subprocess.run(
@@ -77,6 +78,37 @@ class RemotionCliRenderer:
         if result.returncode != 0:
             raise FatalStepError("render premium falhou no Remotion CLI")
         return command
+
+    def _preflight_local_media(self, plan_path: Path) -> None:
+        try:
+            plan = read_json(plan_path)
+        except Exception as exc:  # noqa: BLE001
+            raise FatalStepError("plano de acabamento Remotion invalido ou ilegivel") from exc
+        if not isinstance(plan, dict):
+            raise FatalStepError("plano de acabamento Remotion invalido")
+        missing: list[str] = []
+        for scene in plan.get("scenes") or []:
+            if not isinstance(scene, dict):
+                continue
+            media_path = self._local_media_path(str(scene.get("asset_uri") or scene.get("asset_path") or ""))
+            if media_path and not media_path.exists():
+                missing.append(str(media_path))
+        audio = plan.get("audio") if isinstance(plan.get("audio"), dict) else {}
+        media_path = self._local_media_path(str(audio.get("uri") or audio.get("path") or ""))
+        if media_path and not media_path.exists():
+            missing.append(str(media_path))
+        if missing:
+            preview = ", ".join(missing[:4])
+            suffix = f" e mais {len(missing) - 4}" if len(missing) > 4 else ""
+            raise FatalStepError(f"assets locais do Remotion ausentes: {preview}{suffix}")
+
+    def _local_media_path(self, value: str) -> Path | None:
+        if not value:
+            return None
+        if value.startswith("file://"):
+            return path_from_uri(value)
+        path = Path(value)
+        return path if path.is_absolute() else None
 
     def _process_text(self, value: str | bytes | None) -> str:
         if value is None:
