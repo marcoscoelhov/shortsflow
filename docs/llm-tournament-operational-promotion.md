@@ -36,3 +36,25 @@ Usar o **Relatorio de Decisao do Torneio** para orientar roteamento de LLMs sem 
 ```bash
 pytest -q tests/test_llm_tournament.py tests/test_llm_tournament_probe.py tests/test_llm_tournament_runner.py
 ```
+
+## Notas para a proxima rodada full
+
+Melhorias que nao mudam o criterio do torneio:
+
+- Manter tarefas intercaladas por caso, fixture e candidato para evitar que um provider lento monopolize a fila.
+- Usar paralelismo alto como padrao operacional (`--parallelism 24`) e registrar o valor usado no relatorio da rodada.
+- Continuar separando ranking por etapa (`script`, `repair`, `audit`), porque o melhor gerador nao necessariamente e o melhor juiz.
+- Medir tempo por etapa e por candidato no relatorio para diferenciar gargalo local, timeout de API e corte por budget.
+
+Melhorias que mudam politica e exigem nova rodada comparavel:
+
+- Avaliar `timeout-sec` e `failure_budget` mais agressivos por provider lento, principalmente quando a falha recorrente for timeout ou `provider_limit`.
+- Considerar thresholds por tipo de fixture em `audit`; `missed_expected_issue` deve pesar mais que falso positivo simples.
+- Promover juiz de `audit` separadamente do provider de `script` e `repair`; nao usar vencedor geral unico se as etapas divergirem.
+- Fazer rerun apos ajuste de quota/cap de provider antes de comparar modelos eliminados por `failure_budget_exceeded`.
+
+Pendencias externas antes de outra rodada full:
+
+- Gemini esta autenticando, mas retornou `RESOURCE_EXHAUSTED` por cap mensal do projeto associado a chave.
+- DeepSeek respondeu em parte da rodada, mas teve timeouts; validar limite operacional antes de concluir que e problema de credito.
+- MiniMax usa a mesma familia de API ja configurada, mas precisa ser avaliado por etapa porque M2 e M3 tiveram comportamento diferente em `audit`.
