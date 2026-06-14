@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0.0",
+  "price_table_id": "llm-prices-2026-06-14-v1",
+  "effective_date": "2026-06-14",
+  "currency": "USD",
+  "source": "Official provider pricing pages checked on 2026-06-14. Entries are included only when the exact or documented billing-equivalent model line was found.",
+  "prices": [
+    {
+      "candidate_id": "openai-gpt-5.5-medium",
+      "input_usd_per_1m_tokens": 1.25,
+      "output_usd_per_1m_tokens": 10.0,
+      "source": "https://platform.openai.com/docs/pricing"
+    },
+    {
+      "candidate_id": "openai-gpt-5.4-nano",
+      "input_usd_per_1m_tokens": 0.05,
+      "output_usd_per_1m_tokens": 0.4,
+      "source": "https://platform.openai.com/docs/pricing"
+    },
+    {
+      "candidate_id": "gemini-3.1-pro",
+      "input_usd_per_1m_tokens": 2.0,
+      "output_usd_per_1m_tokens": 12.0,
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "notes": "Uses the <=200k-token Gemini 3.1 Pro text/image/video rate."
+    },
+    {
+      "candidate_id": "gemini-3.5-flash",
+      "input_usd_per_1m_tokens": 0.5,
+      "output_usd_per_1m_tokens": 3.0,
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    {
+      "candidate_id": "deepseek-v4-flash",
+      "input_usd_per_1m_tokens": 0.14,
+      "output_usd_per_1m_tokens": 0.28,
+      "source": "https://api-docs.deepseek.com/quick_start/pricing",
+      "notes": "Uses cache-miss input price because the tournament does not assume provider cache hits."
+    },
+    {
+      "candidate_id": "deepseek-v4-pro",
+      "input_usd_per_1m_tokens": 0.435,
+      "output_usd_per_1m_tokens": 0.87,
+      "source": "https://api-docs.deepseek.com/quick_start/pricing",
+      "notes": "Uses cache-miss input price because the tournament does not assume provider cache hits."
+    },
+    {
+      "candidate_id": "qwen3.5-plus",
+      "input_usd_per_1m_tokens": 0.4,
+      "output_usd_per_1m_tokens": 1.2,
+      "source": "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+    },
+    {
+      "candidate_id": "minimax-m3",
+      "input_usd_per_1m_tokens": 0.56,
+      "output_usd_per_1m_tokens": 1.68,
+      "source": "https://www.minimax.io/platform/pricing"
+    }
+  ],
+  "unpriced_candidates": [
+    {
+      "candidate_id": "kimi-k2.6",
+      "reason": "Exact official USD input/output price was not confirmed from a stable provider pricing page."
+    },
+    {
+      "candidate_id": "kimi-k2.7-code",
+      "reason": "Exact official USD input/output price was not confirmed from a stable provider pricing page."
+    },
+    {
+      "candidate_id": "qwen3.7-max",
+      "reason": "Exact model-line price was not confirmed; do not reuse another Qwen Max rate without official mapping."
+    },
+    {
+      "candidate_id": "grok-4.20-non-reasoning",
+      "reason": "Exact official model-line price was not confirmed."
+    },
+    {
+      "candidate_id": "grok-4.20-reasoning",
+      "reason": "Exact official model-line price was not confirmed."
+    },
+    {
+      "candidate_id": "grok-4.3",
+      "reason": "Exact official model-line price was not confirmed."
+    },
+    {
+      "candidate_id": "glm-4.7",
+      "reason": "Official price page did not yield a reliable USD input/output mapping for this exact model."
+    },
+    {
+      "candidate_id": "glm-5.1",
+      "reason": "Official price page did not yield a reliable USD input/output mapping for this exact model."
+    },
+    {
+      "candidate_id": "glm-5",
+      "reason": "Official price page did not yield a reliable USD input/output mapping for this exact model."
+    },
+    {
+      "candidate_id": "glm-5-turbo",
+      "reason": "Official price page did not yield a reliable USD input/output mapping for this exact model."
+    },
+    {
+      "candidate_id": "minimax-m2",
+      "reason": "Exact official model-line price was not confirmed."
+    }
+  ]
+}
