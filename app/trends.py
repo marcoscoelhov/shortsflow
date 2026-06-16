@@ -20,8 +20,19 @@ class TrendCandidate:
     raw_title: str
     familiarity_score: float = 0.0
     source_title: str | None = None
+    hook_seed: str | None = None
+    visual_seed: str | None = None
+    why: list[str] | None = None
 
     def as_notes(self) -> str:
+        extra_parts = []
+        if self.hook_seed:
+            extra_parts.append(f"topic_hook_seed={self.hook_seed}")
+        if self.visual_seed:
+            extra_parts.append(f"topic_visual_seed={self.visual_seed}")
+        if self.why:
+            extra_parts.append(f"topic_scout_why={','.join(self.why)}")
+        extra = "\n" + "\n".join(extra_parts) if extra_parts else ""
         return (
             "trend_research=real_source\n"
             f"trend_source={self.source}\n"
@@ -29,7 +40,8 @@ class TrendCandidate:
             f"trend_score={self.score:.3f}\n"
             f"trend_familiarity_score={self.familiarity_score:.3f}\n"
             f"trend_raw_title={self.raw_title}\n"
-            f"trend_source_title={self.source_title or self.raw_title}\n"
+            f"trend_source_title={self.source_title or self.raw_title}"
+            f"{extra}\n"
             "Priorize conexão imediata com temas familiares/do dia a dia. Evite obscuridade, exceto se o fato tiver payoff visual ou curiosidade muito forte. "
             "Use esta tendência como ponto de partida, mas mantenha fact-check e linguagem conservadora."
         )
@@ -45,6 +57,9 @@ class TrendCandidate:
             "raw_title": self.raw_title,
             "source_title": self.source_title or self.raw_title,
             "familiarity_score": self.familiarity_score,
+            "hook_seed": self.hook_seed,
+            "visual_seed": self.visual_seed,
+            "why": self.why or [],
         }
 
 

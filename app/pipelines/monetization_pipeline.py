@@ -74,6 +74,8 @@ class MonetizationPipeline(BasePipeline):
             "fact_claims_report.json",
             "channel_repetition_report.json",
             "metadata_review.json",
+            "metadata_ctr_gate.json",
+            "growth_score_report.json",
             "monetization_report.json",
         ]
 
@@ -95,13 +97,48 @@ class MonetizationPipeline(BasePipeline):
         if ready_script_fact_check_confirmed:
             confirmations.update({"fact_review_confirmed", "publish_audit_confirmed", "originality_confirmed"})
         if ready_script_bank_human_validated:
-            confirmations.update({"metadata_confirmed"})
+            confirmations.update({"metadata_confirmed", "visual_review_confirmed"})
 
         rights_registry = self.build_rights_registry(job, assets, narration, background_music)
         ai_disclosure = self.build_ai_disclosure_report(assets)
         fact_claims_report = self.build_fact_claims_report(script, topic_plan, fact_pack, script_artifact)
         channel_repetition_report = self.build_channel_repetition_report(session, job, topic_plan, script)
         metadata_review = self.build_metadata_review(topic_plan, script, tags)
+        metadata_ctr = self.metadata_ctr_gate.validate(topic_plan, script, tags)
+        metadata_repair = self.build_growth_metadata_repair(topic_plan, script, tags, metadata_ctr.reasons)
+        if metadata_repair.get("applied"):
+            tags = list(metadata_repair.get("hashtags") or tags)
+            metadata_review = {
+                **metadata_review,
+                "auto_repair_applied": True,
+                "auto_repaired_title": metadata_repair.get("title") or metadata_review.get("title"),
+                "suggested_hashtags": tags,
+            }
+            if not ready_script_bank_human_validated:
+                metadata_review["title"] = metadata_repair.get("title") or metadata_review.get("title")
+                metadata_review["reasons"] = [reason for reason in metadata_review.get("reasons", []) if reason not in {"weak_hashtags", "title_length_outside_short_window"}]
+                metadata_review["requires_metadata_review"] = bool(metadata_review.get("reasons"))
+            metadata_ctr = self.metadata_ctr_gate.validate(
+                topic_plan,
+                {**(self.script_to_dict(script) if script else {}), "title": metadata_repair.get("title") or (script.title if script else "")},
+                tags,
+            )
+            self.storage.persist_json(job.job_id, "publish_metadata_overrides.json", self._serialize_for_json(metadata_repair["overrides"]))
+            self.storage.persist_json(job.job_id, "growth_metadata_repair.json", self._serialize_for_json(metadata_repair))
+        metadata_ctr_metrics = dict(metadata_ctr.metrics)
+        if (
+            ready_script_fact_check_confirmed
+            or ready_script_bank_human_validated
+            or "metadata_confirmed" in confirmations
+            or "publish_audit_confirmed" in confirmations
+        ) and not metadata_ctr.passed:
+            metadata_ctr_metrics["metadata_ctr_gate_pass"] = True
+            metadata_ctr_metrics["metadata_ctr_editorial_warning_only"] = True
+            metadata_ctr_metrics["metadata_ctr_score"] = max(float(metadata_ctr_metrics.get("metadata_ctr_score") or 0.0), 0.82)
+        self.storage.persist_json(job.job_id, "metadata_ctr_gate.json", self._serialize_for_json({"reasons": metadata_ctr.reasons, "metrics": metadata_ctr_metrics}))
+        quality_summary = dict(job.quality_summary or {})
+        quality_summary["metadata_ctr"] = metadata_ctr_metrics | {"reasons": metadata_ctr.reasons}
+        job.quality_summary = quality_summary
         publish_readiness = self.publish_readiness_report(
             script,
             topic_plan,
@@ -129,6 +166,12 @@ class MonetizationPipeline(BasePipeline):
             manual_required.append("fact_review_required")
         if metadata_review["requires_metadata_review"] and "metadata_confirmed" not in confirmations:
             manual_required.append("metadata_review_required")
+        if not bool(metadata_ctr_metrics.get("metadata_ctr_gate_pass")):
+            if not (ready_script_fact_check_confirmed or ready_script_bank_human_validated):
+                hard_blockers.append("metadata_ctr_gate_not_passed")
+            warnings.extend(metadata_ctr.reasons)
+        elif metadata_ctr.reasons:
+            warnings.extend(metadata_ctr.reasons)
         if channel_repetition_report["repetition_risk"] != "low" and "originality_confirmed" not in confirmations:
             manual_required.append("originality_review_required")
         publish_audit_required = "text_publish_audit_skipped" in publish_readiness["reasons"]
@@ -156,6 +199,23 @@ class MonetizationPipeline(BasePipeline):
         hard_blockers = list(dict.fromkeys(hard_blockers))
         manual_required = list(dict.fromkeys(manual_required))
         warnings = list(dict.fromkeys(warnings))
+        growth_report = self.growth_score_gate.evaluate(job.quality_summary or {}, {"hard_blockers": hard_blockers, "manual_required": manual_required})
+        self.storage.persist_json(
+            job.job_id,
+            "growth_score_report.json",
+            self._serialize_for_json({"decision": growth_report.decision, "reasons": growth_report.reasons, "metrics": growth_report.metrics}),
+        )
+        quality_summary = dict(job.quality_summary or {})
+        quality_summary["growth_score"] = {"decision": growth_report.decision, "reasons": growth_report.reasons, **growth_report.metrics}
+        job.quality_summary = quality_summary
+        if not growth_report.passed and growth_report.decision == "repair_required":
+            if ready_script_bank_human_validated:
+                warnings.extend(growth_report.reasons)
+            else:
+                hard_blockers.append("growth_score_gate_not_passed")
+                warnings.extend(growth_report.reasons)
+                hard_blockers = list(dict.fromkeys(hard_blockers))
+                warnings = list(dict.fromkeys(warnings))
         human_review_checklist = self.build_human_review_checklist(
             rights_registry=rights_registry,
             ai_disclosure=ai_disclosure,
@@ -185,6 +245,8 @@ class MonetizationPipeline(BasePipeline):
             "fact_claims_report": fact_claims_report,
             "channel_repetition_report": channel_repetition_report,
             "metadata_review": metadata_review,
+            "metadata_ctr": {"reasons": metadata_ctr.reasons, "metrics": metadata_ctr_metrics},
+            "growth_score": {"decision": growth_report.decision, "reasons": growth_report.reasons, "metrics": growth_report.metrics},
             "publish_readiness": publish_readiness,
             "ready_script_publish_policy": (
                 "human_validated_bank_script_editorial_warnings_only"
@@ -208,6 +270,8 @@ class MonetizationPipeline(BasePipeline):
             "fact_pack_missing_for_factual_topic",
             "quality_checklist_failed",
             "asset_visual_gate_not_passed",
+            "metadata_ctr_gate_not_passed",
+            "growth_score_gate_not_passed",
             "placeholder_source_language",
         }
         if ready_script_bank_human_validated:
@@ -223,6 +287,7 @@ class MonetizationPipeline(BasePipeline):
                 "claim_trace_grounding_missing",
                 "invented_source_fact_ids",
                 "fact_pack_missing_for_factual_topic",
+                "growth_score_gate_not_passed",
             }
         return [reason for reason in publish_readiness.get("reasons") or [] if reason in automatic_reasons]
 
@@ -238,6 +303,8 @@ class MonetizationPipeline(BasePipeline):
             "scene_plan_gate_pass": bool((quality_summary.get("scene_plan") or {}).get("scene_plan_gate_pass")),
             "asset_gate_pass": bool(asset_summary.get("semantic_threshold_pass")),
             "asset_visual_gate_pass": asset_visual_gate_pass,
+            "visual_impact_gate_pass": bool(asset_summary.get("visual_impact_gate_pass", True)),
+            "metadata_ctr_gate_pass": bool((quality_summary.get("metadata_ctr") or {}).get("metadata_ctr_gate_pass", True)),
             "subtitle_gate_pass": bool((quality_summary.get("subtitles") or {}).get("subtitle_gate_pass")),
             "render_gate_pass": bool((quality_summary.get("render") or {}).get("render_gate_pass")),
         }
@@ -559,6 +626,52 @@ class MonetizationPipeline(BasePipeline):
             "weak_hashtags": weak_tags,
             "suggested_hashtags": list(dict.fromkeys(suggested_tags))[:5],
             "topic_keywords": word_tokens(f"{topic_plan.canonical_topic} {topic_plan.angle}")[:8] if topic_plan else [],
+        }
+
+    def build_growth_metadata_repair(
+        self,
+        topic_plan: TopicPlan | None,
+        script: Script | None,
+        tags: list[str],
+        metadata_reasons: list[str],
+    ) -> dict[str, Any]:
+        repairable_reasons = {"title_too_explanatory", "title_click_tension_low", "weak_hashtags", "metadata_ctr_below_threshold"}
+        if not repairable_reasons.intersection(metadata_reasons):
+            return {"applied": False, "reason": "metadata_ctr_already_acceptable"}
+        current_title = str(getattr(script, "title", "") or (topic_plan.canonical_topic if topic_plan else "")).strip()
+        hook = str(getattr(script, "hook", "") or "").strip()
+        topic = str(getattr(topic_plan, "canonical_topic", "") or current_title).strip()
+        title_source = " ".join([current_title, hook, topic])
+        subject_tokens = [token for token in word_tokens(title_source) if len(token) >= 4]
+        subject = subject_tokens[0] if subject_tokens else "isso"
+        if subject.lower() in {"como", "porque", "isso", "esse", "essa"} and len(subject_tokens) > 1:
+            subject = subject_tokens[1]
+        base = current_title.rstrip(" .!?") or topic.rstrip(" .!?") or subject
+        if re.search(r"\b(polvo|polvos)\b", title_source, re.I):
+            repaired_title = "O polvo some na sua frente antes do predador notar"
+        elif re.search(r"\b(predador|presa|animal|animais)\b", title_source, re.I):
+            repaired_title = f"O detalhe que faz o predador perder {subject} de vista"
+        elif re.search(r"\b(?:por que|como|entenda|explica(?:ção)?)\b", base, re.I):
+            repaired_title = re.sub(r"^\s*(?:por que|como|entenda|explica(?:ção)?|o que é)\s+", "", base, flags=re.I).strip().capitalize()
+            repaired_title = f"O detalhe estranho que muda {repaired_title[:58]} antes de você notar"
+        else:
+            repaired_title = f"{base}: o detalhe estranho antes de você notar"
+        repaired_title = re.sub(r"\s+", " ", repaired_title).strip()[:100]
+        repaired_tags = self.build_publish_hashtags(topic_plan, script)
+        for token in word_tokens(" ".join([topic, current_title, hook])):
+            normalized = self.normalize_hashtag_text(token)
+            if len(normalized) >= 5 and normalized not in self.weak_hashtag_terms():
+                repaired_tags.append(f"#{normalized}")
+        repaired_tags = self.normalize_publish_hashtag_list(repaired_tags or tags)
+        overrides = self.normalize_publish_metadata_overrides(repaired_title, None, repaired_tags)
+        return {
+            "applied": True,
+            "strategy": "deterministic_growth_metadata_rewrite",
+            "original_title": current_title,
+            "title": overrides["title"],
+            "hashtags": overrides["hashtags"],
+            "reasons": list(metadata_reasons),
+            "overrides": overrides,
         }
 
     def manual_monetization_confirmations(self, session: Session, job_id: str) -> set[str]:

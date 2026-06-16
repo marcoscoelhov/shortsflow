@@ -47,7 +47,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     {% block head_extra %}{% endblock %}
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css?v=hub-logo-20260613">
+    <link rel="stylesheet" href="/static/styles.css?v=hub-ui-font-20260613">
     <script src="/static/htmx.min.js" defer></script>
   </head>
   <body>
@@ -99,6 +99,10 @@
             <span class="material-symbols-outlined" aria-hidden="true">event_upcoming</span>
             Agendamento
           </a>
+          <a class="{% if active_path[:15] == '/llm-tournament' %}active{% endif %}" href="/llm-tournament" {% if active_path[:15] == '/llm-tournament' %}aria-current="page"{% endif %}>
+            <span class="material-symbols-outlined" aria-hidden="true">emoji_events</span>
+            Torneio
+          </a>
         </nav>
         <div class="sidebar-spacer"></div>
         <button type="button" class="sidebar-new-project" data-open-create-job>
@@ -133,9 +137,9 @@
           <span class="material-symbols-outlined" aria-hidden="true">event_upcoming</span>
           <span>Agenda</span>
         </a>
-        <a href="/publication-hub" class="{% if active_path[:16] == '/publication-hub' %}active{% endif %}" {% if active_path[:16] == '/publication-hub' %}aria-current="page"{% endif %}>
-          <span class="material-symbols-outlined" aria-hidden="true">bar_chart</span>
-          <span>Crescer</span>
+        <a href="/llm-tournament" class="{% if active_path[:15] == '/llm-tournament' %}active{% endif %}" {% if active_path[:15] == '/llm-tournament' %}aria-current="page"{% endif %}>
+          <span class="material-symbols-outlined" aria-hidden="true">emoji_events</span>
+          <span>Torneio</span>
         </a>
       </nav>
       <main class="page-shell">

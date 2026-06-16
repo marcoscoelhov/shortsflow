@@ -38,12 +38,107 @@ class ScriptFactPackDomain(BasePipeline):
     def _build_research_brief(self, topic_plan: Any, request: Any) -> dict[str, Any]:
         return build_research_brief(topic_plan, request)
 
+    def _normalize_evidence_cards(self, fact_pack: dict[str, Any], research_brief: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        if not isinstance(fact_pack, dict):
+            return []
+        facts = fact_pack.get("facts") if isinstance(fact_pack.get("facts"), list) else []
+        valid_source_ids = {
+            str(source.get("source_id"))
+            for source in (fact_pack.get("sources") or [])
+            if isinstance(source, dict) and source.get("source_id")
+        }
+        existing_cards = fact_pack.get("evidence_cards") if isinstance(fact_pack.get("evidence_cards"), list) else []
+        cards: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for index, raw_card in enumerate(existing_cards, start=1):
+            if not isinstance(raw_card, dict):
+                continue
+            claim = str(raw_card.get("claim") or raw_card.get("safe_language") or "").strip()
+            if not claim:
+                continue
+            source_ids = [
+                str(source_id)
+                for source_id in (raw_card.get("source_ids") or raw_card.get("source_fact_ids") or [])
+                if str(source_id).strip()
+            ]
+            if valid_source_ids:
+                source_ids = [source_id for source_id in source_ids if source_id in valid_source_ids]
+            card_id = str(raw_card.get("card_id") or f"E{index}").strip()
+            if card_id in seen:
+                card_id = f"E{index}"
+            seen.add(card_id)
+            support_level = str(raw_card.get("support_level") or "direct").strip().lower()
+            if support_level not in {"direct", "indirect", "context_only"}:
+                support_level = "direct"
+            cards.append(
+                {
+                    "card_id": card_id,
+                    "claim": claim,
+                    "safe_language": str(raw_card.get("safe_language") or claim).strip(),
+                    "do_not_claim": [str(item).strip() for item in (raw_card.get("do_not_claim") or []) if str(item).strip()],
+                    "evidence_profile": str(raw_card.get("evidence_profile") or (research_brief or {}).get("evidence_profile") or "cotidiano_observacional"),
+                    "source_ids": source_ids,
+                    "support_level": support_level,
+                    "claim_scope": str(raw_card.get("claim_scope") or (research_brief or {}).get("claim_scope") or "general_curiosity"),
+                    "allowed_script_use": bool(raw_card.get("allowed_script_use", support_level != "context_only")),
+                    "aggressive_hook_options": [
+                        str(item).strip() for item in (raw_card.get("aggressive_hook_options") or []) if str(item).strip()
+                    ][:3],
+                    "retention_use": self._normalize_evidence_card_retention_use(raw_card.get("retention_use")),
+                    "visual_metaphors": [str(item).strip() for item in (raw_card.get("visual_metaphors") or []) if str(item).strip()][:5],
+                }
+            )
+        if cards:
+            return cards
+        for index, fact in enumerate(facts, start=1):
+            if not isinstance(fact, dict):
+                continue
+            claim = str(fact.get("claim") or "").strip()
+            if not claim:
+                continue
+            source_id = str(fact.get("source_id") or "").strip()
+            source_ids = [source_id] if source_id and (not valid_source_ids or source_id in valid_source_ids) else []
+            cards.append(
+                {
+                    "card_id": f"E{index}",
+                    "claim": claim,
+                    "safe_language": claim,
+                    "do_not_claim": [],
+                    "evidence_profile": str((research_brief or {}).get("evidence_profile") or "cotidiano_observacional"),
+                    "source_ids": source_ids,
+                    "support_level": "direct",
+                    "claim_scope": str((research_brief or {}).get("claim_scope") or "general_curiosity"),
+                    "allowed_script_use": True,
+                    "aggressive_hook_options": [],
+                    "retention_use": {
+                        "hook": [],
+                        "loop": [],
+                        "escalation": [],
+                        "payoff": [],
+                        "loop_close": [],
+                    },
+                    "visual_metaphors": [],
+                }
+            )
+        return cards
+
+    def _normalize_evidence_card_retention_use(self, value: Any) -> dict[str, list[str]]:
+        normalized: dict[str, list[str]] = {}
+        source = value if isinstance(value, dict) else {}
+        for key in ("hook", "loop", "escalation", "payoff", "loop_close"):
+            raw_items = source.get(key) if isinstance(source, dict) else []
+            if isinstance(raw_items, str):
+                raw_items = [raw_items]
+            normalized[key] = [str(item).strip() for item in (raw_items or []) if str(item).strip()][:3]
+        return normalized
+
     def _build_fact_pack(self, topic_plan: TopicPlan, request: TopicRequest, research_brief: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.settings.use_mock_providers:
             return {
                 "status": "limited",
                 "query_used": request.seed_theme,
                 "facts": [],
+                "evidence_cards": [],
                 "sources": [],
                 "editorial_rule": "Mock-provider test mode: no external fact retrieval.",
             }
@@ -85,6 +180,7 @@ class ScriptFactPackDomain(BasePipeline):
                         pack["status"] = "verified"
                         pack["queries_attempted"] = query_batch
                         pack["research_brief"] = research_brief
+                        pack["evidence_cards"] = self._normalize_evidence_cards(pack, research_brief)
                         return pack
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -93,6 +189,7 @@ class ScriptFactPackDomain(BasePipeline):
             "query_used": cleaned_queries[0] if cleaned_queries else request.seed_theme,
             "queries_attempted": query_batch,
             "facts": [],
+            "evidence_cards": [],
             "sources": [],
             "editorial_rule": "No source facts were retrieved. Script must avoid precise numbers, dates, medical/scientific/engineering causality, and absolute claims unless already present in the user input.",
             "topic_alignment": {
@@ -228,6 +325,21 @@ class ScriptFactPackDomain(BasePipeline):
                 " ".join(str(fact.get("claim") or "") for fact in fact_pack.get("facts") or []),
             ]
         )
+        out_of_scope_reason = self._fact_source_is_out_of_scope(
+            self._fact_pack_query_context(request, topic_plan),
+            source_text,
+        )
+        if out_of_scope_reason:
+            alignment = {
+                "passed": False,
+                "reason": out_of_scope_reason,
+                "claim_scope": research_brief.get("claim_scope"),
+                "primary_terms": research_brief.get("primary_terms"),
+                "mechanism_terms": research_brief.get("mechanism_terms"),
+            }
+            fact_pack["topic_alignment"] = alignment
+            fact_pack["research_brief"] = research_brief
+            return False
         alignment = audit_source_relevance(
             research_brief,
             str(fact_pack.get("topic_title") or ""),
@@ -530,6 +642,38 @@ class ScriptFactPackDomain(BasePipeline):
         normalized = "".join(char for char in normalized if not unicodedata.combining(char))
         return re.sub(r"[^a-z0-9\s]", " ", normalized)
 
+    def _fact_source_is_out_of_scope(self, query_context: str, source_text: str) -> str | None:
+        normalized_query = self._normalize_fact_text(query_context)
+        normalized_source = self._normalize_fact_text(source_text)
+        source_tokens = set(word_tokens(normalized_source))
+        query_tokens = set(word_tokens(normalized_query))
+        homeopathy_source = (
+            bool(source_tokens & {"homeopatia", "homeopatico", "homeopatica", "homeopathic", "homeopathy"})
+            or "materia medica" in normalized_source
+            or "coffea cruda" in normalized_source
+        )
+        homeopathy_query = (
+            bool(query_tokens & {"homeopatia", "homeopatico", "homeopatica", "homeopathic", "homeopathy"})
+            or "coffea cruda" in normalized_query
+        )
+        if homeopathy_source and not homeopathy_query:
+            return "source_out_of_scope_homeopathy"
+        return None
+
+    def _fact_pack_query_context(self, request: TopicRequest, topic_plan: TopicPlan) -> str:
+        parts: list[str] = []
+        for owner, fields in [
+            (request, ["seed_theme", "requested_angle", "notes"]),
+            (topic_plan, ["canonical_topic", "angle", "hook_promise", "search_terms", "entities", "title_candidates"]),
+        ]:
+            for field in fields:
+                value = getattr(owner, field, None)
+                if isinstance(value, list | tuple | set):
+                    parts.extend(str(item) for item in value if str(item).strip())
+                elif value is not None and str(value).strip():
+                    parts.append(str(value))
+        return " ".join(parts)
+
     def _fact_result_is_relevant(
         self,
         query: str,
@@ -541,6 +685,8 @@ class ScriptFactPackDomain(BasePipeline):
         title_tokens = {token for token in word_tokens(self._normalize_fact_text(title)) if len(token) >= 4}
         text_tokens = {token for token in word_tokens(self._normalize_fact_text(f"{title} {extract[:500]}")) if len(token) >= 4}
         normalized_query = self._normalize_fact_text(query)
+        if self._fact_source_is_out_of_scope(query, f"{title} {extract[:800]}"):
+            return False
         honey_query = bool(query_tokens & {"honey"}) or bool(re.search(r"\bmel\b", normalized_query))
         if honey_query:
             honey_terms = {"honey", "bee", "bees", "antimicrobial", "glucose", "oxidase", "peroxide"}
@@ -672,9 +818,20 @@ class ScriptFactPackDomain(BasePipeline):
                         "publication_year": result.get("publication_year"),
                     }
                 ],
+                "evidence_cards": self._normalize_evidence_cards(
+                    {
+                        "facts": facts,
+                        "sources": [
+                            {
+                                "source_id": "S1",
+                            }
+                        ],
+                    },
+                    research_brief,
+                ),
                 "editorial_rule": "Use peer-reviewed or scholarly article facts as source material only. Preserve viral pacing, but every precise number, date, technical cause, history claim, or scientific claim must be grounded in fact_id references or rewritten conservatively. Do not use Wikipedia as a factual source.",
             }
-        return {"status": "limited", "facts": [], "sources": []}
+        return {"status": "limited", "facts": [], "evidence_cards": [], "sources": []}
 
     def _openalex_abstract_text(self, abstract_inverted_index: Any) -> str:
         if not isinstance(abstract_inverted_index, dict):

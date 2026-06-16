@@ -24,6 +24,22 @@ class BasePipeline:
         return self.owner.script_gate
 
     @property
+    def viral_intensity_gate(self) -> Any:
+        return self.owner.viral_intensity_gate
+
+    @property
+    def visual_impact_gate(self) -> Any:
+        return self.owner.visual_impact_gate
+
+    @property
+    def metadata_ctr_gate(self) -> Any:
+        return self.owner.metadata_ctr_gate
+
+    @property
+    def growth_score_gate(self) -> Any:
+        return self.owner.growth_score_gate
+
+    @property
     def scene_gate(self) -> Any:
         return self.owner.scene_gate
 

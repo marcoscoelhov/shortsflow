@@ -28,7 +28,7 @@ from app.models import (
 )
 from app.quality.auto_visual_review import AutoVisualReviewService
 from app.schemas import TopicRequestCreate
-from app.trends import TrendResearcher
+from app.topic_scout import TopicScout
 from app.utils import new_id, stable_hash, utcnow
 
 
@@ -45,16 +45,16 @@ TEXTUAL_REPAIR_REASONS = {"unsupported_claim", "invented_source_fact_ids", "off_
 SCENE_PLAN_REPAIR_REASONS = {"disallowed_split_or_collage_composition"}
 SUBTITLE_REPAIR_REASONS = {"p95_timing_drift_too_high", "max_timing_drift_too_high"}
 DEFAULT_AUTOMATION_TOPIC_POOL = [
-    "curiosidades espaciais",
-    "tecnologia que parece ficcao",
-    "desastres historicos",
-    "engenharia curiosa",
-    "animais extremos",
-    "fenomenos naturais",
-    "historia pouco conhecida",
-    "corpo humano",
-    "misterios da ciencia",
-    "lugares extremos da Terra",
+    "Por que o pão fica duro e a bolacha fica mole?",
+    "Por que o espelho embaça no banho?",
+    "Por que a roupa preta esquenta mais no sol?",
+    "Por que sentimos o celular vibrar sem ele vibrar?",
+    "Por que o cheiro de chuva aparece antes da chuva?",
+    "Por que gelo estala dentro do copo?",
+    "Por que algumas músicas grudam na cabeça?",
+    "Por que bocejo parece contagioso?",
+    "Por que a tela do celular parece pior no sol?",
+    "Por que a água gelada sua por fora do copo?",
 ]
 
 
@@ -942,15 +942,23 @@ class AutomationService:
         ).model_dump()
 
     def _automatic_topic_payload(self) -> dict[str, Any]:
-        trend = TrendResearcher().find_topic(self.settings.niche_id)
-        if trend:
+        with session_scope() as session:
+            recent_topics = session.scalars(
+                select(TopicRequest.seed_theme)
+                .where(TopicRequest.niche_id == self.settings.niche_id)
+                .order_by(TopicRequest.created_at.desc())
+                .limit(40)
+            ).all()
+        scout_result = TopicScout().find_topic(self.settings.niche_id, recent_topics=recent_topics)
+        if scout_result:
+            trend = scout_result.candidate
             seed_theme = trend.topic
             requested_angle = trend.requested_angle
-            notes = "\n".join(["input_mode=theme", "automation_source=automatic_topic", trend.as_notes()])
+            notes = "\n".join(["input_mode=theme", "automation_source=automatic_topic", trend.as_notes(), f"topic_scout_considered={scout_result.considered_count}", f"topic_scout_rejected_recent={scout_result.rejected_recent_count}"])
         else:
             seed_theme = random.choice(DEFAULT_AUTOMATION_TOPIC_POOL)
             requested_angle = None
-            notes = "input_mode=theme\nautomation_source=automatic_topic\ntrend_research=unavailable"
+            notes = "input_mode=theme\nautomation_source=automatic_topic\ntrend_research=unavailable\ntrend_source=fallback_pool"
         return TopicRequestCreate(
             seed_theme=seed_theme,
             niche_id=self.settings.niche_id,

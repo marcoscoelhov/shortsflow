@@ -1,5 +1,5 @@
 from tests.e2e_support import *  # noqa: F403
-from app.publication_ops import build_growth_score
+from app.growth_metrics import build_growth_score
 from app.quality.premium_publish_gate import PremiumPublishGateResult
 
 
@@ -43,18 +43,44 @@ def test_artifact_url_maps_file_uri_to_static_route() -> None:
     artifact_path.write_bytes(b"video")
     assert artifact_url(artifact_path.as_uri()) == "/artifacts/job-1/render/final.mp4"
 
+def test_artifact_url_escapes_reserved_path_characters() -> None:
+    artifact_path = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / "job 1" / "render" / "final #1.mp4"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(b"video")
+
+    assert artifact_url(artifact_path.as_uri()) == "/artifacts/job%201/render/final%20%231.mp4"
+
+def test_artifact_url_hides_local_files_outside_artifacts_dir(tmp_path: Path) -> None:
+    outside_path = tmp_path / "outside.mp4"
+    outside_path.write_bytes(b"video")
+
+    assert artifact_url(outside_path.as_uri()) == "#"
+
 def test_hub_auth_token_protects_pages_and_artifacts(monkeypatch) -> None:
     monkeypatch.setattr(main_module.settings, "hub_auth_token", "secret-token")
     client = TestClient(app)
+    authed_client = TestClient(app)
+    authed_client.cookies.set("yts_hub_token", "secret-token")
     main_module.settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     assert client.get("/").status_code == 401
     assert client.get("/", headers={"x-yts-hub-token": "secret-token"}).status_code == 200
-    assert client.get("/", cookies={"yts_hub_token": "secret-token"}).status_code == 200
+    assert authed_client.get("/").status_code == 200
     assert client.get("/artifacts/missing.mp4").status_code == 401
-    assert client.get("/artifacts/missing.mp4", cookies={"yts_hub_token": "secret-token"}).status_code == 404
+    assert authed_client.get("/artifacts/missing.mp4").status_code == 404
     assert client.get("/artifacts/missing.mp4?access_token=secret-token").status_code == 401
-    assert client.post("/jobs", data={"seed_theme": "polvos"}, cookies={"yts_hub_token": "secret-token"}).status_code == 401
+    assert authed_client.post("/jobs", data={"seed_theme": "polvos"}).status_code == 401
+
+
+def test_hub_auth_precedes_ready_script_import_body_limit(monkeypatch) -> None:
+    monkeypatch.setattr(main_module.settings, "hub_auth_token", "secret-token")
+    client = TestClient(app)
+    oversized_headers = {"content-length": str(main_module.MAX_READY_SCRIPT_IMPORT_BODY_BYTES + 1)}
+    authed_oversized_headers = {**oversized_headers, "x-yts-hub-token": "secret-token"}
+
+    assert client.post("/automation/ready-scripts/import", content=b"", headers=oversized_headers).status_code == 401
+    assert client.post("/automation/ready-scripts/import", content=b"", headers=authed_oversized_headers).status_code == 413
+
 
 def test_artifact_url_does_not_embed_hub_auth_token(monkeypatch) -> None:
     monkeypatch.setattr(main_module.settings, "hub_auth_token", "secret-token")
@@ -230,6 +256,20 @@ def test_hub_create_job_sends_title_mode_tone_angle_and_seo_notes(monkeypatch) -
     assert "SEO otimizado" in str(captured["notes"])
     assert "retencao e viralizacao" in str(captured["notes"])
     assert "Use curiosidade forte e payoff claro." in str(captured["notes"])
+
+
+def test_review_route_returns_422_for_invalid_action_before_orchestrator(monkeypatch) -> None:
+    def fail_review_job(*args, **kwargs):
+        raise AssertionError("invalid review action should be rejected before orchestrator")
+
+    monkeypatch.setattr(main_module.orchestrator, "review_job", fail_review_job)
+    client = TestClient(app)
+
+    response = client.post("/jobs/job-invalid-review/review", data={"action": "publish"})
+
+    assert response.status_code == 422
+    assert "literal_error" in response.text
+
 
 def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch) -> None:
     service = AutomationService(orchestrator)
@@ -953,7 +993,14 @@ def test_ready_script_bank_monetization_embeds_human_editorial_confirmations() -
             status="running",
             seed_theme="Metadados ruins mas validados",
             quality_summary={
-                "script": {"script_quality_gate_pass": True},
+                "script": {
+                    "script_quality_gate_pass": True,
+                    "viral_intensity": {
+                        "viral_intensity_gate_pass": False,
+                        "viral_intensity_score": 0.42,
+                        "hook_scroll_stop_score": 0.4,
+                    },
+                },
                 "scene_plan": {"scene_plan_gate_pass": True},
                 "assets": {"semantic_threshold_pass": True},
                 "subtitles": {"subtitle_gate_pass": True},
@@ -1036,9 +1083,14 @@ def test_ready_script_bank_monetization_embeds_human_editorial_confirmations() -
     assert report["passed"] is True
     assert report["final_status"] == "ready_for_upload"
     assert "metadata_confirmed" in report["manual_confirmations"]
+    assert "visual_review_confirmed" in report["manual_confirmations"]
     assert "metadata_review_required" not in report["manual_required"]
+    assert "visual_review_required" not in report["manual_required"]
     assert report["metadata_review"]["requires_metadata_review"] is True
     assert report["ready_script_publish_policy"] == "human_validated_bank_script_editorial_warnings_only"
+    assert report["growth_score"]["metrics"]["growth_score_gate_pass"] is False
+    assert "growth_score_gate_not_passed" not in report["hard_blockers"]
+    assert "script_viral_intensity_low" in report["warnings"]
 
 def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: Path) -> None:
     prompt_path = tmp_path / "hub_settings.json"
@@ -1108,11 +1160,11 @@ def test_publish_audit_is_cached_by_input_hash(monkeypatch) -> None:
     assert calls["count"] == 1
 
 def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+    captured_payloads: list[dict[str, object]] = []
 
     def fake_create_job(payload: dict[str, object]) -> str:
-        captured.update(payload)
-        return "job-defaults"
+        captured_payloads.append(dict(payload))
+        return f"job-defaults-{len(captured_payloads)}"
 
     monkeypatch.setattr(main_module, "_default_seed_theme", lambda: "abelhas")
     monkeypatch.setattr(
@@ -1137,6 +1189,7 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
 
     response = client.post("/jobs", data={"seed_theme": "", "input_mode": "theme"}, follow_redirects=False)
     assert response.status_code == 303
+    captured = captured_payloads[-1]
     assert captured["seed_theme"] == "Por que flamingos estão em alta?"
     assert captured["requested_angle"] == "Transformar tendência real em curiosidade verificável."
     assert captured["job_origin"] == "automatic_topic"
@@ -1144,6 +1197,13 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     assert "trend_research=real_source" in str(captured["notes"])
     assert captured["niche_id"] == "curiosidades"
     assert captured["target_duration_sec"] == 50
+
+    response = client.post("/jobs", data={"seed_theme": "", "input_mode": "title"}, follow_redirects=False)
+    assert response.status_code == 303
+    captured = captured_payloads[-1]
+    assert captured["job_origin"] == "automatic_topic"
+    assert "input_mode=theme" in str(captured["notes"])
+    assert "input_mode=title" not in str(captured["notes"])
 
 def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
     client = TestClient(app)
@@ -1260,7 +1320,7 @@ def test_delete_job_removes_dependencies_references_and_artifacts() -> None:
                 run_id=run_id,
                 schema_version="1.0.0",
                 content_hash=f"{job_id}-run",
-                local_date="2026-06-13",
+                local_date="2099-01-01",
                 status="completed",
                 result_job_id=job_id,
                 result_schedule_id=schedule_id,

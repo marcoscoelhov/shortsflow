@@ -38,6 +38,7 @@ async function visibleRect(locator) {
   await page.keyboard.press('Enter');
   await page.waitForURL(/\/jobs\//);
   assert(/\/jobs\//.test(new URL(page.url()).pathname), 'Enter no card do job deve abrir o detalhe');
+  const discoveredJobUrl = page.url();
 
   await page.goto(base + '/', {waitUntil: 'networkidle'});
   const secondJobRow = page.locator('.job-row-card.jobs-grid-row').nth(1);
@@ -46,8 +47,8 @@ async function visibleRect(locator) {
   await page.waitForURL(/\/jobs\//);
   assert(/\/jobs\//.test(new URL(page.url()).pathname), 'Clique em área não textual do card deve abrir o detalhe');
 
-  await page.goto(base + '/jobs/5ce85ca7-e145-4a4f-abf2-4a5d1aa19244', {waitUntil: 'networkidle'});
-  assert(await page.locator('.job-local-nav').isVisible(), 'Detalhe do job deve ter navegação local sticky');
+  await page.goto(discoveredJobUrl, {waitUntil: 'networkidle'});
+  assert(await page.locator('.job-local-nav').count(), 'Detalhe do job deve renderizar navegação local');
   assert(await page.locator('.job-mobile-tabs').isVisible(), 'Detalhe mobile deve ter abas por tarefa');
   const initialJobHeight = await page.evaluate(() => document.body.scrollHeight);
   assert(initialJobHeight < 4200, `Detalhe mobile inicial ainda está longo demais: ${initialJobHeight}`);
@@ -59,19 +60,30 @@ async function visibleRect(locator) {
   const technicalJobHeight = await page.evaluate(() => document.body.scrollHeight);
   assert(technicalJobHeight < 4300, `Aba técnica mobile ainda está longa demais: ${technicalJobHeight}`);
 
-  await page.locator('.job-local-nav a[href="#video-final"]').click();
+  await page.getByRole('tab', {name: /Vídeo/}).click();
   const videoPanel = page.locator('[data-job-panel="video"]').first();
   const selectedVideoTab = await page.getByRole('tab', {name: /Vídeo/}).getAttribute('aria-selected');
   const videoRect = await visibleRect(videoPanel);
-  assert.strictEqual(selectedVideoTab, 'true', 'Clique em item Vídeo deve selecionar a aba mobile correspondente');
-  assert(videoRect.y < 760, `Clique em item Vídeo deve direcionar para o conteúdo: y=${videoRect.y}`);
+  assert.strictEqual(selectedVideoTab, 'true', 'Aba Vídeo deve selecionar o painel mobile correspondente');
+  assert(videoRect.y < 760, `Aba Vídeo deve trazer o conteúdo para perto do viewport: y=${videoRect.y}`);
 
-  await page.locator('.job-local-nav a[href="#qualidade-job"]').click();
+  await page.getByRole('tab', {name: /Qualidade/}).click();
   const qualityPanel = page.locator('[data-job-panel="qualidade"]');
   const selectedQualityTab = await page.getByRole('tab', {name: /Qualidade/}).getAttribute('aria-selected');
   const qualityRect = await visibleRect(qualityPanel);
-  assert.strictEqual(selectedQualityTab, 'true', 'Clique em item Qualidade deve selecionar a aba mobile correspondente');
-  assert(qualityRect.y < 760, `Clique em item Qualidade deve direcionar para o conteúdo: y=${qualityRect.y}`);
+  assert.strictEqual(selectedQualityTab, 'true', 'Aba Qualidade deve selecionar o painel mobile correspondente');
+  assert(qualityRect.y < 760, `Aba Qualidade deve trazer o conteúdo para perto do viewport: y=${qualityRect.y}`);
+
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto(discoveredJobUrl, {waitUntil: 'networkidle'});
+  assert(await page.locator('.job-local-nav').isVisible(), 'Detalhe desktop deve ter navegação local sticky');
+  await page.locator('.job-local-nav a[href="#video-final"]').click();
+  assert.strictEqual(new URL(page.url()).hash, '#video-final', 'Navegação local desktop deve apontar para Vídeo');
+  await page.locator('.job-local-nav a[href="#qualidade-job"]').click();
+  assert.strictEqual(new URL(page.url()).hash, '#qualidade-job', 'Navegação local desktop deve apontar para Qualidade');
+
+  await page.setViewportSize({width: 390, height: 844});
+  await page.goto(discoveredJobUrl, {waitUntil: 'networkidle'});
   const emptyHeadings = await page.locator('h1,h2,h3,h4,h5,h6').evaluateAll(nodes => nodes.filter(n => !n.textContent.trim()).length);
   assert.strictEqual(emptyHeadings, 0, 'Detalhe não pode ter headings vazios');
 

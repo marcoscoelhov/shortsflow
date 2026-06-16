@@ -265,7 +265,7 @@ Defaults importantes:
 - `niche_id=curiosidades`
 - `language=pt-BR`
 - `target_duration_sec=50`
-- `llm_primary_provider=openai`
+- `llm_primary_provider=deepseek`
 - `llm_fallback_provider=deepseek`
 - `youtube_publish_mode=manual`
 - `youtube_api_enabled=false`

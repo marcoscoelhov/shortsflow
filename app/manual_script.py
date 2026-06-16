@@ -36,10 +36,13 @@ _DISPLAY_LABELS = {
     "hashtags": "Hashtags",
 }
 
-_LABEL_PATTERN = re.compile(
-    r"^\s*(?:\*\*\s*)?(t[ií]tulo|title|hook|loop|beats?|payoff|fechamento|closing|hashtags?|tags)(?:\s*\*\*)?\s*:\s*(.*)$",
-    re.IGNORECASE,
-)
+_LABEL_NAMES = r"(t[ií]tulo|title|hook|loop|beats?|payoff|fechamento|closing|hashtags?|tags)"
+_OPTIONAL_LIST_MARKER = r"(?:[-*•]\s*|\d+[.)]\s*)?"
+_LABEL_PATTERNS = [
+    re.compile(rf"^\s*{_OPTIONAL_LIST_MARKER}\*\*\s*{_LABEL_NAMES}\s*:\s*\*\*\s*(.*)$", re.IGNORECASE),
+    re.compile(rf"^\s*{_OPTIONAL_LIST_MARKER}\*\*\s*{_LABEL_NAMES}\s*\*\*\s*:\s*(.*)$", re.IGNORECASE),
+    re.compile(rf"^\s*{_OPTIONAL_LIST_MARKER}{_LABEL_NAMES}\s*:\s*(.*)$", re.IGNORECASE),
+]
 _MARKDOWN_SEPARATOR_PATTERN = re.compile(r"^\s*-{3,}\s*$")
 _MARKDOWN_STRONG_PATTERN = re.compile(r"\*\*([^*\n]+)\*\*")
 
@@ -81,10 +84,10 @@ def normalize_ready_script_text(raw_text: str) -> str:
         if _MARKDOWN_SEPARATOR_PATTERN.match(line):
             normalized_lines.append("")
             continue
-        match = _LABEL_PATTERN.match(line)
-        if match:
-            field = _LABELS[match.group(1).strip().lower()]
-            value = _strip_markdown_strong(match.group(2).strip())
+        labeled = _match_labeled_line(line)
+        if labeled:
+            field, raw_value = labeled
+            value = _strip_markdown_strong(raw_value.strip())
             label = _DISPLAY_LABELS[field]
             normalized_lines.append(f"{label}: {value}".rstrip())
             continue
@@ -167,17 +170,26 @@ def _parse_labeled_text(raw_text: str) -> dict[str, str]:
     fields: dict[str, list[str]] = {}
     current: str | None = None
     for line in raw_text.replace("\r\n", "\n").split("\n"):
-        match = _LABEL_PATTERN.match(line)
-        if match:
-            current = _LABELS[match.group(1).strip().lower()]
+        labeled = _match_labeled_line(line)
+        if labeled:
+            current, value = labeled
             fields.setdefault(current, [])
-            value = match.group(2).strip()
+            value = value.strip()
             if value:
                 fields[current].append(value)
             continue
         if current and line.strip():
             fields[current].append(line.strip())
     return {key: "\n".join(value).strip() for key, value in fields.items() if value}
+
+
+def _match_labeled_line(line: str) -> tuple[str, str] | None:
+    for pattern in _LABEL_PATTERNS:
+        match = pattern.match(line)
+        if match:
+            field = _LABELS[match.group(1).strip().lower()]
+            return field, match.group(2)
+    return None
 
 
 def _split_beats(value: str) -> list[str]:

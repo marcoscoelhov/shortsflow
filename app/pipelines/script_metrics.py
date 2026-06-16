@@ -17,6 +17,9 @@ def normalize_script_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, int | float) and 1 < value <= 10:
             normalized[key] = round(value / 10, 3)
             continue
+        if isinstance(value, int | float) and 10 < value <= 100:
+            normalized[key] = round(value / 100, 3)
+            continue
         normalized[key] = value
     repetition_value = normalized.get("repetition_score")
     if repetition_value == 1:

@@ -26,8 +26,6 @@
 {% set publication_attempts = details.publication_attempts or [] %}
 {% set publish_result = details.publish_result or {} %}
 {% set progress = details.progress or {} %}
-{% set premium = details.premium_finishing or {} %}
-{% set premium_running = premium.running or premium.status == "running" or request.query_params.get("premium_started") %}
 {% set diagnosis = failure_diagnosis(job, monetization, narration) %}
 {% set retention = (job.quality_summary or {}).get("retention", {}) %}
 {% set retention_cleanup = details.retention_cleanup or {} %}
@@ -39,7 +37,7 @@
 {% set schedule_status = publication_schedule_display.status if publication_schedule_display else None %}
 {% set is_approved = job.status in ["approved_for_publish", "published"] %}
 {% set schedule_ready = publication_schedule_display and publication_schedule_display.status == "scheduled" %}
-<section class="detail-grid minimalist-detail" {% if job.status in ["queued", "running"] or premium_running or (publication_schedule_display and publication_schedule_display.status == "publishing") %}hx-get="/jobs/{{ job.job_id }}" hx-trigger="every 4s" hx-select=".detail-grid" hx-swap="outerHTML"{% endif %}>
+<section class="detail-grid minimalist-detail" {% if job.status in ["queued", "running"] or (publication_schedule_display and publication_schedule_display.status == "publishing") %}hx-get="/jobs/{{ job.job_id }}" hx-trigger="every 4s" hx-select=".detail-grid" hx-swap="outerHTML"{% endif %}>
   <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
     Job {{ job.job_id[:8] }} atualizado. Status {{ job_status_label(job.status) }}. Progresso {{ progress.percent }}%, {{ progress.current_label }}.
   </p>
@@ -255,97 +253,6 @@
         {% endif %}
       </div>
     </section>
-
-    {% if render and not artifacts_cleaned %}
-    <section class="panel premium-proof-panel" data-job-panel="video" role="tabpanel">
-      <div class="premium-proof-header">
-        <div>
-          <p class="eyebrow">Prova premium</p>
-          <h3>Comparar acabamento editorial</h3>
-        </div>
-        {% if premium.available %}
-        <span class="badge {% if premium.gate_pass %}approved{% else %}render_quality_failed{% endif %}">
-          {% if premium.gate_pass %}Critérios aprovados{% else %}Critérios pendentes{% endif %}
-        </span>
-        {% elif premium_running %}
-        <span class="badge running">gerando</span>
-        {% elif premium.status == "failed" %}
-        <span class="badge render_quality_failed">falhou</span>
-        {% else %}
-        <span class="badge monetization_review">não gerada</span>
-        {% endif %}
-      </div>
-      {% if premium.available %}
-      <div class="premium-comparison-grid" aria-label="Comparação de acabamento">
-        <div class="premium-video-column">
-          <strong>Fluxo atual</strong>
-          <video class="premium-comparison-player" controls preload="metadata" playsinline poster="{{ artifact_url(render.poster_uri) }}" src="{{ artifact_url(render.video_uri) }}"></video>
-        </div>
-        <div class="premium-video-column">
-          <strong>Versão premium</strong>
-          <video class="premium-comparison-player" controls preload="metadata" playsinline src="{{ artifact_url(premium.video_uri) }}"></video>
-        </div>
-      </div>
-      <div class="featured-actions premium-proof-actions">
-        <a class="button-link" href="{{ artifact_url(premium.video_uri) }}" target="_blank" rel="noopener">Abrir premium</a>
-        {% if premium.edit_plan_uri %}
-        <a class="button-link ghost-link" href="{{ artifact_url(premium.edit_plan_uri) }}" target="_blank" rel="noopener">Abrir plano</a>
-        {% endif %}
-        {% if premium.log_uri %}
-        <a class="button-link ghost-link" href="{{ artifact_url(premium.log_uri) }}" target="_blank" rel="noopener">Abrir log</a>
-        {% endif %}
-        {% if can_approve and premium.gate_pass %}
-        <form method="post" action="/jobs/{{ job.job_id }}/premium-approve" class="inline-action-form">
-          <input type="hidden" name="reviewer_identity" value="tailscale:local-reviewer">
-          <button type="submit">Aprovar premium e liberar agenda</button>
-        </form>
-        {% endif %}
-      </div>
-      {% else %}
-      <div class="premium-proof-empty">
-        {% if premium.status == "failed" and premium.error %}
-        <div class="premium-progress-card failed" role="status" aria-live="polite">
-          <strong>Acabamento premium falhou</strong>
-          <p>{{ premium.error }}</p>
-        </div>
-        {% endif %}
-        <p>Gere uma versão paralela para avaliar captions, transições, enquadramento estável, overlays e identidade visual sem substituir o arquivo final atual.</p>
-        <form method="post" action="/jobs/{{ job.job_id }}/premium-finish" data-premium-form>
-          <button type="submit" class="secondary" {% if premium_running %}disabled{% endif %}>
-            {% if premium_running %}Gerando versão premium{% else %}Gerar versão premium{% endif %}
-          </button>
-        </form>
-        <div class="premium-progress-card{% if not premium_running %} hidden{% endif %}" data-premium-progress role="status" aria-live="polite">
-          <div class="premium-progress-copy">
-            <strong>Gerando versão premium</strong>
-            {% if job.status == "running" %}
-            <span>{{ progress.percent }}% · {{ progress.current_label }}</span>
-            {% else %}
-            <span>{{ premium.report.detail or "Render premium em andamento" }}</span>
-            {% endif %}
-          </div>
-          {% if job.status == "running" %}
-          <div
-            class="job-progress-bar premium-progress-bar"
-            role="progressbar"
-            aria-label="Progresso da versão premium: {{ progress.current_label }}"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow="{{ progress.percent }}"
-          >
-            <span class="job-progress-fill" style="width: {{ progress.percent }}%"></span>
-          </div>
-          {% else %}
-          <div class="job-progress-bar premium-progress-bar" role="progressbar" aria-label="Render premium em andamento">
-            <span class="job-progress-fill premium-progress-fill indeterminate"></span>
-          </div>
-          {% endif %}
-          <small>Esta página atualiza automaticamente até concluir.</small>
-        </div>
-      </div>
-      {% endif %}
-    </section>
-    {% endif %}
 
     <details id="qualidade-job" class="panel collapse-panel" data-job-panel="qualidade" role="tabpanel" {% if monetization.get("hard_blockers") %}open{% endif %}>
       <summary aria-label="Abrir qualidade e monetização">
@@ -841,20 +748,6 @@
 </section>
 
 <script>
-  (function() {
-    document.querySelectorAll("[data-premium-form]").forEach((form) => {
-      form.addEventListener("submit", (event) => {
-        const button = event.submitter || form.querySelector("button[type='submit']");
-        const panel = form.parentElement?.querySelector("[data-premium-progress]");
-        if (button) {
-          button.disabled = true;
-          button.textContent = "Gerando versão premium";
-        }
-        if (panel) panel.classList.remove("hidden");
-      });
-    });
-  })();
-
   (function() {
     const root = document.querySelector(".detail-grid");
     if (!root) return;

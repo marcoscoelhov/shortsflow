@@ -35,6 +35,8 @@ def test_llm_registry_uses_deepseek_for_repair_and_scene_defaults(monkeypatch) -
             llm_scene_provider="deepseek",
             real_run_allow_mock_fallback=False,
             resolved_minimax_text_api_key="minimax-key",
+            minimax_text_model="MiniMax-M2.7",
+            minimax_text_thinking="auto",
             minimax_text_base_url="https://api.minimax.io/v1",
             minimax_text_timeout_sec=150,
             deepseek_api_key="deepseek-key",
@@ -48,6 +50,67 @@ def test_llm_registry_uses_deepseek_for_repair_and_scene_defaults(monkeypatch) -
 
     assert registry.repair_provider().provider_name == "deepseek"
     assert registry.scene_provider().provider_name == "deepseek"
+
+def test_llm_registry_accepts_minimax_m3_alias(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            llm_primary_provider="minimax-m3",
+            real_run_allow_mock_fallback=False,
+            resolved_minimax_text_api_key="minimax-key",
+            minimax_text_model="MiniMax-M3",
+            minimax_text_thinking="auto",
+            minimax_text_base_url="https://api.minimax.io/v1",
+            minimax_text_timeout_sec=150,
+        ),
+    )
+
+    provider = LLMProviderRegistry().primary_provider()
+
+    assert provider.provider_name == "minimax"
+    assert provider.model_name == "MiniMax-M3"
+
+def test_llm_registry_accepts_gemini_35_flash_alias(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            llm_primary_provider="gemini-3.5-flash",
+            real_run_allow_mock_fallback=False,
+            resolved_gemini_text_api_key="gemini-key",
+            gemini_text_model="gemini-3.5-flash",
+            gemini_text_timeout_sec=180,
+        ),
+    )
+
+    provider = LLMProviderRegistry().primary_provider()
+
+    assert provider.provider_name == "gemini"
+    assert provider.model_name == "gemini-3.5-flash"
+
+def test_minimax_text_key_can_reuse_image_key() -> None:
+    settings = Settings(
+        minimax_text_api_key=None,
+        minimax_api_key=None,
+        minimax_image_api_key="image-key",
+    )
+
+    assert settings.resolved_minimax_text_api_key == "image-key"
+
+def test_minimax_m3_disables_thinking_by_default() -> None:
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.model_name = "MiniMax-M3"
+    provider.text_thinking = "auto"
+
+    assert provider._request_extra_body() == {"thinking": {"type": "disabled"}}
+
+def test_minimax_thinking_can_be_forced_enabled() -> None:
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.model_name = "MiniMax-M3"
+    provider.text_thinking = "enabled"
+
+    assert provider._request_extra_body() == {"thinking": {"type": "enabled"}}
 
 def test_scene_plan_gate_rejects_generic_prompt_without_no_text_constraint() -> None:
     result = ScenePlanGate().validate(
@@ -85,6 +148,34 @@ def test_scene_plan_gate_rejects_split_screen_composition() -> None:
 
     assert not result.passed
     assert "scene-1:disallowed_split_or_collage_composition" in result.reasons
+
+def test_scene_prompt_normalization_rewrites_side_by_side_comparison() -> None:
+    scene = {
+        "scene_id": "scene-4",
+        "order": 4,
+        "narration_text": "Pessoas com sensibilidade genética sofrem impacto maior no sono.",
+        "token_start": 0,
+        "token_end": 8,
+        "primary_subject": "Comparação entre cérebros com e sem sensibilidade genética ADORA2A",
+        "visual_intent": "comparison",
+        "visual_domain": "science documentary realism",
+        "image_prompt": (
+            "Two human brains side by side, left normal with temporary caffeine block, "
+            "right showing ADORA2A gene variant via color code, comparison visualization, "
+            "scientific documentary style, no readable text anywhere"
+        ),
+    }
+
+    prompt = orchestrator.asset_pipeline.image_assets.semantic_english_image_prompt(
+        scene,
+        "Por que o café tira o sono",
+        scene["primary_subject"],
+    )
+    result = ScenePlanGate().validate([{**scene, "image_prompt": prompt}], expected_scene_count=1)
+
+    assert "side by side" not in prompt.lower()
+    assert "side-by-side" in prompt.lower()
+    assert result.passed
 
 def test_scene_plan_gate_rejects_hook_intent_that_violates_visual_contract() -> None:
     visual_contract = {
@@ -568,6 +659,8 @@ def test_minimax_image_provider_prefers_text_key_before_dedicated_key(monkeypatc
 
     settings = SimpleNamespace(
         resolved_minimax_text_api_key="text-key",
+        minimax_text_model="MiniMax-M2.7",
+        minimax_text_thinking="auto",
         minimax_image_api_key="image-key",
         resolved_minimax_image_api_key="image-key",
         minimax_text_base_url="https://text.example/v1",
@@ -1226,6 +1319,8 @@ def test_review_page_renders_dynamic_checklist_and_structured_reason_codes() -> 
     assert "automático" in response.text
 
 def test_pipelines_use_explicit_base_dependencies_and_asset_helpers() -> None:
+    from app.hub_status import JOB_STATUS_LABELS, NEEDS_ACTION_JOB_STATUSES, SCHEDULE_STATUS_LABELS
+
     test_orchestrator = JobOrchestrator()
 
     assert not hasattr(test_orchestrator, "_build_fact_pack")
@@ -1239,6 +1334,19 @@ def test_pipelines_use_explicit_base_dependencies_and_asset_helpers() -> None:
     assert test_orchestrator.topic_pipeline.normalize_topic_plan_payload.__self__ is test_orchestrator.topic_pipeline
     assert test_orchestrator.publication_ops.schedule_publication.__self__ is test_orchestrator.publication_ops
     assert test_orchestrator.publication_ops._run_retention_sweep.__self__ is test_orchestrator.publication_ops
+    assert test_orchestrator.publication_ops.performance_ops.record_performance_metrics.__self__ is test_orchestrator.publication_ops.performance_ops
+    assert test_orchestrator.publication_ops.tiktok_ops.sync_crosspost_queue.__self__ is test_orchestrator.publication_ops.tiktok_ops
+    assert test_orchestrator.publication_ops.retention_ops.run_sweep.__self__ is test_orchestrator.publication_ops.retention_ops
+    assert test_orchestrator.publication_ops.youtube_ops.sync_native_scheduled_publications.__self__ is test_orchestrator.publication_ops.youtube_ops
+    assert test_orchestrator.publication_ops.review_ops.review_job.__self__ is test_orchestrator.publication_ops.review_ops
+    assert test_orchestrator.publication_ops.workflow_ops.publish_job.__self__ is test_orchestrator.publication_ops.workflow_ops
+    assert test_orchestrator.worker_ops.worker_iteration.__self__ is test_orchestrator.worker_ops
+    assert main_module.hub_context.calendar_context.context.__self__ is main_module.hub_context.calendar_context
+    assert main_module.hub_context.jobs_context.job_list_context.__self__ is main_module.hub_context.jobs_context
+    assert main_module.hub_context.publication_context.dashboard_context.__self__ is main_module.hub_context.publication_context
+    assert JOB_STATUS_LABELS["ready_for_upload"] == "Pronto para aprovar"
+    assert SCHEDULE_STATUS_LABELS["publish_failed"] == "Falhou no upload"
+    assert "ready_for_upload" in NEEDS_ACTION_JOB_STATUSES
     assert "__getattr__" not in test_orchestrator.asset_pipeline.__class__.__mro__[1].__dict__
     assert "_build_fact_pack" not in test_orchestrator.script_pipeline.__class__.__mro__[1].__dict__
     assert "_normalize_scene_semantics" not in test_orchestrator.scene_pipeline.__class__.__mro__[1].__dict__

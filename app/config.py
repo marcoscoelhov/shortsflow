@@ -30,8 +30,8 @@ class Settings(BaseSettings):
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
-    llm_primary_provider: str = "openai"
-    llm_fallback_provider: str = "deepseek"
+    llm_primary_provider: str = "xai"
+    llm_fallback_provider: str = "openai"
     llm_repair_provider: str = "deepseek"
     llm_scene_provider: str = "deepseek"
     llm_enable_fallback: bool = True
@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     allow_music_api_fallback: bool = False
     tts_primary_provider: str = "gemini_tts"
     gemini_api_key: str | None = None
+    gemini_text_model: str = "gemini-3.5-flash"
+    gemini_text_timeout_sec: float = 180.0
     gemini_tts_api_key: str | None = None
     gemini_tts_model: str = "gemini-3.1-flash-tts-preview"
     gemini_tts_voice_name: str = "Kore"
@@ -117,6 +119,8 @@ class Settings(BaseSettings):
     minimax_text_api_key: str | None = None
     minimax_image_api_key: str | None = None
     minimax_music_api_key: str | None = None
+    minimax_text_model: str = "MiniMax-M2.7"
+    minimax_text_thinking: str = "auto"
     minimax_text_base_url: str = "https://api.minimax.io/v1"
     minimax_image_base_url: str = "https://api.minimax.io/v1/image_generation"
     minimax_music_base_url: str = "https://api.minimax.io/v1"
@@ -127,12 +131,16 @@ class Settings(BaseSettings):
     llm_scene_plan_timeout_sec: float = 75.0
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_model: str = "gpt-5.4"
+    openai_model: str = "gpt-5.4-nano"
     openai_timeout_sec: float = 180.0
+    xai_api_key: str | None = None
+    xai_base_url: str = "https://api.x.ai/v1"
+    xai_model: str = "grok-4.20-non-reasoning"
+    xai_timeout_sec: float = 180.0
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
-    deepseek_timeout_sec: float = 90.0
+    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_timeout_sec: float = 180.0
     qwen_api_key: str | None = None
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     qwen_model: str = "qwen3.6-max-preview"
@@ -194,7 +202,9 @@ class Settings(BaseSettings):
         "llm_scene_plan_timeout_sec",
         "openai_timeout_sec",
         "deepseek_timeout_sec",
+        "xai_timeout_sec",
         "qwen_timeout_sec",
+        "gemini_text_timeout_sec",
         "gemini_tts_timeout_sec",
     )
     @classmethod
@@ -202,6 +212,15 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("timeout values must be positive")
         return value
+
+    @field_validator("minimax_text_thinking")
+    @classmethod
+    def validate_minimax_text_thinking(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"auto", "enabled", "disabled"}
+        if normalized not in allowed:
+            raise ValueError("minimax_text_thinking must be one of: auto, enabled, disabled")
+        return normalized
 
     @field_validator("asset_generation_parallelism")
     @classmethod
@@ -323,7 +342,7 @@ class Settings(BaseSettings):
 
     @property
     def resolved_minimax_text_api_key(self) -> str | None:
-        return self.minimax_text_api_key or self.minimax_api_key
+        return self.minimax_text_api_key or self.minimax_api_key or self.minimax_image_api_key
 
     @property
     def resolved_minimax_image_api_key(self) -> str | None:
@@ -332,6 +351,10 @@ class Settings(BaseSettings):
     @property
     def resolved_minimax_music_api_key(self) -> str | None:
         return self.minimax_music_api_key or self.resolved_minimax_text_api_key
+
+    @property
+    def resolved_gemini_text_api_key(self) -> str | None:
+        return self.gemini_api_key or self.gemini_tts_api_key
 
     @property
     def artifacts_dir(self) -> Path:

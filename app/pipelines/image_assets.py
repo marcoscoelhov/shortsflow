@@ -246,6 +246,7 @@ class ImageAssetDomain:
             prompt = scene_hint or f"vertical cinematic {domain_style} of {english_subject}, {visual_intent}"
         else:
             prompt = self.replace_subject_aliases(prompt)
+        prompt = self.single_frame_composition_prompt(prompt)
         prompt = self.remove_incompatible_scientific_style(prompt, scene)
         if semantic_directive.lower() not in prompt.lower():
             prompt = f"{prompt}, {semantic_directive}".strip(", ")
@@ -266,6 +267,31 @@ class ImageAssetDomain:
         if "no movie poster" not in prompt.lower():
             prompt += ", no movie poster, no typography, no stock-photo generic scene"
         return self.minimax_safe_image_prompt(self.with_no_text_image_constraints(prompt), scene)
+
+    def single_frame_composition_prompt(self, prompt: str) -> str:
+        replacements = [
+            (r"\btwo\s+human\s+brains\s+side\s+by\s+side\b", "one human brain cross-section in a single integrated composition"),
+            (r"\btwo\s+brains\s+side\s+by\s+side\b", "one brain cross-section in a single integrated composition"),
+            (r"\bleft\s+normal\s+with\b", "with one region showing"),
+            (r"\bright\s+showing\b", "and another region showing"),
+            (r"\bon\s+one\s+side\b", "in the foreground"),
+            (r"\bon\s+the\s+other\b", "in the background"),
+            (r"\bside\s+by\s+side\b", "within one integrated full-frame composition"),
+            (r"\bside-by-side\b", "within one integrated full-frame composition"),
+            (r"\bsplit\s+view\b", "single continuous view"),
+            (r"\bbefore\s+and\s+after\b", "single consequential moment"),
+            (r"\bcomparison\s+visualization\b", "integrated visual evidence"),
+            (r"\btwo\s+panels\b", "one full-frame scene"),
+            (r"\bmulti[-\s]panel\b", "single full-frame"),
+            (r"\bpanel\s+layout\b", "single full-frame composition"),
+            (r"\bgrid\s+layout\b", "single full-frame composition"),
+            (r"\bdiptych\b", "single full-frame composition"),
+            (r"\btriptych\b", "single full-frame composition"),
+        ]
+        updated = prompt
+        for pattern, replacement in replacements:
+            updated = re.sub(rf"(?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s){pattern}", replacement, updated, flags=re.IGNORECASE)
+        return " ".join(updated.split())
 
     def conservative_science_visual_directive(self, scene: dict[str, Any]) -> str:
         source_text = " ".join(

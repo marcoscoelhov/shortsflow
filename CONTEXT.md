@@ -244,6 +244,186 @@ _Avoid_: dashboard generico, tela de dados, painel tecnico
 Um tema escolhido pelo sistema quando o pedido nao traz um assunto explicito.
 _Avoid_: tema aleatorio, fallback local, sugestao solta
 
+**Curiosidade do Cotidiano**:
+Um recorte de Short baseado em situacoes comuns, habitos, objetos, consumo, tecnologia popular ou pequenas descobertas do dia a dia para gerar conexao ampla com o publico.
+_Avoid_: ciencia estrita por padrao, paper obrigatorio para todo tema, curiosidade abstrata sem identificacao
+
+**Perfil de Evidencia**:
+A classificacao editorial que define qual tipo de fonte um **Job de Video** precisa para sustentar suas afirmacoes factuais.
+_Avoid_: fact pack unico para todo tema, paper obrigatorio, checagem solta por LLM
+
+**Cascata de Evidencia**:
+A ordem de tipos de fonte consultados conforme o **Perfil de Evidencia** de um **Job de Video**.
+_Avoid_: buscar sempre em papers, usar uma unica fonte global, escolher fonte por conveniencia do provider
+
+**Camada de Evidencia**:
+A parte do fluxo editorial que transforma fontes confiaveis em **Cartoes de Evidencia** antes da geracao do roteiro.
+_Avoid_: deixar a LLM pesquisar sozinha, tratar busca como roteiro, validar fato apenas no fim
+
+**Verificador de Evidencia**:
+A validacao que decide se uma fonte cobre o escopo necessario para virar **Fonte de Evidencia** ou apenas **Fonte de Contexto**.
+_Avoid_: julgamento livre da LLM, correspondencia por palavra-chave, promover fonte tangencial
+
+**Fonte de Contexto**:
+Uma fonte que ajuda a entender o tema de um **Job de Video**, mas nao sustenta sozinha uma afirmacao factual especifica.
+_Avoid_: tratar como prova, citar como lastro de claim, promover para evidência sem escopo
+
+**Fonte de Evidencia**:
+Uma fonte cujo escopo cobre diretamente a afirmacao factual que ela sustenta em um **Job de Video**.
+_Avoid_: fonte tangencial, fonte sobre outro mecanismo, fonte relacionada apenas por palavra-chave
+
+**Cartao de Evidencia**:
+Uma unidade editorial que liga uma afirmacao permitida a uma **Fonte de Evidencia**, seus limites e a linguagem segura para uso no roteiro.
+_Avoid_: fato solto, resumo de fonte, claim inventada pela LLM
+
+**Embalagem Viral Permitida**:
+A forma de transformar um **Cartao de Evidencia** em hook, loop, imagem mental, payoff ou fechamento de alta retencao sem ampliar a afirmacao factual sustentada.
+_Avoid_: exagero factual, clickbait falso, tornar o cartao burocratico ou academico
+
+**Hook Agressivo Conservador**:
+Uma abertura de alta tensao e potencial viral que usa contraste, surpresa ou consequencia cotidiana sem exagerar a afirmacao factual permitida.
+_Avoid_: promessa falsa, causalidade inventada, numero sem fonte, universalizacao
+
+**Afirmacao Observacional**:
+Uma afirmacao de baixa exigencia factual baseada em experiencia comum, linguagem subjetiva ou enquadramento editorial, sem declarar causalidade tecnica, numero, regra atual ou fato historico especifico.
+_Avoid_: causalidade tecnica disfarçada, fato universal, claim sem evidência apresentada como certeza
+
+**Torneio de LLMs**:
+A comparacao controlada de modelos usando os mesmos **Jobs de Video**, **Perfis de Evidencia** e **Cartoes de Evidencia** para medir custo, velocidade, obediencia factual e qualidade editorial.
+_Avoid_: teste isolado impressionista, comparar modelos com entradas diferentes, escolher apenas por velocidade
+
+**Candidato de Torneio**:
+Um modelo/provider configurado para participar do **Torneio de LLMs** sem alterar o provider operacional padrao do pipeline.
+_Avoid_: trocar provider global manualmente, teste sem alias estavel, misturar configuracao do hub com benchmark
+
+**Conjunto de Benchmark Editorial**:
+Um grupo fixo de temas representativos usado para comparar modelos e providers no **Torneio de LLMs**.
+_Avoid_: testar um tema isolado, mudar entradas entre modelos, benchmark sem nichos cotidianos
+
+**Caso de Benchmark Editorial**:
+Uma entrada fixa e barata do **Conjunto de Benchmark Editorial** usada para comparar modelos em uma etapa editorial especifica sem executar um **Job de Video** completo.
+_Avoid_: job completo, smoke test de provider, tema solto, pipeline multimidia
+
+**Rodada Inicial do Torneio**:
+A primeira comparacao do **Torneio de LLMs**, limitada a geracao de roteiro, reparo de roteiro e auditoria textual sobre **Casos de Benchmark Editorial**.
+_Avoid_: plano de cenas inicial, render completo, comparacao por pipeline multimidia
+
+**Rodada Textual Completa do Torneio**:
+A comparacao do **Torneio de LLMs** que executa roteiro, reparo de roteiro e auditoria textual antes do **Comite de Decisao Pos-Torneio**.
+_Avoid_: chamar pipeline multimidia de torneio completo, incluir cena ou render antes da decisao textual, comparar etapa que ainda nao tem artefato padronizado
+
+**Triagem Textual do Torneio**:
+A passagem curta do **Torneio de LLMs** que elimina candidatos indisponiveis, lentos, incompativeis ou instaveis antes da rodada textual completa.
+_Avoid_: rodar benchmark completo em provider quebrado, decidir qualidade final por smoke test, esconder eliminacao operacional
+
+**Medicao Separada por Etapa**:
+A avaliacao do **Torneio de LLMs** que mede geracao inicial, reparo e auditoria como capacidades distintas.
+_Avoid_: reparo escondendo roteiro inicial ruim, media unica por modelo, misturar capacidades de etapas diferentes
+
+**Pacote Fixo de Auditoria**:
+Um conjunto igual de roteiros e artefatos usado para comparar candidatos na etapa de auditoria do **Torneio de LLMs**.
+_Avoid_: modelo auditando apenas a propria resposta, auditoria sem casos negativos, comparar auditores com entradas diferentes
+
+**Pacote de Artefatos do Torneio**:
+O conjunto de respostas, vetos, custos, latencias, falhas e rastros editoriais produzido pelos candidatos para o **Comite de Decisao Pos-Torneio**.
+_Avoid_: julgamento sem artefato, ler apenas ranking agregado, pedir avaliacao profunda para todos os candidatos
+
+**Benchmark Editorial Inicial**:
+A primeira versao do **Benchmark Editorial Versionado**, composta por 12 **Casos de Benchmark Editorial** de curiosidade cotidiana, saude leve, tecnologia popular e percepcao/comportamento.
+_Avoid_: benchmark grande antes do primeiro ranking, amostra pequena demais, conjunto sem variedade de risco factual
+
+**Caso Adversarial Publicavel**:
+Um **Caso de Benchmark Editorial** feito para expor exagero, invencao ou desobediencia factual sem deixar de ser um tema plausivel para canal.
+_Avoid_: pegadinha artificial, tema impossivel de publicar, caso sem valor editorial
+
+**Cartao de Evidencia Congelado**:
+Um **Cartao de Evidencia** versionado dentro de um **Caso de Benchmark Editorial** para manter o **Torneio de LLMs** comparavel entre execucoes.
+_Avoid_: buscar fonte durante o torneio, mudar evidencia entre candidatos, comparar modelos com fatos diferentes
+
+**Benchmark Editorial Versionado**:
+Uma versao persistida do **Conjunto de Benchmark Editorial** que torna resultados de **Torneio de LLMs** comparaveis ao longo do tempo.
+_Avoid_: benchmark ad hoc, trocar tema durante comparacao, resultado sem versao de entrada
+
+**Roteamento Editorial por Etapa**:
+A escolha de modelos ou providers diferentes conforme a etapa editorial e o **Perfil de Evidencia** de um **Job de Video**.
+_Avoid_: um modelo global para tudo, fallback opaco, trocar provider sem medir etapa
+
+**Ranking por Etapa do Torneio**:
+A classificacao principal do **Torneio de LLMs** que escolhe vencedores separados para roteiro, reparo e auditoria textual.
+_Avoid_: vencedor unico global, media que esconde fraqueza por funcao, escolha por impressao geral
+
+**Recomendacao de Roteamento do Torneio**:
+Uma sugestao de modelos por etapa produzida pelo **Torneio de LLMs** sem alterar automaticamente o provider operacional dos **Jobs de Video**.
+_Avoid_: promocao automatica de provider, alterar producao por benchmark isolado, roteamento invisivel
+
+**Escolha de Custo-Beneficio do Projeto**:
+A sintese do **Comite de Decisao Pos-Torneio** que recomenda o melhor roteamento por etapa e, separadamente, o melhor modelo unico quando simplicidade operacional for mais importante.
+_Avoid_: vencedor unico como fonte principal, custo menor sem qualidade minima, esconder diferencas entre roteiro, reparo e auditoria
+
+**Finalista do Torneio**:
+Um candidato que passou pelos vetos objetivos e entrou na avaliacao seletiva do **Comite de Decisao Pos-Torneio** em pelo menos uma etapa.
+_Avoid_: avaliar todos os candidatos por Codex, promover candidato instavel, esconder o piso de viabilidade
+
+**Eliminado na Triagem do Torneio**:
+Um candidato retirado da comparacao competitiva por falha objetiva na **Triagem Textual do Torneio**.
+_Avoid_: misturar indisponivel com perdedor, repetir teste caro sem corrigir acesso, esconder motivo de eliminacao
+
+**Candidato Nao Comparavel do Torneio**:
+Um candidato sem artefatos ou metricas suficientes para entrar no ranking competitivo do **Torneio de LLMs**.
+_Avoid_: ranquear medicao incompleta, tratar ausencia de custo como custo zero, promover candidato sem etapa suportada
+
+**Comite de Decisao Pos-Torneio**:
+Uma avaliacao assistida por Codex que interpreta artefatos completos do **Torneio de LLMs** para recomendar custo-beneficio e roteamento sem substituir os rankings objetivos por etapa.
+_Avoid_: juiz por caso, prompt de avaliacao token-intensivo, vencedor global que apaga fraquezas por etapa
+
+**Relatorio de Decisao do Torneio**:
+O artefato final do **Comite de Decisao Pos-Torneio** que resume vencedores por etapa, custo-beneficio, riscos, eliminacoes e recomendacao operacional.
+_Avoid_: conclusao sem evidencia, decisao apenas em chat, relatorio que substitui artefatos brutos
+
+**Veto Duro do Torneio**:
+Uma falha que elimina uma resposta do **Ranking por Etapa do Torneio** mesmo quando ela parece editorialmente forte.
+_Avoid_: penalidade leve, preferencia subjetiva, aceitar invencao factual por boa escrita
+
+**Orcamento de Falha do Torneio**:
+O limite de falhas operacionais aceitas para um candidato continuar competindo em uma etapa do **Torneio de LLMs**.
+_Avoid_: esperar timeouts repetidos, gastar quota com candidato instavel, tratar veto editorial como indisponibilidade operacional
+
+**Nota de Roteiro do Torneio**:
+A avaliacao de uma resposta de roteiro no **Torneio de LLMs**, priorizando obediencia factual, hook, loop, replay, escalada, payoff, clareza em pt-BR, custo e latencia nessa ordem.
+_Avoid_: nota por beleza textual, custo antes de qualidade minima, ranking sem retencao
+
+**Avaliador Hibrido do Torneio**:
+A combinacao de vetos objetivos e julgamento editorial por IA usada para pontuar respostas em **Casos de Benchmark Editorial**.
+_Avoid_: juiz unico sem gates, regra deterministica fingindo medir replay, opiniao humana ad hoc
+
+**Juiz Editorial Versionado**:
+Um modelo e prompt fixos usados fora da competicao principal para avaliar qualidade editorial no **Torneio de LLMs**.
+_Avoid_: juiz variavel por rodada, candidato julgando a si mesmo sem registro, prompt de avaliacao sem versao
+
+**Juiz Editorial Inicial**:
+O primeiro **Juiz Editorial Versionado** do **Torneio de LLMs**, usando um modelo premium fixo para avaliar qualidade editorial dos candidatos.
+_Avoid_: juiz barato por padrao, troca silenciosa de avaliador, avaliacao sem conflito registrado
+
+**Modo de Escala**:
+A configuracao operacional que prioriza baixo custo medio por **Job de Video** mantendo a qualidade minima de publicacao.
+_Avoid_: qualidade maxima em toda tentativa, gastar modelo premium por padrao, publicar sem gates
+
+**Modo Premium**:
+A configuracao operacional que permite maior custo por **Job de Video** quando potencial, risco ou falha repetida justificam uma geracao mais forte.
+_Avoid_: gastar caro sempre, aprovar sem revisao, tratar todo job como premium
+
+**Custo por Job Publicavel**:
+O custo total de geracao e revisao automatizada necessario para um **Job de Video** passar pelos gates e chegar a revisao ou publicacao.
+_Avoid_: custo por token isolado, preco nominal do modelo, ignorar retries e fallbacks
+
+**Custo Operacional Observado do Torneio**:
+A medida de custo do **Torneio de LLMs** baseada em tokens reportados, latencia, falhas, retries, timeouts e taxa de sucesso sem converter para dinheiro.
+_Avoid_: preco chutado, comparar so tokens, ignorar falha operacional barata
+
+**Custo Estimado Versionado**:
+A estimativa de custo em dinheiro usada no **Torneio de LLMs** somente quando baseada em uma tabela de precos versionada.
+_Avoid_: chutar preco, comparar custo sem fonte, usar preco atual invisivel em resultado historico
+
 **Roteiro Pronto**:
 Um roteiro fornecido por uma pessoa como fonte de verdade editorial validada para um **Job de Video**.
 _Avoid_: prompt, tema, titulo completo
@@ -516,6 +696,10 @@ _Avoid_: log bruto, porcentagem decorativa, timeline tecnica
 A recusa de um provedor em continuar uma geracao porque a conta, chave ou plano atingiu quota, credito, saldo ou rate limit.
 _Avoid_: timeout, erro generico, instabilidade temporaria
 
+**Falha Operacional do Torneio**:
+Uma falha de candidato no **Torneio de LLMs** causada por limite, autenticacao, modelo indisponivel, timeout, JSON invalido, veto duro ou falha do juiz.
+_Avoid_: retry invisivel, esconder instabilidade, tratar erro operacional como nota editorial
+
 **Chave Esgotada**:
 Uma chave de provedor que ja encontrou **Limite de Provedor** durante uma geracao e nao deve ser tentada novamente no mesmo **Job de Video**.
 _Avoid_: chave invalida, provider offline, timeout, bloqueio diario global automatico
@@ -574,6 +758,7 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Um **Job de Video** historico pode aparecer com **Origem Desconhecida do Job** quando a origem nao puder ser inferida com seguranca.
 - Um **Arquivo de Video Final** pertence a exatamente um **Job de Video**.
 - O **Acabamento Editorial Premium** melhora a composicao final do **Arquivo de Video Final** sem mudar o conteudo editorial aprovado.
+- O **Relatorio de Decisao do Torneio** recomenda mudancas de roteamento, mas nao altera a **Configuracao Operacional do Hub** sem aprovacao humana.
 - O **Movimento Visual de Cena** e uma parte possivel do **Acabamento Editorial Premium**, nao o acabamento inteiro.
 - Uma **Prova Comparativa de Acabamento** compara versoes do mesmo **Job de Video** antes de promover uma abordagem de acabamento a padrao.
 - Uma **Decisao Comparativa de Acabamento** nao substitui a **Revisao Humana** necessaria para publicar um **Job de Video**.

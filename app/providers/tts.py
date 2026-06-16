@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import audioop
 import base64
 import math
 import re
@@ -16,6 +15,9 @@ from typing import Any
 import httpx
 import imageio_ffmpeg
 
+from app.audio.pcm import multiply as pcm_multiply
+from app.audio.pcm import peak_abs as pcm_peak_abs
+from app.audio.pcm import rms as pcm_rms
 from app.quality.subtitle_gate import BAD_ENDINGS
 from app.config import get_settings
 from app.utils import parse_srt, word_tokens, wrap_caption
@@ -295,14 +297,14 @@ class LocalSpeechFallbackProvider:
             segment = bytes(audio[start:end])
             if not segment:
                 continue
-            rms = audioop.rms(segment, sample_width)
-            peak = audioop.max(segment, sample_width)
+            rms = pcm_rms(segment, sample_width)
+            peak = pcm_peak_abs(segment, sample_width)
             if rms <= 0 or peak <= 0:
                 continue
             gain = target_rms / rms
             gain = min(gain, peak_ceiling / peak)
             gain = max(0.45, min(gain, 4.0))
-            audio[start:end] = audioop.mul(segment, sample_width, gain)
+            audio[start:end] = pcm_multiply(segment, sample_width, gain)
         temp_path = audio_path.with_suffix(".leveled.wav")
         with wave.open(str(temp_path), "wb") as target:
             target.setparams(params)

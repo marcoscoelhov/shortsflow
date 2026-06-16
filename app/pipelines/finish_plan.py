@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any
 
@@ -124,6 +125,47 @@ def build_finish_plan(
     return plan
 
 
+def public_finish_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    public_plan = copy.deepcopy(plan)
+    scenes = public_plan.get("scenes") if isinstance(public_plan.get("scenes"), list) else []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        asset_src = _public_media_uri(scene.get("asset_src"))
+        asset_uri = asset_src or _public_media_uri(scene.get("asset_uri"))
+        if asset_uri:
+            scene["asset_uri"] = asset_uri
+        else:
+            scene.pop("asset_uri", None)
+        if asset_src:
+            scene["asset_src"] = asset_src
+        else:
+            scene.pop("asset_src", None)
+        scene.pop("asset_path", None)
+    audio = public_plan.get("audio") if isinstance(public_plan.get("audio"), dict) else {}
+    audio_src = _public_media_uri(audio.get("src"))
+    audio_uri = audio_src or _public_media_uri(audio.get("uri"))
+    if audio_uri:
+        audio["uri"] = audio_uri
+    else:
+        audio.pop("uri", None)
+    if audio_src:
+        audio["src"] = audio_src
+    else:
+        audio.pop("src", None)
+    audio.pop("path", None)
+    if str(public_plan.get("source_final_video_uri") or "").startswith("file://"):
+        public_plan["source_final_video_uri"] = None
+    return public_plan
+
+
+def _public_media_uri(value: Any) -> str:
+    uri = str(value or "").strip()
+    if uri.startswith("file://") or Path(uri).is_absolute():
+        return ""
+    return uri
+
+
 def _media_src(uri: str, *, media_base_url: str | None, artifacts_dir: Path | None) -> str:
     if not media_base_url or not artifacts_dir or not uri.startswith("file://"):
         return uri
@@ -138,7 +180,7 @@ def _media_src(uri: str, *, media_base_url: str | None, artifacts_dir: Path | No
 def _caption_item(item: dict[str, Any]) -> dict[str, Any]:
     text = " ".join(str(item.get("text") or "").split())
     start_ms = max(0, int(item.get("start_ms") or 0))
-    end_ms = max(1, int(item.get("end_ms") or 0))
+    end_ms = max(start_ms + 1, int(item.get("end_ms") or 0))
     return {
         "idx": str(item.get("idx") or ""),
         "startMs": start_ms,

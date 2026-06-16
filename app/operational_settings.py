@@ -38,6 +38,7 @@ PROVIDER_OPTIONS = (
     ("openai", "OpenAI"),
     ("deepseek", "DeepSeek"),
     ("minimax", "MiniMax"),
+    ("xai", "XAI (Grok)"),
 )
 
 TTS_PROVIDER_OPTIONS = (

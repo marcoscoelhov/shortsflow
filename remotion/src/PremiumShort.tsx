@@ -1,7 +1,7 @@
-import React from 'react';
+import React, {useMemo} from 'react';
 import type {Caption as RemotionCaption} from '@remotion/captions';
 import {Audio} from '@remotion/media';
-import {AbsoluteFill, Img, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, Img, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
 
 type SceneMotion = {
   kind: string;
@@ -43,6 +43,12 @@ type CaptionItem = RemotionCaption & {
   end_ms?: number;
 };
 
+type CaptionFrame = {
+  caption: CaptionItem;
+  startFrame: number;
+  endFrame: number;
+};
+
 export type FinishPlan = {
   schema_version: string;
   finish_plan_version: string;
@@ -69,12 +75,16 @@ export type FinishPlan = {
 export const PremiumShort: React.FC<FinishPlan> = (plan) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
-  const audioSource = plan.audio.uri || plan.audio.src || '';
-  const activeCaption = plan.caption_track.items.find((item) => {
-    const start = msToFrame(captionStartMs(item), fps);
-    const end = msToFrame(captionEndMs(item), fps);
-    return frame >= start && frame < end;
-  });
+  const audioSource = mediaSource(plan.audio.src || plan.audio.uri || '');
+  const captionFrames: CaptionFrame[] = useMemo(
+    () => plan.caption_track.items.map((caption) => ({
+      caption,
+      startFrame: msToFrame(captionStartMs(caption), fps),
+      endFrame: msToFrame(captionEndMs(caption), fps)
+    })),
+    [fps, plan.caption_track.items]
+  );
+  const activeCaption = captionFrames.find((item) => frame >= item.startFrame && frame < item.endFrame)?.caption;
 
   return (
     <AbsoluteFill style={{background: plan.style.palette.background, fontFamily: plan.style.font_family}}>
@@ -126,7 +136,7 @@ const SceneLayer: React.FC<{scene: ScenePlan; fps: number; accent: string}> = ({
     : scene.retention_role === 'turn_or_payoff' || scene.retention_role === 'loop_close'
       ? 'contrast(1.1) saturate(1.08)'
       : 'contrast(1.04) saturate(1.04)';
-  const assetSource = scene.asset_uri || scene.asset_src || scene.asset_path;
+  const assetSource = mediaSource(scene.asset_src || scene.asset_uri || scene.asset_path);
 
   return (
     <Sequence from={startFrame} durationInFrames={durationFrames + transitionFrames}>
@@ -148,6 +158,16 @@ const SceneLayer: React.FC<{scene: ScenePlan; fps: number; accent: string}> = ({
   );
 };
 
+const mediaSource = (value: string): string => {
+  if (!value) {
+    return '';
+  }
+  if (/^(https?:|data:|blob:|file:)/.test(value)) {
+    return value;
+  }
+  return staticFile(value.replace(/^\/+/, ''));
+};
+
 const SceneTone: React.FC<{scene: ScenePlan; accent: string; localFrame: number; fps: number}> = ({scene, accent, localFrame, fps}) => {
   const reveal = interpolate(localFrame, [0, Math.round(fps * 0.35)], [0.65, 0.2], {
     extrapolateLeft: 'clamp',
@@ -162,42 +182,6 @@ const SceneTone: React.FC<{scene: ScenePlan; accent: string; localFrame: number;
           : `linear-gradient(180deg, rgba(0,0,0,${reveal}), rgba(0,0,0,0.08) 48%, rgba(0,0,0,0.42))`
       }}
     />
-  );
-};
-
-const Overlay: React.FC<{overlay: SceneOverlay; fps: number; localFrame: number; accent: string}> = ({overlay, fps, localFrame, accent}) => {
-  const start = msToFrame(overlay.start_ms, fps);
-  const end = start + msToFrame(overlay.duration_ms, fps);
-  const visible = localFrame >= start && localFrame <= end;
-  const enter = interpolate(localFrame, [start, start + Math.round(fps * 0.18)], [18, 0], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp'
-  });
-  if (!visible || !overlay.text) {
-    return null;
-  }
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        top: 126,
-        left: 72,
-        maxWidth: 760,
-        padding: '18px 24px',
-        borderRadius: 8,
-        background: 'rgba(9, 9, 11, 0.74)',
-        border: `2px solid ${accent}`,
-        color: 'oklch(0.96 0.012 35)',
-        fontSize: 34,
-        fontWeight: 800,
-        letterSpacing: 0,
-        lineHeight: 1.05,
-        textTransform: 'uppercase',
-        transform: `translateY(${enter}px)`
-      }}
-    >
-      {overlay.text}
-    </div>
   );
 };
 

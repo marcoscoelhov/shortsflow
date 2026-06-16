@@ -1251,6 +1251,400 @@ pre {
   margin: 0;
 }
 
+.llm-tournament-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.llm-tournament-summary h2 {
+  margin: 0.2rem 0 0;
+  color: var(--ink-heading);
+  font-size: clamp(1.65rem, 2.15vw, 2.15rem);
+  line-height: 1.08;
+}
+
+.llm-tournament-summary p:not(.eyebrow) {
+  max-width: 720px;
+  margin: 0.65rem 0 0;
+  color: var(--muted-strong);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.llm-tournament-state {
+  display: grid;
+  justify-items: end;
+  gap: 0.45rem;
+  min-width: 11rem;
+}
+
+.llm-tournament-state strong {
+  color: var(--ink-strong);
+  font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.llm-tournament-command {
+  max-width: 100%;
+  margin: 0;
+  padding: 0.85rem;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(9 9 11 / 0.48);
+  color: var(--ink-warm);
+}
+
+.llm-command-panel {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.llm-command-list,
+.llm-history-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.llm-command-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.7fr) minmax(0, 1.6fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(9 9 11 / 0.26);
+}
+
+.llm-command-row strong,
+.llm-history-row strong {
+  color: var(--ink-strong);
+}
+
+.llm-command-row p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.llm-copy-command {
+  width: 2.35rem;
+  height: 2.35rem;
+}
+
+.llm-copy-command[data-copied="true"] {
+  border-color: rgb(34 197 94 / 0.42);
+  color: var(--success);
+}
+
+.llm-kpi-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.55rem;
+}
+
+.llm-kpi-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(9 9 11 / 0.24);
+}
+
+.llm-kpi-list li span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.llm-kpi-list li strong {
+  color: var(--ink-heading);
+  font-size: 1rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.llm-tournament-decision {
+  display: grid;
+  gap: 1rem;
+}
+
+.llm-stage-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.llm-stage-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.8fr) minmax(0, 1.8fr);
+  gap: 1rem;
+  align-items: center;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(9 9 11 / 0.26);
+}
+
+.llm-triage-stage-row {
+  grid-template-columns: minmax(10rem, 0.7fr) minmax(0, 1.5fr);
+}
+
+.llm-stage-row span,
+.llm-route-panel dt,
+.llm-artifact-panel dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.llm-route-panel dt,
+.llm-artifact-panel dt,
+.llm-stage-row span {
+  font-family: inherit;
+}
+
+.llm-stage-row strong {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--ink-strong);
+}
+
+.llm-stage-row dl,
+.llm-route-panel dl,
+.llm-artifact-panel dl {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.llm-stage-row dl {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.llm-stage-row dl div,
+.llm-route-panel dl div,
+.llm-artifact-panel dl div {
+  min-width: 0;
+}
+
+.llm-stage-row dt,
+.llm-stage-row dd,
+.llm-route-panel dt,
+.llm-route-panel dd,
+.llm-artifact-panel dt,
+.llm-artifact-panel dd {
+  margin: 0;
+}
+
+.llm-stage-row dd,
+.llm-route-panel dd,
+.llm-artifact-panel dd {
+  color: var(--ink-warm);
+  overflow-wrap: anywhere;
+}
+
+.llm-route-panel dd > div {
+  margin-bottom: 0.28rem;
+}
+
+.llm-route-panel dd > div:last-child {
+  margin-bottom: 0;
+}
+
+.llm-tournament-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.llm-route-panel {
+  display: grid;
+  align-content: start;
+  gap: 0.8rem;
+}
+
+.llm-route-panel h3 {
+  margin: 0;
+  color: var(--ink-heading);
+}
+
+.llm-risk-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0 0 0 1.1rem;
+  color: var(--ink-warm);
+}
+
+.llm-artifact-panel {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.llm-artifact-row {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.llm-artifact-panel code {
+  color: var(--ink-warm);
+  font-size: 0.82rem;
+}
+
+.llm-file-link {
+  margin-top: 0.35rem;
+  display: inline-block;
+  color: var(--ink-strong);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  text-decoration: none;
+  padding: 0.22rem 0.6rem;
+  background: rgb(9 9 11 / 0.32);
+}
+
+.llm-file-link:hover {
+  border-color: rgb(255 255 255 / 0.2);
+}
+
+.llm-file-link.disabled {
+  color: var(--muted);
+  border-color: var(--line-disabled);
+  background: var(--surface-disabled);
+  pointer-events: none;
+}
+
+.llm-candidate-table {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.25rem;
+}
+
+.llm-candidate-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) repeat(5, minmax(5rem, max-content));
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgb(255 255 255 / 0.07);
+  border-radius: 8px;
+  background: rgb(9 9 11 / 0.22);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.llm-candidate-row.survived {
+  border-color: rgb(34 197 94 / 0.28);
+  background: rgb(34 197 94 / 0.08);
+}
+
+.llm-candidate-row strong {
+  color: var(--ink-warm);
+}
+
+.llm-history-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.5fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(9 9 11 / 0.22);
+}
+
+.llm-history-row div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.llm-history-row span {
+  color: var(--muted);
+  font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.llm-history-row code {
+  color: var(--ink-warm);
+  overflow-wrap: anywhere;
+}
+
+.llm-json-panel {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.llm-json-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(9 9 11 / 0.18);
+  padding: 0.75rem 0.9rem 0.85rem;
+}
+
+.llm-json-details summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.llm-json-details pre {
+  margin: 0.8rem 0 0;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(2 6 23 / 0.7);
+}
+
+.llm-json-details code {
+  display: block;
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
+  color: var(--ink-warm);
+}
+
+.llm-evidence-panel {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.llm-evidence-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.llm-evidence-stage {
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(9 9 11 / 0.2);
+}
+
+.llm-evidence-stage h4 {
+  margin: 0 0 0.6rem;
+  color: var(--ink-heading);
+}
+
 .error-banner {
   border-color: rgba(162, 58, 45, 0.2);
   background: var(--danger-state-bg);
@@ -1426,117 +1820,6 @@ pre {
 .minimal-featured-render {
   grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
   align-items: stretch;
-}
-
-.premium-proof-panel {
-  display: grid;
-  gap: 1rem;
-  scroll-margin-top: 5.5rem;
-}
-
-.premium-proof-header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.premium-proof-header h3 {
-  margin: 0.2rem 0 0;
-}
-
-.premium-comparison-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-  align-items: start;
-}
-
-.premium-video-column {
-  display: grid;
-  gap: 0.6rem;
-  min-width: 0;
-}
-
-.premium-video-column strong {
-  color: var(--ink-heading);
-}
-
-.premium-comparison-player {
-  width: min(100%, 320px);
-  aspect-ratio: 9 / 16;
-  border-radius: 8px;
-  background: var(--surface-code);
-  justify-self: center;
-}
-
-.premium-proof-empty {
-  display: grid;
-  gap: 0.9rem;
-  max-width: 72ch;
-}
-
-.premium-proof-empty p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.premium-progress-card {
-  display: grid;
-  gap: 0.65rem;
-  padding: 0.85rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: rgba(2, 6, 23, 0.3);
-}
-
-.premium-progress-card.failed {
-  border-color: rgba(248, 113, 113, 0.38);
-  background: rgba(248, 113, 113, 0.1);
-}
-
-.premium-progress-card.failed strong {
-  color: var(--danger-soft);
-}
-
-.premium-progress-copy {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.35rem 0.85rem;
-}
-
-.premium-progress-copy strong {
-  color: var(--ink-heading);
-}
-
-.premium-progress-copy span,
-.premium-progress-card small {
-  color: var(--muted);
-}
-
-.premium-progress-bar {
-  min-height: 0.62rem;
-}
-
-.premium-progress-fill.indeterminate {
-  width: 42%;
-  animation: premium-progress-sweep 1.35s cubic-bezier(0.16, 1, 0.3, 1) infinite;
-}
-
-.premium-proof-actions {
-  margin-top: 0.15rem;
-}
-
-@keyframes premium-progress-sweep {
-  from {
-    transform: translateX(-120%);
-  }
-
-  to {
-    transform: translateX(240%);
-  }
 }
 
 .compact-checklist {
@@ -2928,6 +3211,46 @@ a:focus-visible {
     max-height: none;
     overflow: visible;
     padding-right: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .llm-tournament-summary {
+    display: grid;
+    align-items: start;
+  }
+
+  .llm-tournament-state {
+    justify-items: start;
+    min-width: 0;
+  }
+
+  .llm-stage-row,
+  .llm-command-row,
+  .llm-history-row,
+  .llm-tournament-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .llm-stage-row dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .llm-copy-command {
+    width: 100%;
+  }
+
+  .llm-candidate-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .llm-kpi-list,
+  .llm-candidate-table {
+    grid-template-columns: 1fr;
+  }
+
+  .llm-json-details pre {
+    max-height: 240px;
   }
 }
 
@@ -4929,7 +5252,6 @@ label,
   .detail-grid,
   .featured-render,
   .minimal-featured-render,
-  .premium-comparison-grid,
   .publication-grid {
     grid-template-columns: 1fr;
   }
@@ -4951,10 +5273,6 @@ label,
   body {
     max-width: 100%;
     overflow-x: clip;
-  }
-
-  .premium-proof-panel {
-    scroll-margin-top: 5rem;
   }
 
   .app-topbar {
@@ -5189,6 +5507,13 @@ label,
     gap: 0.8rem;
   }
 
+  .calendar-mobile-agenda .calendar-agenda-list {
+    max-height: min(58vh, 32rem);
+    overflow: auto;
+    padding-right: 0.1rem;
+    overscroll-behavior: contain;
+  }
+
   .calendar-grid,
   .calendar-head,
   .calendar-legend {
@@ -5349,10 +5674,6 @@ label,
     transition-duration: 1ms !important;
   }
 
-  .premium-progress-fill.indeterminate {
-    animation: none !important;
-    transform: translateX(0);
-  }
 }
 
 /* Impeccable detect pass: keep operational density without scanner-visible slop. */
@@ -5465,5 +5786,757 @@ label,
   .growth-action-control .inline-form,
   .growth-action-control .button-link {
     width: 100%;
+  }
+}
+
+/* UI/UX responsive correction pass: density, width and fixed navigation. */
+:root {
+  --ui-page-max: 1480px;
+  --ui-page-pad-x: clamp(1.1rem, 2vw, 2rem);
+  --ui-panel-pad: clamp(0.9rem, 1.4vw, 1.15rem);
+  --ui-row-pad: clamp(0.8rem, 1.2vw, 1rem);
+  --ui-topbar-h: 4.25rem;
+  --ui-mobile-topbar-h: 3.45rem;
+  --ui-mobile-nav-h: 4.8rem;
+}
+
+html {
+  text-size-adjust: 100%;
+}
+
+body {
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+.app-topbar {
+  height: var(--ui-topbar-h);
+  grid-template-columns: 240px minmax(260px, 540px) minmax(120px, 1fr);
+  padding-inline: 1rem;
+}
+
+.topbar-product {
+  min-height: 2.7rem;
+  font-size: 1.12rem;
+}
+
+.brand-mark {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.topbar-search {
+  height: 2.55rem;
+}
+
+.topbar-icon,
+.topbar-avatar {
+  width: 2.55rem;
+  height: 2.55rem;
+  min-height: 2.55rem;
+}
+
+.app-sidebar {
+  inset: var(--ui-topbar-h) auto 0 0;
+  width: 232px;
+  padding: 0.8rem 0.65rem;
+  gap: 0.55rem;
+}
+
+.app-sidebar .topnav,
+.sidebar-footer-nav {
+  gap: 0.25rem;
+}
+
+.app-sidebar .topnav a,
+.app-sidebar .topnav button,
+.sidebar-footer-nav a,
+.sidebar-footer-nav button {
+  min-height: 2.65rem;
+  padding-inline: 0.7rem;
+  font-size: 0.78rem;
+}
+
+.sidebar-new-project {
+  min-height: 2.9rem;
+  font-size: 0.84rem;
+}
+
+.page-shell {
+  width: calc(100% - 232px);
+  max-width: none;
+  margin-left: 232px;
+  padding: calc(var(--ui-topbar-h) + 0.95rem) var(--ui-page-pad-x) 2.5rem;
+}
+
+.page-shell > * {
+  width: min(100%, var(--ui-page-max));
+  margin-inline: auto;
+}
+
+.panel,
+.jobs-table-panel,
+.ready-script-bank-card,
+.operational-settings-card,
+.schedule-picker-card,
+.featured-player,
+.calendar-agenda-day,
+.ready-script-item {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.panel,
+.jobs-table-panel {
+  padding: var(--ui-panel-pad);
+}
+
+.jobs-control-hero,
+.publication-hero,
+.calendar-summary,
+.calendar-toolbar,
+.library-summary,
+.settings-summary,
+.operational-settings-page-head {
+  gap: 0.85rem;
+  padding-bottom: 1rem;
+}
+
+.jobs-hero-copy h2,
+.publication-hero h2,
+.calendar-summary h2,
+.library-summary h2,
+.settings-summary h2 {
+  font-size: clamp(1.65rem, 2.15vw, 2.15rem);
+  line-height: 1.08;
+}
+
+.jobs-hero-copy p:not(.eyebrow),
+.publication-hero p:not(.eyebrow),
+.calendar-summary p:not(.eyebrow),
+.library-summary p:not(.eyebrow),
+.settings-summary p:not(.eyebrow),
+.section-note,
+.detail-subtitle,
+.field-help {
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.jobs-operation-summary {
+  width: min(100%, 30rem);
+}
+
+.jobs-operation-summary li {
+  padding: 0.45rem 0.55rem;
+}
+
+.jobs-action-row,
+.jobs-table-header,
+.pagination,
+.publication-shell,
+.calendar-shell,
+.ready-script-bank-layout,
+.operational-settings-grid {
+  gap: 0.75rem;
+}
+
+.jobs-grid-head,
+.jobs-grid-row {
+  grid-template-columns: 84px minmax(220px, 1.45fr) minmax(148px, 0.65fr) minmax(190px, 0.85fr);
+  gap: 0.75rem;
+}
+
+.jobs-grid-head {
+  padding: 0.75rem 0.95rem;
+}
+
+.jobs-grid-row.job-row-card {
+  padding: var(--ui-row-pad);
+}
+
+.job-thumb {
+  width: 74px;
+}
+
+.job-title-cell,
+.job-status-cell,
+.job-row-next,
+.job-row-actions,
+.jobs-grid-row .job-progress-compact,
+.media-block,
+.calendar-card,
+.publication-panel,
+.ready-script-item,
+.operational-settings-group {
+  min-width: 0;
+}
+
+.job-title-cell h3 {
+  font-size: 0.92rem;
+  line-height: 1.25;
+}
+
+.jobs-grid-row .job-status-cell,
+.jobs-grid-row .job-progress-compact {
+  align-self: start;
+}
+
+.jobs-grid-row .job-status-cell small,
+.jobs-grid-row .job-row-next,
+.jobs-grid-row .job-decision-summary span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+.jobs-grid-row .job-status-cell small,
+.jobs-grid-row .job-row-next {
+  -webkit-line-clamp: 2;
+}
+
+.jobs-grid-row .job-decision-summary {
+  gap: 0.18rem;
+  padding-top: 0.35rem;
+  font-size: 0.72rem;
+}
+
+.jobs-grid-row .job-decision-summary span {
+  -webkit-line-clamp: 1;
+}
+
+.jobs-grid-row .job-decision-summary small {
+  display: none;
+}
+
+.job-row-card {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+
+.collapse-panel,
+.scene-card,
+.asset-card {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+
+.job-row-meta,
+.badge,
+.jobs-grid-head,
+.eyebrow,
+label,
+.inline-hint {
+  font-size: 0.76rem;
+}
+
+.button-link,
+button,
+input,
+select,
+textarea {
+  font-size: 0.94rem;
+}
+
+.detail-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 350px);
+  gap: 0.85rem;
+}
+
+.detail-grid,
+.publication-shell,
+.calendar-shell,
+.library-shell,
+.settings-shell {
+  max-width: min(100%, 1320px);
+}
+
+.main-column,
+.side-column,
+.workflow-focus,
+.focus-strip,
+.review-checklist,
+.publication-grid,
+.calendar-mobile-agenda,
+.library-active-list,
+.library-archive-list,
+.ready-script-bank-list {
+  gap: 0.75rem;
+}
+
+.side-column .sticky {
+  top: calc(var(--ui-topbar-h) + 0.65rem);
+}
+
+.job-local-nav {
+  top: var(--ui-topbar-h);
+  padding: 0.35rem;
+}
+
+.job-local-nav a,
+.job-mobile-tabs button,
+.library-state-tabs a,
+.library-archive-panel summary {
+  min-height: 2.45rem;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.publication-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ready-script-bank-layout,
+.operational-settings-grid {
+  grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
+}
+
+.calendar-cell {
+  min-height: 7.8rem;
+}
+
+.calendar-agenda-day {
+  padding: 0.8rem;
+}
+
+.featured-render,
+.minimal-featured-render {
+  grid-template-columns: minmax(210px, 300px) minmax(0, 1fr);
+}
+
+.sidebar-collapsed .app-topbar {
+  grid-template-columns: 80px minmax(260px, 620px) minmax(120px, 1fr);
+}
+
+.sidebar-collapsed .page-shell {
+  width: calc(100% - 80px);
+  margin-left: 80px;
+}
+
+@media (min-width: 1320px) {
+  .jobs-grid-head,
+  .jobs-grid-row {
+    grid-template-columns: 88px minmax(280px, 1.35fr) minmax(150px, 0.6fr) minmax(200px, 0.8fr) 104px;
+    gap: 0.8rem;
+  }
+}
+
+@media (min-width: 861px) {
+  body {
+    font-size: 1rem;
+  }
+
+  .app-sidebar .topnav a,
+  .app-sidebar .topnav button,
+  .sidebar-footer-nav a,
+  .sidebar-footer-nav button {
+    font-size: 0.86rem;
+  }
+
+  .topbar-product {
+    font-size: 1.18rem;
+  }
+
+  .jobs-hero-copy p:not(.eyebrow),
+  .publication-hero p:not(.eyebrow),
+  .calendar-summary p:not(.eyebrow),
+  .library-summary p:not(.eyebrow),
+  .settings-summary p:not(.eyebrow),
+  .section-note,
+  .detail-subtitle,
+  .field-help {
+    font-size: 0.96rem;
+  }
+
+  .job-title-cell h3 {
+    font-size: 1.02rem;
+  }
+
+  .job-row-meta,
+  .badge,
+  .jobs-grid-head,
+  .eyebrow,
+  label,
+  .inline-hint {
+    font-size: 0.8rem;
+  }
+
+  .job-status-cell small,
+  .jobs-grid-row .job-row-next,
+  .job-decision-summary {
+    font-size: 0.88rem;
+  }
+
+  .jobs-grid-row .job-progress-compact > div:first-child,
+  .pagination a,
+  .pagination .disabled,
+  .job-local-nav a,
+  .library-state-tabs a,
+  .library-archive-panel summary {
+    font-size: 0.9rem;
+  }
+
+  .button-link,
+  button,
+  input,
+  select,
+  textarea {
+    font-size: 0.96rem;
+  }
+}
+
+@media (max-width: 1180px) and (min-width: 861px) {
+  .app-topbar {
+    grid-template-columns: 212px minmax(220px, 1fr) auto;
+  }
+
+  .app-sidebar {
+    width: 212px;
+  }
+
+  .page-shell {
+    width: calc(100% - 212px);
+    margin-left: 212px;
+  }
+
+  .jobs-grid-row {
+    grid-template-columns: 74px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 980px) {
+  .detail-grid,
+  .featured-render,
+  .minimal-featured-render,
+  .publication-grid,
+  .ready-script-bank-layout,
+  .operational-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-shell > * {
+    width: 100%;
+  }
+}
+
+@media (max-width: 860px) {
+  body {
+    padding-bottom: calc(var(--ui-mobile-nav-h) + env(safe-area-inset-bottom));
+    font-size: 0.92rem;
+  }
+
+  .app-topbar {
+    min-height: var(--ui-mobile-topbar-h);
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.45rem;
+    padding: 0.45rem 0.7rem;
+  }
+
+  .topbar-product {
+    min-height: 2.45rem;
+    font-size: 0.98rem;
+  }
+
+  .brand-mark {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .topbar-actions {
+    gap: 0.35rem;
+  }
+
+  .topbar-search-trigger,
+  .topbar-actions .topbar-icon,
+  .topbar-avatar {
+    flex-basis: 2.45rem;
+    width: 2.45rem;
+    height: 2.45rem;
+    min-height: 2.45rem;
+  }
+
+  .page-shell {
+    width: 100%;
+    margin-left: 0;
+    padding: 0.75rem 0.7rem calc(var(--ui-mobile-nav-h) + 1.25rem + env(safe-area-inset-bottom));
+  }
+
+  .panel,
+  .jobs-table-panel,
+  .ready-script-bank-card,
+  .operational-settings-card,
+  .schedule-picker-card,
+  .calendar-agenda-day,
+  .ready-script-item {
+    padding: 0.85rem;
+  }
+
+  .jobs-control-hero,
+  .publication-hero,
+  .calendar-summary,
+  .calendar-toolbar,
+  .library-summary,
+  .settings-summary,
+  .operational-settings-page-head {
+    gap: 0.65rem;
+    padding-bottom: 0.7rem;
+  }
+
+  .jobs-hero-copy h2,
+  .publication-hero h2,
+  .calendar-summary h2,
+  .library-summary h2,
+  .settings-summary h2 {
+    font-size: 1.45rem;
+    line-height: 1.12;
+  }
+
+  .jobs-hero-copy p:not(.eyebrow),
+  .publication-hero p:not(.eyebrow),
+  .calendar-summary p:not(.eyebrow),
+  .library-summary p:not(.eyebrow),
+  .settings-summary p:not(.eyebrow),
+  .section-note,
+  .detail-subtitle,
+  .field-help {
+    font-size: 0.84rem;
+  }
+
+  .jobs-operation-summary {
+    gap: 0.35rem;
+    padding: 0.25rem;
+  }
+
+  .jobs-operation-summary li {
+    flex: 1 1 calc(50% - 0.35rem);
+    padding: 0.45rem;
+  }
+
+  .jobs-operation-summary span,
+  .job-row-meta,
+  .badge,
+  .eyebrow,
+  label,
+  .inline-hint {
+    font-size: 0.68rem;
+  }
+
+  .jobs-operation-summary strong {
+    font-size: 0.9rem;
+  }
+
+  .jobs-action-row {
+    gap: 0.55rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .jobs-filter-pills {
+    gap: 0.35rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .jobs-filter-pills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .jobs-filter-pills a,
+  .jobs-sort-control,
+  .job-title-cell h3 a,
+  .job-row-meta a,
+  .media-block > a,
+  .inline-disclosure summary {
+    min-height: 2.45rem;
+  }
+
+  .jobs-grid-row {
+    grid-template-columns: 4rem minmax(0, 1fr);
+    gap: 0.65rem;
+  }
+
+  .jobs-grid-row.job-row-card {
+    padding: 0.8rem;
+  }
+
+  .job-thumb {
+    width: 4rem;
+  }
+
+  .job-title-cell h3 {
+    font-size: 0.9rem;
+  }
+
+  .job-status-cell,
+  .jobs-grid-row .job-progress-compact,
+  .job-date-cell,
+  .jobs-grid-row .job-row-actions {
+    grid-column: 1 / -1;
+  }
+
+  .jobs-grid-row .job-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .jobs-grid-row .job-row-actions .button-link {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .jobs-grid-row .job-row-meta {
+    gap: 0.22rem 0.45rem;
+  }
+
+  .jobs-grid-row .job-row-meta .origin-badge,
+  .jobs-grid-row .job-date-cell,
+  .jobs-grid-row .job-status-cell small,
+  .jobs-grid-row .job-progress-compact .job-row-next:nth-of-type(n + 2) {
+    display: none;
+  }
+
+  .jobs-grid-row .job-status-cell {
+    gap: 0.25rem;
+  }
+
+  .jobs-grid-row .job-progress-compact {
+    gap: 0.3rem;
+  }
+
+  .jobs-grid-row .job-progress-compact > div:first-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.45rem;
+    align-items: baseline;
+  }
+
+  .jobs-grid-row .job-row-next {
+    -webkit-line-clamp: 2;
+    margin-bottom: 0;
+  }
+
+  .jobs-grid-row .job-decision-summary {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .mobile-bottom-nav {
+    min-height: var(--ui-mobile-nav-h);
+    padding: 0.35rem 0.45rem calc(0.35rem + env(safe-area-inset-bottom));
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .mobile-bottom-nav a,
+  .mobile-bottom-nav button {
+    min-width: 0;
+    min-height: 3.65rem;
+    padding: 0.35rem 0.25rem;
+    font-size: 0.66rem;
+    line-height: 1.15;
+  }
+
+  .mobile-bottom-nav .material-symbols-outlined {
+    font-size: 1.35rem;
+  }
+
+  .calendar-mobile-agenda,
+  .library-active-list,
+  .library-archive-list,
+  .ready-script-bank-list,
+  .main-column,
+  .side-column,
+  .workflow-focus,
+  .focus-strip,
+  .publication-shell,
+  .calendar-shell {
+    gap: 0.65rem;
+  }
+
+  .calendar-agenda-day {
+    padding: 0.75rem;
+  }
+
+  .calendar-agenda-day header {
+    align-items: start;
+  }
+
+  .calendar-agenda-day .calendar-card,
+  .publication-panel,
+  .ready-script-item,
+  .operational-settings-group,
+  .growth-action-row {
+    padding: 0.75rem;
+  }
+
+  .calendar-metrics,
+  .publication-metrics,
+  .ready-script-bank-summary,
+  .growth-scoreboard,
+  .growth-status-grid {
+    gap: 0.5rem;
+  }
+
+  .create-job-modal,
+  .operational-settings-modal,
+  .calendar-schedule-modal {
+    width: min(100vw - 0.7rem, 40rem);
+  }
+
+  .create-job-card,
+  .operational-settings-card,
+  .calendar-schedule-card {
+    max-height: calc(100dvh - 0.7rem);
+  }
+}
+
+@media (max-width: 640px) {
+  .job-local-nav {
+    display: none;
+  }
+
+  .job-mobile-tabs {
+    top: var(--ui-mobile-topbar-h);
+    margin-inline: -0.1rem;
+    padding: 0.35rem;
+    grid-auto-columns: minmax(5.35rem, max-content);
+    gap: 0.35rem;
+  }
+
+  .job-mobile-tabs button {
+    min-height: 2.25rem;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.78rem;
+  }
+
+  .detail-header-panel {
+    padding: 0.85rem;
+  }
+
+  .featured-render,
+  .minimal-featured-render {
+    gap: 0.65rem;
+  }
+
+  .review-primary-action button,
+  .review-secondary-actions .button-link,
+  .growth-action-control,
+  .growth-action-control .inline-form,
+  .growth-action-control .button-link {
+    width: 100%;
+  }
+
+  h1,
+  h2,
+  h3,
+  p,
+  a,
+  span,
+  button,
+  input,
+  select,
+  textarea,
+  summary {
+    overflow-wrap: anywhere;
   }
 }

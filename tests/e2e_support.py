@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import audioop
-
 import json
 
 import math
@@ -73,7 +71,7 @@ from app.pipelines.timeline import normalize_scene_timings  # noqa: E402
 
 from app.providers.errors import ProviderFailure  # noqa: E402
 from app.providers.image import MinimaxImageProvider  # noqa: E402
-from app.providers.llm import DeepSeekCreativeProvider, LLMProviderRegistry, MinimaxCreativeProvider, MockCreativeProvider, OpenAICreativeProvider, ResilientCreativeProvider  # noqa: E402
+from app.providers.llm import DeepSeekCreativeProvider, GeminiCreativeProvider, LLMProviderRegistry, MinimaxCreativeProvider, MockCreativeProvider, OpenAICreativeProvider, ResilientCreativeProvider  # noqa: E402
 from app.providers.music import LocalMusicBankProvider, MiniMaxBackgroundMusicProvider, ResilientMusicProvider  # noqa: E402
 from app.providers.tts import LocalSpeechFallbackProvider  # noqa: E402
 

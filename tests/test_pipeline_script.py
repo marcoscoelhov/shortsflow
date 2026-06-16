@@ -1,3 +1,5 @@
+import asyncio
+
 from tests.e2e_support import *  # noqa: F403
 
 
@@ -138,6 +140,117 @@ Hashtags: #curiosidades #shorts"""
     assert "Terremoto teste lote B" in page.text
     assert "2 disponíveis" in page.text
 
+def test_ready_script_batch_import_rejects_oversized_text() -> None:
+    client = TestClient(app)
+    oversized = "Título: X\n" + ("a" * (main_module.MAX_READY_SCRIPT_IMPORT_CHARS + 1))
+
+    response = client.post(
+        "/automation/ready-scripts/import",
+        data={"ready_script_batch": oversized, "fact_check_confirmed": "true", "return_to": "/calendar"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 413
+
+
+def test_ready_script_batch_import_rejects_oversized_upload() -> None:
+    client = TestClient(app)
+    oversized = b"a" * (main_module.MAX_READY_SCRIPT_IMPORT_CHARS + 1)
+
+    response = client.post(
+        "/automation/ready-scripts/import",
+        data={"fact_check_confirmed": "true", "return_to": "/calendar"},
+        files={"ready_script_file": ("ready.txt", oversized, "text/plain")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 413
+
+
+def test_ready_script_batch_import_accepts_multibyte_upload_under_character_limit() -> None:
+    client = TestClient(app)
+    script = "\n".join(
+        [
+            "Título: Roteiro com acentos",
+            "Hook: Um lote em português pode ter muitos caracteres acentuados.",
+            "Loop: O limite deve contar texto, não bytes UTF-8 isolados.",
+            "Beats:",
+            "á" * 120_000,
+            "Payoff: A importação continua válida quando o texto cabe no limite editorial.",
+            "Fechamento: O banco recebe o roteiro sem tratar acento como excesso.",
+            "Hashtags: #curiosidades #shorts",
+        ]
+    )
+
+    response = client.post(
+        "/automation/ready-scripts/import",
+        data={"fact_check_confirmed": "true", "return_to": "/calendar"},
+        files={"ready_script_file": ("ready.txt", script.encode("utf-8"), "text/plain")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+
+
+def test_ready_script_batch_import_rejects_large_declared_body_before_form_parse() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/automation/ready-scripts/import",
+        content=b"",
+        headers={"content-length": str(main_module.MAX_READY_SCRIPT_IMPORT_BODY_BYTES + 1)},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 413
+
+
+async def _post_ready_script_import_without_content_length(body: bytes) -> int:
+    chunks = [body[index : index + 65536] for index in range(0, len(body), 65536)]
+    messages: list[dict[str, object]] = []
+
+    async def receive() -> dict[str, object]:
+        if chunks:
+            chunk = chunks.pop(0)
+            return {"type": "http.request", "body": chunk, "more_body": bool(chunks)}
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, object]) -> None:
+        messages.append(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/automation/ready-scripts/import",
+            "raw_path": b"/automation/ready-scripts/import",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"host", b"testserver"),
+                (b"content-type", b"application/x-www-form-urlencoded"),
+            ],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        },
+        receive,
+        send,
+    )
+    response_start = next(message for message in messages if message.get("type") == "http.response.start")
+    return int(response_start["status"])
+
+
+def test_ready_script_batch_import_rejects_streaming_body_without_content_length() -> None:
+    body = b"fact_check_confirmed=true&ready_script_batch=" + (b"a" * (main_module.MAX_READY_SCRIPT_IMPORT_BODY_BYTES + 1))
+
+    status = asyncio.run(_post_ready_script_import_without_content_length(body))
+
+    assert status == 413
+
+
 def test_ready_script_batch_import_normalizes_markdown_blocks() -> None:
     client = TestClient(app)
     batch = """**Título**: Lote markdown A
@@ -177,6 +290,68 @@ Depois da normalização, cada título inicia um bloco.
     assert all(row.status == "available" for row in rows)
     assert all("**" not in row.raw_text for row in rows)
     assert all("---" not in row.raw_text for row in rows)
+
+
+def test_ready_script_parser_normalizes_markdown_label_colon_inside_bold() -> None:
+    from app.manual_script import parse_ready_script
+
+    ready_script = """## 1
+
+**Título:** Espelho: por que ele inverte lados, mas não altura
+**Hook:** **Levante** a mão direita, e o espelho parece trair você.
+**Loop:** Por que ele troca esquerda e direita, mas não cima e baixo?
+**Beats:** O espelho não sabe o que é direita.
+Ele só devolve luz em linha direta.
+**Payoff:** O espelho troca frente e trás, não esquerda e direita.
+**Fechamento:** A traição não está no vidro; está na sua cabeça.
+**Hashtags:** #curiosidades #facts #shorts"""
+
+    ready = parse_ready_script(ready_script, fact_check_confirmed=True)
+
+    assert ready.script["title"] == "Espelho: por que ele inverte lados, mas não altura"
+    assert ready.script["hook"] == "Levante a mão direita, e o espelho parece trair você."
+    assert ready.script["body_beats"][0] == "O espelho não sabe o que é direita."
+    assert ready.script["ending"] == "A traição não está no vidro; está na sua cabeça."
+    assert "**" not in ready.raw_text
+
+
+def test_ready_script_batch_import_preprocesses_ai_markdown_attachment() -> None:
+    client = TestClient(app)
+    batch = """Assimilei o padrão do banco: hook forte, loop aberto e frases curtas.
+
+## 1
+
+- **Título:** Validador markdown: o anexo vira roteiro limpo
+- **Hook:** **Cole** o texto bruto, e o banco não deve guardar a marcação.
+- **Loop:** Como o importador evita que Markdown vire narração?
+- **Beats:** O pré-tratamento reconhece rótulos mesmo com lista.
+Ele remove negrito antes de persistir o texto.
+O separador visual não entra no roteiro.
+- **Payoff:** O banco recebe campos canônicos, não o formato visual do anexo.
+- **Fechamento:** O roteiro entra limpo antes da automação usar.
+- **Hashtags:** #curiosidades #facts #shorts
+
+---"""
+
+    response = client.post(
+        "/automation/ready-scripts/import",
+        data={"ready_script_batch": batch, "fact_check_confirmed": "true", "return_to": "/library"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/library?imported=1"
+    with SessionLocal() as session:
+        row = session.scalar(select(ReadyScriptItem).where(ReadyScriptItem.title == "Validador markdown: o anexo vira roteiro limpo"))
+
+    assert row is not None
+    assert row.status == "available"
+    assert row.raw_text.startswith("Título: Validador markdown")
+    assert "Assimilei" not in row.raw_text
+    assert "##" not in row.raw_text
+    assert "**" not in row.raw_text
+    assert "---" not in row.raw_text
+    assert row.parsed_script["hook"] == "Cole o texto bruto, e o banco não deve guardar a marcação."
 
 def test_automation_preflight_fails_before_consuming_ready_script() -> None:
     service = AutomationService(orchestrator)
@@ -368,6 +543,61 @@ def test_minimax_script_prompt_requires_pt_br_for_all_text_fields(monkeypatch) -
     assert "ignore esse formato e mantenha exatamente o JSON estrito" in prompt
     assert "sem instruções de camera nos campos narrados" in prompt
     assert "visual_opening pode descrever composicao visual" in prompt
+
+def test_script_prompt_prioritizes_evidence_cards_for_viral_retention(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_json_completion(self, prompt: str) -> dict[str, object]:
+        captured["prompt"] = prompt
+        return {
+            "title": "Café e o alarme do cansaço",
+            "hook": "O café não cria energia do nada.",
+            "body_beats": ["Ele pode atrapalhar a ação da adenosina."],
+            "ending": "Talvez a segunda xícara só adie o aviso.",
+            "cta": None,
+            "full_narration": "O café não cria energia do nada. Ele pode atrapalhar a ação da adenosina. Talvez a segunda xícara só adie o aviso.",
+            "estimated_duration_sec": 35,
+            "key_facts": ["A cafeína pode atrapalhar a ação da adenosina em receptores ligados ao sono."],
+            "source_fact_ids": ["F1"],
+            "claim_trace": [{"text": "Ele pode atrapalhar a ação da adenosina.", "source_fact_ids": ["F1"], "grounding": "fact_pack"}],
+            "token_count": 23,
+            "language": "pt-BR",
+            "retention_map": {},
+            "visual_opening": {},
+            "qa_metrics": {},
+            "prompt_version": "teste",
+        }
+
+    monkeypatch.setattr(MinimaxCreativeProvider, "_json_completion", fake_json_completion)
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.generate_script(
+        {
+            "canonical_topic": "cafeina e sono",
+            "fact_pack": {
+                "status": "verified",
+                "facts": [{"fact_id": "F1", "claim": "A cafeína pode bloquear receptores de adenosina.", "source_id": "S1"}],
+                "evidence_cards": [
+                    {
+                        "card_id": "E1",
+                        "claim": "A cafeína pode bloquear receptores de adenosina.",
+                        "safe_language": "A cafeína pode atrapalhar a ação da adenosina em receptores ligados ao sono.",
+                        "do_not_claim": ["queda garantida depois do café"],
+                        "support_level": "direct",
+                        "allowed_script_use": True,
+                        "aggressive_hook_options": ["O café não cria energia do nada."],
+                        "retention_use": {"hook": ["O café não cria energia do nada."], "loop_close": ["Talvez a segunda xícara só adie o aviso."]},
+                    }
+                ],
+            },
+        }
+    )
+
+    prompt = captured["prompt"]
+    assert "use evidence_cards como fonte factual e editorial preferencial" in prompt
+    assert "use aggressive_hook_options para criar hook agressivo" in prompt
+    assert "Hook forte, Loop aberto, Beats em escalada, Payoff no último terço" in prompt
+    assert "nunca afirme nada listado em do_not_claim" in prompt
+    assert "queda garantida depois do café" in prompt
 
 def test_script_quality_gate_blocks_generic_hook_opening() -> None:
     script = {
@@ -563,6 +793,23 @@ def test_script_metrics_normalize_zero_to_ten_provider_scores() -> None:
     assert metrics["repetition_score"] == 0.2
     assert metrics["ending_strength_score"] == 0.8
     assert metrics["avg_words_per_sentence"] == 12.5
+
+def test_script_metrics_normalize_zero_to_one_hundred_provider_scores() -> None:
+    metrics = normalize_script_metrics(
+        {
+            "hook_score": 92,
+            "clarity_score": 88,
+            "information_density_score": 85,
+            "repetition_score": 15,
+            "ending_strength_score": 80,
+        }
+    )
+
+    assert metrics["hook_score"] == 0.92
+    assert metrics["clarity_score"] == 0.88
+    assert metrics["information_density_score"] == 0.85
+    assert metrics["repetition_score"] == 0.15
+    assert metrics["ending_strength_score"] == 0.8
 
 def test_script_metrics_treat_repetition_one_as_low_provider_score() -> None:
     metrics = normalize_script_metrics({"repetition_score": 1})
@@ -912,7 +1159,7 @@ def test_visual_non_factual_topic_without_claims_does_not_require_fact_review(mo
 
     assert report["requires_fact_review"] is False
 
-def test_script_pipeline_uses_verified_fact_pack_deterministic_fallback(monkeypatch) -> None:
+def test_script_pipeline_does_not_use_deterministic_fact_pack_fallback(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
     monkeypatch.setattr(pipeline.settings, "llm_script_repair_attempts", 0)
     monkeypatch.setattr(
@@ -933,15 +1180,15 @@ def test_script_pipeline_uses_verified_fact_pack_deterministic_fallback(monkeypa
         ],
     }
 
-    script, metrics = pipeline._validate_or_repair_script(
-        bad_script,
-        {"fact_pack": fact_pack, "canonical_topic": "Polvos e movimento dos braços"},
-        target_duration_sec=35,
-    )
+    with pytest.raises(RecoverableStepError) as exc:
+        pipeline._validate_or_repair_script(
+            bad_script,
+            {"fact_pack": fact_pack, "canonical_topic": "Polvos e movimento dos braços"},
+            target_duration_sec=35,
+        )
 
-    assert metrics["script_quality_gate_pass"] is True
-    assert metrics["script_repair_fact_pack_fallback_used"] is True
-    assert script["source_fact_ids"] == ["F3", "F4", "F5"]
+    assert "verified_fact_pack_deterministic" not in str(exc.value)
+    assert "script_repair_fallback_failed:TimeoutError" in str(exc.value)
 
 def test_step_script_uses_strict_prompt_rules_when_fact_pack_is_required(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
@@ -1012,6 +1259,7 @@ def test_step_script_uses_strict_prompt_rules_when_fact_pack_is_required(monkeyp
             "_validate_or_repair_script",
             lambda script, *_args, **_kwargs: (script, {"script_quality_gate_pass": True, "fact_pack_consistency_pass": True}),
         )
+        monkeypatch.setattr(pipeline, "_validate_or_repair_viral_intensity", lambda script, **_kwargs: (script, {"viral_intensity_gate_pass": True}, None))
         monkeypatch.setattr(pipeline, "_text_publish_audit", lambda *_args, **_kwargs: {"passed": True, "reasons": []})
 
         pipeline.step_script(session, job, 1)
@@ -1035,14 +1283,15 @@ def test_step_script_uses_ready_script_without_llm_generation(monkeypatch) -> No
     from app.manual_script import build_ready_script_notes
 
     pipeline = orchestrator.script_pipeline
-    ready_script = """Título: Venus: o planeta onde um dia dura mais que um ano
-Hook: 243 dias para girar uma vez, mas só 225 para orbitar o Sol.
-Loop: Como um planeta pode envelhecer antes de terminar o próprio dia?
-Beats: Em Venus, o relógio não acompanha o calendário.
-O planeta gira tão devagar que o Sol parece quase travado.
-Enquanto isso, ele completa uma volta inteira ao redor do Sol.
-Payoff: O dia venusiano é maior que o ano venusiano.
-Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
+    ready_script = """Título: Vênus esconde um relógio impossível no céu de fogo
+Hook: Vênus esconde um relógio impossível: o ano acaba antes do dia.
+Loop: Como um planeta pode virar o calendário contra o próprio pôr do sol?
+Beats: Ele gira tão devagar que uma rotação leva 243 dias terrestres.
+Mas completa a volta ao redor do Sol em cerca de 225 dias.
+Enquanto o calendário fecha um ano, o céu ainda segura o mesmo dia.
+É como ver o aniversário chegar antes do pôr do sol.
+Payoff: O segredo estranho é esse: no céu de fogo de Vênus, o dia perde para o ano.
+Fechamento: Da próxima vez, lembra: você está vendo um planeta impossível onde o tempo parece quebrar em tempo real."""
     job_id = orchestrator.create_job(
         {
             "seed_theme": "Venus: o planeta onde um dia dura mais que um ano",
@@ -1091,9 +1340,9 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
         script = session.scalar(select(Script).where(Script.job_id == job_id))
 
     assert script is not None
-    assert script.title == "Venus: o planeta onde um dia dura mais que um ano"
+    assert script.title == "Vênus esconde um relógio impossível no céu de fogo"
     assert not script.full_narration.startswith(script.title)
-    assert "243 dias para girar" in script.full_narration
+    assert "ano acaba antes do dia" in script.full_narration
     assert "ready_script_input.json" in artifacts
     assert "visual_contract.json" in artifacts
     assert "structured_viral_contract.json" not in artifacts
@@ -1170,6 +1419,7 @@ def test_step_script_fails_closed_when_visual_contract_invalid(monkeypatch) -> N
             "_validate_or_repair_script",
             lambda script, *_args, **_kwargs: (script, {"script_quality_gate_pass": True, "fact_pack_consistency_pass": True}),
         )
+        monkeypatch.setattr(pipeline, "_validate_or_repair_viral_intensity", lambda script, **_kwargs: (script, {"viral_intensity_gate_pass": True}, None))
         monkeypatch.setattr(pipeline, "_text_publish_audit", lambda *_args, **_kwargs: {"passed": True, "reasons": []})
         monkeypatch.setattr(orchestrator.providers.creative, "generate_visual_contract", lambda _script: {"visual_thesis": "fraco"})
 
@@ -1889,8 +2139,9 @@ def test_build_monetization_report_keeps_fact_review_with_verified_fact_pack(mon
 
     assert report["final_status"] == "monetization_review"
     assert report["passed"] is False
+    assert "metadata_ctr_gate_not_passed" not in report["hard_blockers"]
+    assert report["metadata_review"].get("auto_repair_applied") is True
     assert "fact_review_required" in report["manual_required"]
-    assert "publish_audit_required" not in report["manual_required"]
 
 def test_ready_script_fact_check_confirmation_bypasses_external_publish_audit(monkeypatch) -> None:
     from app.manual_script import parse_ready_script
@@ -2447,6 +2698,42 @@ def test_scientific_article_fact_pack_skips_result_without_abstract(monkeypatch)
     assert pack["topic_title"] == "Carotenoid pigmentation in flamingos"
     assert pack["sources"][0]["url"] == "https://doi.org/10.0000/flamingo"
     assert pack["sources"][0]["provider"] == "openalex"
+    assert pack["evidence_cards"][0]["card_id"] == "E1"
+    assert pack["evidence_cards"][0]["source_ids"] == ["S1"]
+    assert pack["evidence_cards"][0]["allowed_script_use"] is True
+
+def test_evidence_cards_preserve_viral_retention_fields() -> None:
+    pipeline = orchestrator.script_pipeline.fact_pack_domain
+    fact_pack = {
+        "facts": [{"fact_id": "F1", "claim": "A cafeína pode bloquear receptores de adenosina.", "source_id": "S1"}],
+        "sources": [{"source_id": "S1", "title": "Caffeine and sleep"}],
+        "evidence_cards": [
+            {
+                "card_id": "E1",
+                "claim": "A cafeína pode bloquear receptores de adenosina.",
+                "safe_language": "A cafeína pode atrapalhar a ação da adenosina em receptores ligados ao sono.",
+                "do_not_claim": ["queda garantida depois do café"],
+                "evidence_profile": "saude_biologia",
+                "source_ids": ["S1"],
+                "support_level": "direct",
+                "claim_scope": "mecanismo",
+                "allowed_script_use": True,
+                "aggressive_hook_options": ["O café não te dá energia. Ele pode só esconder o alarme."],
+                "retention_use": {
+                    "hook": ["O café não cria energia do nada."],
+                    "loop": ["Então por que você sente que acordou?"],
+                    "escalation": ["Ele pode mascarar um sinal que ainda está ali."],
+                    "payoff": ["O truque não está na energia, está no bloqueio do sinal."],
+                    "loop_close": ["Na segunda xícara, talvez você esteja adiando o aviso."],
+                },
+                "visual_metaphors": ["alarme silenciado"],
+            }
+        ],
+    }
+
+    cards = pipeline._normalize_evidence_cards(fact_pack, {"evidence_profile": "saude_biologia", "claim_scope": "explanatory_mechanism"})
+
+    assert cards == fact_pack["evidence_cards"]
 
 def test_scientific_article_fact_pack_skips_low_information_abstract(monkeypatch) -> None:
     class FakeResponse:
@@ -2761,7 +3048,105 @@ def test_fact_pack_query_generation_uses_caffeine_concepts_for_cafe_topic() -> N
         "The World Café as a Participatory Method for Collecting Qualitative Data",
         "World Café is a participatory assessment tool used in community development.",
     ) is False
+    assert pipeline._fact_result_is_relevant(
+        "cafe sono cafeina adenosina",
+        "Coffea cruda : uma releitura da matéria médica homeopática",
+        (
+            "O trabalho discute conhecimento popular e literatura homeopática sobre Coffea cruda, "
+            "com menções a café, sono e agitação."
+        ),
+    ) is False
     assert pipeline._is_weak_fact_query("adenosina") is True
+
+def test_fact_pack_rejects_homeopathy_source_for_caffeine_sleep_topic() -> None:
+    pipeline = orchestrator.script_pipeline
+    request = SimpleNamespace(seed_theme="Por que o café tira o sono?", requested_angle=None, notes=None)
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que o café tira o sono",
+        angle="A cafeína bloqueia adenosina e pode atrasar o sono.",
+        hook_promise="A cafeína engana o cérebro ao bloquear a adenosina.",
+        search_terms=["caffeine adenosine receptor antagonism sleep mechanism"],
+        entities=["cafeína", "adenosina", "sono"],
+        title_candidates=[],
+    )
+    fact_pack = {
+        "topic_title": "Coffea cruda : uma releitura da matéria médica homeopática",
+        "sources": [{"title": "Coffea cruda : uma releitura da matéria médica homeopática"}],
+        "facts": [
+            {
+                "claim": (
+                    "O trabalho discute conhecimento popular e literatura homeopática sobre Coffea cruda, "
+                    "com menções a café, sono e agitação."
+                )
+            }
+        ],
+    }
+
+    assert pipeline._fact_pack_matches_topic(fact_pack, request, topic_plan) is False
+    assert fact_pack["topic_alignment"]["reason"] == "source_out_of_scope_homeopathy"
+
+def test_fact_pack_rejects_general_coffee_culture_source_for_caffeine_sleep_mechanism() -> None:
+    pipeline = orchestrator.script_pipeline
+    request = SimpleNamespace(seed_theme="Por que o café tira o sono?", requested_angle=None, notes=None)
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que o café tira o sono: o bloqueio da adenosina e o efeito rebote que piora o cansaço",
+        angle="A cafeína bloqueia adenosina e pode atrasar o sono.",
+        hook_promise="A cafeína engana o cérebro ao bloquear a adenosina.",
+        search_terms=[
+            "caffeine adenosine receptor mechanism blocking sleep",
+            "caffeine half-life rebound fatigue adenosine accumulation",
+        ],
+        entities=["cafeína", "adenosina", "sono"],
+        title_candidates=[],
+    )
+    fact_pack = {
+        "topic_title": "Cultura de café: histórico, classificação botânica e fases de crescimento",
+        "sources": [{"title": "Cultura de café: histórico, classificação botânica e fases de crescimento"}],
+        "facts": [
+            {
+                "claim": (
+                    "Apos o conhecimento de suas propriedades, em relacao a cafeina, por ser uma substância "
+                    "estimulante, ativa as dopaminas, reduzindo o teor de adenosina no cerebro."
+                )
+            },
+            {
+                "claim": (
+                    "Originado da Etiopia, espalhou-se pela Europa chegando ao Brasil atraves da Guiana Francesa."
+                )
+            },
+        ],
+    }
+
+    assert pipeline._fact_pack_matches_topic(fact_pack, request, topic_plan) is False
+    assert fact_pack["topic_alignment"]["reason"] == "missing_promised_mechanism_terms"
+
+def test_fact_pack_rejects_parkinson_source_for_caffeine_sleep_scope() -> None:
+    pipeline = orchestrator.script_pipeline
+    request = SimpleNamespace(seed_theme="Por que o café tira o sono?", requested_angle=None, notes=None)
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que o café tira o sono: o bloqueio da adenosina e o efeito rebote que piora o cansaço",
+        angle="A cafeína bloqueia adenosina e pode atrasar o sono.",
+        hook_promise="O café parece salvar a tarde, mas pode só adiar o cansaço.",
+        search_terms=[
+            "caffeine adenosine receptor antagonism sleep mechanism",
+            "caffeine sleepiness rebound adenosine accumulation",
+        ],
+        entities=["cafeína", "adenosina", "sono"],
+        title_candidates=[],
+    )
+    fact_pack = {
+        "topic_title": "Neuroprotection by caffeine and A(2A) adenosine receptor inactivation in a model of Parkinson's disease.",
+        "sources": [{"title": "Neuroprotection by caffeine and A(2A) adenosine receptor inactivation in a model of Parkinson's disease."}],
+        "facts": [
+            {"claim": "Caffeine attenuated MPTP-induced loss of striatal dopamine and dopamine transporter binding sites."},
+            {"claim": "The effects of caffeine were mimicked by several A(2A) antagonists in a Parkinson's disease model."},
+        ],
+    }
+
+    assert pipeline._fact_pack_matches_topic(fact_pack, request, topic_plan) is False
+    assert fact_pack["topic_alignment"]["reason"] == "missing_promised_mechanism_terms"
+    assert fact_pack["topic_alignment"]["evidence_profile"] == "saude_biologia"
+    assert fact_pack["topic_alignment"]["missing_required_evidence_term_groups"][0]["name"] == "coffee_sleep_scope"
 
 def test_fact_pack_query_generation_uses_optical_illusion_concepts() -> None:
     request = SimpleNamespace(seed_theme="Ilusão de ótica: por que imagem parada parece se mexer?")
@@ -2823,6 +3208,38 @@ def test_fact_pack_accepts_source_when_research_brief_matches_primary_and_mechan
 
     assert pipeline._fact_pack_matches_topic(fact_pack, request, topic_plan) is True
     assert fact_pack["topic_alignment"]["mechanism_overlap"]
+
+def test_fact_pack_rejects_partial_mechanism_match_without_primary_topic_terms() -> None:
+    pipeline = orchestrator.script_pipeline
+    request = SimpleNamespace(seed_theme="por que sentimos arrepios", requested_angle=None)
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que sentimos arrepios?",
+        angle=(
+            "O paradoxo do arrepio musical: quando o cérebro interpreta uma experiência puramente auditiva "
+            "como ameaça ou recompensa extrema."
+        ),
+        hook_promise="A música ativa um sistema que a ciência só começou a decifrar.",
+        entities=["música", "arrepios", "dopamina", "reflexo pilomotor", "músculo arrector pili"],
+        search_terms=[
+            "sistema límbico arrepio",
+            "frisson music dopamine release study",
+        ],
+    )
+    fact_pack = {
+        "topic_title": "Zumbido e ansiedade: uma revisão da literatura",
+        "sources": [{"title": "Zumbido e ansiedade: uma revisão da literatura"}],
+        "facts": [
+            {
+                "claim": (
+                    "O resultado desta interação, especialmente sistema límbico e sistema nervoso autônomo, "
+                    "seria responsável por associações emocionais negativas em pacientes com zumbido."
+                )
+            }
+        ],
+    }
+
+    assert pipeline._fact_pack_matches_topic(fact_pack, request, topic_plan) is False
+    assert fact_pack["topic_alignment"]["reason"] == "missing_primary_topic_terms"
 
 def test_fact_pack_accepts_english_optical_illusion_source_for_pt_topic() -> None:
     pipeline = orchestrator.script_pipeline

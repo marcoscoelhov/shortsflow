@@ -22,8 +22,7 @@ from zoneinfo import ZoneInfo
 
 import imageio_ffmpeg
 from PIL import Image
-from sqlalchemy import delete, func, or_, select, update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.audio.music_mix import mix_background_music
@@ -33,10 +32,14 @@ from app.config import get_settings
 from app.db import SessionLocal, run_transaction_with_lock_retry, session_scope
 from app.editorial.retention import attach_retention_metadata, enrich_plan_for_script_generation
 from app.editorial.repetition import build_channel_repetition_report
+from app.job_failure import build_failure_diagnosis, failure_status_for_step
+from app.job_progress import PIPELINE_STEP_NAMES, build_job_progress
 from app.job_origin import (
     CREATION_VIA_API,
     CREATION_VIA_RECREATION,
+    JOB_ORIGIN_MANUAL_READY_SCRIPT,
     JOB_ORIGIN_MANUAL_THEME,
+    JOB_ORIGIN_READY_SCRIPT_BANK,
     JOB_ORIGIN_UNKNOWN,
     build_job_origin_artifact,
     creation_via_display,
@@ -47,6 +50,7 @@ from app.job_origin import (
     resolve_creation_via,
     resolve_job_origin,
 )
+from app.hub_prompt import hub_settings_path, load_viral_prompt_template
 from app.models import (
     AutomationAttempt,
     AutomationRun,
@@ -71,7 +75,9 @@ from app.models import (
     TopicRequest,
     YouTubeAnalyticsSnapshot,
 )
+from app.orchestrator_worker import OrchestratorWorkerOperations
 from app.pipelines.common import FatalStepError, RecoverableStepError, model_payload
+from app.pipelines.script_metrics import normalize_script_metrics as _normalize_script_metrics
 from app.providers.registry import ProviderRegistry
 from app.quality.asset_gate import AssetGate
 from app.quality.asset_visual_gate import AssetVisualGate
@@ -79,6 +85,10 @@ from app.quality.render_gate import RenderGate
 from app.quality.scene_gate import ScenePlanGate
 from app.quality.script_gate import ScriptQualityGate
 from app.quality.subtitle_gate import BAD_ENDINGS, SubtitleGate
+from app.quality.growth_score_gate import GrowthScoreGate
+from app.quality.metadata_ctr_gate import MetadataCTRGate
+from app.quality.viral_intensity_gate import ViralIntensityGate
+from app.quality.visual_impact_gate import VisualImpactGate
 from app.quality.visual_contract_gate import VisualContractGate
 from app.schemas import PublicationSchedulePayload, SUPPORTED_LANGUAGES, SUPPORTED_NICHES, TopicRequestCreate
 from app.storage import StorageManager
@@ -108,47 +118,7 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_script_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(metrics)
-    score_keys = {
-        "hook_score",
-        "clarity_score",
-        "information_density_score",
-        "repetition_score",
-        "ending_strength_score",
-    }
-    for key in score_keys:
-        value = normalized.get(key)
-        if isinstance(value, str):
-            stripped = value.strip()
-            lowered = stripped.lower()
-            if lowered in {"true", "passed", "pass", "ok", "aprovado"}:
-                value = True
-            elif lowered in {"false", "failed", "fail", "reprovado"}:
-                value = False
-            else:
-                fraction_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", stripped)
-                percentage_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*%", stripped)
-                if fraction_match:
-                    denominator = float(fraction_match.group(2))
-                    value = round(float(fraction_match.group(1)) / denominator, 3) if denominator > 0 else value
-                elif percentage_match:
-                    value = round(float(percentage_match.group(1)) / 100, 3)
-                else:
-                    try:
-                        value = float(stripped.replace(",", "."))
-                    except ValueError:
-                        pass
-        if isinstance(value, int | float) and 1 < value <= 10:
-            normalized[key] = round(value / 10, 3)
-            continue
-        normalized[key] = value
-    repetition_value = normalized.get("repetition_score")
-    if repetition_value == 1:
-        normalized["repetition_score"] = 0.1
-        return normalized
-    if isinstance(repetition_value, int | float) and 0.88 < repetition_value <= 1:
-        normalized["repetition_score"] = round(max(0.0, 1 - repetition_value), 3)
-    return normalized
+    return _normalize_script_metrics(metrics)
 
 
 NO_TEXT_IMAGE_CONSTRAINT = (
@@ -226,64 +196,6 @@ SCENE_VISUAL_HINTS = [
     (("cor", "textura", "predadores"), "octopus rapidly changing skin color and texture while camouflaging from a predator"),
 ]
 
-RETENTION_HARD_FAILURE_STATUSES = {
-    "failed",
-    "script_quality_failed",
-    "visual_contract_quality_failed",
-    "scene_plan_quality_failed",
-    "asset_quality_failed",
-    "subtitle_quality_failed",
-    "render_quality_failed",
-}
-RETENTION_RECOVERABLE_STATUSES = {
-    "monetization_review",
-    "blocked_for_monetization",
-    "rejected",
-}
-RETENTION_EXCLUDED_JOB_STATUSES = {
-    "queued",
-    "running",
-    "published",
-    "cancelled",
-}
-RETENTION_EXCLUDED_SCHEDULE_STATUSES = {
-    "publishing",
-    "published",
-}
-PROGRESS_STEP_LABELS = {
-    "input_gate": "Entrada",
-    "topic_plan": "Pauta",
-    "script": "Roteiro",
-    "scene_plan": "Cenas",
-    "asset_generation": "Imagens",
-    "tts": "Narração",
-    "subtitle_alignment": "Legendas",
-    "background_music": "Trilha",
-    "render": "Render",
-    "monetization_readiness_gate": "Monetização",
-    "publish_to_review_hub": "Revisão",
-}
-PROGRESS_COMPLETE_STATUSES = {
-    "monetization_review",
-    "blocked_for_monetization",
-    "ready_for_upload",
-    "approved_for_publish",
-    "published",
-    "approved",
-    "rejected",
-}
-PROGRESS_FAILED_STATUSES = {
-    "failed",
-    "script_quality_failed",
-    "visual_contract_quality_failed",
-    "scene_plan_quality_failed",
-    "asset_quality_failed",
-    "subtitle_quality_failed",
-    "render_quality_failed",
-    "cancelled",
-}
-
-
 def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -322,6 +234,10 @@ class JobOrchestrator:
         self.render_pipeline = RenderPipeline(self)
         self.monetization_pipeline = MonetizationPipeline(self)
         self.script_gate = ScriptQualityGate()
+        self.viral_intensity_gate = ViralIntensityGate()
+        self.visual_impact_gate = VisualImpactGate()
+        self.metadata_ctr_gate = MetadataCTRGate()
+        self.growth_score_gate = GrowthScoreGate()
         self.visual_contract_gate = VisualContractGate()
         self.scene_gate = ScenePlanGate()
         self.asset_gate = AssetGate()
@@ -334,50 +250,51 @@ class JobOrchestrator:
         self.worker_id = f"worker-{new_id()[:8]}"
         self.stop_event = threading.Event()
         self.worker_thread: threading.Thread | None = None
+        self.worker_ops = OrchestratorWorkerOperations(self)
 
     def start_worker(self) -> None:
-        if self.worker_thread and self.worker_thread.is_alive():
-            return
-        self.stop_event = threading.Event()
-        self.worker_thread = threading.Thread(target=self._worker_loop, name="yts-worker", daemon=True)
-        self.worker_thread.start()
+        self.worker_ops.start_worker()
 
     def stop_worker(self) -> None:
-        self.stop_event.set()
-        if self.worker_thread and self.worker_thread.is_alive():
-            self.worker_thread.join(timeout=2)
-        if self.worker_thread and not self.worker_thread.is_alive():
-            self.worker_thread = None
+        self.worker_ops.stop_worker()
 
     def _lease_delta(self) -> timedelta:
-        return timedelta(seconds=max(300, self.settings.job_lease_seconds))
+        return self.worker_ops.lease_delta()
 
     def _start_lease_heartbeat(self, job_id: str) -> threading.Event:
-        stop_heartbeat = threading.Event()
-        interval = max(5.0, min(30.0, max(300, self.settings.job_lease_seconds) / 3))
-
-        def heartbeat() -> None:
-            while not stop_heartbeat.wait(interval):
-                def refresh_lease(session: Session) -> bool:
-                    job = session.get(Job, job_id)
-                    if not job or job.status != "running" or job.lease_owner != self.worker_id:
-                        return False
-                    job.lease_expires_at = utcnow() + self._lease_delta()
-                    return True
-
-                try:
-                    if not run_transaction_with_lock_retry(refresh_lease):
-                        return
-                except OperationalError:
-                    logger.warning("lease heartbeat skipped after repeated database lock for job %s", job_id, exc_info=True)
-
-        threading.Thread(target=heartbeat, name=f"yts-lease-{job_id[:8]}", daemon=True).start()
-        return stop_heartbeat
+        return self.worker_ops.start_lease_heartbeat(job_id)
 
     def _persist_repair_telemetry(self, job_id: str, stage: str, payload: dict[str, Any]) -> str:
         filename = f"{stage}_repair_telemetry.json"
         self.storage.persist_json(job_id, filename, self._serialize_for_json(payload))
         return filename
+
+    def _ensure_viral_prompt_notes(self, payload: dict[str, Any], job_origin: str) -> dict[str, Any]:
+        """Apply the hub viral metaprompt to every generated-script job.
+
+        Roteiro pronto jobs are the only exception because the supplied script is
+        already the editorial source of truth and must be preserved.
+        """
+        notes = str(payload.get("notes") or "").strip()
+        lower_notes = notes.lower()
+        ready_script_origin = job_origin in {JOB_ORIGIN_MANUAL_READY_SCRIPT, JOB_ORIGIN_READY_SCRIPT_BANK}
+        ready_script_notes = "input_mode=script" in lower_notes or "[[yts_ready_script_begin]]" in lower_notes
+        if ready_script_origin or ready_script_notes:
+            return payload
+        if "prompt viral customizado do hub" in lower_notes:
+            return payload
+        viral_prompt = load_viral_prompt_template(hub_settings_path(self.settings.data_dir)).strip()
+        if not viral_prompt:
+            return payload
+        viral_note = (
+            "Prompt viral padrão obrigatório para jobs com roteiro gerado. "
+            "Use como diretriz editorial em todas as etapas de pauta, roteiro, cenas, metadados e revisão; "
+            "se pedir formato de saida diferente, ignore o formato e mantenha o JSON interno obrigatorio do app.\n"
+            f"{viral_prompt}"
+        )
+        payload = dict(payload)
+        payload["notes"] = "\n".join(part for part in [notes, viral_note] if part)
+        return payload
 
     def create_job(self, payload: dict[str, Any], retry_of_job_id: str | None = None) -> str:
         payload = TopicRequestCreate.model_validate(payload).model_dump()
@@ -386,6 +303,7 @@ class JobOrchestrator:
         job_origin = normalize_job_origin(requested_job_origin) if requested_job_origin else infer_job_origin_from_notes(payload.get("notes"))
         if job_origin == JOB_ORIGIN_UNKNOWN and payload.get("seed_theme"):
             job_origin = JOB_ORIGIN_MANUAL_THEME
+        payload = self._ensure_viral_prompt_notes(payload, job_origin)
         creation_via = normalize_creation_via(
             requested_creation_via or (CREATION_VIA_RECREATION if retry_of_job_id else CREATION_VIA_API)
         )
@@ -558,8 +476,6 @@ class JobOrchestrator:
             scene = next((item for item in scene_plan.scenes if str(item.get("scene_id") or "") == scene_id), None)
             if scene is None:
                 raise ValueError(f"unknown scene {scene_id}")
-            session.execute(delete(SceneAsset).where(SceneAsset.job_id == job_id, SceneAsset.scene_id == scene_id))
-            session.execute(delete(StepExecution).where(StepExecution.job_id == job_id, StepExecution.step_name.in_(downstream_step_names)))
             job.status = "running"
             job.current_step = "asset_generation"
             job.failure_reason = None
@@ -577,12 +493,26 @@ class JobOrchestrator:
             {"scene_id": scene_id, "downstream_steps": downstream_step_names, "operator_instruction": instruction},
         )
 
-        result = self.asset_pipeline._generate_assets_for_scene(job_id, scene_for_generation, attempt=1)
+        try:
+            result = self.asset_pipeline._generate_assets_for_scene(job_id, scene_for_generation, attempt=1)
+        except RecoverableStepError as exc:
+            with session_scope() as session:
+                job = session.get(Job, job_id)
+                if job:
+                    job.status = "asset_quality_failed"
+                    job.failure_reason = f"asset_generation: {exc}"
+                    job.lease_owner = None
+                    job.lease_expires_at = None
+                    self.publication_ops._refresh_retention_state(session, job)
+            self._append_event(job_id, "scene.regeneration_failed", "failed", {"scene_id": scene_id, "message": str(exc)})
+            raise
         visual_gate_failure_message = ""
         with session_scope() as session:
             job = session.get(Job, job_id)
             scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job_id))
             assert job and scene_plan
+            session.execute(delete(SceneAsset).where(SceneAsset.job_id == job_id, SceneAsset.scene_id == scene_id))
+            session.execute(delete(StepExecution).where(StepExecution.job_id == job_id, StepExecution.step_name.in_(downstream_step_names)))
             for event_name, status, payload in result["events"]:
                 self._append_event(job_id, event_name, status, payload)
             for fallback_payload in result["fallback_events"]:
@@ -776,101 +706,12 @@ class JobOrchestrator:
         performance_timeline: dict[str, Any] | None = None,
         events: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        step_names = [step.name for step in self._steps()]
-        total_steps = len(step_names)
-        timeline_steps = list((performance_timeline or {}).get("steps") or [])
-        has_timeline_steps = bool(timeline_steps)
-        latest_by_step: dict[str, dict[str, Any]] = {}
-        for row in timeline_steps:
-            if not isinstance(row, dict):
-                continue
-            step_name = str(row.get("step_name") or "")
-            if step_name:
-                latest_by_step[step_name] = row
-
-        job_status = str(job.status or "")
-        current_step = str(job.current_step or "")
-        complete = job_status in PROGRESS_COMPLETE_STATUSES
-        failed = job_status in PROGRESS_FAILED_STATUSES or job_status.endswith("_failed")
-        running = job_status == "running"
-        queued = job_status == "queued"
-        current_index = step_names.index(current_step) if current_step in step_names else -1
-        completed_count = 0
-        progress_steps: list[dict[str, Any]] = []
-
-        for index, step_name in enumerate(step_names, start=1):
-            execution = latest_by_step.get(step_name, {})
-            execution_status = str(execution.get("status") or "")
-            step_status = "pending"
-            if complete:
-                step_status = "completed"
-            elif execution_status == "succeeded":
-                step_status = "completed"
-            elif execution_status == "failed" or (failed and current_step == step_name):
-                step_status = "failed"
-            elif not has_timeline_steps and current_index >= 0 and index - 1 < current_index:
-                step_status = "completed"
-            elif running and current_step == step_name:
-                step_status = "running"
-
-            if step_status == "completed":
-                completed_count += 1
-            progress_steps.append(
-                {
-                    "name": step_name,
-                    "label": PROGRESS_STEP_LABELS.get(step_name, step_name.replace("_", " ").title()),
-                    "index": index,
-                    "status": step_status,
-                    "attempt": execution.get("attempt"),
-                    "duration_ms": execution.get("duration_ms"),
-                    "started_at": execution.get("started_at"),
-                    "finished_at": execution.get("finished_at"),
-                }
-            )
-
-        current_name = current_step if current_step in step_names else ""
-        if not current_name:
-            next_pending = next((step for step in progress_steps if step["status"] in {"running", "failed", "pending"}), None)
-            current_name = str(next_pending["name"]) if next_pending else step_names[-1]
-        current_label = PROGRESS_STEP_LABELS.get(current_name, current_name.replace("_", " ").title())
-
-        if complete:
-            percent = 100
-            state = "completed"
-            summary = "Pipeline concluído; o job está pronto para revisão, aprovação ou publicação."
-        elif queued:
-            percent = 0
-            state = "queued"
-            summary = "Aguardando o worker iniciar o pipeline."
-            current_label = "Fila"
-        elif failed:
-            percent = round((completed_count / total_steps) * 100) if total_steps else 0
-            state = "failed"
-            summary = f"Falhou em {current_label}; abra os dados técnicos para ver o erro."
-        elif running:
-            partial = 0.35 if current_name else 0
-            percent = min(99, round(((completed_count + partial) / total_steps) * 100)) if total_steps else 0
-            state = "running"
-            summary = f"Rodando {current_label}; a página atualiza automaticamente."
-        else:
-            percent = min(100, round((completed_count / total_steps) * 100)) if total_steps else 0
-            state = "waiting"
-            summary = "Sem execução ativa no momento."
-
-        last_event = None
-        if events:
-            last_event = events[-1]
-        return {
-            "state": state,
-            "percent": percent,
-            "completed_steps": completed_count,
-            "total_steps": total_steps,
-            "current_step": current_name,
-            "current_label": current_label,
-            "summary": summary,
-            "steps": progress_steps,
-            "last_event": last_event,
-        }
+        return build_job_progress(
+            job,
+            step_names=[step.name for step in self._steps()],
+            performance_timeline=performance_timeline,
+            events=events,
+        )
 
     def review_job(self, payload: dict[str, Any], job_id: str) -> str | None:
         return self.publication_ops.review_job(payload, job_id)
@@ -1003,19 +844,22 @@ class JobOrchestrator:
         return self.publication_ops.sync_due_youtube_analytics_snapshots(days=days, limit=limit)
 
     def _steps(self) -> list[StepDefinition]:
-        return [
-            StepDefinition("input_gate", 0, self._step_input_gate),
-            StepDefinition("topic_plan", 2, self.topic_pipeline.step_topic_plan),
-            StepDefinition("script", 2, self.script_pipeline.step_script),
-            StepDefinition("scene_plan", 1, self.scene_pipeline.step_scene_plan),
-            StepDefinition("asset_generation", 2, self.asset_pipeline.step_assets),
-            StepDefinition("tts", 2, self.asset_pipeline.step_tts),
-            StepDefinition("subtitle_alignment", 1, self.asset_pipeline.step_subtitles),
-            StepDefinition("background_music", 1, self.asset_pipeline.step_background_music),
-            StepDefinition("render", 1, self.render_pipeline.step_render),
-            StepDefinition("monetization_readiness_gate", 0, self.monetization_pipeline.step_monetization_readiness),
-            StepDefinition("publish_to_review_hub", 0, self.monetization_pipeline.step_publish),
-        ]
+        handlers: dict[str, tuple[int, Callable[[Session, Job, int], list[str]]]] = {
+            "input_gate": (0, self._step_input_gate),
+            "topic_plan": (2, self.topic_pipeline.step_topic_plan),
+            "script": (2, self.script_pipeline.step_script),
+            "scene_plan": (1, self.scene_pipeline.step_scene_plan),
+            "asset_generation": (2, self.asset_pipeline.step_assets),
+            "tts": (2, self.asset_pipeline.step_tts),
+            "subtitle_alignment": (1, self.asset_pipeline.step_subtitles),
+            "background_music": (1, self.asset_pipeline.step_background_music),
+            "render": (1, self.render_pipeline.step_render),
+            "monetization_readiness_gate": (0, self.monetization_pipeline.step_monetization_readiness),
+            "publish_to_review_hub": (0, self.monetization_pipeline.step_publish),
+        }
+        if set(handlers) != set(PIPELINE_STEP_NAMES):
+            raise RuntimeError("pipeline step handlers do not match progress step names")
+        return [StepDefinition(name, *handlers[name]) for name in PIPELINE_STEP_NAMES]
 
     def _run_step(self, job_id: str, step: StepDefinition, step_index: int | None = None, total_steps: int | None = None) -> bool:
         for attempt in range(1, step.retries + 2):
@@ -1173,14 +1017,36 @@ class JobOrchestrator:
         )
 
     def _fail_job(self, job_id: str, step_name: str, message: str) -> None:
+        status = failure_status_for_step(step_name, message)
+        diagnosis = build_failure_diagnosis(
+            job_id=job_id,
+            status=status,
+            step_name=step_name,
+            message=message,
+            artifacts=self._failure_diagnosis_artifacts(job_id),
+        )
         with session_scope() as session:
             job = session.get(Job, job_id)
             assert job
-            job.status = self._failure_status_for_step(step_name, message)
+            job.status = status
             job.failure_reason = f"{step_name}: {message}"
+            quality_summary = dict(job.quality_summary or {})
+            quality_summary["failure_diagnosis"] = diagnosis
+            job.quality_summary = quality_summary
             job.lease_owner = None
             job.lease_expires_at = None
-        self._append_event(job_id, "job.failed", "failed", {"step": step_name, "message": message})
+        self.storage.persist_json(job_id, "failure_diagnosis.json", self._serialize_for_json(diagnosis))
+        self._append_event(job_id, "job.failed", "failed", {"step": step_name, "message": message, "diagnosis": diagnosis})
+
+    def _failure_diagnosis_artifacts(self, job_id: str) -> dict[str, Any]:
+        return {
+            "fact_pack": self._read_job_json(job_id, "fact_pack.json"),
+            "script_generation_debug": self._read_job_json(job_id, "script_generation_debug.json"),
+            "text_publish_audit": self._read_job_json(job_id, "text_publish_audit.json"),
+            "text_publish_audit_repair": self._read_job_json(job_id, "text_publish_audit_repair.json"),
+            "visual_contract_gate": self._read_job_json(job_id, "visual_contract_gate.json"),
+            "script_rejected": self._read_job_json(job_id, "script_rejected.json"),
+        }
 
     def _cancel_job(self, job_id: str, step_name: str, message: str) -> None:
         with session_scope() as session:
@@ -1191,19 +1057,6 @@ class JobOrchestrator:
             job.lease_owner = None
             job.lease_expires_at = None
         self._append_event(job_id, "job.cancelled", "cancelled", {"step": step_name, "message": message})
-
-    def _failure_status_for_step(self, step_name: str, message: str) -> str:
-        if "quality gate" in message or "gate failed" in message:
-            if "visual contract" in message:
-                return "visual_contract_quality_failed"
-            return {
-                "script": "script_quality_failed",
-                "scene_plan": "scene_plan_quality_failed",
-                "asset_generation": "asset_quality_failed",
-                "subtitle_alignment": "subtitle_quality_failed",
-                "render": "render_quality_failed",
-            }.get(step_name, "failed")
-        return "failed"
 
     def _build_step_input(self, session: Session, job: Job, step_name: str) -> dict[str, Any]:
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
@@ -1330,84 +1183,16 @@ class JobOrchestrator:
         return data
 
     def _worker_loop(self) -> None:
-        while not self.stop_event.is_set():
-            try:
-                did_work = self._worker_iteration()
-            except OperationalError:
-                logger.warning("worker iteration skipped after database operational error", exc_info=True)
-                time.sleep(max(1.0, self.settings.worker_poll_seconds))
-                continue
-            except Exception:
-                logger.exception("worker iteration failed unexpectedly")
-                time.sleep(max(1.0, self.settings.worker_poll_seconds))
-                continue
-            if not did_work:
-                time.sleep(self.settings.worker_poll_seconds)
+        self.worker_ops.worker_loop()
 
     def _run_worker_task(self, task_name: str, callback: Callable[[], Any]) -> Any:
-        try:
-            return callback()
-        except OperationalError:
-            logger.warning("worker task %s skipped after database operational error", task_name, exc_info=True)
-            return None
-        except Exception:
-            logger.exception("worker task %s failed; worker will continue", task_name)
-            return None
+        return self.worker_ops.run_worker_task(task_name, callback)
 
     def _worker_iteration(self) -> bool:
-        if self.settings.artifact_retention_enabled:
-            should_sweep = time.monotonic() - self._last_retention_sweep_at >= self.settings.artifact_retention_sweep_seconds
-            if should_sweep:
-                self._last_retention_sweep_at = time.monotonic()
-                self._run_worker_task("retention_sweep", self.publication_ops._run_retention_sweep)
-        if self.publication_ops._youtube_api_mode_enabled():
-            self._run_worker_task("youtube_native_schedule_sync", self.publication_ops._sync_native_scheduled_publications)
-        if self.publication_ops._tiktok_auto_publish_enabled():
-            self._run_worker_task("tiktok_status_sync", self.publication_ops._sync_tiktok_publication_statuses)
-            self._run_worker_task("tiktok_crosspost_queue_sync", self.publication_ops._sync_tiktok_crosspost_queue)
-        claimed_job_id = self._run_worker_task("job_claim", self._claim_next_job_with_retry)
-        if claimed_job_id:
-            self._run_worker_task("job_process", lambda: self.process_job(claimed_job_id))
-            return True
-        claimed_publication_job_id = self._run_worker_task("publication_schedule_claim", self.publication_ops._claim_due_publication_schedule)
-        if claimed_publication_job_id:
-            self._run_worker_task("publication_schedule_publish", lambda: self.publish_job(claimed_publication_job_id, trigger="schedule_worker"))
-            return True
-        claimed_tiktok_publication_id = self._run_worker_task("tiktok_publication_claim", self.publication_ops._claim_due_tiktok_publication)
-        if claimed_tiktok_publication_id:
-            self._run_worker_task(
-                "tiktok_publication_publish",
-                lambda: self.publication_ops._publish_tiktok_channel_publication(claimed_tiktok_publication_id),
-            )
-            return True
-        return False
+        return self.worker_ops.worker_iteration()
 
     def _claim_next_job(self, session: Session) -> str | None:
-        now = utcnow()
-        lease_expires_at = now + self._lease_delta()
-        claimable_job_id = (
-            select(Job.job_id)
-            .where(
-                or_(
-                    Job.status == "queued",
-                    (Job.status == "running") & (Job.lease_expires_at.is_(None) | (Job.lease_expires_at < now)),
-                )
-            )
-            .order_by(Job.created_at)
-            .limit(1)
-            .scalar_subquery()
-        )
-        claim = (
-            update(Job)
-            .where(Job.job_id == claimable_job_id)
-            .values(
-                status="running",
-                lease_owner=self.worker_id,
-                lease_expires_at=lease_expires_at,
-            )
-            .returning(Job.job_id)
-        )
-        return session.execute(claim).scalar_one_or_none()
+        return self.worker_ops.claim_next_job(session)
 
     def _claim_next_job_with_retry(self) -> str | None:
         return run_transaction_with_lock_retry(self._claim_next_job)

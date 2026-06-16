@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.editorial.retention import enrich_plan_for_script_generation
 from app.editorial.visual_contract import normalize_visual_contract_payload
+from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
 from app.manual_script import extract_ready_script_from_notes
 from app.models import Job, Script, TopicPlan, TopicRequest
 from app.pipelines.common import FatalStepError, RecoverableStepError, model_payload
@@ -123,6 +124,14 @@ class ScriptPipeline(BasePipeline):
         validation_started = time.monotonic()
         try:
             script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec, request.cta_style or "none", job.job_id)
+            script, viral_metrics, viral_repair_file = self._validate_or_repair_viral_intensity(
+                script,
+                plan_dict=plan_dict,
+                ready_script_mode=ready_script is not None,
+                ready_script_bank_mode=job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK,
+                job_id=job.job_id,
+            )
+            metrics = {**metrics, "viral_intensity": viral_metrics}
         except Exception as exc:  # noqa: BLE001
             self._persist_script_generation_debug(
                 job_id=job.job_id,
@@ -250,12 +259,73 @@ class ScriptPipeline(BasePipeline):
         artifacts = ["fact_pack.json", "script.json", "script_generation_debug.json", "text_publish_audit.json", script_telemetry_file]
         if audit_repair_file is not None:
             artifacts.append(audit_repair_file)
+        if viral_repair_file is not None:
+            artifacts.append(viral_repair_file)
         artifacts.append("visual_contract.json")
         if ready_script is not None:
             artifacts.append("ready_script_input.json")
         if structured_contract_file is not None:
             artifacts.append(structured_contract_file)
         return artifacts
+
+    def _validate_viral_intensity(self, script: dict[str, Any], *, ready_script_mode: bool) -> dict[str, Any]:
+        result = self.viral_intensity_gate.validate(script)
+        return self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode)
+
+    def _validate_or_repair_viral_intensity(
+        self,
+        script: dict[str, Any],
+        *,
+        plan_dict: dict[str, Any],
+        ready_script_mode: bool,
+        job_id: str,
+        ready_script_bank_mode: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+        result = self.viral_intensity_gate.validate(script)
+        if result.passed:
+            return script, self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode), None
+        if ready_script_bank_mode:
+            metrics = self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode, raise_on_fail=False)
+            metrics["ready_script_bank_policy"] = "viral_intensity_diagnostic_only"
+            return script, metrics, None
+        if ready_script_mode:
+            metrics = self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode, raise_on_fail=False)
+            self._persist_script_rejection(job_id, script, {"viral_intensity": metrics}, ["script_viral_intensity_low"])
+            raise RecoverableStepError(f"viral intensity gate failed: {', '.join(result.reasons[:6])}")
+        repair_reasons = [str(reason) for reason in result.reasons]
+        try:
+            candidate = self.providers.creative.repair_script(script, repair_reasons, plan_dict)
+        except Exception as exc:  # noqa: BLE001
+            raise RecoverableStepError(f"viral intensity gate failed: {', '.join(repair_reasons[:6])}") from exc
+        repaired_result = self.viral_intensity_gate.validate(candidate)
+        if not repaired_result.passed:
+            raise RecoverableStepError(f"viral intensity gate failed: {', '.join(repaired_result.reasons[:6])}")
+        repaired_metrics = self._viral_intensity_metrics(repaired_result, ready_script_mode=False)
+        repaired_metrics["viral_intensity_repair_attempted"] = True
+        repaired_metrics["viral_intensity_original_reasons"] = repair_reasons
+        repair_payload = {
+            "job_id": job_id,
+            "original_reasons": repair_reasons,
+            "repaired_passed": repaired_result.passed,
+            "repaired_reasons": repaired_result.reasons,
+            "metrics": repaired_metrics,
+        }
+        if hasattr(self, "storage"):
+            try:
+                self.storage.persist_json(job_id, "viral_intensity_repair.json", self._serialize_for_json(repair_payload))
+            except Exception:  # noqa: BLE001
+                pass
+        return candidate, repaired_metrics, "viral_intensity_repair.json"
+
+    def _viral_intensity_metrics(self, result: Any, *, ready_script_mode: bool, raise_on_fail: bool = True) -> dict[str, Any]:
+        metrics = dict(result.metrics)
+        metrics["viral_intensity_reasons"] = result.reasons
+        metrics["viral_intensity_hard_block"] = bool(not result.passed)
+        if ready_script_mode and not result.passed:
+            metrics["viral_intensity_ready_script_blocked"] = True
+        if not result.passed and raise_on_fail:
+            raise RecoverableStepError(f"viral intensity gate failed: {', '.join(result.reasons[:6])}")
+        return metrics
 
     def _repair_after_text_audit(
         self,

@@ -12,7 +12,7 @@ from app.models import BackgroundMusicAsset, Job, NarrationAsset, RenderOutput, 
 from app.pipelines.common import RecoverableStepError, model_payload
 from app.pipelines.base import BasePipeline
 from app.pipelines.timeline import normalize_scene_timings
-from app.utils import ensure_dir, file_uri, new_id, path_from_uri, stable_hash, utcnow
+from app.utils import ensure_dir, file_sha256, file_uri, new_id, path_from_uri, stable_hash, utcnow
 
 
 RENDER_MOTION_FPS = 30
@@ -151,7 +151,8 @@ class RenderPipeline(BasePipeline):
         )
         render_gate, render_log = self.render_with_repair(job.job_id, command, final_video, ffmpeg_log, narration.duration_ms)
         ffmpeg_log.write_text(render_log, encoding="utf-8")
-        Image.open(path_from_uri(selected_assets[0].uri)).resize((540, 960)).save(poster, format="JPEG")
+        with Image.open(path_from_uri(selected_assets[0].uri)) as poster_source:
+            poster_source.resize((540, 960)).save(poster, format="JPEG")
         duration_ms = int(render_gate.metrics.get("duration_ms") or narration.duration_ms)
         created_at = utcnow()
         payload = {
@@ -159,7 +160,7 @@ class RenderPipeline(BasePipeline):
             "render_id": new_id(),
             "job_id": job.job_id,
             "created_at": created_at,
-            "content_hash": stable_hash(final_video.read_bytes()),
+            "content_hash": file_sha256(final_video),
             "video_uri": file_uri(final_video),
             "poster_uri": file_uri(poster),
             "waveform_uri": None,
@@ -175,20 +176,6 @@ class RenderPipeline(BasePipeline):
         session.execute(delete(RenderOutput).where(RenderOutput.job_id == job.job_id))
         session.add(RenderOutput(**model_payload(RenderOutput, payload)))
         self.storage.persist_json(job.job_id, "render_output.json", self._serialize_for_json(payload))
-        primary_artifacts: list[str] = []
-        if str(getattr(self.settings, "render_primary_backend", "ffmpeg") or "ffmpeg").lower() == "remotion":
-            session.flush()
-            try:
-                self.owner.premium_finishing.generate_parallel_version(session, job.job_id)
-                self.owner.premium_finishing.promote_as_primary_render(
-                    session,
-                    job.job_id,
-                    previous_video_uri=file_uri(final_video),
-                    source="render_pipeline_primary",
-                )
-                primary_artifacts = ["render/premium.mp4", "render/edit_plan.json", "premium_finishing_report.json", "render/remotion.log"]
-            except Exception as exc:  # noqa: BLE001
-                raise RecoverableStepError(f"remotion primary render failed: {exc}") from exc
         render_telemetry_file = self._persist_repair_telemetry(
             job.job_id,
             "render",
@@ -219,7 +206,6 @@ class RenderPipeline(BasePipeline):
             "render_output.json",
             "render_motion_plan.json",
             render_telemetry_file,
-            *primary_artifacts,
         ]
 
     def build_render_motion_plan(self, job_id: str, scene_segments: list[dict[str, Any]]) -> dict[str, Any]:

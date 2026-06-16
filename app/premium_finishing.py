@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import subprocess
+import json
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -11,117 +13,18 @@ from sqlalchemy.orm import Session
 
 from app.models import BackgroundMusicAsset, Job, NarrationAsset, RenderOutput, SceneAsset, ScenePlan, SubtitleTrack
 from app.pipelines.common import FatalStepError, model_payload
-from app.pipelines.finish_plan import build_finish_plan
+from app.pipelines.finish_plan import build_finish_plan, public_finish_plan
 from app.pipelines.timeline import normalize_scene_timings
 from app.quality.premium_finishing_gate import PremiumFinishingGate
-from app.utils import ensure_dir, file_uri, new_id, path_from_uri, read_json, stable_hash, utcnow
-
-
-PREMIUM_COMPOSITION_ID = "YtsPremiumShort"
-
-
-class RemotionCliRenderer:
-    def __init__(self, project_dir: Path | None = None, timeout_sec: int = 900) -> None:
-        self.project_dir = project_dir or Path(__file__).resolve().parent.parent / "remotion"
-        self.timeout_sec = timeout_sec
-
-    def render(self, *, plan_path: Path, output_path: Path, log_path: Path) -> list[str]:
-        remotion_bin = self.project_dir / "node_modules" / ".bin" / "remotion"
-        entrypoint = self.project_dir / "src" / "index.ts"
-        resolved_plan_path = plan_path.resolve()
-        resolved_output_path = output_path.resolve()
-        resolved_log_path = log_path.resolve()
-        if not remotion_bin.exists():
-            raise FatalStepError("dependencias do Remotion nao instaladas; rode npm install em remotion/")
-        if not entrypoint.exists():
-            raise FatalStepError("entrypoint do Remotion nao encontrado em remotion/src/index.ts")
-        command = [
-            str(remotion_bin),
-            "render",
-            str(entrypoint),
-            PREMIUM_COMPOSITION_ID,
-            str(resolved_output_path),
-            "--props",
-            str(resolved_plan_path),
-            "--codec",
-            "h264",
-            "--audio-codec",
-            "aac",
-            "--pixel-format",
-            "yuv420p",
-            "--crf",
-            "20",
-            "--x264-preset",
-            "veryfast",
-            "--overwrite",
-            "--concurrency",
-            "2",
-            "--disable-web-security",
-            "--log",
-            "info",
-        ]
-        self._preflight_local_media(resolved_plan_path)
-        ensure_dir(resolved_output_path.parent)
-        try:
-            result = subprocess.run(
-                command,
-                cwd=self.project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=self.timeout_sec,
-            )
-        except subprocess.TimeoutExpired as exc:
-            resolved_log_path.write_text(self._process_text(exc.stdout) + "\n" + self._process_text(exc.stderr), encoding="utf-8")
-            raise FatalStepError("render premium excedeu o tempo limite") from exc
-        resolved_log_path.write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
-        if result.returncode != 0:
-            raise FatalStepError("render premium falhou no Remotion CLI")
-        return command
-
-    def _preflight_local_media(self, plan_path: Path) -> None:
-        try:
-            plan = read_json(plan_path)
-        except Exception as exc:  # noqa: BLE001
-            raise FatalStepError("plano de acabamento Remotion invalido ou ilegivel") from exc
-        if not isinstance(plan, dict):
-            raise FatalStepError("plano de acabamento Remotion invalido")
-        missing: list[str] = []
-        for scene in plan.get("scenes") or []:
-            if not isinstance(scene, dict):
-                continue
-            media_path = self._local_media_path(str(scene.get("asset_uri") or scene.get("asset_path") or ""))
-            if media_path and not media_path.exists():
-                missing.append(str(media_path))
-        audio = plan.get("audio") if isinstance(plan.get("audio"), dict) else {}
-        media_path = self._local_media_path(str(audio.get("uri") or audio.get("path") or ""))
-        if media_path and not media_path.exists():
-            missing.append(str(media_path))
-        if missing:
-            preview = ", ".join(missing[:4])
-            suffix = f" e mais {len(missing) - 4}" if len(missing) > 4 else ""
-            raise FatalStepError(f"assets locais do Remotion ausentes: {preview}{suffix}")
-
-    def _local_media_path(self, value: str) -> Path | None:
-        if not value:
-            return None
-        if value.startswith("file://"):
-            return path_from_uri(value)
-        path = Path(value)
-        return path if path.is_absolute() else None
-
-    def _process_text(self, value: str | bytes | None) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace")
-        return value
+from app.render_selection import promote_render_output_to_file
+from app.remotion_renderer import RemotionCliRenderer
+from app.utils import ensure_dir, file_sha256, file_uri, new_id, path_from_uri, read_json, stable_hash, utcnow
 
 
 class PremiumFinishingService:
     def __init__(self, owner: Any, *, renderer: RemotionCliRenderer | None = None, gate: PremiumFinishingGate | None = None) -> None:
         self.owner = owner
-        self.renderer = renderer or RemotionCliRenderer()
+        self.renderer = renderer or RemotionCliRenderer(allowed_media_root=owner.settings.artifacts_dir)
         self.gate = gate or PremiumFinishingGate(owner.render_gate)
 
     @property
@@ -181,13 +84,14 @@ class PremiumFinishingService:
             artifacts_dir=self.settings.artifacts_dir,
         )
         job_dir = self.storage.job_dir(job_id)
-        plan_artifact = self.storage.persist_json(job_id, "render/edit_plan.json", plan)
+        plan_artifact = self.storage.persist_json(job_id, "render/edit_plan.json", public_finish_plan(plan))
         output_path = job_dir / "render" / "premium.mp4"
         log_path = job_dir / "render" / "remotion.log"
         self.mark_running(job_id, phase="rendering", detail="Render premium em andamento")
         self.owner._append_event(job_id, "premium_finishing.started", "succeeded", {"finish_plan_hash": plan_artifact.content_hash})
         try:
-            command = self.renderer.render(plan_path=job_dir / "render" / "edit_plan.json", output_path=output_path, log_path=log_path)
+            command = self._render_with_runtime_plan(job_id, plan, output_path=output_path, log_path=log_path)
+            public_command = self._public_command(command, job_dir)
             gate_result = self.gate.validate(output_path, narration.duration_ms, plan)
         except FatalStepError as exc:
             report = self._failure_report(job_id, plan, str(exc))
@@ -205,8 +109,8 @@ class PremiumFinishingService:
             "video_uri": file_uri(output_path),
             "edit_plan_uri": plan_artifact.uri,
             "log_uri": file_uri(log_path),
-            "command": command,
-            "content_hash": stable_hash(output_path.read_bytes()) if output_path.exists() else None,
+            "command": public_command,
+            "content_hash": file_sha256(output_path) if output_path.exists() else None,
         }
         self.storage.persist_json(job_id, "premium_finishing_report.json", report)
         if not gate_result.passed:
@@ -281,14 +185,15 @@ class PremiumFinishingService:
         job_dir = self.storage.job_dir(job_id)
         render_dir = job_dir / "render"
         ensure_dir(render_dir)
-        plan_artifact = self.storage.persist_json(job_id, "render/edit_plan.json", plan)
+        plan_artifact = self.storage.persist_json(job_id, "render/edit_plan.json", public_finish_plan(plan))
         output_path = render_dir / "final.mp4"
         log_path = render_dir / "remotion.log"
         poster_path = render_dir / "poster.jpg"
         self.mark_running(job_id, phase="rendering", detail="Render principal Remotion em andamento")
         self.owner._append_event(job_id, "render.remotion_primary.started", "succeeded", {"finish_plan_hash": plan_artifact.content_hash})
         try:
-            command = self.renderer.render(plan_path=render_dir / "edit_plan.json", output_path=output_path, log_path=log_path)
+            command = self._render_with_runtime_plan(job_id, plan, output_path=output_path, log_path=log_path)
+            public_command = self._public_command(command, job_dir)
             gate_result = self.gate.validate(output_path, narration.duration_ms, plan)
         except FatalStepError as exc:
             report = self._failure_report(job_id, plan, str(exc))
@@ -309,12 +214,13 @@ class PremiumFinishingService:
                 "video_uri": file_uri(output_path) if output_path.exists() else None,
                 "edit_plan_uri": plan_artifact.uri,
                 "log_uri": file_uri(log_path),
-                "command": command,
+                "command": public_command,
             }
             self.storage.persist_json(job_id, "premium_finishing_report.json", report)
             self.owner._append_event(job_id, "render.remotion_primary.failed", "failed", {"reasons": gate_result.reasons})
             raise FatalStepError(f"gate de render Remotion falhou: {', '.join(gate_result.reasons[:6])}")
-        Image.open(path_from_uri(selected_assets[0].uri)).resize((540, 960)).save(poster_path, format="JPEG")
+        with Image.open(path_from_uri(selected_assets[0].uri)) as poster_source:
+            poster_source.resize((540, 960)).save(poster_path, format="JPEG")
         duration_ms = int(gate_result.metrics.get("duration_ms") or narration.duration_ms)
         created_at = utcnow()
         render_payload = {
@@ -322,7 +228,7 @@ class PremiumFinishingService:
             "render_id": new_id(),
             "job_id": job_id,
             "created_at": created_at,
-            "content_hash": stable_hash(output_path.read_bytes()),
+            "content_hash": file_sha256(output_path),
             "video_uri": file_uri(output_path),
             "poster_uri": file_uri(poster_path),
             "waveform_uri": None,
@@ -351,8 +257,8 @@ class PremiumFinishingService:
             "video_uri": file_uri(output_path),
             "edit_plan_uri": plan_artifact.uri,
             "log_uri": file_uri(log_path),
-            "command": command,
-            "content_hash": stable_hash(output_path.read_bytes()),
+            "command": public_command,
+            "content_hash": file_sha256(output_path),
         }
         self.storage.persist_json(job_id, "premium_finishing_report.json", report)
         artifact_index = dict(job.artifact_index or {})
@@ -405,24 +311,15 @@ class PremiumFinishingService:
             raise FatalStepError("versao Remotion ainda nao foi gerada")
         if not premium_report or not bool(premium_report.get("passed")):
             raise FatalStepError("versao Remotion nao passou no gate de acabamento")
-        original_video_uri = previous_video_uri or str(render.video_uri or "")
-        render.video_uri = file_uri(premium_path)
-        render.filesize_bytes = premium_path.stat().st_size
-        render.content_hash = stable_hash({
-            "primary_video_uri": render.video_uri,
-            "previous_video_uri": original_video_uri,
-            "source": source,
-        })
-        artifact_index = dict(job.artifact_index or {})
         job_dir = self.storage.job_dir(job_id, create=False)
-        try:
-            original_render_ref = str(path_from_uri(original_video_uri).resolve().relative_to(job_dir.resolve()))
-        except (OSError, ValueError):
-            original_render_ref = str(artifact_index.get("render") or original_video_uri)
-        if original_render_ref and original_render_ref != "render/premium.mp4":
-            artifact_index["standard_render"] = str(artifact_index.get("standard_render") or original_render_ref)
-        artifact_index["render"] = "render/premium.mp4"
-        artifact_index["premium_video"] = "render/premium.mp4"
+        artifact_index, original_video_uri = promote_render_output_to_file(
+            render,
+            selected_video_path=premium_path,
+            job_dir=job_dir,
+            artifact_index=dict(job.artifact_index or {}),
+            selected_render_ref="render/premium.mp4",
+            previous_video_uri=previous_video_uri,
+        )
         job.artifact_index = artifact_index
         render_payload = self._read_json(job_id, "render_output.json")
         if render_payload:
@@ -510,6 +407,70 @@ class PremiumFinishingService:
             "reasons": ["premium_render_failed"],
             "edit_plan_hash": stable_hash(plan),
         }
+
+    def _render_with_runtime_plan(self, job_id: str, plan: dict[str, Any], *, output_path: Path, log_path: Path) -> list[str]:
+        runtime_plan_path: Path | None = None
+        try:
+            runtime_plan = self._stage_runtime_media(job_id, plan)
+            with tempfile.NamedTemporaryFile("w", suffix=".json", prefix=f"{job_id}-remotion-", delete=False, encoding="utf-8") as handle:
+                runtime_plan_path = Path(handle.name)
+                json.dump(self.owner._serialize_for_json(runtime_plan), handle, ensure_ascii=False)
+            return self.renderer.render(plan_path=runtime_plan_path, output_path=output_path, log_path=log_path)
+        finally:
+            if runtime_plan_path is not None:
+                runtime_plan_path.unlink(missing_ok=True)
+
+    def _stage_runtime_media(self, job_id: str, plan: dict[str, Any]) -> dict[str, Any]:
+        project_dir = getattr(self.renderer, "project_dir", None)
+        if not project_dir:
+            return plan
+        public_dir = Path(project_dir) / "public" / "yts-runtime" / job_id
+        shutil.rmtree(public_dir, ignore_errors=True)
+        ensure_dir(public_dir)
+        staged = json.loads(json.dumps(self.owner._serialize_for_json(plan), ensure_ascii=False))
+        for scene in staged.get("scenes") or []:
+            if not isinstance(scene, dict):
+                continue
+            source = self._local_media_path(scene.get("asset_uri") or scene.get("asset_path"))
+            if source is None or not source.exists():
+                continue
+            target = public_dir / f"{scene.get('scene_id') or source.stem}{source.suffix or '.jpg'}"
+            shutil.copy2(source, target)
+            scene["asset_src"] = f"yts-runtime/{job_id}/{target.name}"
+        audio = staged.get("audio") if isinstance(staged.get("audio"), dict) else {}
+        source = self._local_media_path(audio.get("uri") or audio.get("path"))
+        if source is not None and source.exists():
+            target = public_dir / f"audio{source.suffix or '.wav'}"
+            shutil.copy2(source, target)
+            audio["src"] = f"yts-runtime/{job_id}/{target.name}"
+        return staged
+
+    def _local_media_path(self, value: Any) -> Path | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            if text.startswith("file://"):
+                return path_from_uri(text)
+        except Exception:  # noqa: BLE001
+            return None
+        path = Path(text)
+        return path if path.is_absolute() else None
+
+    def _public_command(self, command: list[str], job_dir: Path) -> list[str]:
+        public: list[str] = []
+        job_root = job_dir.resolve()
+        for item in command:
+            value = str(item)
+            path = Path(value)
+            if path.is_absolute():
+                try:
+                    public.append(path.resolve().relative_to(job_root).as_posix())
+                except (OSError, ValueError):
+                    public.append(f"<{path.name}>")
+            else:
+                public.append(value)
+        return public
 
     def _read_json(self, job_id: str, relative_path: str) -> dict[str, Any]:
         path = self.storage.job_dir(job_id, create=False) / relative_path

@@ -380,6 +380,15 @@ def test_redirect_back_appends_params_before_fragment() -> None:
     assert response.status_code == 303
     assert response.headers["location"] == "/?automation_error=failed#publication-hub"
 
+
+def test_redirect_back_rejects_external_or_header_injection_targets() -> None:
+    external = main_module._redirect_back("//evil.test/path", default="/publication-hub")
+    crlf = main_module._redirect_back("/jobs/1\r\nLocation: //evil.test", default="/publication-hub")
+
+    assert external.headers["location"] == "/publication-hub"
+    assert crlf.headers["location"] == "/publication-hub"
+
+
 def test_create_job_rejects_unsupported_niche() -> None:
     client = TestClient(app)
 
@@ -871,6 +880,26 @@ def test_scene_regeneration_route_reuses_existing_artifacts(monkeypatch) -> None
         "operator_instruction": "uma unica imagem vertical",
     }
 
+def test_scene_regeneration_route_handles_recoverable_error(monkeypatch) -> None:
+    job_id = "scene-regeneration-recoverable"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Regenerar cena")
+        session.commit()
+
+    def fake_regenerate(*_args, **_kwargs) -> str:
+        raise RecoverableStepError("render temporariamente indisponivel")
+
+    monkeypatch.setattr(main_module.orchestrator, "regenerate_scene_and_rerender", fake_regenerate)
+
+    response = TestClient(app).post(
+        f"/jobs/{job_id}/scenes/scene-3/regenerate",
+        data={"operator_instruction": "uma unica imagem vertical"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/jobs/{job_id}?reprocess_error=")
+
 def test_regenerate_scene_runs_only_render_downstream(monkeypatch) -> None:
     job_id = "scene-regeneration-partial"
     ran_steps: list[str] = []
@@ -999,6 +1028,78 @@ def test_regenerate_scene_runs_only_render_downstream(monkeypatch) -> None:
         assert by_step["tts"].output_refs == ["old-tts.json"]
         assert by_step["render"].output_refs == ["render.json"]
         assert session.query(SceneAsset).filter_by(job_id=job_id, scene_id="scene-2", selected=True).count() == 1
+
+def test_scene_regeneration_preserves_existing_asset_when_generation_fails(monkeypatch) -> None:
+    job_id = "scene-regeneration-preserve-old"
+
+    def fail_generate(*_args, **_kwargs):
+        raise RecoverableStepError("provider temporariamente indisponivel")
+
+    monkeypatch.setattr(orchestrator.asset_pipeline, "_generate_assets_for_scene", fail_generate)
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Preservar cena antiga")
+        session.add(
+            ScenePlan(
+                scene_plan_id=f"{job_id}-scene-plan",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="scene-plan-hash",
+                scene_count=1,
+                scenes=[
+                    {
+                        "scene_id": "scene-1",
+                        "order": 1,
+                        "narration_text": "Cena um.",
+                        "token_start": 0,
+                        "token_end": 1,
+                        "image_prompt": "single vertical image, no readable text anywhere",
+                    },
+                ],
+            )
+        )
+        session.add(
+            SceneAsset(
+                asset_id=f"{job_id}-old-scene-1",
+                job_id=job_id,
+                scene_id="scene-1",
+                schema_version="1.0.0",
+                content_hash="old-asset-hash",
+                provider="mock_ai",
+                kind="image",
+                uri=f"file:///{job_id}/old-scene-1.png",
+                width=720,
+                height=1280,
+                selected=True,
+                scores={"total_score": 0.9},
+            )
+        )
+        now = utcnow()
+        session.add(
+            StepExecution(
+                execution_id=f"{job_id}-render",
+                job_id=job_id,
+                step_name="render",
+                attempt=1,
+                status="succeeded",
+                input_hash="old-render",
+                output_refs=["old-render.json"],
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        session.commit()
+
+    with pytest.raises(RecoverableStepError, match="provider temporariamente indisponivel"):
+        orchestrator.regenerate_scene_and_rerender(job_id, "scene-1", "sem tela dividida")
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == "asset_quality_failed"
+        assert job.lease_owner is None
+        assert session.query(SceneAsset).filter_by(job_id=job_id, scene_id="scene-1", selected=True).count() == 1
+        render_step = session.query(StepExecution).filter_by(job_id=job_id, step_name="render").one()
+        assert render_step.output_refs == ["old-render.json"]
 
 def test_review_action_rejects_non_reviewable_status() -> None:
     client = TestClient(app)
@@ -1372,6 +1473,8 @@ def test_process_job_fails_explicitly_for_legacy_invalid_niche() -> None:
         assert job is not None
         assert job.status == "failed"
         assert job.failure_reason == "input_gate: unsupported niche_id: esportes"
+        assert job.quality_summary["failure_diagnosis"]["step"] == "input_gate"
+        assert job.quality_summary["failure_diagnosis"]["title"] == "Falha no pipeline"
 
 def test_process_job_fails_fast_for_invalid_language_in_persisted_request() -> None:
     job_id = "job-invalid-language"
@@ -1426,6 +1529,8 @@ def test_extract_fact_entity_prefers_subject_before_colon() -> None:
     assert entity.lower() == "polvos"
 
 def test_speech_envelope_normalization_levels_caption_cues(tmp_path: Path) -> None:
+    from app.audio.pcm import rms as pcm_rms
+
     audio_path = tmp_path / "voice.wav"
     srt_path = tmp_path / "voice.srt"
     sample_rate = 24_000
@@ -1449,8 +1554,8 @@ def test_speech_envelope_normalization_levels_caption_cues(tmp_path: Path) -> No
         width = wav_file.getsampwidth()
         first = wav_file.readframes(sample_rate)
         second = wav_file.readframes(sample_rate)
-    first_rms = audioop.rms(first, width)
-    second_rms = audioop.rms(second, width)
+    first_rms = pcm_rms(first, width)
+    second_rms = pcm_rms(second, width)
     ratio = max(first_rms, second_rms) / min(first_rms, second_rms)
     assert ratio < 1.15
 

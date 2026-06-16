@@ -26,16 +26,21 @@ from tests.e2e_support import (
 
 from app.models import ScenePlan
 from app.pipelines.common import FatalStepError
-from app.pipelines.finish_plan import build_finish_plan
+from app.pipelines.finish_plan import build_finish_plan, public_finish_plan
 from app.premium_finishing import RemotionCliRenderer
 from app.quality.premium_finishing_gate import PremiumFinishingGate
 from app.quality.render_gate import RenderGateResult
-from app.utils import stable_hash, utcnow
+from app.utils import file_sha256, stable_hash, utcnow
 
 
 class FakePremiumRenderer:
     def render(self, *, plan_path: Path, output_path: Path, log_path: Path) -> list[str]:
         assert plan_path.exists()
+        runtime_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        assert runtime_plan["scenes"][0]["asset_uri"].startswith("file://")
+        assert "asset_path" in runtime_plan["scenes"][0]
+        assert runtime_plan["audio"]["uri"].startswith("file://")
+        assert "path" in runtime_plan["audio"]
         output_path.write_bytes(b"premium-video")
         log_path.write_text("fake remotion log", encoding="utf-8")
         return ["remotion", "render", str(output_path)]
@@ -227,11 +232,17 @@ def test_premium_finishing_generates_parallel_artifacts(monkeypatch) -> None:
     assert report["passed"] is True
     edit_plan_path = Path(__import__("os").environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "render" / "edit_plan.json"
     premium_path = edit_plan_path.parent / "premium.mp4"
-    plan = json.loads(edit_plan_path.read_text(encoding="utf-8"))
+    plan_text = edit_plan_path.read_text(encoding="utf-8")
+    plan = json.loads(plan_text)
     assert premium_path.exists()
     assert plan["plan_name"] == "Plano de Acabamento Editorial"
     assert plan["style"]["component_policy"] == "free_only"
     assert plan["caption_track"]["max_lines"] == 1
+    assert "file://" not in plan_text
+    assert str(Path(__import__("os").environ["YTS_DATA_DIR"]).resolve()) not in plan_text
+    assert "asset_path" not in plan["scenes"][0]
+    assert "path" not in plan["audio"]
+    assert report["command"] == ["remotion", "render", "render/premium.mp4"]
     assert {scene["motion"]["kind"] for scene in plan["scenes"]} == {"subtle_push"}
     assert plan["scenes"][0]["overlays"] == []
     assert "sem_texto_superior_editorial" in plan["summary"]["premium_features"]
@@ -276,6 +287,35 @@ def test_remotion_primary_render_skips_legacy_ffmpeg(monkeypatch) -> None:
         assert job.quality_summary["selected_render"]["variant"] == "remotion"
         assert render.video_uri.endswith("/render/final.mp4")
         assert render.ffmpeg_log_uri.endswith("/render/remotion.log")
+
+
+def test_promote_as_primary_render_uses_premium_file_hash() -> None:
+    job_id = "premium-promote-file-hash"
+    _create_rendered_job(job_id)
+    premium_path = _write_job_artifact(job_id, "render/premium.mp4", "premium-file-bytes")
+    orchestrator.storage.persist_json(
+        job_id,
+        "premium_finishing_report.json",
+        {"status": "succeeded", "passed": True, "video_uri": premium_path.as_uri(), "reasons": []},
+    )
+    orchestrator.storage.persist_json(
+        job_id,
+        "render_output.json",
+        {"content_hash": "old-render-hash", "video_uri": "old-video-uri", "filesize_bytes": 5},
+    )
+
+    with SessionLocal() as session:
+        orchestrator.premium_finishing.promote_as_primary_render(session, job_id, previous_video_uri="file:///tmp/standard.mp4")
+        session.commit()
+
+    with SessionLocal() as session:
+        render = session.query(RenderOutput).filter_by(job_id=job_id).one()
+        assert render.video_uri == premium_path.as_uri()
+        assert render.content_hash == file_sha256(premium_path)
+
+    render_payload = json.loads((Path(__import__("os").environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "render_output.json").read_text(encoding="utf-8"))
+    assert render_payload["content_hash"] == file_sha256(premium_path)
+    assert render_payload["selected_render"] == "remotion"
 
 
 def test_premium_finishing_reprocesses_from_tts_when_current_narration_is_not_primary(monkeypatch) -> None:
@@ -332,9 +372,13 @@ def test_remotion_cli_renderer_uses_absolute_artifact_paths(tmp_path, monkeypatc
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured["cwd"] = kwargs["cwd"]
-        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout=f"ok project={project_dir} props={plan_path}",
+            stderr=f"output={output_path} entry={entrypoint}",
+        )
 
-    monkeypatch.setattr("app.premium_finishing.subprocess.run", fake_run)
+    monkeypatch.setattr("app.remotion_renderer.subprocess.run", fake_run)
 
     command = RemotionCliRenderer(project_dir=project_dir).render(plan_path=plan_path, output_path=output_path, log_path=log_path)
 
@@ -343,7 +387,14 @@ def test_remotion_cli_renderer_uses_absolute_artifact_paths(tmp_path, monkeypatc
     assert Path(command[4]).is_absolute()
     assert command[command.index("--concurrency") + 1] == "2"
     assert captured["cwd"] == project_dir
-    assert log_path.read_text(encoding="utf-8").strip() == "ok"
+    log_text = log_path.read_text(encoding="utf-8")
+    assert str(project_dir) not in log_text
+    assert str(plan_path) not in log_text
+    assert str(output_path) not in log_text
+    assert str(entrypoint) not in log_text
+    assert "<remotion>" in log_text
+    assert "<edit_plan.json>" in log_text
+    assert "<premium.mp4>" in log_text
 
 
 def test_remotion_cli_renderer_rejects_missing_local_media_before_render(tmp_path, monkeypatch) -> None:
@@ -372,10 +423,69 @@ def test_remotion_cli_renderer_rejects_missing_local_media_before_render(tmp_pat
     def fake_run(*_args, **_kwargs):
         raise AssertionError("remotion render should not be called")
 
-    monkeypatch.setattr("app.premium_finishing.subprocess.run", fake_run)
+    monkeypatch.setattr("app.remotion_renderer.subprocess.run", fake_run)
 
-    with pytest.raises(FatalStepError, match="assets locais do Remotion ausentes"):
+    with pytest.raises(FatalStepError, match="assets locais do Remotion ausentes") as exc_info:
         RemotionCliRenderer(project_dir=project_dir).render(plan_path=plan_path, output_path=output_path, log_path=log_path)
+    assert str(missing_asset.parent) not in str(exc_info.value)
+    assert "missing.png" in str(exc_info.value)
+
+
+def test_remotion_cli_renderer_rejects_local_media_outside_allowed_root(tmp_path, monkeypatch) -> None:
+    project_dir = tmp_path / "remotion"
+    remotion_bin = project_dir / "node_modules" / ".bin" / "remotion"
+    entrypoint = project_dir / "src" / "index.ts"
+    remotion_bin.parent.mkdir(parents=True)
+    entrypoint.parent.mkdir(parents=True)
+    remotion_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    entrypoint.write_text("export {};\n", encoding="utf-8")
+    allowed_root = tmp_path / "data" / "artifacts"
+    outside_asset = tmp_path / "private" / "secret.png"
+    outside_asset.parent.mkdir(parents=True)
+    outside_asset.write_bytes(b"secret")
+    plan_path = allowed_root / "job" / "render" / "edit_plan.json"
+    output_path = allowed_root / "job" / "render" / "premium.mp4"
+    log_path = allowed_root / "job" / "render" / "remotion.log"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text(
+        json.dumps({"scenes": [{"asset_uri": outside_asset.as_uri()}], "audio": {"uri": "https://example.test/audio.mp3"}}),
+        encoding="utf-8",
+    )
+
+    def fake_run(*_args, **_kwargs):
+        raise AssertionError("remotion render should not be called")
+
+    monkeypatch.setattr("app.remotion_renderer.subprocess.run", fake_run)
+
+    with pytest.raises(FatalStepError, match="assets locais do Remotion ausentes") as exc_info:
+        RemotionCliRenderer(project_dir=project_dir, allowed_media_root=allowed_root).render(
+            plan_path=plan_path,
+            output_path=output_path,
+            log_path=log_path,
+        )
+    assert str(outside_asset.parent) not in str(exc_info.value)
+    assert "secret.png fora da raiz permitida" in str(exc_info.value)
+
+
+def test_public_finish_plan_removes_unsafe_local_media_uris(tmp_path: Path) -> None:
+    outside_asset = tmp_path / "private" / "scene.png"
+    outside_audio = tmp_path / "private" / "voice.wav"
+    plan = {
+        "source_final_video_uri": outside_asset.as_uri(),
+        "scenes": [
+            {
+                "asset_uri": outside_asset.as_uri(),
+                "asset_src": outside_asset.as_uri(),
+                "asset_path": str(outside_asset),
+            }
+        ],
+        "audio": {"uri": outside_audio.as_uri(), "src": outside_audio.as_uri(), "path": str(outside_audio)},
+    }
+
+    public_plan_text = json.dumps(public_finish_plan(plan))
+
+    assert "file://" not in public_plan_text
+    assert str(tmp_path) not in public_plan_text
 
 
 def test_premium_finishing_gate_accepts_controlled_editorial_motion(tmp_path: Path) -> None:
@@ -464,6 +574,37 @@ def test_finish_plan_limits_caption_emphasis_to_data_only() -> None:
     assert "\n" not in caption["text"]
 
 
+def test_finish_plan_repairs_invalid_caption_end_after_start() -> None:
+    job_id = "premium-caption-timing"
+    _create_rendered_job(job_id)
+    _add_premium_generation_inputs(job_id)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        scene_plan = session.query(ScenePlan).filter_by(job_id=job_id).one()
+        assets = session.query(SceneAsset).filter_by(job_id=job_id, selected=True).all()
+        narration = session.query(NarrationAsset).filter_by(job_id=job_id).one()
+        subtitles = session.query(SubtitleTrack).filter_by(job_id=job_id).one()
+        subtitles.items = [{"idx": "1", "start_ms": 1200, "end_ms": 0, "text": "Legenda com fim ausente"}]
+        render = session.query(RenderOutput).filter_by(job_id=job_id).one()
+        assert job
+        plan = build_finish_plan(
+            schema_version="1.0.0",
+            job=job,
+            scene_plan=scene_plan,
+            selected_assets=assets,
+            narration=narration,
+            subtitles=subtitles,
+            background_music=None,
+            render=render,
+            visual_contract={},
+        )
+
+    caption = plan["caption_track"]["items"][0]
+    assert caption["startMs"] == 1200
+    assert caption["endMs"] == 1201
+
+
 def test_premium_caption_highlight_uses_only_current_word() -> None:
     source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
 
@@ -476,8 +617,35 @@ def test_premium_caption_highlight_uses_only_current_word() -> None:
 def test_premium_component_prefers_local_media_for_cli_render() -> None:
     source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
 
-    assert "scene.asset_uri || scene.asset_src" in source
-    assert "plan.audio.uri || plan.audio.src" in source
+    assert "scene.asset_src || scene.asset_uri" in source
+    assert "plan.audio.src || plan.audio.uri" in source
+    assert "staticFile(value.replace" in source
+
+
+def test_premium_runtime_plan_stages_local_media_for_remotion_public(tmp_path: Path) -> None:
+    project_dir = tmp_path / "remotion"
+    service = orchestrator.premium_finishing
+    original_renderer = service.renderer
+    service.renderer = RemotionCliRenderer(project_dir=project_dir)
+    image_path = tmp_path / "source.jpg"
+    audio_path = tmp_path / "source.wav"
+    Image.new("RGB", (16, 16), color=(1, 2, 3)).save(image_path, format="JPEG")
+    audio_path.write_bytes(b"wav")
+    try:
+        staged = service._stage_runtime_media(
+            "stage-job",
+            {
+                "scenes": [{"scene_id": "scene-1", "asset_uri": image_path.as_uri(), "asset_path": str(image_path)}],
+                "audio": {"uri": audio_path.as_uri(), "path": str(audio_path)},
+            },
+        )
+    finally:
+        service.renderer = original_renderer
+
+    assert staged["scenes"][0]["asset_src"] == "yts-runtime/stage-job/scene-1.jpg"
+    assert staged["audio"]["src"] == "yts-runtime/stage-job/audio.wav"
+    assert (project_dir / "public" / "yts-runtime" / "stage-job" / "scene-1.jpg").exists()
+    assert (project_dir / "public" / "yts-runtime" / "stage-job" / "audio.wav").exists()
 
 
 def test_job_detail_hides_manual_premium_action() -> None:
@@ -591,6 +759,7 @@ def test_premium_approval_promotes_premium_video_to_publish_package(monkeypatch)
         assert job.status == "approved_for_publish"
         assert job.review_state == "approved"
         assert render.video_uri == premium_path.as_uri()
+        assert render.content_hash == file_sha256(premium_path)
         assert job.artifact_index["render"] == "render/premium.mp4"
         assert job.artifact_index["standard_render"] == "render/final.mp4"
     package_path = Path(__import__("os").environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "publish_package.json"

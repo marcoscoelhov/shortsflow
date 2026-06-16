@@ -6,7 +6,7 @@ import shutil
 from typing import Any
 
 from app.config import get_settings
-from app.utils import ensure_dir, file_uri, stable_hash, write_json, write_text
+from app.utils import ensure_dir, file_sha256, file_uri, stable_hash, write_json, write_text
 
 
 @dataclass
@@ -29,14 +29,12 @@ class StorageManager:
     def persist_json(self, job_id: str, relative_path: str, payload: dict[str, Any]) -> StoredArtifact:
         path = self.job_dir(job_id) / relative_path
         write_json(path, payload)
-        raw = path.read_bytes()
-        return StoredArtifact(uri=file_uri(path), content_hash=stable_hash(raw), size_bytes=len(raw))
+        return StoredArtifact(uri=file_uri(path), content_hash=file_sha256(path), size_bytes=path.stat().st_size)
 
     def persist_text(self, job_id: str, relative_path: str, content: str) -> StoredArtifact:
         path = self.job_dir(job_id) / relative_path
         write_text(path, content)
-        raw = path.read_bytes()
-        return StoredArtifact(uri=file_uri(path), content_hash=stable_hash(raw), size_bytes=len(raw))
+        return StoredArtifact(uri=file_uri(path), content_hash=file_sha256(path), size_bytes=path.stat().st_size)
 
     def persist_bytes(self, job_id: str, relative_path: str, data: bytes) -> StoredArtifact:
         path = self.job_dir(job_id) / relative_path

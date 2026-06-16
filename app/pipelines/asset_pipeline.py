@@ -132,6 +132,7 @@ class AssetPipeline(BasePipeline):
             raise RecoverableStepError(f"asset quality gate failed: {', '.join(asset_gate.reasons[:6])}")
         visual_contract = self._visual_contract_artifact_payload(job.job_id)
         asset_visual_gate = self.asset_visual_gate.validate(selected_assets, scene_plan.scenes, visual_contract=visual_contract)
+        visual_impact_gate = self.visual_impact_gate.validate(selected_assets, scene_plan.scenes, visual_contract=visual_contract)
         self.storage.persist_json(
             job.job_id,
             "asset_visual_gate.json",
@@ -141,8 +142,19 @@ class AssetPipeline(BasePipeline):
                 "selected_assets": selected_assets,
             },
         )
+        self.storage.persist_json(
+            job.job_id,
+            "visual_impact_gate.json",
+            {
+                "reasons": visual_impact_gate.reasons,
+                "metrics": visual_impact_gate.metrics,
+                "selected_assets": selected_assets,
+            },
+        )
         if not asset_visual_gate.passed:
             raise RecoverableStepError(f"asset visual quality gate failed: {', '.join(asset_visual_gate.reasons[:6])}")
+        if not visual_impact_gate.passed:
+            raise RecoverableStepError(f"visual impact gate failed: {', '.join(visual_impact_gate.reasons[:6])}")
         quality_summary = dict(job.quality_summary or {})
         verification_modes = sorted(
             {
@@ -158,6 +170,8 @@ class AssetPipeline(BasePipeline):
             "asset_visual_gate_checked": asset_visual_gate.metrics.get("checked", False),
             "asset_visual_verification_modes": verification_modes,
             "asset_visual_real_vision_checked": bool(verification_modes) and "prompt_heuristic" not in verification_modes,
+            "visual_impact": visual_impact_gate.metrics,
+            "visual_impact_gate_pass": visual_impact_gate.metrics.get("visual_impact_gate_pass", False),
         }
         job.quality_summary = quality_summary
         self._append_event(job.job_id, "asset.selected", "succeeded", quality_summary["assets"])
