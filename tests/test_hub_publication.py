@@ -37,6 +37,38 @@ def _allow_premium_publish_gate(monkeypatch, score: float = 9.5) -> None:
     )
 
 
+def test_ready_script_bank_premium_publish_gate_auto_confirms_editorial_score_and_visual_review(monkeypatch) -> None:
+    job_id = "ready-script-bank-premium-policy"
+    captured = {}
+
+    def fake_evaluate(job, *, confirmations=None, visual_review_required=False):
+        captured["confirmations"] = set(confirmations or set())
+        captured["visual_review_required"] = visual_review_required
+        return PremiumPublishGateResult(
+            passed=True,
+            score=7.3,
+            target_score=9.2,
+            reasons=[],
+            audit=_premium_publish_audit_result(7.3),
+            visual_review_required=visual_review_required,
+            visual_review_confirmed="visual_review_confirmed" in set(confirmations or set()),
+        )
+
+    monkeypatch.setattr(orchestrator.publication_ops.premium_publish_gate, "evaluate", fake_evaluate)
+    monkeypatch.setattr(orchestrator.monetization_pipeline, "visual_review_required_for_assets", lambda job: True)
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="ready_for_upload")
+        session.flush()
+        job = session.get(Job, job_id)
+        job.job_origin = "ready_script_bank"
+        result = orchestrator.publication_ops._run_premium_publish_gate(session, job, context="test_ready_script_bank_policy")
+
+    assert result.passed is True
+    assert captured["visual_review_required"] is True
+    assert "visual_review_confirmed" in captured["confirmations"]
+    assert "premium_publish_score_accepted" in captured["confirmations"]
+
+
 def test_artifact_url_maps_file_uri_to_static_route() -> None:
     artifact_path = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / "job-1" / "render" / "final.mp4"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)

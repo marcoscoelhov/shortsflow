@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.channel_publication import channel_publication_payload
 from app.compliance.review import build_human_review_checklist
 from app.db import session_scope
+from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
 from app.models import ChannelPublication, Job, PublicationSchedule, ReviewRecord
 from app.pipelines.common import FatalStepError
 from app.performance_ops import PerformanceOperations
@@ -242,6 +243,8 @@ class PublicationOperations:
         if self.premium_publish_gate is None:
             raise FatalStepError("premium publish gate unavailable")
         confirmations = self._premium_publish_confirmations(session, job.job_id, extra_confirmations)
+        if job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK:
+            confirmations.update({"visual_review_confirmed", "premium_publish_score_accepted"})
         result = self.premium_publish_gate.evaluate(
             job,
             confirmations=confirmations,
