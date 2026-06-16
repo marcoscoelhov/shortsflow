@@ -12,9 +12,16 @@ def test_operational_settings_context_separates_scene_planner_from_image_generat
     assert fields["llm_scene_provider"]["label"] == "Planejador de cenas (LLM)"
     assert "nao gera imagens" in fields["llm_scene_provider"]["description"]
     assert "Imagem" in group_names
+    assert "Narracao" in group_names
     assert fields["image_generation_provider"]["label"] == "Gerador de imagens"
     assert fields["image_generation_provider"]["input_type"] == "readonly"
     assert fields["image_generation_provider"]["value"] == "MiniMax"
+    assert fields["tts_primary_provider"]["label"] == "TTS primario"
+    assert fields["tts_primary_provider"]["options"] == [
+        {"value": "gemini_tts", "label": "Gemini TTS"},
+        {"value": "elevenlabs", "label": "ElevenLabs"},
+        {"value": "edge_tts", "label": "Edge TTS (emergencia)"},
+    ]
 
 def test_llm_registry_uses_deepseek_for_repair_and_scene_defaults(monkeypatch) -> None:
     monkeypatch.setattr(
@@ -28,6 +35,8 @@ def test_llm_registry_uses_deepseek_for_repair_and_scene_defaults(monkeypatch) -
             llm_scene_provider="deepseek",
             real_run_allow_mock_fallback=False,
             resolved_minimax_text_api_key="minimax-key",
+            minimax_text_model="MiniMax-M2.7",
+            minimax_text_thinking="auto",
             minimax_text_base_url="https://api.minimax.io/v1",
             minimax_text_timeout_sec=150,
             deepseek_api_key="deepseek-key",
@@ -41,6 +50,67 @@ def test_llm_registry_uses_deepseek_for_repair_and_scene_defaults(monkeypatch) -
 
     assert registry.repair_provider().provider_name == "deepseek"
     assert registry.scene_provider().provider_name == "deepseek"
+
+def test_llm_registry_accepts_minimax_m3_alias(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            llm_primary_provider="minimax-m3",
+            real_run_allow_mock_fallback=False,
+            resolved_minimax_text_api_key="minimax-key",
+            minimax_text_model="MiniMax-M3",
+            minimax_text_thinking="auto",
+            minimax_text_base_url="https://api.minimax.io/v1",
+            minimax_text_timeout_sec=150,
+        ),
+    )
+
+    provider = LLMProviderRegistry().primary_provider()
+
+    assert provider.provider_name == "minimax"
+    assert provider.model_name == "MiniMax-M3"
+
+def test_llm_registry_accepts_gemini_35_flash_alias(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            llm_primary_provider="gemini-3.5-flash",
+            real_run_allow_mock_fallback=False,
+            resolved_gemini_text_api_key="gemini-key",
+            gemini_text_model="gemini-3.5-flash",
+            gemini_text_timeout_sec=180,
+        ),
+    )
+
+    provider = LLMProviderRegistry().primary_provider()
+
+    assert provider.provider_name == "gemini"
+    assert provider.model_name == "gemini-3.5-flash"
+
+def test_minimax_text_key_can_reuse_image_key() -> None:
+    settings = Settings(
+        minimax_text_api_key=None,
+        minimax_api_key=None,
+        minimax_image_api_key="image-key",
+    )
+
+    assert settings.resolved_minimax_text_api_key == "image-key"
+
+def test_minimax_m3_disables_thinking_by_default() -> None:
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.model_name = "MiniMax-M3"
+    provider.text_thinking = "auto"
+
+    assert provider._request_extra_body() == {"thinking": {"type": "disabled"}}
+
+def test_minimax_thinking_can_be_forced_enabled() -> None:
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.model_name = "MiniMax-M3"
+    provider.text_thinking = "enabled"
+
+    assert provider._request_extra_body() == {"thinking": {"type": "enabled"}}
 
 def test_scene_plan_gate_rejects_generic_prompt_without_no_text_constraint() -> None:
     result = ScenePlanGate().validate(
@@ -59,6 +129,53 @@ def test_scene_plan_gate_rejects_generic_prompt_without_no_text_constraint() -> 
     )
     assert not result.passed
     assert any("missing_no_text_constraint" in reason for reason in result.reasons)
+
+def test_scene_plan_gate_rejects_split_screen_composition() -> None:
+    result = ScenePlanGate().validate(
+        [
+            {
+                "scene_id": "scene-1",
+                "order": 1,
+                "narration_text": "A tempestade de Júpiter dura muito mais que um furacão terrestre.",
+                "token_start": 0,
+                "token_end": 10,
+                "primary_subject": "Júpiter",
+                "image_prompt": "split screen showing Earth hurricane and Jupiter storm, no readable text anywhere",
+            }
+        ],
+        expected_scene_count=1,
+    )
+
+    assert not result.passed
+    assert "scene-1:disallowed_split_or_collage_composition" in result.reasons
+
+def test_scene_prompt_normalization_rewrites_side_by_side_comparison() -> None:
+    scene = {
+        "scene_id": "scene-4",
+        "order": 4,
+        "narration_text": "Pessoas com sensibilidade genética sofrem impacto maior no sono.",
+        "token_start": 0,
+        "token_end": 8,
+        "primary_subject": "Comparação entre cérebros com e sem sensibilidade genética ADORA2A",
+        "visual_intent": "comparison",
+        "visual_domain": "science documentary realism",
+        "image_prompt": (
+            "Two human brains side by side, left normal with temporary caffeine block, "
+            "right showing ADORA2A gene variant via color code, comparison visualization, "
+            "scientific documentary style, no readable text anywhere"
+        ),
+    }
+
+    prompt = orchestrator.asset_pipeline.image_assets.semantic_english_image_prompt(
+        scene,
+        "Por que o café tira o sono",
+        scene["primary_subject"],
+    )
+    result = ScenePlanGate().validate([{**scene, "image_prompt": prompt}], expected_scene_count=1)
+
+    assert "side by side" not in prompt.lower()
+    assert "side-by-side" in prompt.lower()
+    assert result.passed
 
 def test_scene_plan_gate_rejects_hook_intent_that_violates_visual_contract() -> None:
     visual_contract = {
@@ -517,6 +634,21 @@ def test_non_science_visual_domain_removes_scientific_prompt_style() -> None:
     assert "scientific image" not in prompt
     assert "clean vertical cinematic scientific image" not in prompt
 
+
+def test_minimax_safe_image_prompt_includes_shorts_ratio() -> None:
+    prompt = orchestrator.asset_pipeline.image_assets.minimax_safe_image_prompt(
+        "vertical cinematic test of a city scene",
+        {
+            "primary_subject": "cidade abandonada",
+            "topic_hint": "cidade abandonada",
+            "visual_domain": "urban documentary realism",
+            "narration_text": "Uma maquete urbana em miniatura.",
+        },
+    )
+
+    assert "vertical 9:16 frame for YouTube Shorts" in prompt
+
+
 def test_minimax_image_provider_prefers_text_key_before_dedicated_key(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
@@ -527,6 +659,8 @@ def test_minimax_image_provider_prefers_text_key_before_dedicated_key(monkeypatc
 
     settings = SimpleNamespace(
         resolved_minimax_text_api_key="text-key",
+        minimax_text_model="MiniMax-M2.7",
+        minimax_text_thinking="auto",
         minimax_image_api_key="image-key",
         resolved_minimax_image_api_key="image-key",
         minimax_text_base_url="https://text.example/v1",
@@ -557,13 +691,16 @@ def test_minimax_image_provider_falls_back_to_dedicated_key_on_quota(monkeypatch
         minimax_image_api_key="image-key",
         resolved_minimax_image_api_key="image-key",
         minimax_image_base_url="https://image.example/v1/image_generation",
+        minimax_image_aspect_ratio="9:16",
     )
     request = httpx.Request("POST", settings.minimax_image_base_url)
     tiny_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lCw3GQAAAABJRU5ErkJggg=="
     calls: list[str] = []
+    request_payloads: list[dict[str, object]] = []
 
     def fake_post(url, headers, json, timeout):  # noqa: ANN001
         calls.append(headers["Authorization"])
+        request_payloads.append(json)
         if len(calls) == 1:
             return httpx.Response(429, request=request, text="quota exceeded")
         return httpx.Response(
@@ -589,6 +726,37 @@ def test_minimax_image_provider_falls_back_to_dedicated_key_on_quota(monkeypatch
     assert result["provider_metadata"]["fallback_from_text_key"] is True
     assert result["provider_metadata"]["text_key_exhausted_for_job"] is True
     assert second["provider_metadata"]["credential_role"] == "image_dedicated"
+    assert all(payload["aspect_ratio"] == "9:16" for payload in request_payloads)
+
+
+def test_minimax_scene_prompt_ratio_mentioned_for_short_visuals(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_json_completion(self, prompt: str) -> list[dict[str, object]]:
+        captured["prompt"] = prompt
+        return [
+            {
+                "scene_id": "scene-1",
+                "order": 1,
+                "narration_text": "Cena em pt-BR.",
+                "token_start": 0,
+                "token_end": 5,
+                "estimated_duration_sec": 5,
+                "visual_intent": "subject_closeup",
+                "primary_subject": "animal real",
+                "image_prompt": "high-impact vertical first-frame hook of a real animal, no readable text anywhere",
+                "fallback_queries": ["animal real"],
+            }
+        ]
+
+    monkeypatch.setattr(MinimaxCreativeProvider, "_json_completion", fake_json_completion)
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.plan_scenes(
+        {"title": "Teste", "hook": "Um animal muda de aparência.", "full_narration": "Cena em pt-BR.", "estimated_duration_sec": 5},
+        1,
+    )
+
+    assert "9:16" in captured["prompt"]
 
 def test_minimax_image_provider_does_not_use_dedicated_key_for_timeout(monkeypatch, tmp_path) -> None:
     settings = SimpleNamespace(
@@ -1151,6 +1319,8 @@ def test_review_page_renders_dynamic_checklist_and_structured_reason_codes() -> 
     assert "automático" in response.text
 
 def test_pipelines_use_explicit_base_dependencies_and_asset_helpers() -> None:
+    from app.hub_status import JOB_STATUS_LABELS, NEEDS_ACTION_JOB_STATUSES, SCHEDULE_STATUS_LABELS
+
     test_orchestrator = JobOrchestrator()
 
     assert not hasattr(test_orchestrator, "_build_fact_pack")
@@ -1164,6 +1334,19 @@ def test_pipelines_use_explicit_base_dependencies_and_asset_helpers() -> None:
     assert test_orchestrator.topic_pipeline.normalize_topic_plan_payload.__self__ is test_orchestrator.topic_pipeline
     assert test_orchestrator.publication_ops.schedule_publication.__self__ is test_orchestrator.publication_ops
     assert test_orchestrator.publication_ops._run_retention_sweep.__self__ is test_orchestrator.publication_ops
+    assert test_orchestrator.publication_ops.performance_ops.record_performance_metrics.__self__ is test_orchestrator.publication_ops.performance_ops
+    assert test_orchestrator.publication_ops.tiktok_ops.sync_crosspost_queue.__self__ is test_orchestrator.publication_ops.tiktok_ops
+    assert test_orchestrator.publication_ops.retention_ops.run_sweep.__self__ is test_orchestrator.publication_ops.retention_ops
+    assert test_orchestrator.publication_ops.youtube_ops.sync_native_scheduled_publications.__self__ is test_orchestrator.publication_ops.youtube_ops
+    assert test_orchestrator.publication_ops.review_ops.review_job.__self__ is test_orchestrator.publication_ops.review_ops
+    assert test_orchestrator.publication_ops.workflow_ops.publish_job.__self__ is test_orchestrator.publication_ops.workflow_ops
+    assert test_orchestrator.worker_ops.worker_iteration.__self__ is test_orchestrator.worker_ops
+    assert main_module.hub_context.calendar_context.context.__self__ is main_module.hub_context.calendar_context
+    assert main_module.hub_context.jobs_context.job_list_context.__self__ is main_module.hub_context.jobs_context
+    assert main_module.hub_context.publication_context.dashboard_context.__self__ is main_module.hub_context.publication_context
+    assert JOB_STATUS_LABELS["ready_for_upload"] == "Pronto para aprovar"
+    assert SCHEDULE_STATUS_LABELS["publish_failed"] == "Falhou no upload"
+    assert "ready_for_upload" in NEEDS_ACTION_JOB_STATUSES
     assert "__getattr__" not in test_orchestrator.asset_pipeline.__class__.__mro__[1].__dict__
     assert "_build_fact_pack" not in test_orchestrator.script_pipeline.__class__.__mro__[1].__dict__
     assert "_normalize_scene_semantics" not in test_orchestrator.scene_pipeline.__class__.__mro__[1].__dict__
@@ -1202,6 +1385,35 @@ def test_pipelines_use_explicit_base_dependencies_and_asset_helpers() -> None:
     assert test_orchestrator.monetization_pipeline.build_fact_claims_report.__self__ is test_orchestrator.monetization_pipeline
     assert test_orchestrator.monetization_pipeline.build_publish_package.__self__ is test_orchestrator.monetization_pipeline
     assert test_orchestrator.monetization_pipeline.provider_publish_audit.__self__ is test_orchestrator.monetization_pipeline
+
+def test_render_motion_plan_uses_stable_scene_framing() -> None:
+    scenes = [
+        {"scene_id": "scene-1", "order": 1, "actual_start_ms": 0, "actual_end_ms": 10_000},
+        {"scene_id": "scene-2", "order": 2, "actual_start_ms": 10_000, "actual_end_ms": 20_000},
+        {"scene_id": "scene-3", "order": 3, "actual_start_ms": 20_000, "actual_end_ms": 30_000},
+        {"scene_id": "scene-4", "order": 4, "actual_start_ms": 30_000, "actual_end_ms": 40_000},
+    ]
+
+    plan = orchestrator.render_pipeline.build_render_motion_plan("motion-job", scenes)
+
+    assert plan["motion_policy"] == "stable_scene_framing"
+    assert [scene["mode"] for scene in plan["scenes"]] == ["stable_hold", "stable_hold", "stable_hold", "stable_hold"]
+    assert plan["summary"]["enabled"] is False
+    assert plan["summary"]["modes"] == {"stable_hold": 4}
+    assert plan["summary"]["max_zoom_delta"] == 0.0
+    assert plan["scenes"][0]["start_zoom"] == 1.0
+    assert plan["scenes"][1]["start_zoom"] == plan["scenes"][1]["end_zoom"]
+
+def test_render_motion_filter_uses_stable_frames_without_zoompan() -> None:
+    motion = {"start_zoom": 1.0, "end_zoom": 1.0}
+
+    filter_graph = orchestrator.render_pipeline._scene_motion_filter(0, 5.0, motion)
+
+    assert "zoompan" not in filter_graph
+    assert "crop=1080:1920,fps=30" in filter_graph
+    assert "trim=duration=5.000" in filter_graph
+    assert "setpts=PTS-STARTPTS" in filter_graph
+    assert filter_graph.endswith("format=yuv420p[v0]")
 
 def test_scene_timings_fall_back_to_token_boundaries() -> None:
     scenes = [
@@ -1373,6 +1585,19 @@ def test_subtitle_boundary_repair_can_pull_words_from_next_chunk() -> None:
 
     assert repaired[0]["text"] == "predadores e muda de cor"
     assert repaired[1]["text"] == "em segundos."
+    assert SubtitleGate().validate(repaired, 1.0).passed
+
+def test_subtitle_boundary_repair_resplits_pair_when_weak_ending_cannot_fit_next_word() -> None:
+    items = [
+        {"idx": 11, "start_ms": 25_714, "end_ms": 28_286, "text": "nada, o coração principal para", "token_start": 63, "token_end": 67},
+        {"idx": "12.1", "start_ms": 28_286, "end_ms": 30_214, "text": "temporariamente. Esse movimento", "token_start": 68, "token_end": 70},
+        {"idx": "12.2", "start_ms": 30_214, "end_ms": 30_857, "text": "elegante", "token_start": 71, "token_end": 71},
+    ]
+
+    repaired = orchestrator.asset_pipeline.subtitles.repair_subtitle_item_boundaries(items)
+
+    assert all(not word_tokens(item["text"])[-1].lower() in {"para", "e"} for item in repaired)
+    assert "nada, o coração principal" in [item["text"] for item in repaired]
     assert SubtitleGate().validate(repaired, 1.0).passed
 
 def test_subtitle_split_avoids_semantic_orphan_fragments_from_audit_job() -> None:

@@ -153,6 +153,53 @@ def _infer_claim_scope(seed_theme: str, canonical_topic: str, angle: str, hook_p
     return "general_curiosity"
 
 
+def _infer_evidence_profile(seed_theme: str, canonical_topic: str, angle: str, hook_promise: str, entities: list[str]) -> str:
+    scope_text = normalize_research_text(" ".join([seed_theme, canonical_topic, angle, hook_promise, *entities]))
+    tokens = set(word_tokens(scope_text))
+    if tokens & {"sono", "sleep", "sonolencia", "sleepiness", "vigilia", "wakefulness", "insomnia"}:
+        return "saude_biologia"
+    if tokens & {"corpo", "cerebro", "brain", "hormonio", "hormone", "molecular", "receptor", "biologia", "biology"}:
+        return "saude_biologia"
+    if tokens & {"origem", "historia", "historico", "cultura", "cultural", "museu", "arquivo"}:
+        return "historia_cultura"
+    if tokens & {"preco", "valor", "regra", "lei", "taxa", "dados", "estatistica", "percentual"}:
+        return "dados_atuais"
+    if tokens & {"celular", "aplicativo", "app", "plataforma", "produto", "marca", "fabricante"}:
+        return "produto_plataforma"
+    if tokens & {"mecanismo", "funciona", "bloqueia", "ativa", "engenharia", "tecnico", "tecnica"}:
+        return "explicacao_tecnica"
+    return "cotidiano_observacional"
+
+
+def _required_evidence_term_groups(seed_theme: str, canonical_topic: str, angle: str, hook_promise: str, entities: list[str], search_terms: list[str]) -> list[dict[str, Any]]:
+    scope_tokens = set(research_tokens(" ".join([seed_theme, canonical_topic, angle, hook_promise, *entities, *search_terms])))
+    groups: list[dict[str, Any]] = []
+    caffeine_terms = {"cafe", "coffee", "cafeina", "caffeine", "adenosina", "adenosine"}
+    sleep_terms = {
+        "sono",
+        "sleep",
+        "sleepiness",
+        "sonolencia",
+        "vigilia",
+        "wakefulness",
+        "latency",
+        "insomnia",
+        "cansaco",
+        "fatigue",
+        "rebound",
+        "pressure",
+    }
+    if scope_tokens & caffeine_terms and scope_tokens & sleep_terms:
+        groups.append(
+            {
+                "name": "coffee_sleep_scope",
+                "terms": sorted(sleep_terms),
+                "description": "Fonte sobre cafeina/adenosina precisa cobrir sono, vigilia, sonolencia, latencia ou rebote para sustentar esse recorte.",
+            }
+        )
+    return groups
+
+
 def build_research_brief(topic_plan: Any, request: Any) -> dict[str, Any]:
     canonical_topic = str(_read_field(topic_plan, "canonical_topic", "") or _read_field(request, "seed_theme", "")).strip()
     angle = str(_read_field(topic_plan, "angle", "") or _read_field(request, "requested_angle", "") or "").strip()
@@ -167,7 +214,7 @@ def build_research_brief(topic_plan: Any, request: Any) -> dict[str, Any]:
         search_terms = [search_terms]
     search_terms = [str(term).strip() for term in search_terms if str(term).strip()][:8]
 
-    primary_terms = research_tokens(" ".join([seed_theme, canonical_topic, *entities]))[:8]
+    primary_terms = _expand_primary_aliases(research_tokens(" ".join([seed_theme, canonical_topic, *entities]))[:8])
     mechanism_seed_terms = research_tokens(" ".join([angle, hook_promise]))
     mechanism_terms: list[str] = []
     seen_mechanism: set[str] = set()
@@ -194,6 +241,8 @@ def build_research_brief(topic_plan: Any, request: Any) -> dict[str, Any]:
         )
 
     claim_scope = _infer_claim_scope(seed_theme, canonical_topic, angle, hook_promise)
+    evidence_profile = _infer_evidence_profile(seed_theme, canonical_topic, angle, hook_promise, entities)
+    required_evidence_term_groups = _required_evidence_term_groups(seed_theme, canonical_topic, angle, hook_promise, entities, search_terms)
     require_mechanism_match = claim_scope in {"explanatory_mechanism", "historical_origin", "descriptive_evidence"} and bool(
         mechanism_terms or search_term_groups
     )
@@ -204,14 +253,39 @@ def build_research_brief(topic_plan: Any, request: Any) -> dict[str, Any]:
         "angle": angle,
         "hook_promise": hook_promise,
         "claim_scope": claim_scope,
+        "evidence_profile": evidence_profile,
         "primary_entities": entities[:5] or [canonical_topic],
         "primary_terms": primary_terms,
         "mechanism_terms": mechanism_terms,
+        "required_evidence_term_groups": required_evidence_term_groups,
         "supporting_search_terms": search_terms,
         "search_term_groups": search_term_groups,
         "require_primary_match": bool(primary_terms),
         "require_mechanism_match": require_mechanism_match,
     }
+
+
+def _expand_primary_aliases(primary_terms: list[str]) -> list[str]:
+    aliases = {
+        "cafe": ["coffee", "caffeine"],
+        "cafeina": ["caffeine"],
+        "mel": ["honey", "honeys"],
+        "arrepios": ["arrepio", "goosebumps", "chills", "frisson", "piloerection"],
+        "arrepio": ["arrepios", "goosebumps", "chills", "frisson", "piloerection"],
+        "musica": ["music", "musical"],
+        "musical": ["music", "musica"],
+        "dopamina": ["dopamine"],
+        "pilomotor": ["piloerection"],
+    }
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for term in primary_terms:
+        for candidate in [term, *aliases.get(term, [])]:
+            if candidate in seen:
+                continue
+            expanded.append(candidate)
+            seen.add(candidate)
+    return expanded[:12]
 
 
 def audit_source_relevance(research_brief: dict[str, Any], title: str, extract: str) -> dict[str, Any]:
@@ -223,15 +297,19 @@ def audit_source_relevance(research_brief: dict[str, Any], title: str, extract: 
 
     group_hits: list[dict[str, Any]] = []
     strong_group_hits = 0
+    group_token_counts: dict[str, int] = {}
     for group in research_brief.get("search_term_groups") or []:
+        query = str(group.get("query") or "")
         tokens = [str(token) for token in (group.get("tokens") or []) if str(token)]
         if not tokens:
             continue
+        group_token_counts[query] = len(tokens)
         overlap = sorted(set(tokens) & source_tokens)
         if not overlap:
             continue
         non_primary_terms = [str(token) for token in (group.get("non_primary_terms") or []) if str(token)]
         matched_non_primary_terms = sorted(set(non_primary_terms) & source_tokens)
+        matched_primary_terms = sorted((set(tokens) & primary_terms) & source_tokens)
         threshold = 1 if len(tokens) <= 1 else (2 if len(tokens) <= 3 else 3)
         is_strong = len(overlap) >= threshold and bool(matched_non_primary_terms or not non_primary_terms)
         if is_strong:
@@ -240,23 +318,43 @@ def audit_source_relevance(research_brief: dict[str, Any], title: str, extract: 
             {
                 "query": group.get("query"),
                 "matched_terms": overlap,
+                "matched_primary_terms": matched_primary_terms,
                 "matched_non_primary_terms": matched_non_primary_terms,
                 "strong_match": is_strong,
             }
         )
 
     mechanism_required = bool(research_brief.get("require_mechanism_match"))
-    mechanism_pass = strong_group_hits > 0 or len(mechanism_overlap) >= (2 if mechanism_required else 1)
+    missing_required_groups: list[dict[str, Any]] = []
+    for group in research_brief.get("required_evidence_term_groups") or []:
+        terms = {str(term) for term in (group.get("terms") or []) if str(term)}
+        matched_terms = sorted(terms & source_tokens)
+        if not matched_terms:
+            missing_required_groups.append({"name": group.get("name"), "terms": sorted(terms)})
+    if mechanism_required and research_brief.get("claim_scope") == "explanatory_mechanism":
+        mechanism_pass = strong_group_hits > 0
+    else:
+        mechanism_pass = strong_group_hits > 0 or len(mechanism_overlap) >= (2 if mechanism_required else 1)
     primary_pass = (
         not research_brief.get("require_primary_match")
         or bool(primary_overlap)
-        or strong_group_hits > 0
+        or any(
+            bool(hit.get("strong_match"))
+            and (
+                bool(hit.get("matched_primary_terms"))
+                or len(hit.get("matched_terms") or []) >= group_token_counts.get(str(hit.get("query") or ""), 0)
+            )
+            for hit in group_hits
+        )
     )
 
-    passed = primary_pass and (mechanism_pass or not mechanism_required)
+    required_evidence_pass = not missing_required_groups
+    passed = primary_pass and required_evidence_pass and (mechanism_pass or not mechanism_required)
     reason = "matched_research_brief"
     if not primary_pass:
         reason = "missing_primary_topic_terms"
+    elif not required_evidence_pass:
+        reason = "missing_promised_mechanism_terms"
     elif mechanism_required and not mechanism_pass:
         reason = "missing_promised_mechanism_terms"
 
@@ -264,8 +362,11 @@ def audit_source_relevance(research_brief: dict[str, Any], title: str, extract: 
         "passed": passed,
         "reason": reason,
         "claim_scope": research_brief.get("claim_scope"),
+        "evidence_profile": research_brief.get("evidence_profile"),
         "primary_terms": sorted(primary_terms),
         "mechanism_terms": sorted(mechanism_terms),
+        "required_evidence_term_groups": research_brief.get("required_evidence_term_groups") or [],
+        "missing_required_evidence_term_groups": missing_required_groups,
         "primary_overlap": primary_overlap,
         "mechanism_overlap": mechanism_overlap,
         "strong_group_hit_count": strong_group_hits,

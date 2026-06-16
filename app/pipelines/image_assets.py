@@ -21,6 +21,11 @@ NO_TEXT_IMAGE_CONSTRAINT = (
     "no typography, no labels, no UI, no signs, no text printed on objects"
 )
 
+SINGLE_VERTICAL_IMAGE_CONSTRAINT = (
+    "single full-frame 9:16 vertical image, no split screen, no side-by-side, no collage, "
+    "no panels, no picture-in-picture, no timeline, no arrows, no guide lines, no overlay graphics"
+)
+
 ENGLISH_SUBJECT_ALIASES = {
     "polvo": "octopus",
     "polvos": "octopuses",
@@ -118,6 +123,7 @@ SCENE_VISUAL_HINTS = [
 class ImageAssetDomain:
     def __init__(self, pipeline: Any) -> None:
         self.pipeline = pipeline
+        self.minimax_image_aspect_ratio = str(getattr(pipeline.settings, "minimax_image_aspect_ratio", "9:16"))
 
     def generate_primary_asset(self, job_id: str, scene: dict[str, Any], output_path: Path) -> dict[str, Any]:
         result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
@@ -240,6 +246,7 @@ class ImageAssetDomain:
             prompt = scene_hint or f"vertical cinematic {domain_style} of {english_subject}, {visual_intent}"
         else:
             prompt = self.replace_subject_aliases(prompt)
+        prompt = self.single_frame_composition_prompt(prompt)
         prompt = self.remove_incompatible_scientific_style(prompt, scene)
         if semantic_directive.lower() not in prompt.lower():
             prompt = f"{prompt}, {semantic_directive}".strip(", ")
@@ -260,6 +267,31 @@ class ImageAssetDomain:
         if "no movie poster" not in prompt.lower():
             prompt += ", no movie poster, no typography, no stock-photo generic scene"
         return self.minimax_safe_image_prompt(self.with_no_text_image_constraints(prompt), scene)
+
+    def single_frame_composition_prompt(self, prompt: str) -> str:
+        replacements = [
+            (r"\btwo\s+human\s+brains\s+side\s+by\s+side\b", "one human brain cross-section in a single integrated composition"),
+            (r"\btwo\s+brains\s+side\s+by\s+side\b", "one brain cross-section in a single integrated composition"),
+            (r"\bleft\s+normal\s+with\b", "with one region showing"),
+            (r"\bright\s+showing\b", "and another region showing"),
+            (r"\bon\s+one\s+side\b", "in the foreground"),
+            (r"\bon\s+the\s+other\b", "in the background"),
+            (r"\bside\s+by\s+side\b", "within one integrated full-frame composition"),
+            (r"\bside-by-side\b", "within one integrated full-frame composition"),
+            (r"\bsplit\s+view\b", "single continuous view"),
+            (r"\bbefore\s+and\s+after\b", "single consequential moment"),
+            (r"\bcomparison\s+visualization\b", "integrated visual evidence"),
+            (r"\btwo\s+panels\b", "one full-frame scene"),
+            (r"\bmulti[-\s]panel\b", "single full-frame"),
+            (r"\bpanel\s+layout\b", "single full-frame composition"),
+            (r"\bgrid\s+layout\b", "single full-frame composition"),
+            (r"\bdiptych\b", "single full-frame composition"),
+            (r"\btriptych\b", "single full-frame composition"),
+        ]
+        updated = prompt
+        for pattern, replacement in replacements:
+            updated = re.sub(rf"(?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s){pattern}", replacement, updated, flags=re.IGNORECASE)
+        return " ".join(updated.split())
 
     def conservative_science_visual_directive(self, scene: dict[str, Any]) -> str:
         source_text = " ".join(
@@ -435,9 +467,9 @@ class ImageAssetDomain:
 
     def visual_hook_directive(self, scene: dict[str, Any], scene_hint: str) -> str:
         return (
-            "first-frame hook for Shorts, instantly legible in under one second, "
-            f"close vertical composition, concrete contrast or consequence, focus: {scene_hint}, "
-            "stay within this scene beat, do not reveal later payoff, no calm establishing shot"
+            "first-frame hook for Shorts under one second, concrete contrast or consequence, "
+            "do not reveal later payoff, close vertical composition, no calm establishing shot, "
+            f"focus: {scene_hint}"
         )
 
     def should_rebuild_image_prompt(self, prompt: str) -> bool:
@@ -509,6 +541,7 @@ class ImageAssetDomain:
             "main subject unmistakable and relevant to the narration beat",
             "every visible object blank and unbranded",
             "no text on cups, packages, screens, charts or labels",
+            SINGLE_VERTICAL_IMAGE_CONSTRAINT,
             "avoid random props, generic sci-fi objects and irrelevant backgrounds",
         ]
         if "no readable text anywhere" not in prompt_lower:
@@ -585,7 +618,8 @@ class ImageAssetDomain:
             prompt = prompt.replace(NO_TEXT_IMAGE_CONSTRAINT, self.minimax_no_text_constraint(scene))
 
         required_constraints = [
-            "vertical 2:3 frame for YouTube Shorts",
+            f"vertical {self.minimax_image_aspect_ratio} frame for YouTube Shorts",
+            SINGLE_VERTICAL_IMAGE_CONSTRAINT,
             self.domain_negative_constraints(scene),
             self.minimax_no_text_constraint(scene),
         ]

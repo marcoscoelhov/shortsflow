@@ -36,3 +36,6 @@ uv.lock
 .playwright/
 playwright-report/
 test-results/
+
+# Remotion runtime assets generated from real jobs
+remotion/public/yts-runtime/

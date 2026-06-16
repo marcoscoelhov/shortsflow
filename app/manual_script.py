@@ -26,11 +26,25 @@ _LABELS = {
     "hashtags": "hashtags",
     "tags": "hashtags",
 }
+_DISPLAY_LABELS = {
+    "title": "Título",
+    "hook": "Hook",
+    "loop": "Loop",
+    "beats": "Beats",
+    "payoff": "Payoff",
+    "closing": "Fechamento",
+    "hashtags": "Hashtags",
+}
 
-_LABEL_PATTERN = re.compile(
-    r"^\s*(t[ií]tulo|title|hook|loop|beats?|payoff|fechamento|closing|hashtags?|tags)\s*:\s*(.*)$",
-    re.IGNORECASE,
-)
+_LABEL_NAMES = r"(t[ií]tulo|title|hook|loop|beats?|payoff|fechamento|closing|hashtags?|tags)"
+_OPTIONAL_LIST_MARKER = r"(?:[-*•]\s*|\d+[.)]\s*)?"
+_LABEL_PATTERNS = [
+    re.compile(rf"^\s*{_OPTIONAL_LIST_MARKER}\*\*\s*{_LABEL_NAMES}\s*:\s*\*\*\s*(.*)$", re.IGNORECASE),
+    re.compile(rf"^\s*{_OPTIONAL_LIST_MARKER}\*\*\s*{_LABEL_NAMES}\s*\*\*\s*:\s*(.*)$", re.IGNORECASE),
+    re.compile(rf"^\s*{_OPTIONAL_LIST_MARKER}{_LABEL_NAMES}\s*:\s*(.*)$", re.IGNORECASE),
+]
+_MARKDOWN_SEPARATOR_PATTERN = re.compile(r"^\s*-{3,}\s*$")
+_MARKDOWN_STRONG_PATTERN = re.compile(r"\*\*([^*\n]+)\*\*")
 
 
 @dataclass(frozen=True)
@@ -64,8 +78,26 @@ def extract_ready_script_from_notes(notes: str | None) -> ReadyScript | None:
     return parse_ready_script(raw, fact_check_confirmed=FACT_CHECK_CONFIRMED in text)
 
 
+def normalize_ready_script_text(raw_text: str) -> str:
+    normalized_lines: list[str] = []
+    for line in (raw_text or "").replace("\r\n", "\n").split("\n"):
+        if _MARKDOWN_SEPARATOR_PATTERN.match(line):
+            normalized_lines.append("")
+            continue
+        labeled = _match_labeled_line(line)
+        if labeled:
+            field, raw_value = labeled
+            value = _strip_markdown_strong(raw_value.strip())
+            label = _DISPLAY_LABELS[field]
+            normalized_lines.append(f"{label}: {value}".rstrip())
+            continue
+        normalized_lines.append(_strip_markdown_strong(line.rstrip()))
+    return "\n".join(normalized_lines).strip()
+
+
 def parse_ready_script(raw_text: str, *, fact_check_confirmed: bool) -> ReadyScript:
-    fields = _parse_labeled_text(raw_text)
+    normalized_text = normalize_ready_script_text(raw_text)
+    fields = _parse_labeled_text(normalized_text)
     missing = [label for label in ["title", "hook", "loop", "beats", "payoff", "closing"] if not fields.get(label)]
     if missing:
         raise ValueError(f"roteiro pronto sem campos obrigatorios: {', '.join(missing)}")
@@ -130,25 +162,34 @@ def parse_ready_script(raw_text: str, *, fact_check_confirmed: bool) -> ReadyScr
         },
         "prompt_version": "ready-script-v1",
     }
-    fact_pack = _build_declared_fact_pack(raw_text, key_facts, source_fact_ids, fact_check_confirmed)
-    return ReadyScript(raw_text=raw_text, fact_check_confirmed=fact_check_confirmed, script=script, fact_pack=fact_pack, hashtags=hashtags)
+    fact_pack = _build_declared_fact_pack(normalized_text, key_facts, source_fact_ids, fact_check_confirmed)
+    return ReadyScript(raw_text=normalized_text, fact_check_confirmed=fact_check_confirmed, script=script, fact_pack=fact_pack, hashtags=hashtags)
 
 
 def _parse_labeled_text(raw_text: str) -> dict[str, str]:
     fields: dict[str, list[str]] = {}
     current: str | None = None
     for line in raw_text.replace("\r\n", "\n").split("\n"):
-        match = _LABEL_PATTERN.match(line)
-        if match:
-            current = _LABELS[match.group(1).strip().lower()]
+        labeled = _match_labeled_line(line)
+        if labeled:
+            current, value = labeled
             fields.setdefault(current, [])
-            value = match.group(2).strip()
+            value = value.strip()
             if value:
                 fields[current].append(value)
             continue
         if current and line.strip():
             fields[current].append(line.strip())
     return {key: "\n".join(value).strip() for key, value in fields.items() if value}
+
+
+def _match_labeled_line(line: str) -> tuple[str, str] | None:
+    for pattern in _LABEL_PATTERNS:
+        match = pattern.match(line)
+        if match:
+            field = _LABELS[match.group(1).strip().lower()]
+            return field, match.group(2)
+    return None
 
 
 def _split_beats(value: str) -> list[str]:
@@ -189,11 +230,21 @@ def _ensure_sentence(value: str) -> str:
 
 
 def _normalize_visible_text(value: str) -> str:
+    value = _strip_markdown_strong(value)
     text = value.replace("—", ", ").replace("–", ", ")
     text = text.translate(str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"}))
     text = re.sub(r"\s+([,.!?;:])", r"\1", text)
     text = re.sub(r"([,.!?;:]){2,}", r"\1", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _strip_markdown_strong(value: str) -> str:
+    previous = value
+    while True:
+        current = _MARKDOWN_STRONG_PATTERN.sub(r"\1", previous)
+        if current == previous:
+            return current
+        previous = current
 
 
 def _build_declared_fact_pack(raw_text: str, key_facts: list[str], source_fact_ids: list[str], fact_check_confirmed: bool) -> dict[str, Any]:

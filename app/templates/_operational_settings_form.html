@@ -18,11 +18,17 @@
   </div>
   <div class="operational-settings-grid">
     {% for group in operational_settings.groups %}
+    {% set display_group_name = {"Publicacao": "Publicação", "Automacao": "Automação", "Narracao": "Narração", "Musica": "Música"}.get(group.name, group.name) %}
     <details class="operational-settings-group" {% if group.name == "Publicacao" %}open{% endif %}>
       <summary>
-        <span>{{ group.name }}</span>
+        <span>{{ display_group_name }}</span>
         <small>{{ group.fields|length }} controle{% if group.fields|length != 1 %}s{% endif %}</small>
       </summary>
+      {% if group.name == "Publicacao" %}
+      <p class="settings-risk-note">Afeta publicação, notificações e retropost. Revise antes de salvar.</p>
+      {% elif group.name == "Automacao" %}
+      <p class="settings-risk-note">Afeta criação automática de jobs e cadência operacional.</p>
+      {% endif %}
       <div class="settings-body">
         {% for field in group.fields %}
         {% if field.input_type == "select" %}

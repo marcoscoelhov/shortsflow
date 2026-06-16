@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import audioop
-
 import json
 
 import math
@@ -23,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -46,7 +45,7 @@ import app.orchestrator as orchestrator_module  # noqa: E402
 
 import app.pipelines.script_fact_pack as script_fact_pack_module  # noqa: E402
 
-from app.automation import AutomationService  # noqa: E402
+from app.automation import AutomationService, PublishSlot  # noqa: E402
 
 from app.compliance.review import build_human_review_checklist  # noqa: E402
 
@@ -72,7 +71,7 @@ from app.pipelines.timeline import normalize_scene_timings  # noqa: E402
 
 from app.providers.errors import ProviderFailure  # noqa: E402
 from app.providers.image import MinimaxImageProvider  # noqa: E402
-from app.providers.llm import DeepSeekCreativeProvider, LLMProviderRegistry, MinimaxCreativeProvider, MockCreativeProvider, OpenAICreativeProvider, ResilientCreativeProvider  # noqa: E402
+from app.providers.llm import DeepSeekCreativeProvider, GeminiCreativeProvider, LLMProviderRegistry, MinimaxCreativeProvider, MockCreativeProvider, OpenAICreativeProvider, ResilientCreativeProvider  # noqa: E402
 from app.providers.music import LocalMusicBankProvider, MiniMaxBackgroundMusicProvider, ResilientMusicProvider  # noqa: E402
 from app.providers.tts import LocalSpeechFallbackProvider  # noqa: E402
 

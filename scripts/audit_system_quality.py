@@ -36,6 +36,22 @@ def _bool_score(value: Any, good: float = 9.4, bad: float = 5.0) -> float:
     return good if bool(value) else bad
 
 
+def _metric_passed(metrics: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value = metrics.get(key)
+        if isinstance(value, bool):
+            if value:
+                return True
+            continue
+        if isinstance(value, (int, float)):
+            if value >= 7:
+                return True
+            continue
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
+
+
 def _cap(score: float, cap: float, gaps: list[str], reason: str) -> float:
     if score > cap:
         gaps.append(reason)
@@ -49,14 +65,23 @@ def score_topic(root: Path) -> StageScore:
     evidence: list[str] = []
     gaps: list[str] = []
     required_groups = [
-        ("loop", "loop_sustentavel", "loop_sustained"),
-        ("payoff", "payoff_tardio"),
-        ("replay_trigger", "replay_mental", "provoca_replay"),
-        ("promessa_verificável", "promessa_verificavel"),
-        ("beats", "escalada_de_impacto", "retencao_esperada"),
+        ("loop", "loop_sustentavel", "loop_sustained", "loop_strength", "loop_tension", "hook_contrast"),
+        ("payoff", "payoff_tardio", "payoff_late"),
+        ("replay_trigger", "replay_mental", "provoca_replay", "replay_potential"),
+        ("promessa_verificável", "promessa_verificavel", "verifiable_promise"),
+        (
+            "beats",
+            "escalada_de_impacto",
+            "escalation_visual",
+            "retencao_esperada",
+            "retencao_maxima",
+            "retencao_projetada",
+        ),
     ]
-    passed = sum(1 for group in required_groups if any(metrics.get(key) for key in group))
+    passed = sum(1 for group in required_groups if _metric_passed(metrics, *group[1:]))
     score = _score_from_ratio(passed / max(len(required_groups), 1), floor=6.2)
+    if passed < len(required_groups):
+        gaps.append(f"topic quality metrics incomplete: {passed}/{len(required_groups)}")
     if metrics.get("topic_uniqueness_pass"):
         score += 0.3
         evidence.append("topic_uniqueness_pass")
@@ -89,6 +114,9 @@ def score_script(root: Path) -> StageScore:
         score = max(score, 8.8)
     else:
         gaps.append("script quality gate not proven")
+    warnings = metrics.get("script_quality_gate_warnings")
+    if isinstance(warnings, list):
+        gaps.extend(f"script quality warning: {item}" for item in warnings if item)
     if audit and not audit_payload.get("passed", False):
         score = min(score, 8.5)
         gaps.append("text publish audit did not pass")
@@ -162,6 +190,7 @@ def score_scene_plan(root: Path) -> StageScore:
 def score_image_semantics(root: Path) -> StageScore:
     gate = _load_json(root / "asset_visual_gate.json")
     visual_review = _load_json(root / "visual_review_report.json")
+    human_review = _load_json(root / "human_review.json")
     metrics = gate.get("metrics") if isinstance(gate.get("metrics"), dict) else {}
     selected = gate.get("selected_assets") if isinstance(gate.get("selected_assets"), list) else []
     gaps: list[str] = []
@@ -182,10 +211,17 @@ def score_image_semantics(root: Path) -> StageScore:
         for asset in selected
         if isinstance(asset, dict)
     }
+    human_visual_confirmed = (
+        human_review.get("action") == "approve"
+        and "visual_review_confirmed" in {str(item) for item in (human_review.get("reason_codes") or [])}
+    )
     if "prompt_heuristic" in verification_modes or not selected:
         if visual_review.get("passed") and str(visual_review.get("reviewer") or "").lower() in {"codex_vision", "human_vision"}:
             score = max(score, 9.4)
             evidence.append(f"visual review passed by {visual_review.get('reviewer')}")
+        elif human_visual_confirmed:
+            score = max(score, 9.4)
+            evidence.append("visual review confirmed by human review")
         else:
             score = _cap(score, 8.2, gaps, "image semantics used prompt heuristic instead of real vision")
     if any(str(asset.get("provider") or "") == "local_semantic" for asset in selected if isinstance(asset, dict)):
@@ -334,8 +370,9 @@ def score_publish(root: Path) -> StageScore:
     if manual_required:
         score = min(score, 8.9)
         gaps.append(f"manual confirmations required: {', '.join(map(str, manual_required[:5]))}")
-    if package.get("status") == "ready_for_upload":
+    if package.get("status") in {"ready_for_publish", "ready_for_upload"}:
         score += 0.2
+        evidence.append(f"publish_package status={package.get('status')}")
     elif package.get("status"):
         gaps.append(f"publish_package status={package.get('status')}")
     return StageScore("publish_readiness", round(max(0.0, min(10.0, score)), 1), evidence, gaps)

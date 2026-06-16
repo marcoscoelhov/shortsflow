@@ -159,7 +159,7 @@ Etapas atuais de `JobOrchestrator._steps()`:
 | `tts` | 2 | Gera narracao e metadados basicos de audio. |
 | `subtitle_alignment` | 1 | Normaliza legenda e arquivos de render. |
 | `background_music` | 1 | Seleciona ou gera trilha, faz mix e valida audio final. |
-| `render` | 1 | Gera `render/final.mp4` vertical via FFmpeg. |
+| `render` | 1 | Gera `render/final.mp4` vertical via FFmpeg, com enquadramento estável por cena. |
 | `monetization_readiness_gate` | 0 | Consolida direitos, disclosure, factualidade, repeticao e publish readiness. |
 | `publish_to_review_hub` | 0 | Persiste o pacote de publicacao e leva o job ao hub. |
 
@@ -168,6 +168,10 @@ A primeira cena carrega a **Imagem de Hook Visual**: o prompt visual deve tornar
 Cada etapa grava `StepExecution`, eventos em `events.jsonl` e artefatos JSON ou midia no diretorio do job.
 
 Os nomes de etapa, artefatos e chaves principais de `quality_summary` sao contratos publicos do app. Refatoracoes internas podem trocar classes ou helpers, mas nao devem renomear esses contratos sem migracao e teste dedicado.
+
+O auditor `scripts/audit_system_quality.py` trata `topic_plan.quality_metrics` como evidencia explicita. Ele aceita aliases emitidos por provedores diferentes para loop, payoff, replay, promessa verificavel e beats de retencao (incluindo valores booleanos, numericos >= 7 e strings descritivas). O auditor nao infere qualidade editorial apenas por campos textuais completos; se as metricas editoriais nao vierem no artefato, o score de `topic_plan` deve permanecer baixo. `fallback_used=true` continua aparecendo como gap operacional leve.
+
+No estagio `script`, warnings do `ScriptQualityGate` sao expostos como gaps de melhoria mesmo quando `script_quality_gate_pass=true`. Isso acontece especialmente em roteiro pronto preservado: o pipeline pode permitir seguir para revisao humana, mas o auditor ainda precisa explicar por que o score tecnico ficou abaixo do alvo.
 
 ## Publicacao e YouTube
 
@@ -223,7 +227,7 @@ O contexto de integracao exposto no hub usa:
 | --- | --- | --- |
 | `GET` | `/` | Home do hub com formulario, jobs e resumo operacional. |
 | `POST` | `/hub/prompt` | Salva ou reseta o template viral do hub. |
-| `GET` | `/jobs` | Fragmento HTML da tabela paginada de jobs. |
+| `GET` | `/jobs` | Pagina completa da fila; quando `HX-Request=true`, retorna apenas o fragmento HTML da tabela paginada. |
 | `GET` | `/publication-hub` | Centro de Crescimento do Canal com estatisticas, Analytics e orientacao editorial. |
 | `GET` | `/publication-hub/fragment` | Fragmento HTMX do Centro de Crescimento do Canal. |
 | `GET` | `/library` | Pagina de Biblioteca de Roteiros para importar e acompanhar o Banco de Roteiros Prontos. |
@@ -261,8 +265,7 @@ Defaults importantes:
 - `niche_id=curiosidades`
 - `language=pt-BR`
 - `target_duration_sec=50`
-- `simple_shorts_mode=true`
-- `llm_primary_provider=openai`
+- `llm_primary_provider=deepseek`
 - `llm_fallback_provider=deepseek`
 - `youtube_publish_mode=manual`
 - `youtube_api_enabled=false`
@@ -279,7 +282,7 @@ Defaults importantes:
 Camadas de configuracao:
 
 - `.env`: boot, infraestrutura e segredos. Inclui `YTS_APP_URL`, `YTS_HUB_AUTH_TOKEN`, `YTS_DATABASE_URL`, chaves de provedores, OAuth do YouTube, token do TikTok e exposicao Tailnet.
-- Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, planejador de cenas, fonte de musica, autopopulacao do banco local, modo de publicacao, API do YouTube, publicacao cruzada no TikTok, horario do ciclo diario, horario padrao de publicacao, janela da agenda, score minimo e coleta de performance. O gerador de imagens aparece como informacao operacional; hoje, em execucao real, ele e MiniMax.
+- Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, planejador de cenas, fonte de musica, autopopulacao do banco local, TTS primario, modo de publicacao, API do YouTube, publicacao cruzada no TikTok, horario do ciclo diario, horario padrao de publicacao, janela da agenda, score minimo e coleta de performance. O gerador de imagens aparece como informacao operacional; hoje, em execucao real, ele e MiniMax.
 - defaults do codigo: valores seguros usados quando nem `.env` nem Hub definem uma sobreposicao.
 
 As sobreposicoes do Hub ficam na tabela `operational_settings`. Elas sao aplicadas no startup do FastAPI e nos comandos `yts-render automation-run` e `yts-render analytics-sync-run`. Segredos nunca devem ser adicionados a essa tabela; novos campos editaveis precisam entrar pela allowlist em `app/operational_settings.py`.
@@ -288,6 +291,7 @@ Terminologia do painel:
 
 - **Planejador de cenas (LLM)**: escolhe o LLM que cria `scene_plan.json`, com cenas, intencao visual e prompts. Ele nao gera imagens.
 - **Gerador de imagens**: provider que gera ou seleciona os assets visuais no passo `asset_generation`. Hoje, em execucao real, e MiniMax; por isso aparece como leitura operacional, nao como seletor editavel.
+- **TTS primario**: escolhe o provider principal da narracao. Gemini TTS e o padrao; ElevenLabs e publicavel quando configurado; Edge TTS e emergencia e bloqueia elegibilidade automatizada.
 
 Musica de fundo:
 
@@ -308,8 +312,9 @@ Credenciais MiniMax por midia:
 - imagem usa `YTS_MINIMAX_IMAGE_API_KEY` so depois de limite ou quota na chave de texto, e marca essa chave como esgotada para o job atual
 - se nao houver chave de texto, imagem usa diretamente `YTS_MINIMAX_IMAGE_API_KEY`
 - musica usa `YTS_MINIMAX_MUSIC_API_KEY` ou a chave resolvida de texto apenas quando MiniMax Music esta configurado como provider ou fallback
-- narracao usa Gemini TTS quando `YTS_TTS_PRIMARY_PROVIDER=gemini_tts` e `YTS_GEMINI_TTS_API_KEY` ou `YTS_GEMINI_API_KEY` esta configurada; por padrao, escolhe uma voz Gemini pelo perfil editorial do roteiro e registra a decisao em `narration_asset.json`; se Gemini falhar, tenta ElevenLabs
-- narracao usa ElevenLabs quando `YTS_TTS_PRIMARY_PROVIDER=elevenlabs` e `YTS_ELEVENLABS_API_KEY` esta configurada; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados
+- narracao usa Gemini TTS quando `YTS_TTS_PRIMARY_PROVIDER=gemini_tts` ou a sobreposicao do Hub escolhe `gemini_tts`, e `YTS_GEMINI_TTS_API_KEY` ou `YTS_GEMINI_API_KEY` esta configurada; por padrao, escolhe uma voz Gemini pelo perfil de narrador do roteiro e registra a decisao em `narration_asset.json`; se Gemini falhar, tenta ElevenLabs
+- narracao usa ElevenLabs quando `YTS_TTS_PRIMARY_PROVIDER=elevenlabs` ou a sobreposicao do Hub escolhe `elevenlabs`, e `YTS_ELEVENLABS_API_KEY` esta configurada; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados
+- `edge_tts` pode ser selecionado como emergencia, mas e tratado como provider tecnico e bloqueia elegibilidade automatizada
 
 Limite de provedor para troca de chave de imagem significa quota, saldo, credito ou rate limit. Timeout, erro de conexao, resposta invalida e `5xx` continuam sendo falhas transientes da chamada atual.
 
@@ -350,9 +355,12 @@ publish_metadata_overrides.json
 publication_schedule.json
 youtube_publish_attempts.json
 publish_result.json
+asset_visual_gate.json
+visual_review_report.json
 render/final.mp4
 render/poster.jpg
 render/ffmpeg.log
+render_motion_plan.json
 ```
 
 `artifact_url()` converte `file://...` dentro de `data/artifacts/` para `/artifacts/...`. Quando o arquivo ja foi removido, a UI nao renderiza link quebrado.
@@ -398,6 +406,10 @@ A job page atual e deliberadamente centrada em decisao:
 
 Conteudo tecnico, erros e artefatos ficam colapsados em paines secundarios.
 
+Quando existir `visual_review_report.json`, o detalhe do job mostra a **Revisao visual auxiliar** dentro de "Qualidade e monetizacao". Esse relatorio e evidencia para a pessoa revisora; ele nao muda sozinho status do job, agenda ou aprovacao.
+
+`/jobs` e uma rota de navegacao direta e precisa entregar o shell completo do **Console Operacional**. O mesmo endpoint tambem serve `jobs_table.html` para atualizacoes HTMX da fila quando a requisicao carrega `HX-Request=true`; sem esse header, retornar apenas o fragmento e regressao visual.
+
 O calendario e uma superficie operacional secundaria. Ele mostra slots programados e publicados, mas tambem abre um modal de agenda pelo botao `+` de cada dia do mes atual. Esse modal lista apenas jobs em `approved_for_publish` que ainda nao estejam publicados nem tenham agenda ativa.
 
 ## Automacao diaria
@@ -411,7 +423,7 @@ scripts/install_automation_timer.sh
 scripts/install_analytics_sync_timer.sh
 ```
 
-O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de 14 dias a partir de amanha. Quando encontra dia vago na agenda interna, tenta primeiro consumir um roteiro pronto aleatorio do banco, filtrado por similaridade narrativa. Se o banco estiver vazio ou saturado por similaridade, usa Tema Automatico.
+O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de agenda a partir de amanha. Ele preenche primeiro os slots do horario configurado (`automation_publish_time`) ao longo da janela e, quando esses slots ja estao ocupados ou ha backlog suficiente, usa um segundo slot diario as 18:00 de Brasilia. Antes de gerar conteudo novo, o ciclo agenda backlog publicavel ja aprovado ou autoaprovavel; se ainda sobrarem slots, tenta consumir um roteiro pronto aleatorio do banco, filtrado por similaridade narrativa. Se o banco estiver vazio ou saturado por similaridade, usa Tema Automatico.
 
 Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` para 11h em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
 

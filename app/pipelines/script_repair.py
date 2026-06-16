@@ -127,6 +127,7 @@ class ScriptRepairDomain(BasePipeline):
             processed = self._repair_script_loop_closure(processed, plan_dict)
         processed = self._split_long_script_sentences(processed)
         processed = self._normalize_script_visible_text(processed)
+        processed = self._sanitize_source_fact_ids(processed, fact_pack)
         processed = self._attach_claim_trace(processed, fact_pack)
         processed["estimated_duration_sec"] = round(max(35.0, min(55.0, len(word_tokens(str(processed.get("full_narration") or ""))) / 2.55)), 2)
         processed = self._sync_retention_map_to_script(processed)
@@ -339,6 +340,7 @@ class ScriptRepairDomain(BasePipeline):
             for reason in {
                 "factual_risk_requires_conservative_rewrite",
                 "overconfident_or_unsupported_factual_claim",
+                "unsupported_claim",
                 "invented_source_fact_ids",
                 "fact_pack_source_ids_missing",
                 "high_risk_claims_need_fact_pack_grounding",
@@ -351,7 +353,7 @@ class ScriptRepairDomain(BasePipeline):
         return bool(self.script_gate._fact_risk_report(script).get("blocked"))  # noqa: SLF001
 
     def _should_repair_loop(self, script: dict[str, Any], gate_reasons: list[str]) -> bool:
-        if any(reason in gate_reasons for reason in {"ending_not_connected_to_hook", "weak_loop_closure"}):
+        if any(reason in gate_reasons for reason in {"ending_not_connected_to_hook", "weak_loop_closure", "weak_ending"}):
             return True
         ending = str(script.get("ending") or "").strip()
         if REWATCH_LOOP_PATTERN.search(ending):
@@ -574,6 +576,24 @@ class ScriptRepairDomain(BasePipeline):
         updated["claim_trace"] = trace
         return updated
 
+    def _sanitize_source_fact_ids(self, script: dict[str, Any], fact_pack: dict[str, Any]) -> dict[str, Any]:
+        updated = dict(script)
+        valid_ids = {
+            str(fact.get("fact_id"))
+            for fact in fact_pack.get("facts") or []
+            if isinstance(fact, dict) and fact.get("fact_id")
+        }
+        source_ids = updated.get("source_fact_ids") or []
+        if isinstance(source_ids, str):
+            source_ids = [source_ids]
+        updated["source_fact_ids"] = list(
+            dict.fromkeys(str(source_id) for source_id in source_ids if str(source_id) in valid_ids)
+        )
+        trace = updated.get("claim_trace")
+        if isinstance(trace, list):
+            updated["claim_trace"] = self._normalize_claim_trace(trace, valid_ids)
+        return updated
+
     def _normalize_claim_trace(self, trace: list[Any], valid_ids: set[str]) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
         for item in trace:
@@ -612,8 +632,7 @@ class ScriptRepairDomain(BasePipeline):
         script["qa_metrics"] = normalize_script_metrics(dict(script.get("qa_metrics") or {}))
         gate_result = self.script_gate.validate(script, target_duration_sec)
         fact_pack = plan_dict.get("fact_pack") if isinstance(plan_dict.get("fact_pack"), dict) else {}
-        simple_mode_fact_skip = self.settings.simple_shorts_mode and fact_pack.get("status") == "skipped"
-        consistency_reasons = [] if simple_mode_fact_skip else self._fact_pack_consistency_reasons(script, fact_pack)
+        consistency_reasons = self._fact_pack_consistency_reasons(script, fact_pack)
         attempts_log: list[dict[str, Any]] = [
             {
                 "repair_attempt": 0,
@@ -631,42 +650,6 @@ class ScriptRepairDomain(BasePipeline):
                 "fact_pack_consistency_pass": True,
                 "ready_script_declared_fact_check_accepted": True,
                 "script_repair_attempts_log": attempts_log,
-                **self._claim_trace_metrics(script),
-            }
-            script["qa_metrics"] = metrics
-            return script, metrics
-        if simple_mode_fact_skip:
-            critical_reasons = self._simple_mode_blocking_script_reasons(gate_result.reasons)
-            if critical_reasons:
-                raise RecoverableStepError(f"script quality gate failed: {', '.join(critical_reasons)}")
-            repairable_reasons = self._simple_mode_lightweight_repair_reasons(gate_result.reasons)
-            if repairable_reasons:
-                repaired = self._postprocess_script_for_quality(dict(script), plan_dict, repairable_reasons)
-                repaired["qa_metrics"] = normalize_script_metrics(dict(repaired.get("qa_metrics") or {}))
-                repaired_gate = self.script_gate.validate(repaired, target_duration_sec)
-                repaired_consistency_reasons: list[str] = []
-                attempts_log.append(
-                    {
-                        "repair_attempt": 1,
-                        "reason_codes": list(repaired_gate.reasons),
-                        "passed": repaired_gate.passed,
-                        "used_fallback": False,
-                        "repair_strategy": "simple_mode_local",
-                    }
-                )
-                if self._simple_mode_repair_improved(gate_result.reasons, repaired_gate.reasons):
-                    script = repaired
-                    gate_result = repaired_gate
-                    consistency_reasons = repaired_consistency_reasons
-            metrics = {
-                **gate_result.metrics,
-                "script_quality_gate_pass": True,
-                "script_quality_gate_blocking": False,
-                "script_quality_gate_warnings": list(gate_result.reasons),
-                "fact_pack_consistency_pass": True,
-                "fact_pack_consistency_skipped": True,
-                "script_repair_attempts_log": attempts_log,
-                "simple_shorts_mode": True,
                 **self._claim_trace_metrics(script),
             }
             script["qa_metrics"] = metrics
@@ -757,88 +740,7 @@ class ScriptRepairDomain(BasePipeline):
             self._persist_script_rejection(job_id, fallback_repaired, fallback_gate.metrics, fallback_consistency_reasons)
             last_reasons = [*fallback_gate.reasons, *fallback_consistency_reasons]
 
-        fact_pack_fallback = self._fact_pack_fallback_script(plan_dict)
-        if fact_pack_fallback is not None:
-            fact_pack_fallback = self._apply_cta_policy(fact_pack_fallback, cta_style)
-            fact_pack_fallback = self._postprocess_script_for_quality(fact_pack_fallback, plan_dict, [])
-            fact_pack_fallback["qa_metrics"] = normalize_script_metrics(dict(fact_pack_fallback.get("qa_metrics") or {}))
-            fact_pack_gate = self.script_gate.validate(fact_pack_fallback, target_duration_sec)
-            fact_pack_consistency_reasons = self._fact_pack_consistency_reasons(fact_pack_fallback, plan_dict.get("fact_pack"))
-            attempts_log.append(
-                {
-                    "repair_attempt": repair_attempts + 2,
-                    "reason_codes": [*fact_pack_gate.reasons, *fact_pack_consistency_reasons],
-                    "passed": fact_pack_gate.passed and not fact_pack_consistency_reasons,
-                    "used_fallback": True,
-                    "repair_strategy": "verified_fact_pack_deterministic",
-                }
-            )
-            if fact_pack_gate.passed and not fact_pack_consistency_reasons:
-                fact_pack_fallback["qa_metrics"] = {
-                    **fact_pack_gate.metrics,
-                    "fact_pack_consistency_pass": True,
-                    "script_repair_used": True,
-                    "script_repair_fact_pack_fallback_used": True,
-                    "script_repair_initial_reasons": [*gate_result.reasons, *consistency_reasons],
-                    "script_repair_attempts_log": attempts_log,
-                    **self._claim_trace_metrics(fact_pack_fallback),
-                }
-                return fact_pack_fallback, fact_pack_fallback["qa_metrics"]
-            self._persist_script_rejection(job_id, fact_pack_fallback, fact_pack_gate.metrics, fact_pack_consistency_reasons)
-            last_reasons = [*fact_pack_gate.reasons, *fact_pack_consistency_reasons]
-
         raise RecoverableStepError(f"script quality gate failed: {', '.join(last_reasons)}")
-
-    def _fact_pack_fallback_script(self, plan_dict: dict[str, Any]) -> dict[str, Any] | None:
-        fact_pack = plan_dict.get("fact_pack") if isinstance(plan_dict.get("fact_pack"), dict) else {}
-        if fact_pack.get("status") != "verified":
-            return None
-        facts = [
-            fact
-            for fact in fact_pack.get("facts") or []
-            if isinstance(fact, dict) and str(fact.get("fact_id") or "").strip() and str(fact.get("claim") or "").strip()
-        ]
-        if len(facts) < 3:
-            return None
-        title = "O braço do polvo se move como um sistema vivo"
-        hook = "O braço do polvo parece livre demais para obedecer como um braço comum."
-        beats = [
-            "Em estudos com Octopus vulgaris, pesquisadores analisaram vídeos do polvo alcançando um alvo.",
-            "O movimento aparece como uma dobra que viaja da base do braço até a ponta.",
-            "A mesma lógica também aparece em movimentos como locomoção e busca.",
-        ]
-        ending = "Na segunda olhada, aquele braço solto vira um sistema de controle inteiro."
-        source_ids = [str(fact.get("fact_id")) for fact in facts[:5]]
-        beat_source_ids = source_ids[2:5] if len(source_ids) >= 5 else source_ids[:3]
-        claim_trace = [
-            {"text": beats[0], "source_fact_ids": [source_ids[2] if len(source_ids) > 2 else source_ids[0]], "grounding": "direct"},
-            {"text": beats[1], "source_fact_ids": [source_ids[3] if len(source_ids) > 3 else source_ids[0]], "grounding": "direct"},
-            {"text": beats[2], "source_fact_ids": [source_ids[4] if len(source_ids) > 4 else source_ids[-1]], "grounding": "direct"},
-        ]
-        full_narration = " ".join([hook, *beats, ending])
-        return {
-            "title": title,
-            "hook": hook,
-            "body_beats": beats,
-            "ending": ending,
-            "cta": None,
-            "full_narration": full_narration,
-            "estimated_duration_sec": 35,
-            "key_facts": beats,
-            "source_fact_ids": list(dict.fromkeys(beat_source_ids)),
-            "claim_trace": claim_trace,
-            "token_count": len(tokenize(full_narration)),
-            "language": "pt-BR",
-            "qa_metrics": {
-                "hook_score": 0.84,
-                "clarity_score": 0.86,
-                "information_density_score": 0.82,
-                "ending_strength_score": 0.8,
-                "repetition_score": 0.12,
-                "generation_provider": "verified_fact_pack_deterministic",
-                "generation_provider_role": "fallback",
-            },
-        }
 
     def _validate_ready_script_without_repair(
         self,
@@ -897,37 +799,6 @@ class ScriptRepairDomain(BasePipeline):
             return False
         trace_metrics = self._claim_trace_metrics(script)
         return bool(trace_metrics["claim_trace_items"] and trace_metrics["claim_trace_missing_items"] == 0)
-
-    def _simple_mode_blocking_script_reasons(self, reasons: list[str]) -> list[str]:
-        blocking = {
-            "placeholder_source_language",
-            "repeated_clause",
-            "estimated_duration_outside_absolute_range",
-            "markup_or_ssml_leaked",
-            "foreign_language_detected",
-            "non_latin_text_detected",
-            "em_dash_or_en_dash_detected",
-            "truncated_ending_logic",
-            "generic_ai_style_phrase",
-        }
-        return [reason for reason in reasons if reason in blocking]
-
-    def _simple_mode_lightweight_repair_reasons(self, reasons: list[str]) -> list[str]:
-        repairable = {
-            "factual_claim_trace_missing",
-            "factual_risk_requires_conservative_rewrite",
-            "overconfident_or_unsupported_factual_claim",
-            "weak_loop_closure",
-            "ending_not_connected_to_hook",
-        }
-        return [reason for reason in reasons if reason in repairable]
-
-    def _simple_mode_repair_improved(self, original_reasons: list[str], repaired_reasons: list[str]) -> bool:
-        original = set(original_reasons)
-        repaired = set(repaired_reasons)
-        if not original:
-            return False
-        return len(repaired) < len(original) or repaired < original
 
     def _claim_trace_metrics(self, script: dict[str, Any]) -> dict[str, Any]:
         trace = script.get("claim_trace") if isinstance(script.get("claim_trace"), list) else []

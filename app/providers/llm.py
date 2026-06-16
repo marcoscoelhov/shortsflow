@@ -7,6 +7,8 @@ import queue
 import threading
 from typing import Any, Callable, Protocol
 
+from google import genai
+from google.genai import types as genai_types
 from openai import OpenAI
 
 from app.config import get_settings
@@ -115,14 +117,15 @@ class MockCreativeProvider:
         verified_facts = fact_pack.get("facts") or [] if fact_pack.get("status") == "verified" else []
         grounded_claims = [str(fact.get("claim") or "").strip() for fact in verified_facts if str(fact.get("claim") or "").strip()]
         source_fact_ids = [str(fact.get("fact_id")) for fact in verified_facts if fact.get("fact_id")][:2]
-        hook = f"{subject.capitalize()} escondem um detalhe biologico quase absurdo."
+        hook = f"{subject.capitalize()} parecem comuns; então uma pista escondida rouba a cena e deixa tudo estranho."
+        loop = f"Se parecem tão conhecidos, por que o primeiro detalhe muda tudo?"
         if grounded_claims:
             body = [
                 grounded_claims[0],
-                grounded_claims[1] if len(grounded_claims) > 1 else f"Esse recorte explica {angle} sem forcar precisao falsa.",
-                grounded_claims[2] if len(grounded_claims) > 2 else f"Isso deixa {subject} mais concreto para quem assiste.",
-                f"Quando esses fatos entram na mesma sequencia, {subject} parece ainda mais estranho.",
-                f"Esse encadeamento sustenta a promessa sem inventar detalhe tecnico extra.",
+                grounded_claims[1] if len(grounded_claims) > 1 else f"Mas esse detalhe vira tensão quando entra em {angle}.",
+                grounded_claims[2] if len(grounded_claims) > 2 else f"O que parecia pequeno começa a revelar uma consequência visual maior.",
+                f"Quando esses fatos entram na mesma sequência, {subject} parece quase impossível por alguns segundos.",
+                f"A pista final é o que sobra depois que o detalhe escondido aparece em cena.",
             ]
             key_facts = grounded_claims[:3]
             claim_trace = [
@@ -136,21 +139,21 @@ class MockCreativeProvider:
             ]
         else:
             body = [
-                f"{subject.capitalize()} parece vago so ate aparecer o efeito ao redor.",
-                f"O ponto central entra em {angle} e muda a escala do tema.",
-                f"Em vez do objeto isolado, o entorno entrega a pista principal.",
-                f"Esse recorte deixa {subject} mais concreto para quem assiste.",
-                f"Assim cada cena sustenta a ideia sem inventar elemento aleatorio.",
+                f"O detalhe vira uma pista visual antes da resposta aparecer.",
+                f"Mas o recorte em {angle} cria uma tensão que prende o olhar.",
+                f"O entorno revela o que quase ninguém percebe no primeiro segundo.",
+                f"A virada é simples: a pista estava visível antes do cérebro notar.",
             ]
             key_facts = [
-                f"{subject.capitalize()} reage ao ambiente antes da maioria notar.",
-                f"O tema fica mais claro quando se observa o contexto e a funcao.",
-                f"O comportamento do sujeito economiza energia enquanto reduz risco.",
+                f"{subject.capitalize()} pode ser apresentado por um detalhe visual central.",
+                f"O tema fica mais claro quando o roteiro mostra contexto e função.",
+                f"A retenção aumenta quando o fechamento faz o público rever a primeira cena.",
             ]
             source_fact_ids = []
             claim_trace = []
-        ending = f"No fim, {subject} deixa de ser so um nome e vira um fenomeno legivel."
-        narration_parts = [hook, *body, ending]
+        payoff = f"A virada final: a pista rouba a cena diante do olho, parece fogo e fica difícil de ignorar."
+        ending = f"Quando você rever o começo, lembra: a primeira cena já entregava tudo em tempo real."
+        narration_parts = [hook, loop, *body, payoff, ending]
         full_narration = " ".join(narration_parts)
         token_count = len(tokenize(full_narration))
         estimated_duration_sec = round(max(35.0, min(55.0, len(word_tokens(full_narration)) / 2.55)), 2)
@@ -173,7 +176,9 @@ class MockCreativeProvider:
         return {
             "title": topic_plan["title_candidates"][0],
             "hook": hook,
+            "loop": loop,
             "body_beats": body,
+            "payoff": payoff,
             "ending": ending,
             "cta": None,
             "full_narration": full_narration,
@@ -323,7 +328,6 @@ class MockCreativeProvider:
 class MinimaxCreativeProvider:
     provider_name = "minimax"
     failure_provider_name = "minimax_text"
-    model_name = "MiniMax-M2.7"
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -331,6 +335,8 @@ class MinimaxCreativeProvider:
         if not api_key:
             raise ProviderFailure(self.failure_provider_name, "missing minimax text api key")
         self.timeout_sec = settings.minimax_text_timeout_sec
+        self.model_name = settings.minimax_text_model
+        self.text_thinking = settings.minimax_text_thinking
         self.client = OpenAI(
             api_key=api_key,
             base_url=settings.minimax_text_base_url,
@@ -522,6 +528,14 @@ Regras:
 - fatos acima de viralidade: não invente números, nacionalidades, planos, materiais, causas técnicas ou soluções de engenharia se eles não estiverem na Entrada JSON ou forem conhecimento extremamente consolidado
 - se houver incerteza factual, use formulação conservadora e geral em vez de precisão falsa; prefira “engenheiros reduziram a inclinação removendo solo sob a base” a números específicos não verificados
 - evite frases absolutas/enganosas como “está garantida”, “a física prova”, “domina a física”, “desafia a física” ou “a inclinação sustenta”
+- se Entrada JSON.fact_pack.evidence_cards existir, use evidence_cards como fonte factual e editorial preferencial
+- use aggressive_hook_options para criar hook agressivo, mas sem ultrapassar claim, safe_language e do_not_claim
+- use retention_use.hook, retention_use.loop, retention_use.escalation, retention_use.payoff e retention_use.loop_close para organizar a estrutura viral: Hook forte, Loop aberto, Beats em escalada, Payoff no último terço e Fechamento que provoque replay
+- use visual_metaphors como imagem mental e base do visual_opening quando forem compatíveis com o roteiro
+- toda afirmação factual de risco deve caber em claim ou safe_language de algum evidence_card com allowed_script_use=true e support_level diferente de context_only
+- nunca afirme nada listado em do_not_claim, nem como metáfora, nem como frase de impacto
+- evidence_cards com support_level="context_only" podem inspirar entendimento, mas não podem sustentar claim narrada
+- se evidence_cards existir, key_facts deve refletir safe_language ou claim dos cartões realmente usados
 - se a Entrada JSON tiver fact_pack.status="verified", use o fact_pack como fonte factual obrigatória: toda afirmação de número, data, causa técnica, evento histórico, ciência, saúde ou engenharia deve derivar de facts[].claim
 - source_fact_ids deve listar somente fact_id existentes em fact_pack.facts; inclua pelo menos 2 quando houver 2+ fatos disponíveis
 - claim_trace deve mapear cada afirmação factual de risco do texto narrado para fact_id existentes em fact_pack.facts; formato: lista de objetos com text, source_fact_ids e grounding
@@ -537,7 +551,6 @@ Regras:
 - sem instruções de camera nos campos narrados; visual_opening pode descrever composicao visual, sujeito, contraste, acao e resultado esperado
 - evite repetir aberturas listadas em recent_pattern_brief.avoid_hook_openings e padrões de título recentes
 - QA deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass, editorial_prompt_version
-- se Entrada JSON.simple_shorts_mode for true: não tente citar fonte, não use frases como "a fonte aponta", não gere source_fact_ids, deixe claim_trace vazio ou conservador, e priorize roteiro viral claro com fatos amplamente seguros, sem números precisos não fornecidos
 """
         payload = self._json_completion(prompt)
         payload["qa_metrics"] = {**payload.get("qa_metrics", {}), "source_provider": self.provider_name}
@@ -602,6 +615,9 @@ Regras obrigatórias:
 - se Contexto da pauta JSON.editorial_mode for "factual_strict", preserve o grounding factual e remova qualquer mecanismo sem lastro
 - preserve a régua editorial do app: hook forte, loop aberto, beats em escalada, payoff no último terço e fechamento que provoque replay
 - se os motivos incluírem weak_loop_closure ou ending_not_connected_to_hook, corrija o bloco loop_close sem criar final genérico repetitivo
+- se os motivos incluírem weak_ending, reescreva o ending para pagar a promessa do hook e apontar concretamente de volta ao início
+- se os motivos incluírem off_topic, remova desvios e alinhe título, hook, beats, payoff e ending ao canonical_topic, angle e hook_promise do contexto
+- se os motivos incluírem unsupported_claim, remova a afirmação sem lastro ou substitua por formulação diretamente sustentada por facts[].claim
 - o novo ending deve criar loop de reassistência: o início precisa ganhar novo significado na segunda visualização
 - não use frase meta como "fecha o ciclo", "agora tudo faz sentido" ou "essa curiosidade muda como você olha"
 - preserve tom viral mesmo quando usar fatos científicos; não transforme o roteiro em aula ou resumo acadêmico
@@ -655,6 +671,10 @@ passed, reasons, factual_score, retention_score, metadata_score, ending_score, s
 Regras:
 - passed só pode ser true se o roteiro não parecer factualmente exagerado, o final não parecer truncado, título/hashtags forem publicáveis e não houver fonte falsa.
 - reasons deve usar slugs curtos em inglês, ex: unsupported_claim, weak_ending, weak_hashtags, invented_source_fact_ids, low_retention.
+- avalie off_topic somente comparando o roteiro com Entrada JSON.topic; não infira outro tema apenas por estilo ou vocabulário
+- use unsupported_claim apenas para afirmação factual concreta sem apoio no fact_pack; metáfora, tensão editorial e linguagem explicitamente conservadora não bastam
+- use invented_source_fact_ids somente quando source_fact_ids ou claim_trace contiverem IDs ausentes em fact_pack.facts
+- use weak_ending somente quando o ending não pagar a promessa do hook ou estiver truncado/genérico; preferência estilística isolada não basta
 - scores de 0 a 1.
 - Não reescreva o roteiro; só audite.
 Sem markdown.
@@ -700,7 +720,7 @@ Excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas e nomes d
 Regras obrigatorias para image_prompt:
 - image_prompt MUST be written in English only, even when the narration is pt-BR
 - keep image_prompt compact for MiniMax image-01, under 900 characters; no long negative-prompt wall
-- describe one vertical 2:3 cinematic visual scene with objects that fit visual_contract.visual_domain when present
+- describe one cinematic visual scene for 9:16 vertical shorts with objects that fit visual_contract.visual_domain when present
 - every image_prompt must depict the concrete fact in that scene's narration_text, not just the generic visual_intent
 - if visual_contract exists, every image_prompt must obey the scene's visual_intent and the visual contract; do not override it with generic scientific styling
 - if visual_contract.visual_domain is miniature/diorama/model city/craft, keep every scene inside that same miniature diorama world, even when narration mentions movies, games, cameras or motion blur
@@ -751,6 +771,8 @@ Regras obrigatorias para image_prompt:
         return None
 
     def _json_completion(self, prompt: str) -> Any:
+        extra_body = self._request_extra_body()
+        request_kwargs = {"extra_body": extra_body} if extra_body else {}
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
@@ -759,6 +781,7 @@ Regras obrigatorias para image_prompt:
                     {"role": "user", "content": prompt},
                 ],
                 timeout=self.timeout_sec,
+                **request_kwargs,
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
@@ -778,6 +801,15 @@ Regras obrigatorias para image_prompt:
                 except Exception:
                     pass
             raise ProviderFailure(self.failure_provider_name, f"invalid json: {raw[:300]}") from exc
+
+    def _request_extra_body(self) -> dict[str, Any]:
+        thinking = str(getattr(self, "text_thinking", "auto") or "auto").strip().lower()
+        model_name = str(getattr(self, "model_name", "") or "").strip().lower()
+        if thinking == "auto" and model_name == "minimax-m3":
+            thinking = "disabled"
+        if thinking in {"enabled", "disabled"}:
+            return {"thinking": {"type": thinking}}
+        return {}
 
     def _extract_json(self, raw: str) -> str | None:
         candidates = []
@@ -818,6 +850,55 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
             base_url=settings.deepseek_base_url,
             timeout=self.timeout_sec,
         )
+
+
+class GeminiCreativeProvider(MinimaxCreativeProvider):
+    provider_name = "gemini"
+    failure_provider_name = "gemini_text"
+
+    def __init__(self) -> None:
+        settings = get_settings()
+        api_key = settings.resolved_gemini_text_api_key
+        if not api_key:
+            raise ProviderFailure(self.failure_provider_name, "missing gemini text api key")
+        self.timeout_sec = settings.gemini_text_timeout_sec
+        self.model_name = settings.gemini_text_model
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=genai_types.HttpOptions(timeout=int(float(self.timeout_sec) * 1000)),
+        )
+
+    def _json_completion(self, prompt: str) -> Any:
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.7,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
+        raw = (getattr(response, "text", None) or "").strip()
+        if not raw:
+            raise ProviderFailure(self.failure_provider_name, "empty text response")
+        raw = self._strip_think(raw)
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        try:
+            return json.loads(raw)
+        except Exception as exc:  # noqa: BLE001
+            extracted = self._extract_json(raw)
+            if extracted is not None:
+                try:
+                    return json.loads(extracted)
+                except Exception:
+                    pass
+            raise ProviderFailure(self.failure_provider_name, f"invalid json: {raw[:300]}") from exc
+
+    def _json_array_completion(self, prompt: str) -> Any:
+        return self._json_completion(prompt)
 
 
 class OpenAICreativeProvider(MinimaxCreativeProvider):
@@ -892,6 +973,23 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
                 except Exception:
                     pass
             raise ProviderFailure(self.failure_provider_name, f"invalid json array: {raw[:300]}") from exc
+
+
+class XAICreativeProvider(MinimaxCreativeProvider):
+    provider_name = "xai"
+    failure_provider_name = "xai_text"
+
+    def __init__(self) -> None:
+        settings = get_settings()
+        if not settings.xai_api_key:
+            raise ProviderFailure(self.failure_provider_name, "missing xai api key")
+        self.timeout_sec = settings.xai_timeout_sec
+        self.model_name = settings.xai_model
+        self.client = OpenAI(
+            api_key=settings.xai_api_key,
+            base_url=settings.xai_base_url,
+            timeout=self.timeout_sec,
+        )
 
 
 class QwenCreativeProvider(MinimaxCreativeProvider):
@@ -1264,10 +1362,14 @@ class LLMProviderRegistry:
         try:
             if normalized in {"openai", "gpt-5", "gpt5", "gpt-5.4", "gpt5.4"}:
                 return OpenAICreativeProvider()
-            if normalized in {"minimax", "minimax_2_7", "minimax-m2.7"}:
+            if normalized in {"minimax", "minimax_2_7", "minimax-m2.7", "minimax_m3", "minimax-m3"}:
                 return MinimaxCreativeProvider()
-            if normalized in {"deepseek", "deepseek_v4_flash", "deepseek-v4-flash", "deepseek_v4"}:
+            if normalized in {"xai", "grok", "grok-4.20", "grok-4.20-non-reasoning", "openai_compatible"}:
+                return XAICreativeProvider()
+            if normalized in {"deepseek", "deepseek_v4", "deepseek_v4_flash", "deepseek-v4-flash", "deepseek_v4_pro", "deepseek-v4-pro"}:
                 return DeepSeekCreativeProvider()
+            if normalized in {"gemini", "gemini_flash", "gemini-flash", "gemini_3_5_flash", "gemini-3.5-flash"}:
+                return GeminiCreativeProvider()
         except ProviderFailure:
             if required:
                 raise

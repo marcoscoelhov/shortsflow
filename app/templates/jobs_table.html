@@ -20,8 +20,10 @@
   {% set publication_schedule = row.publication_schedule %}
   {% set row_progress = job_progress_snapshot(job) %}
   {% set publication_state = publication_operational_status(job, publication_schedule) %}
+  {% set diagnosis = failure_diagnosis(job) %}
+  {% set action_summary = row.action_summary %}
   {% set created_text = job.created_at|string %}
-  <article class="job-row-card jobs-grid-row">
+  <article class="job-row-card jobs-grid-row" data-href="/jobs/{{ job.job_id }}" role="link" tabindex="0" aria-label="Abrir job {{ job.job_id[:8] }}: {{ seed_theme or job.topic_summary or job.job_id }}">
     <a class="job-thumb" href="/jobs/{{ job.job_id }}" aria-label="Abrir job {{ job.job_id }}">
       <span class="material-symbols-outlined" aria-hidden="true">smart_display</span>
     </a>
@@ -39,6 +41,9 @@
     <div class="job-status-cell" data-label="Status">
       <span class="badge {{ publication_state.class_name }}">{{ publication_state.label }}</span>
       <small>{{ publication_state.stage }}</small>
+      {% if diagnosis.visible %}
+      <small title="{{ diagnosis.cause }}">{{ diagnosis.title }}</small>
+      {% endif %}
     </div>
     <div class="job-progress-compact" data-label="Progresso" aria-label="Progresso do job">
       <div>
@@ -56,6 +61,14 @@
         <span class="job-progress-fill {{ row_progress.state }}" style="width: {{ row_progress.percent }}%"></span>
       </div>
       <p class="job-row-next">{{ publication_state.next_action }}</p>
+      {% if diagnosis.visible %}
+      <p class="job-row-next">{{ diagnosis.action }}</p>
+      {% endif %}
+      <div class="job-decision-summary {{ action_summary.kind }}">
+        <span>Ação sugerida: <strong>{{ action_summary.label }}</strong></span>
+        <small>Para publicar: {{ action_summary.missing }}</small>
+        <small>{{ action_summary.recommendation }}</small>
+      </div>
     </div>
     <div class="job-date-cell" data-label="Criado em">
       <time datetime="{{ created_text }}">{{ created_text[:10] }}</time>

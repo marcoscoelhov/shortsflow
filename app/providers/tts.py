@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import audioop
 import base64
 import math
 import re
@@ -16,6 +15,9 @@ from typing import Any
 import httpx
 import imageio_ffmpeg
 
+from app.audio.pcm import multiply as pcm_multiply
+from app.audio.pcm import peak_abs as pcm_peak_abs
+from app.audio.pcm import rms as pcm_rms
 from app.quality.subtitle_gate import BAD_ENDINGS
 from app.config import get_settings
 from app.utils import parse_srt, word_tokens, wrap_caption
@@ -118,6 +120,14 @@ GEMINI_TTS_VOICE_PROFILES: dict[str, dict[str, Any]] = {
         },
         "direction": "Tom ágil e curioso, com energia de Shorts sem atropelar a clareza.",
     },
+}
+
+GEMINI_TTS_PROFILE_PRIORITY: dict[str, int] = {
+    "mystery_tension": 50,
+    "upbeat_viral": 40,
+    "science_explainer": 30,
+    "history_authority": 20,
+    "warm_curiosity": 10,
 }
 
 
@@ -287,14 +297,14 @@ class LocalSpeechFallbackProvider:
             segment = bytes(audio[start:end])
             if not segment:
                 continue
-            rms = audioop.rms(segment, sample_width)
-            peak = audioop.max(segment, sample_width)
+            rms = pcm_rms(segment, sample_width)
+            peak = pcm_peak_abs(segment, sample_width)
             if rms <= 0 or peak <= 0:
                 continue
             gain = target_rms / rms
             gain = min(gain, peak_ceiling / peak)
             gain = max(0.45, min(gain, 4.0))
-            audio[start:end] = audioop.mul(segment, sample_width, gain)
+            audio[start:end] = pcm_multiply(segment, sample_width, gain)
         temp_path = audio_path.with_suffix(".leveled.wav")
         with wave.open(str(temp_path), "wb") as target:
             target.setparams(params)
@@ -559,10 +569,33 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
 
     def _mark_gemini_fallback(self, fallback: dict[str, Any], reason: str) -> None:
         metadata = fallback.setdefault("provider_metadata", {})
+        existing_chain = metadata.get("fallback_chain")
+        if isinstance(existing_chain, list):
+            fallback_chain = list(existing_chain)
+        else:
+            fallback_chain = []
+            existing_from = metadata.get("fallback_from_provider")
+            existing_reason = metadata.get("fallback_reason")
+            if existing_from or existing_reason:
+                fallback_chain.append(
+                    {
+                        "from_provider": existing_from,
+                        "to_provider": metadata.get("fallback_provider"),
+                        "reason": existing_reason,
+                    }
+                )
         metadata["fallback_used"] = True
         metadata["fallback_from_provider"] = "gemini_tts"
         metadata["fallback_provider"] = fallback.get("provider")
         metadata["fallback_reason"] = reason
+        metadata["fallback_chain"] = [
+            {
+                "from_provider": "gemini_tts",
+                "to_provider": fallback.get("provider"),
+                "reason": reason,
+            },
+            *fallback_chain,
+        ]
 
     def _run_gemini(self, text: str, audio_path: Path, srt_path: Path, settings: Any, api_key: str, context: dict[str, Any] | None) -> dict[str, Any]:
         audio_path.parent.mkdir(parents=True, exist_ok=True)
@@ -687,14 +720,17 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
         corpus = self._voice_context_corpus(context)
         best_profile = "configured_default"
         best_score = 0
+        best_priority = -1
         best_matches: list[str] = []
         for profile_name, profile in GEMINI_TTS_VOICE_PROFILES.items():
             keywords = profile["keywords"]
             matches = sorted(keyword for keyword in keywords if self._normalized_voice_token(keyword) in corpus)
             score = len(matches)
-            if score > best_score:
+            priority = GEMINI_TTS_PROFILE_PRIORITY.get(profile_name, 0)
+            if score > best_score or (score == best_score and score > 0 and priority > best_priority):
                 best_profile = profile_name
                 best_score = score
+                best_priority = priority
                 best_matches = matches
         if best_score <= 0:
             return {

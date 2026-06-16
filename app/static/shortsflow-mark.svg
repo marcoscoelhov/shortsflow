@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">ShortsFlow</title>
+  <desc id="desc">Marca do Hub de Revisao: quadro vertical de short com sinal de reproducao e trilha de decisao.</desc>
+  <defs>
+    <linearGradient id="frame" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffb4a8"/>
+      <stop offset="0.54" stop-color="#ff5540"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="21" y1="12" x2="43" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#24242a"/>
+      <stop offset="1" stop-color="#111116"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#131316"/>
+  <path d="M23 7h18c5 0 9 4 9 9v32c0 5-4 9-9 9H23c-5 0-9-4-9-9V16c0-5 4-9 9-9Z" fill="url(#frame)"/>
+  <path d="M24 12h16c3 0 5 2 5 5v30c0 3-2 5-5 5H24c-3 0-5-2-5-5V17c0-3 2-5 5-5Z" fill="url(#panel)"/>
+  <path d="M29 25.2c0-1.8 2-2.9 3.6-1.9l8.6 5.2c1.5.9 1.5 3.1 0 4l-8.6 5.2c-1.6 1-3.6-.1-3.6-1.9V25.2Z" fill="#fff3f0"/>
+  <path d="M13.5 21.5H7.8c-1.1 0-2-.9-2-2s.9-2 2-2h5.7v4Zm0 25H7.8c-1.1 0-2-.9-2-2s.9-2 2-2h5.7v4Zm36.9-25h5.8c1.1 0 2-.9 2-2s-.9-2-2-2h-5.8v4Zm0 25h5.8c1.1 0 2-.9 2-2s-.9-2-2-2h-5.8v4Z" fill="#b8a5a2"/>
+  <path d="M21.7 18.4h6.6M35.7 45.6h6.6" stroke="#ffb4a8" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

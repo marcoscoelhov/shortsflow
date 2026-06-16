@@ -24,6 +24,46 @@ _Avoid_: origem editorial, provider, status, etapa do pipeline
 O arquivo de midia produzido por um **Job de Video** para revisao humana.
 _Avoid_: video, output, render
 
+**Acabamento Editorial Premium**:
+A camada de composicao final do **Arquivo de Video Final** que adiciona ritmo visual, movimento, transicoes, tipografia, enfase de legenda e identidade visual sem alterar roteiro, narracao ou fatos.
+_Avoid_: trocar roteiro, gerar nova pauta, mudar fatos, estetica generica
+
+**Prova Comparativa de Acabamento**:
+A avaliacao humana lado a lado de versoes do mesmo **Job de Video** para decidir se uma abordagem de **Acabamento Editorial Premium** deve virar padrao.
+_Avoid_: opiniao isolada, comparar jobs diferentes, aprovar sem gates, decisao por ferramenta
+
+**Decisao Comparativa de Acabamento**:
+A escolha humana feita durante uma **Prova Comparativa de Acabamento** sobre qual versao do mesmo **Job de Video** tem melhor acabamento, sem aprovar publicacao por si so.
+_Avoid_: aprovacao de publicacao, revisao humana final, score automatico, troca invisivel de arquivo
+
+**Versao Premium Paralela**:
+Um **Arquivo de Video Final** alternativo criado para **Prova Comparativa de Acabamento**, sem substituir o arquivo usado pelo fluxo normal de revisao e publicacao.
+_Avoid_: substituir final.mp4 durante prova, publicacao acidental, versao invisivel, artefato solto
+
+**Gate de Acabamento Premium**:
+A validacao automatica minima de uma **Versao Premium Paralela** antes de ela participar de uma **Prova Comparativa de Acabamento**.
+_Avoid_: comparar arquivo quebrado, julgamento estetico sem sanidade tecnica, aprovar efeito que viola narrativa
+
+**Acao de Prova Premium**:
+O comando humano no **Hub de Revisao** que gera uma **Versao Premium Paralela** para avaliar **Acabamento Editorial Premium** sem mudar o fluxo normal do **Job de Video**.
+_Avoid_: etapa obrigatoria do pipeline, publicacao automatica, aprovacao invisivel, experimento global
+
+**Ajuste de Timing Visual**:
+A mudanca de ritmo de elementos visuais dentro de cenas ja aprovadas, sem reordenar cenas, cortar narracao, alterar legenda ou antecipar payoff.
+_Avoid_: mudar timing editorial, reescrever roteiro, cortar audio, revelar payoff cedo
+
+**Pacote de Acabamento Premium Inicial**:
+O conjunto inicial de recursos de **Acabamento Editorial Premium** para comparar captions animadas, transicoes semanticas, enquadramento estavel de cena, overlays editoriais pontuais e identidade visual consistente.
+_Avoid_: efeitos livres, template barato, excesso de zoom, variacao visual caotica
+
+**Plano de Acabamento Editorial**:
+O contrato de composicao final que transforma o conteudo aprovado de um **Job de Video** em decisoes de captions, transicoes, enquadramento, overlays e identidade visual para o **Arquivo de Video Final**.
+_Avoid_: plano de cenas, roteiro novo, configuracao tecnica do renderizador, efeito solto
+
+**Plano de Acabamento Deterministico**:
+Um **Plano de Acabamento Editorial** criado por regras previsiveis a partir dos papeis narrativos, intencoes visuais, duracao de cenas, legendas e contrato visual aprovados.
+_Avoid_: escolha livre por LLM, efeitos imprevisiveis, variacao sem baseline, decisao estetica opaca
+
 **Pauta Viral Estruturada**:
 O contrato editorial de entrada usado para transformar um tema ou titulo em roteiro de Short, organizado em Titulo, Hook, Loop, Beats, Payoff, Fechamento e Hashtags.
 _Avoid_: prompt solto, instrucoes livres, formato opcional
@@ -95,6 +135,18 @@ _Avoid_: backlog massivo, sugestoes ilimitadas, ideias fora do formato de roteir
 **Linha Editorial Vencedora**:
 Um padrao de tema, hook, ritmo, promessa, payoff ou formato que performou acima do restante e pode inspirar novos **Jobs de Video** sem virar copia.
 _Avoid_: copiar video, tema repetido, template fixo, viral por chute
+
+**Canal de Referencia Competitiva**:
+Um canal externo usado para comparar padrões editoriais e descobrir aprendizados aplicaveis aos proximos **Jobs de Video** sem copiar identidade ou roteiro.
+_Avoid_: concorrente generico, canal para copiar, benchmark sem nicho
+
+**Short de Referencia Viral**:
+Um video curto externo com desempenho forte o bastante para servir como amostra de aprendizado editorial.
+_Avoid_: qualquer video popular, copiar roteiro, evidencia sem metricas
+
+**Arquitetura de Retencao do Roteiro**:
+A organizacao de hook, loop, escalada, payoff e fechamento que explica por que um roteiro sustenta atencao ate o fim.
+_Avoid_: transcricao completa, resumo do tema, estilo visual isolado
 
 **Sinal Primario de Performance**:
 A metrica que mais pesa para identificar uma **Linha Editorial Vencedora**, priorizando retencao em vez de alcance bruto.
@@ -192,12 +244,192 @@ _Avoid_: dashboard generico, tela de dados, painel tecnico
 Um tema escolhido pelo sistema quando o pedido nao traz um assunto explicito.
 _Avoid_: tema aleatorio, fallback local, sugestao solta
 
+**Curiosidade do Cotidiano**:
+Um recorte de Short baseado em situacoes comuns, habitos, objetos, consumo, tecnologia popular ou pequenas descobertas do dia a dia para gerar conexao ampla com o publico.
+_Avoid_: ciencia estrita por padrao, paper obrigatorio para todo tema, curiosidade abstrata sem identificacao
+
+**Perfil de Evidencia**:
+A classificacao editorial que define qual tipo de fonte um **Job de Video** precisa para sustentar suas afirmacoes factuais.
+_Avoid_: fact pack unico para todo tema, paper obrigatorio, checagem solta por LLM
+
+**Cascata de Evidencia**:
+A ordem de tipos de fonte consultados conforme o **Perfil de Evidencia** de um **Job de Video**.
+_Avoid_: buscar sempre em papers, usar uma unica fonte global, escolher fonte por conveniencia do provider
+
+**Camada de Evidencia**:
+A parte do fluxo editorial que transforma fontes confiaveis em **Cartoes de Evidencia** antes da geracao do roteiro.
+_Avoid_: deixar a LLM pesquisar sozinha, tratar busca como roteiro, validar fato apenas no fim
+
+**Verificador de Evidencia**:
+A validacao que decide se uma fonte cobre o escopo necessario para virar **Fonte de Evidencia** ou apenas **Fonte de Contexto**.
+_Avoid_: julgamento livre da LLM, correspondencia por palavra-chave, promover fonte tangencial
+
+**Fonte de Contexto**:
+Uma fonte que ajuda a entender o tema de um **Job de Video**, mas nao sustenta sozinha uma afirmacao factual especifica.
+_Avoid_: tratar como prova, citar como lastro de claim, promover para evidência sem escopo
+
+**Fonte de Evidencia**:
+Uma fonte cujo escopo cobre diretamente a afirmacao factual que ela sustenta em um **Job de Video**.
+_Avoid_: fonte tangencial, fonte sobre outro mecanismo, fonte relacionada apenas por palavra-chave
+
+**Cartao de Evidencia**:
+Uma unidade editorial que liga uma afirmacao permitida a uma **Fonte de Evidencia**, seus limites e a linguagem segura para uso no roteiro.
+_Avoid_: fato solto, resumo de fonte, claim inventada pela LLM
+
+**Embalagem Viral Permitida**:
+A forma de transformar um **Cartao de Evidencia** em hook, loop, imagem mental, payoff ou fechamento de alta retencao sem ampliar a afirmacao factual sustentada.
+_Avoid_: exagero factual, clickbait falso, tornar o cartao burocratico ou academico
+
+**Hook Agressivo Conservador**:
+Uma abertura de alta tensao e potencial viral que usa contraste, surpresa ou consequencia cotidiana sem exagerar a afirmacao factual permitida.
+_Avoid_: promessa falsa, causalidade inventada, numero sem fonte, universalizacao
+
+**Afirmacao Observacional**:
+Uma afirmacao de baixa exigencia factual baseada em experiencia comum, linguagem subjetiva ou enquadramento editorial, sem declarar causalidade tecnica, numero, regra atual ou fato historico especifico.
+_Avoid_: causalidade tecnica disfarçada, fato universal, claim sem evidência apresentada como certeza
+
+**Torneio de LLMs**:
+A comparacao controlada de modelos usando os mesmos **Jobs de Video**, **Perfis de Evidencia** e **Cartoes de Evidencia** para medir custo, velocidade, obediencia factual e qualidade editorial.
+_Avoid_: teste isolado impressionista, comparar modelos com entradas diferentes, escolher apenas por velocidade
+
+**Candidato de Torneio**:
+Um modelo/provider configurado para participar do **Torneio de LLMs** sem alterar o provider operacional padrao do pipeline.
+_Avoid_: trocar provider global manualmente, teste sem alias estavel, misturar configuracao do hub com benchmark
+
+**Conjunto de Benchmark Editorial**:
+Um grupo fixo de temas representativos usado para comparar modelos e providers no **Torneio de LLMs**.
+_Avoid_: testar um tema isolado, mudar entradas entre modelos, benchmark sem nichos cotidianos
+
+**Caso de Benchmark Editorial**:
+Uma entrada fixa e barata do **Conjunto de Benchmark Editorial** usada para comparar modelos em uma etapa editorial especifica sem executar um **Job de Video** completo.
+_Avoid_: job completo, smoke test de provider, tema solto, pipeline multimidia
+
+**Rodada Inicial do Torneio**:
+A primeira comparacao do **Torneio de LLMs**, limitada a geracao de roteiro, reparo de roteiro e auditoria textual sobre **Casos de Benchmark Editorial**.
+_Avoid_: plano de cenas inicial, render completo, comparacao por pipeline multimidia
+
+**Rodada Textual Completa do Torneio**:
+A comparacao do **Torneio de LLMs** que executa roteiro, reparo de roteiro e auditoria textual antes do **Comite de Decisao Pos-Torneio**.
+_Avoid_: chamar pipeline multimidia de torneio completo, incluir cena ou render antes da decisao textual, comparar etapa que ainda nao tem artefato padronizado
+
+**Triagem Textual do Torneio**:
+A passagem curta do **Torneio de LLMs** que elimina candidatos indisponiveis, lentos, incompativeis ou instaveis antes da rodada textual completa.
+_Avoid_: rodar benchmark completo em provider quebrado, decidir qualidade final por smoke test, esconder eliminacao operacional
+
+**Medicao Separada por Etapa**:
+A avaliacao do **Torneio de LLMs** que mede geracao inicial, reparo e auditoria como capacidades distintas.
+_Avoid_: reparo escondendo roteiro inicial ruim, media unica por modelo, misturar capacidades de etapas diferentes
+
+**Pacote Fixo de Auditoria**:
+Um conjunto igual de roteiros e artefatos usado para comparar candidatos na etapa de auditoria do **Torneio de LLMs**.
+_Avoid_: modelo auditando apenas a propria resposta, auditoria sem casos negativos, comparar auditores com entradas diferentes
+
+**Pacote de Artefatos do Torneio**:
+O conjunto de respostas, vetos, custos, latencias, falhas e rastros editoriais produzido pelos candidatos para o **Comite de Decisao Pos-Torneio**.
+_Avoid_: julgamento sem artefato, ler apenas ranking agregado, pedir avaliacao profunda para todos os candidatos
+
+**Benchmark Editorial Inicial**:
+A primeira versao do **Benchmark Editorial Versionado**, composta por 12 **Casos de Benchmark Editorial** de curiosidade cotidiana, saude leve, tecnologia popular e percepcao/comportamento.
+_Avoid_: benchmark grande antes do primeiro ranking, amostra pequena demais, conjunto sem variedade de risco factual
+
+**Caso Adversarial Publicavel**:
+Um **Caso de Benchmark Editorial** feito para expor exagero, invencao ou desobediencia factual sem deixar de ser um tema plausivel para canal.
+_Avoid_: pegadinha artificial, tema impossivel de publicar, caso sem valor editorial
+
+**Cartao de Evidencia Congelado**:
+Um **Cartao de Evidencia** versionado dentro de um **Caso de Benchmark Editorial** para manter o **Torneio de LLMs** comparavel entre execucoes.
+_Avoid_: buscar fonte durante o torneio, mudar evidencia entre candidatos, comparar modelos com fatos diferentes
+
+**Benchmark Editorial Versionado**:
+Uma versao persistida do **Conjunto de Benchmark Editorial** que torna resultados de **Torneio de LLMs** comparaveis ao longo do tempo.
+_Avoid_: benchmark ad hoc, trocar tema durante comparacao, resultado sem versao de entrada
+
+**Roteamento Editorial por Etapa**:
+A escolha de modelos ou providers diferentes conforme a etapa editorial e o **Perfil de Evidencia** de um **Job de Video**.
+_Avoid_: um modelo global para tudo, fallback opaco, trocar provider sem medir etapa
+
+**Ranking por Etapa do Torneio**:
+A classificacao principal do **Torneio de LLMs** que escolhe vencedores separados para roteiro, reparo e auditoria textual.
+_Avoid_: vencedor unico global, media que esconde fraqueza por funcao, escolha por impressao geral
+
+**Recomendacao de Roteamento do Torneio**:
+Uma sugestao de modelos por etapa produzida pelo **Torneio de LLMs** sem alterar automaticamente o provider operacional dos **Jobs de Video**.
+_Avoid_: promocao automatica de provider, alterar producao por benchmark isolado, roteamento invisivel
+
+**Escolha de Custo-Beneficio do Projeto**:
+A sintese do **Comite de Decisao Pos-Torneio** que recomenda o melhor roteamento por etapa e, separadamente, o melhor modelo unico quando simplicidade operacional for mais importante.
+_Avoid_: vencedor unico como fonte principal, custo menor sem qualidade minima, esconder diferencas entre roteiro, reparo e auditoria
+
+**Finalista do Torneio**:
+Um candidato que passou pelos vetos objetivos e entrou na avaliacao seletiva do **Comite de Decisao Pos-Torneio** em pelo menos uma etapa.
+_Avoid_: avaliar todos os candidatos por Codex, promover candidato instavel, esconder o piso de viabilidade
+
+**Eliminado na Triagem do Torneio**:
+Um candidato retirado da comparacao competitiva por falha objetiva na **Triagem Textual do Torneio**.
+_Avoid_: misturar indisponivel com perdedor, repetir teste caro sem corrigir acesso, esconder motivo de eliminacao
+
+**Candidato Nao Comparavel do Torneio**:
+Um candidato sem artefatos ou metricas suficientes para entrar no ranking competitivo do **Torneio de LLMs**.
+_Avoid_: ranquear medicao incompleta, tratar ausencia de custo como custo zero, promover candidato sem etapa suportada
+
+**Comite de Decisao Pos-Torneio**:
+Uma avaliacao assistida por Codex que interpreta artefatos completos do **Torneio de LLMs** para recomendar custo-beneficio e roteamento sem substituir os rankings objetivos por etapa.
+_Avoid_: juiz por caso, prompt de avaliacao token-intensivo, vencedor global que apaga fraquezas por etapa
+
+**Relatorio de Decisao do Torneio**:
+O artefato final do **Comite de Decisao Pos-Torneio** que resume vencedores por etapa, custo-beneficio, riscos, eliminacoes e recomendacao operacional.
+_Avoid_: conclusao sem evidencia, decisao apenas em chat, relatorio que substitui artefatos brutos
+
+**Veto Duro do Torneio**:
+Uma falha que elimina uma resposta do **Ranking por Etapa do Torneio** mesmo quando ela parece editorialmente forte.
+_Avoid_: penalidade leve, preferencia subjetiva, aceitar invencao factual por boa escrita
+
+**Orcamento de Falha do Torneio**:
+O limite de falhas operacionais aceitas para um candidato continuar competindo em uma etapa do **Torneio de LLMs**.
+_Avoid_: esperar timeouts repetidos, gastar quota com candidato instavel, tratar veto editorial como indisponibilidade operacional
+
+**Nota de Roteiro do Torneio**:
+A avaliacao de uma resposta de roteiro no **Torneio de LLMs**, priorizando obediencia factual, hook, loop, replay, escalada, payoff, clareza em pt-BR, custo e latencia nessa ordem.
+_Avoid_: nota por beleza textual, custo antes de qualidade minima, ranking sem retencao
+
+**Avaliador Hibrido do Torneio**:
+A combinacao de vetos objetivos e julgamento editorial por IA usada para pontuar respostas em **Casos de Benchmark Editorial**.
+_Avoid_: juiz unico sem gates, regra deterministica fingindo medir replay, opiniao humana ad hoc
+
+**Juiz Editorial Versionado**:
+Um modelo e prompt fixos usados fora da competicao principal para avaliar qualidade editorial no **Torneio de LLMs**.
+_Avoid_: juiz variavel por rodada, candidato julgando a si mesmo sem registro, prompt de avaliacao sem versao
+
+**Juiz Editorial Inicial**:
+O primeiro **Juiz Editorial Versionado** do **Torneio de LLMs**, usando um modelo premium fixo para avaliar qualidade editorial dos candidatos.
+_Avoid_: juiz barato por padrao, troca silenciosa de avaliador, avaliacao sem conflito registrado
+
+**Modo de Escala**:
+A configuracao operacional que prioriza baixo custo medio por **Job de Video** mantendo a qualidade minima de publicacao.
+_Avoid_: qualidade maxima em toda tentativa, gastar modelo premium por padrao, publicar sem gates
+
+**Modo Premium**:
+A configuracao operacional que permite maior custo por **Job de Video** quando potencial, risco ou falha repetida justificam uma geracao mais forte.
+_Avoid_: gastar caro sempre, aprovar sem revisao, tratar todo job como premium
+
+**Custo por Job Publicavel**:
+O custo total de geracao e revisao automatizada necessario para um **Job de Video** passar pelos gates e chegar a revisao ou publicacao.
+_Avoid_: custo por token isolado, preco nominal do modelo, ignorar retries e fallbacks
+
+**Custo Operacional Observado do Torneio**:
+A medida de custo do **Torneio de LLMs** baseada em tokens reportados, latencia, falhas, retries, timeouts e taxa de sucesso sem converter para dinheiro.
+_Avoid_: preco chutado, comparar so tokens, ignorar falha operacional barata
+
+**Custo Estimado Versionado**:
+A estimativa de custo em dinheiro usada no **Torneio de LLMs** somente quando baseada em uma tabela de precos versionada.
+_Avoid_: chutar preco, comparar custo sem fonte, usar preco atual invisivel em resultado historico
+
 **Roteiro Pronto**:
-Um roteiro fornecido por uma pessoa como fonte de verdade editorial para um **Job de Video**; o sistema nao deve reescrever hook, beats, payoff ou fechamento automaticamente.
+Um roteiro fornecido por uma pessoa como fonte de verdade editorial validada para um **Job de Video**.
 _Avoid_: prompt, tema, titulo completo
 
 **Banco de Roteiros Prontos**:
-Um estoque de **Roteiros Prontos** fornecidos por uma pessoa para a automacao transformar em **Jobs de Video** sem gerar nova pauta ou novo roteiro por LLM.
+Um estoque de **Roteiros Prontos** validados por uma pessoa para a automacao transformar em **Jobs de Video** sem gerar nova pauta ou novo roteiro por LLM.
 _Avoid_: fila de prompts, temas soltos, backlog gerado pelo app
 
 **Pagina de Biblioteca de Roteiros**:
@@ -229,24 +461,28 @@ Um conjunto de **Roteiros Prontos** enviado por arquivo ou copiar/colar para ali
 _Avoid_: upload de videos, lista de temas, texto sem rotulos, CSV inicial, JSON inicial
 
 **Roteiro Pronto Consumido**:
-Um item do **Banco de Roteiros Prontos** que ja foi usado em uma tentativa de criacao de **Job de Video** e nao deve ser reutilizado automaticamente.
-_Avoid_: tentar o mesmo roteiro todo dia, duplicar job, reciclar sem revisao
+Um item do **Banco de Roteiros Prontos** que ja foi usado para criar um **Job de Video**, mesmo quando esse job falha antes da publicacao.
+_Avoid_: tentar o mesmo roteiro todo dia, duplicar job, reciclar sem revisao, voltar automaticamente ao banco
 
 **Selecao Aleatoria de Roteiro**:
-A escolha nao sequencial de um item disponivel do **Banco de Roteiros Prontos**, filtrada por **Similaridade Narrativa** para evitar repeticao.
-_Avoid_: ordem de importacao obrigatoria, prioridade manual inicial, sorteio sem filtro
+A escolha nao sequencial de um item disponivel do **Banco de Roteiros Prontos**, preservando a prioridade do banco mesmo quando houver **Similaridade Narrativa**.
+_Avoid_: ordem de importacao obrigatoria, prioridade manual inicial, fallback por similaridade
 
 **Roteiro Pulado por Similaridade**:
-Um item disponivel do **Banco de Roteiros Prontos** que nao gera **Job de Video** em uma execucao porque esta semanticamente proximo demais da agenda atual.
-_Avoid_: consumido, rejeitado, apagado
+Um conceito historico que nao deve impedir um item disponivel do **Banco de Roteiros Prontos** de gerar **Job de Video**.
+_Avoid_: criterio ativo de fallback, consumido sem tentativa, rejeitado por similaridade
 
 **Fallback para Tema Automatico**:
-A escolha de usar **Tema Automatico** quando o **Banco de Roteiros Prontos** esta vazio ou quando seus itens disponiveis foram pulados por **Similaridade Narrativa** no ciclo atual.
-_Avoid_: parar sem tentar, forcar roteiro repetitivo, ignorar dia vago
+A escolha de usar **Tema Automatico** apenas quando o **Banco de Roteiros Prontos** nao tem nenhum item disponivel para tentativa.
+_Avoid_: fallback por similaridade, ignorar roteiro pronto disponivel, gerar roteiro antes de consumir o banco
 
 **Texto Rotulado**:
 Um texto dividido por rotulos editoriais reconheciveis, como titulo, hook, beats, payoff e fechamento.
 _Avoid_: JSON, prompt livre, markdown arbitrario
+
+**Normalizacao de Roteiro Pronto**:
+A conversao de variacoes leves de sintaxe em **Texto Rotulado** canonico antes de importar ou criar um **Job de Video**, preservando o texto editorial e removendo apenas formatacao como negrito de Markdown e separadores de lote.
+_Avoid_: reescrita de roteiro, fact-check automatico, reparo editorial invisivel
 
 **Loop Editorial**:
 A tensao narrativa que sustenta a curiosidade entre o hook e a entrega dos beats em um **Roteiro Pronto**.
@@ -268,6 +504,10 @@ _Avoid_: prompt solto, descricao estetica generica, copia da narracao, lista lon
 A funcao editorial que uma cena cumpre visualmente dentro de um **Plano de Cenas**.
 _Avoid_: estilo de camera, categoria tecnica solta, descricao estetica
 
+**Movimento Visual de Cena**:
+A variacao sutil e perceptivelmente estavel de enquadramento durante uma cena do **Arquivo de Video Final**, usada para reduzir monotonia sem mudar a **Intencao Visual** ou a narracao aprovada.
+_Avoid_: efeito gratuito, transicao chamativa, camera como substituta de cena ruim, reescrita visual, tremor visual, pulso de zoom
+
 **Validacao Visual de Asset**:
 A avaliacao de uma imagem gerada contra o **Contrato Visual do Roteiro** e a funcao narrativa da cena que ela representa.
 _Avoid_: score semantico generico, qualidade estetica isolada, aprovacao por provider
@@ -279,6 +519,10 @@ _Avoid_: fato verificado pelo app, fonte automatica, suposicao
 **Confirmacao de Factualidade**:
 A declaracao de que os **Fatos Declarados** em um **Roteiro Pronto** ja foram revisados antes do envio.
 _Avoid_: fact-check automatico, fonte do app, aprovacao de publicacao
+
+**Validacao Humana de Roteiro Pronto**:
+A declaracao de que uma pessoa ja aprovou o texto, promessa, retencao, originalidade, metadados editoriais e factualidade assumida de um **Roteiro Pronto**.
+_Avoid_: auditoria editorial automatica, score editorial, bloqueio de copy
 
 **Confirmacao Factual por Lote**:
 A declaracao de uma pessoa de que assume a factualidade dos **Fatos Declarados** em todos os itens de um **Lote de Roteiros Prontos**.
@@ -316,9 +560,13 @@ _Avoid_: sugestao leve, tema amplo repetido, penalidade pequena, bloqueio de rot
 Uma pontuacao composta que combina monetizacao, factualidade, retencao, metadados, alinhamento semantico de assets e repeticao para decidir **Elegibilidade Automatizada**.
 _Avoid_: aprovacao subjetiva, score unico sem criterio, decisao invisivel
 
+**Score Diagnostico de Roteiro Pronto**:
+Uma leitura informativa dos sinais editoriais automatizados de um **Job de Video** criado a partir do **Banco de Roteiros Prontos**, sem poder bloquear a **Publicacao Automatizada**.
+_Avoid_: veto editorial automatico, substituir validacao humana, score bloqueante do banco
+
 **Narracao Publicavel**:
-A voz principal de um **Job de Video** quando ela soa natural para o publico, tem direito comercial confirmado e nao depende de fallback tecnico de baixa qualidade.
-_Avoid_: qualquer TTS gerado, voz de teste, fallback tecnico, audio sem direito comercial
+A voz principal de um **Job de Video** quando ela soa natural para o publico, tem direito comercial confirmado e nao depende de provedor tecnico de baixa qualidade.
+_Avoid_: qualquer TTS gerado, voz de teste, voz sintetica tecnica, audio sem direito comercial
 
 **Direcao de Voz**:
 A orientacao editorial que define como a **Narracao Publicavel** deve soar, priorizando hook, retencao, payoff e fechamento sem alterar o texto aprovado do roteiro.
@@ -331,6 +579,10 @@ _Avoid_: voz fixa para todo roteiro, alternancia aleatoria, efeito teatral sem r
 **Tentativa Automatizada Sem Publicacao**:
 Um **Job de Video** criado pela automacao que falha, nao chega a `ready_for_upload` ou nao atinge o **Score de Autoaprovacao**, consumindo uma tentativa diaria sem ser descartado automaticamente.
 _Avoid_: rejeicao automatica, apagar candidato, loop sem custo
+
+**Recuperacao Dirigida do Job**:
+A acao humana de retomar, corrigir ou recriar um **Job de Video** especifico que falhou depois de consumir um **Roteiro Pronto**.
+_Avoid_: devolver automaticamente ao banco, repetir no cronjob, consumir outro roteiro para a mesma falha
 
 **Retomada de Publicacao Automatizada**:
 A continuacao de uma tentativa que ja gerou um **Job de Video** elegivel, mas ainda nao confirmou o **Agendamento Nativo do YouTube**.
@@ -444,6 +696,10 @@ _Avoid_: log bruto, porcentagem decorativa, timeline tecnica
 A recusa de um provedor em continuar uma geracao porque a conta, chave ou plano atingiu quota, credito, saldo ou rate limit.
 _Avoid_: timeout, erro generico, instabilidade temporaria
 
+**Falha Operacional do Torneio**:
+Uma falha de candidato no **Torneio de LLMs** causada por limite, autenticacao, modelo indisponivel, timeout, JSON invalido, veto duro ou falha do juiz.
+_Avoid_: retry invisivel, esconder instabilidade, tratar erro operacional como nota editorial
+
 **Chave Esgotada**:
 Uma chave de provedor que ja encontrou **Limite de Provedor** durante uma geracao e nao deve ser tentada novamente no mesmo **Job de Video**.
 _Avoid_: chave invalida, provider offline, timeout, bloqueio diario global automatico
@@ -501,6 +757,18 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - A **Via de Criacao do Job** distingue criacao pelo **Hub de Revisao**, **Ciclo Diario de Automacao**, CLI, API e recriacao derivada de outro **Job de Video**.
 - Um **Job de Video** historico pode aparecer com **Origem Desconhecida do Job** quando a origem nao puder ser inferida com seguranca.
 - Um **Arquivo de Video Final** pertence a exatamente um **Job de Video**.
+- O **Acabamento Editorial Premium** melhora a composicao final do **Arquivo de Video Final** sem mudar o conteudo editorial aprovado.
+- O **Relatorio de Decisao do Torneio** recomenda mudancas de roteamento, mas nao altera a **Configuracao Operacional do Hub** sem aprovacao humana.
+- O **Movimento Visual de Cena** e uma parte possivel do **Acabamento Editorial Premium**, nao o acabamento inteiro.
+- Uma **Prova Comparativa de Acabamento** compara versoes do mesmo **Job de Video** antes de promover uma abordagem de acabamento a padrao.
+- Uma **Decisao Comparativa de Acabamento** nao substitui a **Revisao Humana** necessaria para publicar um **Job de Video**.
+- Uma **Versao Premium Paralela** existe apenas para comparacao ate uma abordagem de **Acabamento Editorial Premium** virar padrao.
+- Uma **Versao Premium Paralela** deve passar pelo **Gate de Acabamento Premium** antes da **Prova Comparativa de Acabamento**.
+- Uma **Acao de Prova Premium** pode criar uma **Versao Premium Paralela** para um **Job de Video** especifico.
+- Um **Ajuste de Timing Visual** pode fazer parte do **Acabamento Editorial Premium** quando preserva o conteudo editorial aprovado.
+- O **Pacote de Acabamento Premium Inicial** limita a primeira **Prova Comparativa de Acabamento** a recursos avaliaveis e consistentes.
+- Um **Plano de Acabamento Editorial** aplica **Acabamento Editorial Premium** ao conteudo aprovado de exatamente um **Job de Video**.
+- Um **Plano de Acabamento Deterministico** e a forma inicial preferida de criar um **Plano de Acabamento Editorial** para manter a comparacao avaliavel.
 - O **Hub de Revisao** deve tornar a **Origem do Job** visivel na fila, na revisao do job e em filtros de triagem.
 - A **Origem do Job** deve aparecer em portugues no **Hub de Revisao**, sem expor identificadores internos.
 - A **Via de Criacao do Job** deve ser exibida separada da **Origem do Job** para distinguir conteudo editorial de caminho operacional.
@@ -535,14 +803,16 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Um **Lote de Roteiros Prontos** pode ser enviado pela **Barra Lateral Global do Hub**.
 - Um item do **Banco de Roteiros Prontos** deve preservar a intencao autoral do **Roteiro Pronto** consumido.
 - **Ciclo Diario de Automacao** deve priorizar o **Banco de Roteiros Prontos** antes de usar **Tema Automatico**.
-- O **Banco de Roteiros Prontos** deve usar **Selecao Aleatoria de Roteiro**, respeitando filtro de **Similaridade Narrativa**.
-- Um **Roteiro Pulado por Similaridade** nao deve virar **Roteiro Pronto Consumido**.
-- **Fallback para Tema Automatico** deve ocorrer quando nao houver **Roteiro Pronto** disponivel e adequado no ciclo atual.
+- O **Banco de Roteiros Prontos** deve usar **Selecao Aleatoria de Roteiro** entre itens disponiveis.
+- **Similaridade Narrativa** em item do **Banco de Roteiros Prontos** deve virar warning, nao fallback.
+- **Fallback para Tema Automatico** deve ocorrer somente quando nao houver **Roteiro Pronto** disponivel no ciclo atual.
 - Um item do **Banco de Roteiros Prontos** que gerar uma tentativa deve virar **Roteiro Pronto Consumido**, mesmo quando o **Job de Video** nao for publicado automaticamente.
+- Um **Job de Video** criado a partir de **Roteiro Pronto Consumido** que falha em etapa tecnica deve usar **Recuperacao Dirigida do Job**, nao retorno automatico ao banco.
 - Um **Roteiro Pronto** deve ser enviado como **Texto Rotulado**.
 - Um **Roteiro Pronto** deve conter **Loop Editorial** entre hook e beats.
 - Um **Roteiro Pronto** pode conter **Fatos Declarados**.
 - **Fatos Declarados** dependem de **Confirmacao de Factualidade**.
+- Um item do **Banco de Roteiros Prontos** possui **Validacao Humana de Roteiro Pronto**.
 - Um **Lote de Roteiros Prontos** pode entrar em **Publicacao Automatizada** quando houver **Confirmacao Factual por Lote**.
 - Um **Lote de Roteiros Prontos** gerado por IA nao tem **Confirmacao Factual por Lote** automaticamente.
 - **Loop Editorial** nao e **Fato Declarado** por si so.
@@ -550,12 +820,16 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Um **Horario de Publicacao** so deve ser escolhido depois da aprovacao do **Job de Video**.
 - **Publicacao Automatizada** pode aprovar, agendar e publicar um **Job de Video** sem **Revisao Humana** previa quando os criterios de score e bloqueio forem satisfeitos.
 - **Elegibilidade Automatizada** exige status `ready_for_upload`; **Jobs de Video** em `monetization_review` ou `blocked_for_monetization` nao podem entrar em **Publicacao Automatizada**.
+- **Tema Automatico** pode chegar a **Publicacao Automatizada**, mas nao possui **Validacao Humana de Roteiro Pronto** e deve passar pelo caminho rigoroso de factualidade, auditoria textual, metadados, repeticao, visual, direitos, disclosure, duracao, audio, render e YouTube.
+- **Validacao Humana de Roteiro Pronto** transforma bloqueios editoriais automatizados em warnings, mas nao dispensa etapas tecnicas, visuais, direitos, disclosure, duracao, audio, render ou YouTube.
 - **Tema Amplo** pode se repetir em varios **Jobs de Video** quando a **Similaridade Narrativa** for baixa.
 - **Similaridade Narrativa** alta deve bloquear **Publicacao Automatizada** para evitar conteudo massivo ou repetitivo.
 - **Risco Medio de Repeticao** deve reduzir o score, mas nao bloquear sozinho a **Publicacao Automatizada**.
 - **Risco Alto de Repeticao** deve bloquear **Publicacao Automatizada**.
 - **Score de Autoaprovacao** deve exigir monetizacao aprovada, factualidade minima de 0.80 quando existir, retencao minima de 0.75 quando existir, metadados minimos de 0.75 quando existirem, alinhamento semantico medio de assets de 0.80 quando houver assets e pontuacao composta minima de 0.82.
 - **Risco Medio de Repeticao** deve aplicar penalidade de 0.10 no **Score de Autoaprovacao**.
+- **Score de Autoaprovacao** deve virar **Score Diagnostico de Roteiro Pronto** para **Jobs de Video** criados pelo **Banco de Roteiros Prontos**.
+- **Score Diagnostico de Roteiro Pronto** nao deve bloquear **Publicacao Automatizada** quando o job estiver tecnicamente pronto.
 - **Tentativa Automatizada Sem Publicacao** consome uma tentativa da **Cadencia Diaria de Geracao** e permanece disponivel no **Hub de Revisao** para avaliacao manual.
 - **Retomada de Publicacao Automatizada** deve reutilizar o mesmo **Job de Video** quando ele ja atingiu **Elegibilidade Automatizada** e a falha ocorreu antes da confirmacao do YouTube.
 - **Limite de Retomada de Publicacao** deve parar a retomada automatica apos tres falhas de upload ou agendamento do mesmo **Job de Video**.
@@ -718,25 +992,27 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - "tema automatico" nao significa escolha aleatoria; resolvido: o sistema deve preferir tendencia real e expor quando caiu em fallback.
 - "roteiro pronto" nao significa prompt livre; resolvido: e conteudo editorial estruturado fornecido por uma pessoa e tratado como fonte de verdade.
 - "banco de roteiros" nao significa backlog de temas; resolvido: use **Banco de Roteiros Prontos** para armazenar textos autorais prontos para consumo pela automacao.
-- "aleatorio" nao significa ignorar repeticao; resolvido: use **Selecao Aleatoria de Roteiro** com filtro de **Similaridade Narrativa**.
-- "pulado por similaridade" nao significa consumido; resolvido: **Roteiro Pulado por Similaridade** continua disponivel para ciclos futuros.
-- "banco saturado" nao significa parar; resolvido: use **Fallback para Tema Automatico**.
+- "aleatorio" nao significa que o sistema pode ignorar o banco; resolvido: use **Selecao Aleatoria de Roteiro** entre itens disponiveis do **Banco de Roteiros Prontos**.
+- "pulado por similaridade" nao deve ser comportamento ativo do banco; resolvido: **Similaridade Narrativa** em roteiro do banco vira warning.
+- "banco saturado" nao significa fallback automatico; resolvido: use **Fallback para Tema Automatico** somente quando nao houver item disponivel no banco.
 - "colar em lote" nao significa texto livre sem contrato; resolvido: use **Lote de Roteiros Prontos** com os mesmos rotulos canonicos de **Texto Rotulado**.
-- "consumir roteiro" nao significa publicar obrigatoriamente; resolvido: um **Roteiro Pronto Consumido** pode virar tentativa sem publicacao e nao deve ser retentado automaticamente.
+- "consumir roteiro" nao significa publicar obrigatoriamente; resolvido: um **Roteiro Pronto Consumido** pode virar tentativa sem publicacao e deve ser recuperado pelo **Job de Video**, nao retentado automaticamente pelo banco.
 - "loop" em **Roteiro Pronto** nao significa claim factual; resolvido: use **Loop Editorial** como tensao de retencao entre hook e beats.
 - "reparar automaticamente" nao se aplica ao texto de **Roteiro Pronto**; resolvido: se o texto pronto tiver problema que bloqueia o pipeline, bloqueie e exponha o motivo em vez de reescrever hook, beats, payoff ou fechamento.
 - "texto rotulado" nao significa JSON nem markdown livre; resolvido: o formato canonico inicial usa rotulos editoriais em texto simples.
 - "confiar em mim" nao significa que o fato foi verificado automaticamente pelo app; resolvido: fatos do **Roteiro Pronto** entram como **Fatos Declarados** sob responsabilidade de quem enviou.
 - "feito por IA" nao significa fato confirmado; resolvido: use **Confirmacao Factual por Lote** quando uma pessoa assume explicitamente a factualidade do lote.
 - "confirmacao de factualidade" nao significa aprovacao de publicacao; resolvido: ela cobre a responsabilidade factual do **Roteiro Pronto**.
-- "pular geracao por LLM" nao significa pular validacao; resolvido: **Roteiro Pronto** preserva o texto enviado e eventuais problemas viram warnings, revisão ou bloqueio, nao reparo automatico do roteiro.
+- "pular geracao por LLM" nao significa pular validacao tecnica; resolvido: **Roteiro Pronto** preserva o texto enviado, sinais editoriais automatizados viram warnings e problemas tecnicos ou visuais ainda podem bloquear.
 - "ajustar duracao" nao significa expandir ou cortar livremente; resolvido: desvios pequenos podem ser reparados, desvios grandes bloqueiam antes da midia.
 - "titulo" em **Roteiro Pronto** nao significa fala narrada; resolvido: titulo e metadado, enquanto hook, beats, payoff e fechamento formam a narracao.
 - "hashtags" em **Roteiro Pronto** nao sao fonte de verdade narrativa; resolvido: podem ser derivadas automaticamente como metadados.
 - "data e hora" em agendamento nao significa horario do servidor; resolvido: use **Horario de Publicacao**, com fuso explicito.
 - "auto aprovar" nao significa ignorar criterios; resolvido: use **Publicacao Automatizada**, com scores explicitos, bloqueios e auditoria posterior.
 - "automacao total" nao significa publicar jobs em revisao; resolvido: use **Elegibilidade Automatizada** restrita a `ready_for_upload`.
-- "sem repetir" nao significa banir o mesmo tema amplo; resolvido: permita **Tema Amplo** recorrente e bloqueie **Similaridade Narrativa** alta.
+- "tema automatico" nao significa caminho leve de publicacao; resolvido: **Tema Automatico** tambem pode autopublicar, mas somente quando passar pelo caminho rigoroso da **Elegibilidade Automatizada**.
+- "score baixo" em roteiro do banco nao significa veto; resolvido: use **Score Diagnostico de Roteiro Pronto** como informacao, preservando a **Validacao Humana de Roteiro Pronto**.
+- "sem repetir" nao significa banir roteiro validado do banco; resolvido: permita **Banco de Roteiros Prontos** recorrente com warning de **Similaridade Narrativa**.
 - "similaridade media" nao significa bloqueio imediato; resolvido: use **Risco Medio de Repeticao** como penalidade e **Risco Alto de Repeticao** como bloqueio.
 - "score" nao significa uma nota opaca; resolvido: use **Score de Autoaprovacao** com criterios minimos explicitos e score composto minimo de 0.82.
 - "nao passou no score" nao significa rejeicao automatica; resolvido: vira **Tentativa Automatizada Sem Publicacao** e permanece revisavel.

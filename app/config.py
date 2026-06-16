@@ -27,12 +27,11 @@ class Settings(BaseSettings):
     language: str = "pt-BR"
     target_duration_sec: int = 50
     scene_target_count: int = 6
-    simple_shorts_mode: bool = True
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
-    llm_primary_provider: str = "openai"
-    llm_fallback_provider: str = "deepseek"
+    llm_primary_provider: str = "xai"
+    llm_fallback_provider: str = "openai"
     llm_repair_provider: str = "deepseek"
     llm_scene_provider: str = "deepseek"
     llm_enable_fallback: bool = True
@@ -48,6 +47,7 @@ class Settings(BaseSettings):
     asset_semantic_threshold: float = 0.80
     asset_total_threshold: float = 0.75
     render_min_bitrate: int = 250_000
+    render_primary_backend: str = "remotion"
     asset_generation_timeout_sec: float = 75.0
     asset_generation_regeneration_rounds: int = 2
     asset_generation_parallelism: int = 3
@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     allow_music_api_fallback: bool = False
     tts_primary_provider: str = "gemini_tts"
     gemini_api_key: str | None = None
+    gemini_text_model: str = "gemini-3.5-flash"
+    gemini_text_timeout_sec: float = 180.0
     gemini_tts_api_key: str | None = None
     gemini_tts_model: str = "gemini-3.1-flash-tts-preview"
     gemini_tts_voice_name: str = "Kore"
@@ -100,6 +102,7 @@ class Settings(BaseSettings):
     automation_max_generation_attempts: int = 3
     automation_max_publish_attempts_per_job: int = 3
     automation_score_threshold: float = 0.82
+    premium_publish_min_score: float = 9.2
     performance_collection_enabled: bool = True
     performance_sync_active_window_days: int = 45
     performance_sync_archive_window_days: int = 180
@@ -116,21 +119,28 @@ class Settings(BaseSettings):
     minimax_text_api_key: str | None = None
     minimax_image_api_key: str | None = None
     minimax_music_api_key: str | None = None
+    minimax_text_model: str = "MiniMax-M2.7"
+    minimax_text_thinking: str = "auto"
     minimax_text_base_url: str = "https://api.minimax.io/v1"
     minimax_image_base_url: str = "https://api.minimax.io/v1/image_generation"
     minimax_music_base_url: str = "https://api.minimax.io/v1"
+    minimax_image_aspect_ratio: str = "9:16"
     minimax_text_timeout_sec: float = 180.0
     minimax_music_timeout_sec: float = 240.0
     minimax_scene_plan_timeout_sec: float = 120.0
     llm_scene_plan_timeout_sec: float = 75.0
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_model: str = "gpt-5.4"
+    openai_model: str = "gpt-5.4-nano"
     openai_timeout_sec: float = 180.0
+    xai_api_key: str | None = None
+    xai_base_url: str = "https://api.x.ai/v1"
+    xai_model: str = "grok-4.20-non-reasoning"
+    xai_timeout_sec: float = 180.0
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
-    deepseek_timeout_sec: float = 90.0
+    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_timeout_sec: float = 180.0
     qwen_api_key: str | None = None
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     qwen_model: str = "qwen3.6-max-preview"
@@ -192,7 +202,9 @@ class Settings(BaseSettings):
         "llm_scene_plan_timeout_sec",
         "openai_timeout_sec",
         "deepseek_timeout_sec",
+        "xai_timeout_sec",
         "qwen_timeout_sec",
+        "gemini_text_timeout_sec",
         "gemini_tts_timeout_sec",
     )
     @classmethod
@@ -200,6 +212,15 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("timeout values must be positive")
         return value
+
+    @field_validator("minimax_text_thinking")
+    @classmethod
+    def validate_minimax_text_thinking(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"auto", "enabled", "disabled"}
+        if normalized not in allowed:
+            raise ValueError("minimax_text_thinking must be one of: auto, enabled, disabled")
+        return normalized
 
     @field_validator("asset_generation_parallelism")
     @classmethod
@@ -215,6 +236,15 @@ class Settings(BaseSettings):
         allowed = {"local_bank", "minimax", "auto"}
         if normalized not in allowed:
             raise ValueError("background_music_provider must be one of: local_bank, minimax, auto")
+        return normalized
+
+    @field_validator("render_primary_backend")
+    @classmethod
+    def validate_render_primary_backend(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"ffmpeg", "remotion"}
+        if normalized not in allowed:
+            raise ValueError("render_primary_backend must be one of: ffmpeg, remotion")
         return normalized
 
     @field_validator(
@@ -250,6 +280,13 @@ class Settings(BaseSettings):
             raise ValueError("automation_score_threshold must be between 0 and 1")
         return value
 
+    @field_validator("premium_publish_min_score")
+    @classmethod
+    def validate_premium_publish_min_score(cls, value: float) -> float:
+        if not 0 <= value <= 10:
+            raise ValueError("premium_publish_min_score must be between 0 and 10")
+        return value
+
     @field_validator("performance_sync_active_window_days", "performance_sync_archive_window_days")
     @classmethod
     def validate_performance_sync_windows(cls, value: int) -> int:
@@ -263,6 +300,15 @@ class Settings(BaseSettings):
         if not 1 <= value <= 100:
             raise ValueError("performance_sync_batch_limit must be between 1 and 100")
         return value
+
+    @field_validator("minimax_image_aspect_ratio")
+    @classmethod
+    def validate_minimax_image_aspect_ratio(cls, value: str) -> str:
+        normalized = (value or "").strip()
+        allowed = {"1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9"}
+        if normalized not in allowed:
+            raise ValueError(f"minimax_image_aspect_ratio must be one of: {', '.join(sorted(allowed))}")
+        return normalized
 
     @model_validator(mode="after")
     def validate_performance_sync_window_order(self) -> "Settings":
@@ -296,7 +342,7 @@ class Settings(BaseSettings):
 
     @property
     def resolved_minimax_text_api_key(self) -> str | None:
-        return self.minimax_text_api_key or self.minimax_api_key
+        return self.minimax_text_api_key or self.minimax_api_key or self.minimax_image_api_key
 
     @property
     def resolved_minimax_image_api_key(self) -> str | None:
@@ -305,6 +351,10 @@ class Settings(BaseSettings):
     @property
     def resolved_minimax_music_api_key(self) -> str | None:
         return self.minimax_music_api_key or self.resolved_minimax_text_api_key
+
+    @property
+    def resolved_gemini_text_api_key(self) -> str | None:
+        return self.gemini_api_key or self.gemini_tts_api_key
 
     @property
     def artifacts_dir(self) -> Path:

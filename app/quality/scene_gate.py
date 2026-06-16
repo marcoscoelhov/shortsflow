@@ -16,6 +16,32 @@ GENERIC_PROMPT_MARKERS = {
     "showing process or mechanism",
 }
 
+DISALLOWED_VERTICAL_COMPOSITION_MARKERS = {
+    "before and after",
+    "comparison lines",
+    "diptych",
+    "grid layout",
+    "multi panel",
+    "multi-panel",
+    "panel layout",
+    "sequence",
+    "side by side",
+    "split screen",
+    "split-screen",
+    "triptych",
+    "two panels",
+    "linha de comparacao",
+    "linha de comparação",
+    "linhas de comparacao",
+    "linhas de comparação",
+    "montagem",
+    "paineis",
+    "painéis",
+    "sequencia",
+    "sequência",
+    "tela dividida",
+}
+
 NEGATION_TOKENS = {"no", "not", "without", "sem", "nao", "nunca", "avoid", "evitar"}
 
 VISUAL_TERM_ALIASES = {
@@ -78,6 +104,9 @@ class ScenePlanGate:
                 scene_reasons.append("missing_image_prompt")
             if "no readable text" not in prompt.lower():
                 scene_reasons.append("missing_no_text_constraint")
+            composition_hits = _disallowed_vertical_composition_hits(prompt)
+            if composition_hits:
+                scene_reasons.append("disallowed_split_or_collage_composition")
             if subject and subject.lower() not in prompt.lower() and subject.lower() not in narration.lower():
                 # Provider prompts may translate the subject to English for image models.
                 # Treat this as a metric, not a hard failure.
@@ -89,7 +118,14 @@ class ScenePlanGate:
                 scene_reasons.append("missing_token_bounds")
             elif int(scene["token_end"]) < int(scene["token_start"]):
                 scene_reasons.append("invalid_token_bounds")
-            scene_results.append({"scene_id": scene_id, "passed": not scene_reasons, "reasons": scene_reasons})
+            scene_results.append(
+                {
+                    "scene_id": scene_id,
+                    "passed": not scene_reasons,
+                    "reasons": scene_reasons,
+                    "disallowed_composition_hits": composition_hits,
+                }
+            )
             reasons.extend(f"{scene_id}:{reason}" for reason in scene_reasons)
         return SceneGateResult(
             passed=not reasons,
@@ -156,6 +192,32 @@ def _scene_corpus(scene: dict[str, Any]) -> str:
             for key in ("narration_text", "primary_subject", "topic_hint", "image_prompt", "visual_intent")
         )
     )
+
+
+def _disallowed_vertical_composition_hits(prompt: str) -> list[str]:
+    normalized = _normalized_text(prompt)
+    tokens = normalized.split()
+    hits: list[str] = []
+    for marker in sorted(DISALLOWED_VERTICAL_COMPOSITION_MARKERS):
+        normalized_marker = _normalized_text(marker)
+        if not normalized_marker:
+            continue
+        if _marker_present_unnegated(tokens, normalized_marker.split()):
+            hits.append(marker)
+    return hits
+
+
+def _marker_present_unnegated(tokens: list[str], marker_tokens: list[str]) -> bool:
+    if not marker_tokens:
+        return False
+    for index in range(0, len(tokens) - len(marker_tokens) + 1):
+        if tokens[index : index + len(marker_tokens)] != marker_tokens:
+            continue
+        before = tokens[max(0, index - 4) : index]
+        if any(token in NEGATION_TOKENS for token in before):
+            continue
+        return True
+    return False
 
 
 def _text_list(value: Any) -> list[str]:

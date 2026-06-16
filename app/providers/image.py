@@ -374,6 +374,7 @@ class MinimaxImageProvider:
         if not primary_key and not dedicated_key:
             raise ProviderFailure("minimax_image", "missing minimax text or image api key")
         self.url = settings.minimax_image_base_url
+        self.aspect_ratio = getattr(settings, "minimax_image_aspect_ratio", "9:16")
         self.primary_key = primary_key
         self.dedicated_key = dedicated_key if dedicated_key != primary_key else None
         self.key = primary_key or dedicated_key
@@ -442,7 +443,7 @@ class MinimaxImageProvider:
                             json={
                                 "model": "image-01",
                                 "prompt": scene["image_prompt"],
-                                "aspect_ratio": "2:3",
+                                "aspect_ratio": self.aspect_ratio,
                                 "response_format": "base64",
                             },
                             timeout=httpx.Timeout(45.0, connect=15.0),

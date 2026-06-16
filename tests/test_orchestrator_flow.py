@@ -1,4 +1,18 @@
 from tests.e2e_support import *  # noqa: F403
+import sqlite3
+from sqlalchemy.exc import OperationalError
+from app.models import ScenePlan, StepExecution
+from app.utils import stable_hash
+
+
+def _create_direct_pipeline_job(seed_theme: str = "polvos") -> str:
+    job_id = f"direct-pipeline-{time.time_ns()}"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="test_processing", seed_theme=seed_theme)
+        session.commit()
+    status = orchestrator.process_job(job_id)
+    assert status in {"monetization_review", "blocked_for_monetization"}
+    return job_id
 
 
 def test_job_progress_is_exposed_in_detail_and_api() -> None:
@@ -56,15 +70,7 @@ def test_job_progress_is_exposed_in_detail_and_api() -> None:
     assert "Fila atualizada." in hub.text
 
 def test_full_pipeline_reaches_monetization_review() -> None:
-    client = TestClient(app)
-    response = client.post(
-        "/jobs",
-        data={"seed_theme": "polvos", "target_duration_sec": 35, "tone": "intrigante_direto", "cta_style": "none"},
-        follow_redirects=False,
-    )
-    assert response.status_code == 303
-    job_id = response.headers["location"].split("/")[-1]
-    wait_for_any_status(job_id, {"monetization_review", "blocked_for_monetization"})
+    job_id = _create_direct_pipeline_job("polvos")
     with SessionLocal() as session:
         job = session.get(Job, job_id)
         render = session.query(RenderOutput).filter_by(job_id=job_id).one()
@@ -96,6 +102,7 @@ def test_full_pipeline_reaches_monetization_review() -> None:
         timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
         assert any(step["step_name"] == "render" and step["duration_ms"] is not None for step in timeline["steps"])
         final_status = job.quality_summary["monetization"]["final_status"]
+    client = TestClient(app)
     detail = client.get(f"/jobs/{job_id}")
     assert detail.status_code == 200
     assert "Decidir revisão" in detail.text
@@ -113,6 +120,49 @@ def test_sqlite_engine_uses_busy_timeout_and_wal_pragmas() -> None:
     assert busy_timeout >= 30_000
     assert str(journal_mode).lower() == "wal"
 
+def test_sqlite_lock_retry_uses_fresh_transaction(monkeypatch) -> None:
+    import app.db as db_module
+
+    sessions = []
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.commits = 0
+            self.rollbacks = 0
+            self.closed = False
+
+        def commit(self) -> None:
+            self.commits += 1
+
+        def rollback(self) -> None:
+            self.rollbacks += 1
+
+        def close(self) -> None:
+            self.closed = True
+
+    def session_factory():
+        session = FakeSession()
+        sessions.append(session)
+        return session
+
+    attempts = {"count": 0}
+
+    def operation(_session):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise OperationalError("UPDATE jobs", {}, sqlite3.OperationalError("database is locked"))
+        return "claimed"
+
+    monkeypatch.setattr(db_module, "SessionLocal", session_factory)
+    monkeypatch.setattr(db_module.time, "sleep", lambda _delay: None)
+
+    assert db_module.run_transaction_with_lock_retry(operation) == "claimed"
+    assert attempts["count"] == 3
+    assert len(sessions) == 3
+    assert [session.rollbacks for session in sessions] == [1, 1, 0]
+    assert [session.commits for session in sessions] == [0, 0, 1]
+    assert all(session.closed for session in sessions)
+
 def test_operational_settings_route_saves_allowlisted_overrides() -> None:
     client = TestClient(app)
     response = client.post(
@@ -128,6 +178,7 @@ def test_operational_settings_route_saves_allowlisted_overrides() -> None:
             "background_music_provider": "local_bank",
             "background_music_enabled": "true",
             "music_bank_auto_populate": "true",
+            "tts_primary_provider": "elevenlabs",
             "youtube_publish_mode": "api",
             "youtube_api_enabled": "true",
             "automation_daily_timezone": "UTC",
@@ -144,6 +195,7 @@ def test_operational_settings_route_saves_allowlisted_overrides() -> None:
     assert response.status_code == 303
     assert response.headers["location"] == "/?settings_saved=1"
     assert main_module.settings.llm_primary_provider == "deepseek"
+    assert main_module.settings.tts_primary_provider == "elevenlabs"
     assert main_module.settings.youtube_publish_mode == "api"
     assert main_module.settings.youtube_api_enabled is True
     assert main_module.settings.allow_music_api_fallback is False
@@ -151,6 +203,7 @@ def test_operational_settings_route_saves_allowlisted_overrides() -> None:
         saved_keys = set(session.scalars(select(OperationalSetting.key)).all())
 
     assert "llm_primary_provider" in saved_keys
+    assert "tts_primary_provider" in saved_keys
     assert "youtube_api_enabled" in saved_keys
     assert "openai_api_key" not in saved_keys
 
@@ -326,6 +379,15 @@ def test_redirect_back_appends_params_before_fragment() -> None:
 
     assert response.status_code == 303
     assert response.headers["location"] == "/?automation_error=failed#publication-hub"
+
+
+def test_redirect_back_rejects_external_or_header_injection_targets() -> None:
+    external = main_module._redirect_back("//evil.test/path", default="/publication-hub")
+    crlf = main_module._redirect_back("/jobs/1\r\nLocation: //evil.test", default="/publication-hub")
+
+    assert external.headers["location"] == "/publication-hub"
+    assert crlf.headers["location"] == "/publication-hub"
+
 
 def test_create_job_rejects_unsupported_niche() -> None:
     client = TestClient(app)
@@ -628,9 +690,7 @@ def test_channel_repetition_report_ignores_failed_regeneration_source() -> None:
 
 def test_retry_action_creates_new_job() -> None:
     client = TestClient(app)
-    response = client.post("/jobs", data={"seed_theme": "vulcoes", "target_duration_sec": 35}, follow_redirects=False)
-    job_id = response.headers["location"].split("/")[-1]
-    wait_for_any_status(job_id, {"monetization_review", "blocked_for_monetization"})
+    job_id = _create_direct_pipeline_job("vulcoes")
     retry = client.post(
         f"/jobs/{job_id}/review",
         data={"action": "retry", "reason_codes": "render_issue"},
@@ -639,6 +699,407 @@ def test_retry_action_creates_new_job() -> None:
     assert retry.status_code == 303
     new_job_id = retry.headers["location"].split("/")[-1]
     assert new_job_id != job_id
+
+def test_reprocess_job_from_tts_clears_downstream_cache_only(monkeypatch) -> None:
+    job_id = "reprocess-from-tts"
+    ran_steps: list[str] = []
+
+    def fake_handler(step_name: str):
+        def handler(session, job, attempt):
+            ran_steps.append(step_name)
+            if step_name == "monetization_readiness_gate":
+                quality_summary = dict(job.quality_summary or {})
+                quality_summary["monetization"] = {
+                    "passed": True,
+                    "final_status": "ready_for_upload",
+                    "hard_blockers": [],
+                    "manual_required": [],
+                    "warnings": [],
+                    "content_hash": stable_hash("reprocessed-monetization"),
+                }
+                job.quality_summary = quality_summary
+            return [f"{step_name}.json"]
+
+        return handler
+
+    fake_steps = [
+        StepDefinition("script", 0, fake_handler("script")),
+        StepDefinition("tts", 0, fake_handler("tts")),
+        StepDefinition("subtitle_alignment", 0, fake_handler("subtitle_alignment")),
+        StepDefinition("background_music", 0, fake_handler("background_music")),
+        StepDefinition("render", 0, fake_handler("render")),
+        StepDefinition("monetization_readiness_gate", 0, fake_handler("monetization_readiness_gate")),
+        StepDefinition("publish_to_review_hub", 0, fake_handler("publish_to_review_hub")),
+    ]
+    monkeypatch.setattr(orchestrator, "_steps", lambda: fake_steps)
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="blocked_for_monetization", seed_theme="Reprocessar TTS")
+        session.add(
+            TopicPlan(
+                topic_id=f"{job_id}-topic",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic-hash",
+                canonical_topic="Reprocessar TTS",
+                angle="teste",
+                hook_promise="teste",
+                entities=[],
+                search_terms=[],
+                title_candidates=[],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"{job_id}-script",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="script-hash",
+                title="Reprocessar TTS",
+                hook="O áudio antigo caiu para provider técnico.",
+                body_beats=["A recuperação deve começar na narração."],
+                ending="O job volta com monetização recalculada.",
+                cta=None,
+                full_narration="O áudio antigo caiu para provider técnico. A recuperação deve começar na narração. O job volta com monetização recalculada.",
+                estimated_duration_sec=35,
+                key_facts=[],
+                token_count=18,
+                language="pt-BR",
+                qa_metrics={},
+            )
+        )
+        now = utcnow()
+        for step_name in ["script", "tts", "subtitle_alignment", "publish_to_review_hub"]:
+            session.add(
+                StepExecution(
+                    execution_id=f"{job_id}-{step_name}",
+                    job_id=job_id,
+                    step_name=step_name,
+                    attempt=1,
+                    status="succeeded",
+                    input_hash=f"old-{step_name}",
+                    output_refs=[f"old-{step_name}.json"],
+                    started_at=now,
+                    finished_at=now,
+                )
+            )
+        session.commit()
+
+    status = orchestrator.reprocess_job_from_step(job_id, "tts")
+
+    assert status == "ready_for_upload"
+    assert ran_steps == [
+        "tts",
+        "subtitle_alignment",
+        "background_music",
+        "render",
+        "monetization_readiness_gate",
+        "publish_to_review_hub",
+    ]
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == "ready_for_upload"
+        assert job.current_step == "publish_to_review_hub"
+        rows = session.scalars(select(StepExecution).where(StepExecution.job_id == job_id)).all()
+
+    by_step = {row.step_name: row for row in rows}
+    assert by_step["script"].output_refs == ["old-script.json"]
+    assert by_step["tts"].output_refs == ["tts.json"]
+    assert by_step["publish_to_review_hub"].output_refs == ["publish_to_review_hub.json"]
+
+def test_job_detail_offers_tts_reprocess_for_technical_tts_blocker() -> None:
+    job_id = "tts-reprocess-action"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="blocked_for_monetization", seed_theme="Reprocessar TTS")
+        session.commit()
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "passed": False,
+            "final_status": "blocked_for_monetization",
+            "hard_blockers": ["technical_tts_provider_not_publishable"],
+            "manual_required": [],
+        },
+    )
+
+    response = TestClient(app).get(f"/jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert "Reprocessar TTS e render" in response.text
+    assert f'action="/jobs/{job_id}/reprocess"' in response.text
+    assert 'name="from_step" value="tts"' in response.text
+
+def test_tts_reprocess_route_redirects_after_reprocessing(monkeypatch) -> None:
+    job_id = "tts-reprocess-route"
+    called: dict[str, str] = {}
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="blocked_for_monetization", seed_theme="Reprocessar TTS")
+        session.commit()
+
+    def fake_reprocess(received_job_id: str, from_step: str) -> str:
+        called["job_id"] = received_job_id
+        called["from_step"] = from_step
+        return "ready_for_upload"
+
+    monkeypatch.setattr(main_module.orchestrator, "reprocess_job_from_step", fake_reprocess)
+
+    response = TestClient(app).post(f"/jobs/{job_id}/reprocess", data={"from_step": "tts"}, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/jobs/{job_id}"
+    assert called == {"job_id": job_id, "from_step": "tts"}
+
+def test_scene_regeneration_route_reuses_existing_artifacts(monkeypatch) -> None:
+    job_id = "scene-regeneration-route"
+    called: dict[str, str] = {}
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Regenerar cena")
+        session.commit()
+
+    def fake_regenerate(received_job_id: str, scene_id: str, operator_instruction: str | None = None) -> str:
+        called["job_id"] = received_job_id
+        called["scene_id"] = scene_id
+        called["operator_instruction"] = operator_instruction or ""
+        return "monetization_review"
+
+    monkeypatch.setattr(main_module.orchestrator, "regenerate_scene_and_rerender", fake_regenerate)
+
+    response = TestClient(app).post(
+        f"/jobs/{job_id}/scenes/scene-3/regenerate",
+        data={"operator_instruction": "uma unica imagem vertical"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/jobs/{job_id}"
+    assert called == {
+        "job_id": job_id,
+        "scene_id": "scene-3",
+        "operator_instruction": "uma unica imagem vertical",
+    }
+
+def test_scene_regeneration_route_handles_recoverable_error(monkeypatch) -> None:
+    job_id = "scene-regeneration-recoverable"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Regenerar cena")
+        session.commit()
+
+    def fake_regenerate(*_args, **_kwargs) -> str:
+        raise RecoverableStepError("render temporariamente indisponivel")
+
+    monkeypatch.setattr(main_module.orchestrator, "regenerate_scene_and_rerender", fake_regenerate)
+
+    response = TestClient(app).post(
+        f"/jobs/{job_id}/scenes/scene-3/regenerate",
+        data={"operator_instruction": "uma unica imagem vertical"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/jobs/{job_id}?reprocess_error=")
+
+def test_regenerate_scene_runs_only_render_downstream(monkeypatch) -> None:
+    job_id = "scene-regeneration-partial"
+    ran_steps: list[str] = []
+
+    def fake_handler(step_name: str):
+        def handler(session, job, attempt):
+            ran_steps.append(step_name)
+            if step_name == "monetization_readiness_gate":
+                quality_summary = dict(job.quality_summary or {})
+                quality_summary["monetization"] = {
+                    "passed": True,
+                    "final_status": "monetization_review",
+                    "hard_blockers": [],
+                    "manual_required": [],
+                    "warnings": [],
+                    "content_hash": stable_hash("scene-regeneration-monetization"),
+                }
+                job.quality_summary = quality_summary
+            return [f"{step_name}.json"]
+
+        return handler
+
+    fake_steps = [
+        StepDefinition("asset_generation", 0, fake_handler("asset_generation")),
+        StepDefinition("tts", 0, fake_handler("tts")),
+        StepDefinition("subtitle_alignment", 0, fake_handler("subtitle_alignment")),
+        StepDefinition("background_music", 0, fake_handler("background_music")),
+        StepDefinition("render", 0, fake_handler("render")),
+        StepDefinition("monetization_readiness_gate", 0, fake_handler("monetization_readiness_gate")),
+        StepDefinition("publish_to_review_hub", 0, fake_handler("publish_to_review_hub")),
+    ]
+    monkeypatch.setattr(orchestrator, "_steps", lambda: fake_steps)
+
+    def fake_generate(job_id_arg: str, scene: dict, attempt: int) -> dict:
+        assert job_id_arg == job_id
+        assert scene["scene_id"] == "scene-2"
+        assert "sem tela dividida" in scene["image_prompt"]
+        return {
+            "events": [],
+            "fallback_events": [],
+            "asset_rows": [
+                {
+                    "asset_id": f"{job_id}-scene-2-new",
+                    "job_id": job_id,
+                    "scene_id": "scene-2",
+                    "schema_version": "1.0.0",
+                    "content_hash": "new-asset-hash",
+                    "created_at": utcnow(),
+                    "provider": "mock_ai",
+                    "uri": f"file:///{job_id}/scene-2-new.png",
+                    "width": 720,
+                    "height": 1280,
+                    "selected": True,
+                    "scores": {
+                        "semantic_match": 0.95,
+                        "total_score": 0.9,
+                        "text_or_watermark_penalty": 0,
+                        "artifact_penalty": 0,
+                    },
+                    "source_url": None,
+                    "attribution": None,
+                    "license_note": None,
+                    "prompt_snapshot": scene["image_prompt"],
+                    "rejection_reason": None,
+                    "fallback_used": False,
+                }
+            ],
+            "selected_asset": {"scene_id": "scene-2", "uri": f"file:///{job_id}/scene-2-new.png"},
+            "asset_refs": ["scene-2-new.png"],
+        }
+
+    monkeypatch.setattr(orchestrator.asset_pipeline, "_generate_assets_for_scene", fake_generate)
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Regenerar uma cena")
+        session.add(
+            ScenePlan(
+                scene_plan_id=f"{job_id}-scene-plan",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="scene-plan-hash",
+                scene_count=2,
+                scenes=[
+                    {
+                        "scene_id": "scene-1",
+                        "order": 1,
+                        "narration_text": "Cena um.",
+                        "token_start": 0,
+                        "token_end": 1,
+                        "image_prompt": "single vertical image, no readable text anywhere",
+                    },
+                    {
+                        "scene_id": "scene-2",
+                        "order": 2,
+                        "narration_text": "Cena dois.",
+                        "token_start": 2,
+                        "token_end": 3,
+                        "image_prompt": "single vertical image, no readable text anywhere",
+                    },
+                ],
+            )
+        )
+        now = utcnow()
+        for step_name in ["tts", "subtitle_alignment", "background_music", "render", "monetization_readiness_gate", "publish_to_review_hub"]:
+            session.add(
+                StepExecution(
+                    execution_id=f"{job_id}-{step_name}",
+                    job_id=job_id,
+                    step_name=step_name,
+                    attempt=1,
+                    status="succeeded",
+                    input_hash=f"old-{step_name}",
+                    output_refs=[f"old-{step_name}.json"],
+                    started_at=now,
+                    finished_at=now,
+                )
+            )
+        session.commit()
+
+    status = orchestrator.regenerate_scene_and_rerender(job_id, "scene-2", "sem tela dividida")
+
+    assert status == "monetization_review"
+    assert ran_steps == ["render", "monetization_readiness_gate", "publish_to_review_hub"]
+    with SessionLocal() as session:
+        rows = session.scalars(select(StepExecution).where(StepExecution.job_id == job_id)).all()
+        by_step = {row.step_name: row for row in rows}
+        assert by_step["tts"].output_refs == ["old-tts.json"]
+        assert by_step["render"].output_refs == ["render.json"]
+        assert session.query(SceneAsset).filter_by(job_id=job_id, scene_id="scene-2", selected=True).count() == 1
+
+def test_scene_regeneration_preserves_existing_asset_when_generation_fails(monkeypatch) -> None:
+    job_id = "scene-regeneration-preserve-old"
+
+    def fail_generate(*_args, **_kwargs):
+        raise RecoverableStepError("provider temporariamente indisponivel")
+
+    monkeypatch.setattr(orchestrator.asset_pipeline, "_generate_assets_for_scene", fail_generate)
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Preservar cena antiga")
+        session.add(
+            ScenePlan(
+                scene_plan_id=f"{job_id}-scene-plan",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="scene-plan-hash",
+                scene_count=1,
+                scenes=[
+                    {
+                        "scene_id": "scene-1",
+                        "order": 1,
+                        "narration_text": "Cena um.",
+                        "token_start": 0,
+                        "token_end": 1,
+                        "image_prompt": "single vertical image, no readable text anywhere",
+                    },
+                ],
+            )
+        )
+        session.add(
+            SceneAsset(
+                asset_id=f"{job_id}-old-scene-1",
+                job_id=job_id,
+                scene_id="scene-1",
+                schema_version="1.0.0",
+                content_hash="old-asset-hash",
+                provider="mock_ai",
+                kind="image",
+                uri=f"file:///{job_id}/old-scene-1.png",
+                width=720,
+                height=1280,
+                selected=True,
+                scores={"total_score": 0.9},
+            )
+        )
+        now = utcnow()
+        session.add(
+            StepExecution(
+                execution_id=f"{job_id}-render",
+                job_id=job_id,
+                step_name="render",
+                attempt=1,
+                status="succeeded",
+                input_hash="old-render",
+                output_refs=["old-render.json"],
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        session.commit()
+
+    with pytest.raises(RecoverableStepError, match="provider temporariamente indisponivel"):
+        orchestrator.regenerate_scene_and_rerender(job_id, "scene-1", "sem tela dividida")
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == "asset_quality_failed"
+        assert job.lease_owner is None
+        assert session.query(SceneAsset).filter_by(job_id=job_id, scene_id="scene-1", selected=True).count() == 1
+        render_step = session.query(StepExecution).filter_by(job_id=job_id, step_name="render").one()
+        assert render_step.output_refs == ["old-render.json"]
 
 def test_review_action_rejects_non_reviewable_status() -> None:
     client = TestClient(app)
@@ -817,6 +1278,22 @@ def test_claim_next_job_is_atomic_under_concurrency() -> None:
             session.commit()
         orchestrator.start_worker()
 
+def test_claim_next_job_retries_transient_sqlite_lock(monkeypatch) -> None:
+    test_orchestrator = JobOrchestrator()
+    attempts = {"count": 0}
+
+    def claim(_session):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise OperationalError("UPDATE jobs", {}, sqlite3.OperationalError("database is locked"))
+        return "job-claimed"
+
+    monkeypatch.setattr(test_orchestrator, "_claim_next_job", claim)
+    monkeypatch.setattr("app.db.time.sleep", lambda _delay: None)
+
+    assert test_orchestrator._claim_next_job_with_retry() == "job-claimed"
+    assert attempts["count"] == 2
+
 def test_worker_can_restart_after_stop(monkeypatch) -> None:
     test_orchestrator = JobOrchestrator()
     loop_entered = threading.Event()
@@ -846,6 +1323,29 @@ def test_worker_can_restart_after_stop(monkeypatch) -> None:
     assert second_thread is not first_thread
     test_orchestrator.stop_worker()
     assert len(loop_runs) == 2
+
+def test_worker_iteration_continues_when_retention_sweep_hits_database_lock(monkeypatch) -> None:
+    test_orchestrator = JobOrchestrator()
+    synced: list[str] = []
+
+    def locked_retention_sweep() -> None:
+        raise OperationalError("UPDATE jobs", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(test_orchestrator.settings, "artifact_retention_enabled", True)
+    monkeypatch.setattr(test_orchestrator.settings, "artifact_retention_sweep_seconds", 0)
+    monkeypatch.setattr(test_orchestrator.settings, "youtube_publish_mode", "api")
+    monkeypatch.setattr(test_orchestrator.settings, "youtube_api_enabled", True)
+    monkeypatch.setattr(test_orchestrator.settings, "tiktok_auto_publish_enabled", False)
+    monkeypatch.setattr(test_orchestrator.publication_ops, "_run_retention_sweep", locked_retention_sweep)
+    monkeypatch.setattr(test_orchestrator.publication_ops, "_sync_native_scheduled_publications", lambda: synced.append("youtube") or 0)
+    monkeypatch.setattr(test_orchestrator.publication_ops, "_claim_due_publication_schedule", lambda: None)
+    monkeypatch.setattr(test_orchestrator.publication_ops, "_claim_due_tiktok_publication", lambda: None)
+    monkeypatch.setattr(test_orchestrator, "_claim_next_job", lambda session: None)
+
+    did_work = test_orchestrator._worker_iteration()
+
+    assert did_work is False
+    assert synced == ["youtube"]
 
 def test_process_job_returns_persisted_cancelled_status_after_step_abort(monkeypatch) -> None:
     job_id = orchestrator.create_job(
@@ -973,6 +1473,8 @@ def test_process_job_fails_explicitly_for_legacy_invalid_niche() -> None:
         assert job is not None
         assert job.status == "failed"
         assert job.failure_reason == "input_gate: unsupported niche_id: esportes"
+        assert job.quality_summary["failure_diagnosis"]["step"] == "input_gate"
+        assert job.quality_summary["failure_diagnosis"]["title"] == "Falha no pipeline"
 
 def test_process_job_fails_fast_for_invalid_language_in_persisted_request() -> None:
     job_id = "job-invalid-language"
@@ -1027,6 +1529,8 @@ def test_extract_fact_entity_prefers_subject_before_colon() -> None:
     assert entity.lower() == "polvos"
 
 def test_speech_envelope_normalization_levels_caption_cues(tmp_path: Path) -> None:
+    from app.audio.pcm import rms as pcm_rms
+
     audio_path = tmp_path / "voice.wav"
     srt_path = tmp_path / "voice.srt"
     sample_rate = 24_000
@@ -1050,8 +1554,8 @@ def test_speech_envelope_normalization_levels_caption_cues(tmp_path: Path) -> No
         width = wav_file.getsampwidth()
         first = wav_file.readframes(sample_rate)
         second = wav_file.readframes(sample_rate)
-    first_rms = audioop.rms(first, width)
-    second_rms = audioop.rms(second, width)
+    first_rms = pcm_rms(first, width)
+    second_rms = pcm_rms(second, width)
     ratio = max(first_rms, second_rms) / min(first_rms, second_rms)
     assert ratio < 1.15
 
@@ -1199,7 +1703,7 @@ def test_gemini_tts_prompt_prioritizes_hook_and_retention() -> None:
     assert "A retenção vem antes de dramatização" in prompt
     assert "O payoff deve ganhar ênfase" in prompt
     assert "O fechamento deve recontextualizar" in prompt
-    assert "Voz Gemini selecionada: Charon" in prompt
+    assert "Voz Gemini selecionada: Fenrir" in prompt
     assert "visual_hook: O hook precisa parecer impossível" in prompt
     assert "Preserve exatamente o texto aprovado" in prompt
 
@@ -1226,6 +1730,28 @@ def test_gemini_tts_selects_voice_profile_from_script_context() -> None:
     assert voice["voice_name"] == "Puck"
     assert voice["profile"] == "upbeat_viral"
     assert voice["score"] >= 2
+
+def test_gemini_tts_uses_editorial_priority_for_mixed_voice_profile_signals() -> None:
+    from app.providers.tts import GeminiTTSProvider
+
+    settings = SimpleNamespace(
+        gemini_tts_voice_name="Kore",
+        gemini_tts_voice_rotation_enabled=True,
+    )
+
+    voice = GeminiTTSProvider().select_gemini_voice(
+        settings,
+        {
+            "canonical_topic": "ciencia e misterio",
+            "angle": "curiosidade visual",
+            "title": "O detalhe muda tudo",
+            "hook": "Um detalhe pequeno segura o começo.",
+            "ending": "A resposta aparece no final.",
+        },
+    )
+
+    assert voice["voice_name"] == "Fenrir"
+    assert voice["profile"] == "mystery_tension"
 
 def test_gemini_tts_can_disable_voice_rotation() -> None:
     from app.providers.tts import GeminiTTSProvider
@@ -1274,6 +1800,60 @@ def test_gemini_tts_falls_back_to_elevenlabs_when_primary_is_not_configured(tmp_
     assert result["provider_metadata"]["fallback_used"] is True
     assert result["provider_metadata"]["fallback_from_provider"] == "gemini_tts"
     assert result["provider_metadata"]["fallback_provider"] == "elevenlabs"
+    assert result["provider_metadata"]["fallback_chain"] == [
+        {
+            "from_provider": "gemini_tts",
+            "to_provider": "elevenlabs",
+            "reason": "missing YTS_GEMINI_TTS_API_KEY or YTS_GEMINI_API_KEY",
+        }
+    ]
+
+def test_gemini_tts_preserves_intermediate_fallback_chain_when_elevenlabs_uses_edge(tmp_path: Path, monkeypatch) -> None:
+    from app.providers.tts import ElevenLabsTTSProvider, GeminiTTSProvider
+
+    settings = SimpleNamespace(gemini_api_key="gemini-key", gemini_tts_api_key=None)
+
+    def fake_elevenlabs_synthesize(self, text: str, audio_path: Path, srt_path: Path, context: dict[str, object] | None = None) -> dict[str, object]:
+        audio_path.write_bytes(b"edge")
+        srt_path.write_text("1\n00:00:00,000 --> 00:00:01,000\nedge\n", encoding="utf-8")
+        return {
+            "provider": "edge_tts",
+            "voice": "pt-BR-FranciscaNeural",
+            "audio_uri": audio_path.resolve().as_uri(),
+            "raw_subtitles_uri": srt_path.resolve().as_uri(),
+            "duration_ms": 1000,
+            "sample_rate_hz": 24000,
+            "channels": 1,
+            "provider_metadata": {
+                "fallback_used": True,
+                "fallback_from_provider": "elevenlabs",
+                "fallback_provider": "edge_tts",
+                "fallback_reason": "elevenlabs failed after 2 attempts: quota_exceeded",
+            },
+        }
+
+    monkeypatch.setattr("app.providers.tts.get_settings", lambda: settings)
+    monkeypatch.setattr("app.providers.tts.time.sleep", lambda _: None)
+    monkeypatch.setattr(ElevenLabsTTSProvider, "synthesize", fake_elevenlabs_synthesize)
+    monkeypatch.setattr(GeminiTTSProvider, "_run_gemini", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("RESOURCE_EXHAUSTED")))
+
+    result = GeminiTTSProvider().synthesize("Texto", tmp_path / "voice.wav", tmp_path / "voice.srt")
+
+    assert result["provider"] == "edge_tts"
+    assert result["provider_metadata"]["fallback_from_provider"] == "gemini_tts"
+    assert result["provider_metadata"]["fallback_provider"] == "edge_tts"
+    assert result["provider_metadata"]["fallback_chain"] == [
+        {
+            "from_provider": "gemini_tts",
+            "to_provider": "edge_tts",
+            "reason": "gemini_tts failed after 2 attempts: RESOURCE_EXHAUSTED",
+        },
+        {
+            "from_provider": "elevenlabs",
+            "to_provider": "edge_tts",
+            "reason": "elevenlabs failed after 2 attempts: quota_exceeded",
+        },
+    ]
 
 def test_elevenlabs_tts_falls_back_to_edge_tts_when_primary_fails(tmp_path: Path, monkeypatch) -> None:
     from app.providers.tts import EdgeTTSProvider, ElevenLabsTTSProvider

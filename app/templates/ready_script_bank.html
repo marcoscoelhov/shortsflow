@@ -27,33 +27,72 @@
       </div>
       <p class="section-note">Roteiros disponíveis são consumidos pela automação antes de gerar uma pauta nova.</p>
     </div>
-    {% for item in automation.ready_scripts %}
-    <article class="ready-script-item">
-      <div>
-        <strong>{{ item.title }}</strong>
-        <small>{{ item.created_at[:16] if item.created_at else "-" }} · {{ item.source }}</small>
+
+    <nav class="library-state-tabs" aria-label="Filtrar roteiros por estado">
+      <a class="active" href="#roteiros-ativos">Ativos</a>
+      <a href="#roteiros-arquivados">Arquivados</a>
+      <a href="#novo-lote">Importar lote</a>
+    </nav>
+
+    <div id="roteiros-ativos" class="library-active-list">
+      {% set active_count = namespace(value=0) %}
+      {% for item in automation.ready_scripts %}
+      {% if item.status != "consumed" %}
+      {% set active_count.value = active_count.value + 1 %}
+      <article class="ready-script-item">
+        <div>
+          <strong>{{ item.title }}</strong>
+          <small>{{ item.created_at[:10] if item.created_at else "-" }}{% if item.created_at %} {{ item.created_at[11:16] }}{% endif %} · {% if item.source == "batch" %}Importação em lote{% else %}{{ item.source }}{% endif %}</small>
+        </div>
+        <div class="ready-script-item-meta">
+          <span class="badge {{ item.status }}">
+            {% if item.status == "available" %}Disponível{% elif item.status == "needs_review" %}Revisar{% elif item.status == "scheduled" %}Agendado{% elif item.status == "consumed" %}Consumido{% else %}{{ item.status }}{% endif %}
+          </span>
+          {% if item.consumed_job_id %}
+          <a href="/jobs/{{ item.consumed_job_id }}">Job {{ item.consumed_job_id[:8] }}</a>
+          {% endif %}
+        </div>
+        {% if item.last_skip_reason %}
+        <p class="ready-script-note">Último sinal: {{ item.last_skip_reason }}{% if item.last_similarity_score is not none %} · {{ item.last_similarity_score|round(2) }}{% endif %}</p>
+        {% endif %}
+      </article>
+      {% endif %}
+      {% endfor %}
+      {% if active_count.value == 0 %}
+      <div class="empty-state-card">
+        <strong>Nenhum roteiro ativo.</strong>
+        <p>Importe um lote revisado para abastecer a automação.</p>
       </div>
-      <div class="ready-script-item-meta">
-        <span class="badge {{ item.status }}">
-          {% if item.status == "available" %}disponível{% elif item.status == "needs_review" %}revisar{% elif item.status == "scheduled" %}agendado{% else %}{{ item.status }}{% endif %}
-        </span>
-        {% if item.consumed_job_id %}
-        <a href="/jobs/{{ item.consumed_job_id }}">job {{ item.consumed_job_id[:8] }}</a>
+      {% endif %}
+    </div>
+
+    <details id="roteiros-arquivados" class="library-archive-panel">
+      <summary>Roteiros consumidos e arquivados</summary>
+      <div class="library-archive-list">
+        {% set archived_count = namespace(value=0) %}
+        {% for item in automation.ready_scripts %}
+        {% if item.status == "consumed" %}
+        {% set archived_count.value = archived_count.value + 1 %}
+        <article class="ready-script-item archived">
+          <div>
+            <strong>{{ item.title }}</strong>
+            <small>{{ item.created_at[:10] if item.created_at else "-" }}{% if item.created_at %} {{ item.created_at[11:16] }}{% endif %} · Importação em lote</small>
+          </div>
+          <div class="ready-script-item-meta">
+            <span class="badge consumed">Consumido</span>
+            {% if item.consumed_job_id %}<a href="/jobs/{{ item.consumed_job_id }}">Job {{ item.consumed_job_id[:8] }}</a>{% endif %}
+          </div>
+        </article>
+        {% endif %}
+        {% endfor %}
+        {% if archived_count.value == 0 %}
+        <p class="section-note">Nenhum roteiro arquivado ainda.</p>
         {% endif %}
       </div>
-      {% if item.last_skip_reason %}
-      <p class="ready-script-note">Último pulo: {{ item.last_skip_reason }}{% if item.last_similarity_score is not none %} · {{ item.last_similarity_score|round(2) }}{% endif %}</p>
-      {% endif %}
-    </article>
-    {% else %}
-    <div class="empty-state-card">
-      <strong>Nenhum roteiro importado.</strong>
-      <p>Cole um lote ou envie um arquivo para abastecer a automação.</p>
-    </div>
-    {% endfor %}
+    </details>
   </section>
 
-  <form method="post" action="/automation/ready-scripts/import" enctype="multipart/form-data" class="panel sidebar-form ready-script-import-form ready-script-import-panel">
+  <form id="novo-lote" method="post" action="/automation/ready-scripts/import" enctype="multipart/form-data" class="panel sidebar-form ready-script-import-form ready-script-import-panel">
     <input type="hidden" name="return_to" value="/library">
     <div class="section-heading">
       <div>
@@ -64,7 +103,7 @@
     <div class="field full">
       <label for="library_ready_script_batch">Roteiros em texto</label>
       <textarea id="library_ready_script_batch" name="ready_script_batch" rows="12" placeholder="Título: ...&#10;Hook: ...&#10;Loop: ...&#10;Beats: ...&#10;Payoff: ...&#10;Fechamento: ...&#10;Hashtags: ..." aria-describedby="library_ready_script_batch_help"></textarea>
-      <p id="library_ready_script_batch_help" class="field-help">Um roteiro por bloco, com rótulos como Título, Hook, Beats e Fechamento.</p>
+      <p id="library_ready_script_batch_help" class="field-help">Um roteiro por bloco, começando por Título:. Markdown leve nos rótulos e separadores --- são normalizados.</p>
     </div>
     <div class="field full">
       <label for="library_ready_script_file">Arquivo .txt ou .md</label>

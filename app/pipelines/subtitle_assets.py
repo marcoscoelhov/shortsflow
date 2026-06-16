@@ -223,7 +223,37 @@ class SubtitleDomain:
             boundary_ms = max(pair_start_ms + 1, min(pair_end_ms - 1, boundary_ms))
             current["end_ms"] = boundary_ms
             following["start_ms"] = boundary_ms
+        repaired = self.repair_weak_boundary_pairs(repaired)
         return [item for item in repaired if str(item.get("text") or "").strip()]
+
+    def repair_weak_boundary_pairs(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        repaired = [dict(item) for item in items]
+        index = 0
+        while index < len(repaired) - 1:
+            current = repaired[index]
+            following = repaired[index + 1]
+            current_words = word_tokens(str(current.get("text") or ""))
+            if not current_words or current_words[-1].lower() not in SEMANTIC_BAD_ENDINGS:
+                index += 1
+                continue
+            merged_text = " ".join([str(current.get("text") or "").strip(), str(following.get("text") or "").strip()]).strip()
+            token_start = int(current.get("token_start", 0))
+            token_end = int(following.get("token_end", following.get("token_start", token_start)))
+            merged = {
+                **current,
+                "idx": current.get("idx"),
+                "start_ms": int(current.get("start_ms", 0)),
+                "end_ms": int(following.get("end_ms", current.get("end_ms", 0))),
+                "text": merged_text,
+            }
+            split_items = self.split_subtitle_cue(merged, token_start, max(token_end, token_start))
+            split_texts = [str(item.get("text") or "").strip() for item in split_items]
+            original_texts = [str(current.get("text") or "").strip(), str(following.get("text") or "").strip()]
+            if len(split_items) < 2 or split_texts == original_texts:
+                index += 1
+                continue
+            repaired[index : index + 2] = split_items
+        return repaired
 
     def estimate_subtitle_timing_drift(self, cues: list[dict[str, Any]], items: list[dict[str, Any]]) -> dict[str, Any]:
         token_timeline = self._raw_srt_token_timeline(cues)

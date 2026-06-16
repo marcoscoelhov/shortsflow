@@ -5,10 +5,10 @@ import random
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Annotated
-from urllib.parse import urlencode
+from typing import Annotated, Any
+from urllib.parse import quote, urlencode
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -17,14 +17,17 @@ from sqlalchemy import select
 from app.automation import AutomationService
 from app.config import get_settings
 from app.db import SessionLocal, init_db
-from app.job_origin import (
-    CREATION_VIA_HUB,
-    JOB_ORIGIN_AUTOMATIC_TOPIC,
-    JOB_ORIGIN_MANUAL_READY_SCRIPT,
-    JOB_ORIGIN_MANUAL_THEME,
-    JOB_ORIGIN_MANUAL_TITLE,
+from app.http_limits import content_length_exceeds, read_request_body_limited, replay_request_body
+from app.hub_forms import build_performance_metric_payload, build_review_action_payload
+from app.hub_job_request import HubTrendSeed, build_hub_job_request
+from app.hub_prompt import (
+    DEFAULT_VIRAL_PROMPT_TEMPLATE,
+    hub_settings_path,
+    load_viral_prompt_template,
+    save_viral_prompt_template,
+    sanitize_viral_prompt_template,
 )
-from app.manual_script import build_ready_script_notes, parse_ready_script
+from app.llm_tournament import latest_llm_tournament_decision_summary
 from app.models import Job, Script, TopicPlan, TopicRequest
 from app.operational_settings import (
     apply_operational_settings,
@@ -33,19 +36,29 @@ from app.operational_settings import (
     parse_operational_form_values,
     save_operational_settings,
 )
-from app.orchestrator import FatalStepError, orchestrator
+from app.orchestrator import FatalStepError, RecoverableStepError, orchestrator
+from app.ready_script_import import MAX_READY_SCRIPT_IMPORT_BODY_BYTES, MAX_READY_SCRIPT_IMPORT_CHARS, ready_script_import_text
 from app.hub_context import COMMON_SCHEDULE_TIMEZONES, HubContext
 from app.routes.health import router as health_router
 from pydantic import ValidationError
 
-from app.schemas import PerformanceMetricPayload, PublicationSchedulePayload, ReviewActionPayload, TopicRequestCreate
-from app.trends import TrendResearcher
+from app.schemas import PublicationSchedulePayload
+from app.topic_scout import TopicScout
 from app.utils import path_from_uri
+from app.web_redirects import redirect_back as _redirect_back
 from app.youtube_api import YouTubeIntegrationError
 
 
 settings = get_settings()
 automation_service = AutomationService(orchestrator)
+LLM_TOURNAMENT_OUTPUT_ROOT = (settings.data_dir / "llm_tournament").resolve()
+
+
+def _generate_premium_finish_background(job_id: str) -> None:
+    try:
+        orchestrator.generate_premium_finishing(job_id)
+    except Exception as exc:  # noqa: BLE001
+        orchestrator.record_premium_finishing_failure(job_id, str(exc))
 
 
 def _request_path_with_query(request: Request) -> str:
@@ -74,57 +87,18 @@ templates = Jinja2Templates(directory=str(settings.templates_dir), context_proce
 HUB_DEFAULT_NICHE = "curiosidades"
 HUB_RETENTION_OPTIMIZED_DURATION_SEC = 50
 HUB_RANDOM_THEME_POOL = [
-    "polvos",
-    "gatos",
-    "buracos negros",
-    "vulcoes",
-    "tubaroes",
-    "formigas",
-    "cerebro humano",
-    "sono",
-    "dinossauros",
-    "abelhas",
-    "fungos",
-    "raios",
-    "oceanos profundos",
-    "camaleoes",
-    "planetas extremos",
-    "corpo humano",
-    "animais bioluminescentes",
-    "plantas carnivoras",
-    "memoria",
-    "ilusoes de otica",
+    "Por que o pão fica duro e a bolacha fica mole?",
+    "Por que o espelho embaça no banho?",
+    "Por que a roupa preta esquenta mais no sol?",
+    "Por que sentimos o celular vibrar sem ele vibrar?",
+    "Por que o cheiro de chuva aparece antes da chuva?",
+    "Por que gelo estala dentro do copo?",
+    "Por que algumas músicas grudam na cabeça?",
+    "Por que bocejo parece contagioso?",
+    "Por que a tela do celular parece pior no sol?",
+    "Por que a água gelada sua por fora do copo?",
 ]
-DEFAULT_VIRAL_PROMPT_TEMPLATE = """Crie uma pauta de curiosidades para YouTube Shorts em pt-BR.
-Objetivo: maximizar retencao, compartilhamento, comentarios e replay mental sem clickbait falso.
-Use estrutura de copywriting agressiva para retenção:
-1. Hook de choque nos primeiros 1-2 segundos: contraste, ameaça cognitiva, paradoxo ou fato que pareça impossivel mas seja verdadeiro.
-2. Loop aberto imediato: plante uma pergunta mental que so sera fechada no final.
-3. Promessa clara e especifica: diga/implique por que a pessoa precisa continuar assistindo agora.
-4. Escalada em 3 a 5 beats: cada frase deve revelar algo mais forte, mais estranho ou mais visual que a anterior.
-5. Payoff atrasado: guarde a explicacao mais surpreendente para o ultimo terco.
-6. Fechamento com recontextualizacao forte ou loop: termine fazendo o espectador repensar o primeiro hook, com frase memoravel.
-Retenção:
-- cada frase deve criar motivo para assistir a proxima
-- evite frase neutra, didatica ou enciclopedica quando puder virar tensão, contraste ou consequência
-- use curiosidade concreta, causalidade e imagens mentais fortes
-- priorize consequencia visual especifica, tensão concreta ou virada verificavel sobre lista de fatos soltos
-SEO:
-- palavra-chave principal cedo no titulo quando natural
-- titulo com curiosidade especifica, 45 a 75 caracteres quando possivel
-- evite titulo generico, caixa alta exagerada e promessa que o roteiro nao prove
-Tom:
-- rapido, intrigante, confiante e mais agressivo em retenção
-- linguagem brasileira natural, com tensão e ritmo de Shorts
-- sem enrolacao, sem aula morna, sem introducao generica
-Proibido:
-- nao comece com "voce sabia", "você sabia", "ja imaginou", "já imaginou", "nesse video" ou aberturas genericas equivalentes
-- o hook deve abrir direto com contraste, consequencia, conflito ou fato especifico
-- nao entregue a explicacao completa no primeiro beat; abra um loop e feche depois
-- nao use clickbait falso: todo choque precisa ser provado no roteiro"""
-HUB_SETTINGS_FILENAME = "hub_settings.json"
 HUB_JOBS_PER_PAGE = 4
-MAX_VIRAL_PROMPT_TEMPLATE_CHARS = 12000
 
 
 hub_context = HubContext(settings, orchestrator, automation_service)
@@ -134,6 +108,7 @@ _job_flow_stage = hub_context._job_flow_stage
 _job_next_action = hub_context._job_next_action
 _publication_operational_status = hub_context._publication_operational_status
 _job_progress_snapshot = hub_context._job_progress_snapshot
+_failure_diagnosis = hub_context._failure_diagnosis
 _job_origin_display = hub_context._job_origin_display
 _creation_via_display = hub_context._creation_via_display
 _job_action_guide = hub_context._job_action_guide
@@ -169,20 +144,81 @@ def artifact_url(uri: str | None) -> str:
             path = path_from_uri(uri).resolve()
             relative_path = path.relative_to(settings.artifacts_dir.resolve())
         except (OSError, ValueError):
-            return uri
+            return "#"
         if not path.exists():
             return "#"
-        return f"/artifacts/{relative_path.as_posix()}"
+        return f"/artifacts/{quote(relative_path.as_posix())}"
     return uri
 
 
+def _resolve_llm_tournament_artifact_path(uri: str | None) -> Path | None:
+    if not uri:
+        return None
+    base = LLM_TOURNAMENT_OUTPUT_ROOT
+    source = Path(uri)
+    candidates: list[Path] = []
+    if source.is_absolute():
+        candidates.append(source)
+    else:
+        candidates.extend(
+            (
+                source,
+                Path.cwd() / source,
+                settings.data_dir / source,
+                settings.data_dir / "llm_tournament" / source,
+            )
+        )
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if not resolved.is_file():
+            continue
+        try:
+            resolved.relative_to(base)
+        except ValueError:
+            continue
+        return resolved
+    return None
+
+
+def _llm_tournament_artifact_url(uri: str | None) -> str:
+    path = _resolve_llm_tournament_artifact_path(uri)
+    if not path:
+        return "#"
+    relative_path = path.relative_to(LLM_TOURNAMENT_OUTPUT_ROOT)
+    return f"/llm-tournament/file?path={quote(relative_path.as_posix())}"
+
+
+def _read_llm_tournament_json(uri: str | None) -> Any | None:
+    path = _resolve_llm_tournament_artifact_path(uri)
+    if not path:
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _pretty_json(payload: Any | None) -> str | None:
+    if payload is None:
+        return None
+    try:
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+    except (TypeError, ValueError):
+        return None
+
+
 templates.env.globals["artifact_url"] = artifact_url
+templates.env.globals["llm_tournament_artifact_url"] = _llm_tournament_artifact_url
 templates.env.globals["job_status_label"] = _job_status_label
 templates.env.globals["schedule_status_label"] = _schedule_status_label
 templates.env.globals["job_flow_stage"] = _job_flow_stage
 templates.env.globals["job_next_action"] = _job_next_action
 templates.env.globals["publication_operational_status"] = _publication_operational_status
 templates.env.globals["job_progress_snapshot"] = _job_progress_snapshot
+templates.env.globals["failure_diagnosis"] = _failure_diagnosis
 templates.env.globals["job_origin_display"] = _job_origin_display
 templates.env.globals["creation_via_display"] = _creation_via_display
 
@@ -214,25 +250,21 @@ def _authorized_request(request: Request) -> bool:
     return supplied == settings.hub_auth_token
 
 
-def _optional_float(value: str | None) -> float | None:
-    if value is None or str(value).strip() == "":
-        return None
-    return float(value)
-
-
-def _optional_int(value: str | None) -> int | None:
-    if value is None or str(value).strip() == "":
-        return None
-    return int(value)
-
-
 @app.middleware("http")
 async def require_hub_auth(request: Request, call_next):
     if request.url.path.startswith("/healthz") or request.url.path.startswith("/static"):
         return await call_next(request)
-    if request.method == "OPTIONS" or _authorized_request(request):
+    if request.method != "OPTIONS" and not _authorized_request(request):
+        return PlainTextResponse("unauthorized", status_code=401)
+    if request.method == "POST" and request.url.path == "/automation/ready-scripts/import":
+        if content_length_exceeds(request, MAX_READY_SCRIPT_IMPORT_BODY_BYTES):
+            return PlainTextResponse("payload too large", status_code=413)
+        body = await read_request_body_limited(request, MAX_READY_SCRIPT_IMPORT_BODY_BYTES)
+        if body is None:
+            return PlainTextResponse("payload too large", status_code=413)
+        replay_request_body(request, body)
         return await call_next(request)
-    return PlainTextResponse("unauthorized", status_code=401)
+    return await call_next(request)
 
 
 
@@ -267,50 +299,20 @@ async def require_hub_auth(request: Request, call_next):
 
 
 
-def _hub_settings_path() -> Path:
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    return settings.data_dir / HUB_SETTINGS_FILENAME
+def _hub_settings_path():
+    return hub_settings_path(settings.data_dir)
 
 
 def _sanitize_viral_prompt_template(template: str | None) -> str:
-    cleaned = (template or "").strip()
-    if not cleaned:
-        return DEFAULT_VIRAL_PROMPT_TEMPLATE
-    return cleaned[:MAX_VIRAL_PROMPT_TEMPLATE_CHARS]
+    return sanitize_viral_prompt_template(template)
 
 
 def _viral_prompt_template() -> str:
-    path = _hub_settings_path()
-    if not path.exists():
-        return DEFAULT_VIRAL_PROMPT_TEMPLATE
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return DEFAULT_VIRAL_PROMPT_TEMPLATE
-    return _sanitize_viral_prompt_template(payload.get("viral_prompt_template"))
+    return load_viral_prompt_template(_hub_settings_path())
 
 
 def _save_viral_prompt_template(template: str | None) -> None:
-    payload = {"viral_prompt_template": _sanitize_viral_prompt_template(template)}
-    _hub_settings_path().write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _safe_return_to(return_to: str | None, default: str = "/") -> str:
-    target = (return_to or "").strip()
-    if not target or not target.startswith("/") or target.startswith("//") or any(char in target for char in "\r\n"):
-        return default
-    return target
-
-
-def _redirect_back(return_to: str | None, params: dict[str, str] | None = None, default: str = "/") -> RedirectResponse:
-    target = _safe_return_to(return_to, default=default)
-    if params:
-        path, fragment_separator, fragment = target.partition("#")
-        separator = "&" if "?" in path else "?"
-        target = f"{path}{separator}{urlencode(params)}"
-        if fragment_separator:
-            target = f"{target}#{fragment}"
-    return RedirectResponse(url=target, status_code=303)
+    save_viral_prompt_template(_hub_settings_path(), template)
 
 
 def _default_seed_theme() -> str:
@@ -327,50 +329,31 @@ def _default_seed_theme() -> str:
 
 
 def _trend_seed_theme(niche_id: str) -> tuple[str, str | None, str | None, dict[str, object] | None]:
-    trend = TrendResearcher().find_topic(niche_id)
-    if trend is None:
+    with SessionLocal() as session:
+        recent_themes = session.scalars(
+            select(TopicRequest.seed_theme)
+            .where(TopicRequest.niche_id == (niche_id or HUB_DEFAULT_NICHE))
+            .order_by(TopicRequest.created_at.desc())
+            .limit(40)
+        ).all()
+    scout_result = TopicScout().find_topic(niche_id, recent_topics=recent_themes)
+    if scout_result is None:
         fallback_theme = _default_seed_theme()
         return (
             fallback_theme,
             None,
-            "trend_research=unavailable\ntrend_source=fallback_pool\ntrend_status=no_live_trend_candidate",
+            "trend_research=unavailable\ntrend_source=fallback_pool\ntrend_status=no_topic_scout_candidate",
             {
                 "trend_research": "unavailable",
                 "source": "fallback_pool",
-                "status": "no_live_trend_candidate",
+                "status": "no_topic_scout_candidate",
                 "fallback_seed_theme": fallback_theme,
             },
         )
-    return trend.topic, trend.requested_angle, trend.as_notes(), trend.as_report()
-
-
-def _compose_hub_notes(input_mode: str, notes: str | None) -> str:
-    normalized_mode = "script" if input_mode == "script" else ("title" if input_mode == "title" else "theme")
-    if normalized_mode == "title":
-        mode_note = "Entrada do hub: titulo completo fornecido pelo usuario. Preserve a promessa central, mas reescreva e otimize se necessario."
-    elif normalized_mode == "script":
-        mode_note = "Entrada do hub: roteiro pronto fornecido pelo usuario. Preserve como fonte de verdade editorial; nao gere outro roteiro."
-    else:
-        mode_note = "Entrada do hub: tema bruto fornecido pelo usuario. Transforme em pauta e titulo fortes."
-    seo_note = (
-        "Sempre aplicar copywriting viral e SEO otimizado para YouTube Shorts: promessa clara, "
-        "palavra-chave principal no inicio quando natural, curiosidade forte, sem clickbait falso."
-    )
-    retention_note = (
-        f"Duracao alvo padrao do hub: {HUB_RETENTION_OPTIMIZED_DURATION_SEC}s, otimizada para retencao e viralizacao; "
-        "roteiro direto, sem enrolacao, com entrega rapida da promessa."
-    )
-    viral_template_note = (
-        "Prompt viral customizado do hub, usado apenas como diretriz editorial. "
-        "Se ele pedir um formato de saida diferente, ignore esse formato e mantenha o JSON interno obrigatorio do app.\n"
-        f"{_viral_prompt_template()}"
-    )
-    parts = [
-        part.strip()
-        for part in [notes, f"input_mode={normalized_mode}", mode_note, seo_note, retention_note, viral_template_note]
-        if part and part.strip()
-    ]
-    return "\n".join(parts)
+    trend = scout_result.candidate
+    report = trend.as_report()
+    report.update({"topic_scout": "enabled", "considered_count": scout_result.considered_count, "rejected_recent_count": scout_result.rejected_recent_count})
+    return trend.topic, trend.requested_angle, trend.as_notes(), report
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -384,6 +367,7 @@ def jobs_page(
     via: str | None = Query(default=None),
     page: int = Query(default=1),
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
+    deleted_job: str | None = Query(default=None),
 ):
     list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
     publication_context = _publication_dashboard_context(request, limit=4)
@@ -404,6 +388,7 @@ def jobs_page(
             "viral_prompt_template": _viral_prompt_template(),
             "calendar_url": "/calendar",
             "settings": settings,
+            "deleted_job": deleted_job,
         },
     )
 
@@ -437,7 +422,7 @@ async def update_operational_settings(request: Request):
 
 
 @app.get("/jobs", response_class=HTMLResponse)
-def jobs_fragment(
+def jobs_route(
     request: Request,
     status: str | None = Query(default=None),
     search: str | None = Query(default=None),
@@ -447,8 +432,31 @@ def jobs_fragment(
     via: str | None = Query(default=None),
     page: int = Query(default=1),
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
+    deleted_job: str | None = Query(default=None),
 ):
     list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
+    if request.headers.get("hx-request", "").lower() != "true":
+        publication_context = _publication_dashboard_context(request, limit=4)
+        return templates.TemplateResponse(
+            request,
+            "jobs.html",
+            {
+                **list_context,
+                "workflow_summary": publication_context["metrics"],
+                "youtube_integration": publication_context["integration"],
+                "automation": publication_context["automation"],
+                "hub_defaults": {
+                    "niche_id": HUB_DEFAULT_NICHE,
+                    "seed_theme": "",
+                    "suggested_seed_theme": _default_seed_theme(),
+                    "target_duration_sec": HUB_RETENTION_OPTIMIZED_DURATION_SEC,
+                },
+                "viral_prompt_template": _viral_prompt_template(),
+                "calendar_url": "/calendar",
+                "settings": settings,
+                "deleted_job": deleted_job,
+            },
+        )
     return templates.TemplateResponse(
         request,
         "jobs_table.html",
@@ -504,6 +512,62 @@ def operational_settings_page(request: Request):
     )
 
 
+@app.get("/llm-tournament", response_class=HTMLResponse)
+def llm_tournament_page(request: Request):
+    tournament = latest_llm_tournament_decision_summary()
+    decision_report = _read_llm_tournament_json(
+        (tournament.get("paths") or {}).get("decision_report_json")
+        if isinstance(tournament, dict) and isinstance(tournament.get("paths"), dict)
+        else None
+    )
+    committee_packet_path: str | None = None
+    if isinstance(decision_report, dict):
+        committee_packet_path = decision_report.get("source_committee_packet_path")
+    elif isinstance(tournament, dict):
+        committee_packet_path = (tournament.get("paths") or {}).get("committee_packet")
+    committee_packet = _read_llm_tournament_json(committee_packet_path)
+    latest_textual_path = None
+    if isinstance(tournament, dict):
+        latest_textual_path = tournament.get("latest_textual_path") or (tournament.get("paths") or {}).get("latest_textual")
+    latest_textual = _read_llm_tournament_json(latest_textual_path)
+    artifact_entries: list[dict[str, str | None]] = []
+    raw_paths = tournament.get("paths") if isinstance(tournament, dict) else None
+    if isinstance(raw_paths, dict):
+        for key, value in raw_paths.items():
+            if key == "run_dir" or not value:
+                continue
+            artifact_entries.append(
+                {
+                    "label": key.replace("_", " ").replace("-", " ").title(),
+                    "path": str(value),
+                    "url": _llm_tournament_artifact_url(str(value)),
+                }
+            )
+    return templates.TemplateResponse(
+        request,
+        "llm_tournament.html",
+        {
+            "settings": settings,
+            "tournament": tournament,
+            "tournament_artifacts": artifact_entries,
+            "tournament_decision_report": decision_report,
+            "tournament_decision_report_pretty": _pretty_json(decision_report),
+            "tournament_committee_packet": committee_packet,
+            "tournament_committee_packet_pretty": _pretty_json(committee_packet),
+            "tournament_latest_textual": latest_textual,
+            "tournament_latest_textual_pretty": _pretty_json(latest_textual),
+        },
+    )
+
+
+@app.get("/llm-tournament/file")
+def llm_tournament_file(path: str | None = Query(default=None)):
+    artifact_path = _resolve_llm_tournament_artifact_path(path)
+    if not artifact_path:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    return PlainTextResponse(artifact_path.read_text(encoding="utf-8"))
+
+
 @app.post("/automation/toggle")
 def toggle_automation(enabled: bool = Form(default=False), return_to: str | None = Form(default=None)):
     automation_service.set_automation_enabled(enabled)
@@ -527,10 +591,7 @@ async def import_ready_scripts(
 ):
     if not fact_check_confirmed:
         raise HTTPException(status_code=422, detail="fact_check_confirmed is required for automation-ready script batches")
-    file_text = ""
-    if ready_script_file and ready_script_file.filename:
-        file_text = (await ready_script_file.read()).decode("utf-8")
-    raw_text = "\n\n".join(part for part in [ready_script_batch, file_text] if part and part.strip())
+    raw_text = await ready_script_import_text(ready_script_batch, ready_script_file)
     result = automation_service.import_ready_script_batch(raw_text, fact_check_confirmed=fact_check_confirmed)
     params = {"imported": str(result.imported)}
     if result.errors:
@@ -626,50 +687,37 @@ def create_job(
     ready_script_text: str | None = Form(default=None),
     ready_script_fact_check_confirmed: bool = Form(default=False),
 ):
-    selected_angle = (custom_angle or "").strip() or (requested_angle or "").strip()
-    if selected_angle == "auto":
-        selected_angle = ""
-    selected_niche = niche_id or HUB_DEFAULT_NICHE
-    trend_notes = None
-    normalized_mode = "script" if input_mode == "script" else ("title" if input_mode == "title" else "theme")
-    if normalized_mode == "script":
-        job_origin = JOB_ORIGIN_MANUAL_READY_SCRIPT
-        if not ready_script_fact_check_confirmed:
-            raise HTTPException(status_code=422, detail="ready_script_fact_check_confirmed is required for Roteiro Pronto")
-        try:
-            ready_script = parse_ready_script(ready_script_text or "", fact_check_confirmed=ready_script_fact_check_confirmed)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        selected_seed_theme = str(ready_script.script["title"]).strip()
-        combined_notes = build_ready_script_notes(notes, ready_script.raw_text, ready_script_fact_check_confirmed)
-        trend_report = None
-    elif seed_theme.strip():
-        job_origin = JOB_ORIGIN_MANUAL_TITLE if normalized_mode == "title" else JOB_ORIGIN_MANUAL_THEME
-        selected_seed_theme = seed_theme.strip()
-        trend_report = None
-    else:
-        job_origin = JOB_ORIGIN_AUTOMATIC_TOPIC
-        selected_seed_theme, trend_angle, trend_notes, trend_report = _trend_seed_theme(selected_niche)
-        selected_angle = selected_angle or trend_angle or ""
-        combined_notes = "\n\n".join(part for part in [trend_notes, notes] if part)
-    if normalized_mode != "script" and seed_theme.strip():
-        combined_notes = "\n\n".join(part for part in [trend_notes, notes] if part)
+    def resolve_trend_seed(selected_niche: str) -> HubTrendSeed:
+        trend_theme, trend_angle, trend_notes, trend_report = _trend_seed_theme(selected_niche)
+        return HubTrendSeed(
+            seed_theme=trend_theme,
+            requested_angle=trend_angle,
+            notes=trend_notes,
+            report=trend_report,
+        )
+
     try:
-        payload = TopicRequestCreate(
-            seed_theme=selected_seed_theme,
-            niche_id=selected_niche,
+        result = build_hub_job_request(
+            seed_theme=seed_theme,
+            input_mode=input_mode,
+            niche_id=niche_id,
             language=language,
             target_duration_sec=target_duration_sec,
             tone=tone,
             cta_style=cta_style,
-            notes=_compose_hub_notes(normalized_mode, combined_notes),
-            requested_angle=selected_angle or None,
-            job_origin=job_origin,
-            creation_via=CREATION_VIA_HUB,
+            notes=notes,
+            requested_angle=requested_angle,
+            custom_angle=custom_angle,
+            ready_script_text=ready_script_text,
+            ready_script_fact_check_confirmed=ready_script_fact_check_confirmed,
+            default_niche_id=HUB_DEFAULT_NICHE,
+            retention_optimized_duration_sec=HUB_RETENTION_OPTIMIZED_DURATION_SEC,
+            viral_prompt_template=_viral_prompt_template(),
+            trend_seed_resolver=resolve_trend_seed,
         )
-        job_id = orchestrator.create_job(payload.model_dump())
-        if trend_report is not None:
-            orchestrator.storage.persist_json(job_id, "trend_research.json", trend_report)
+        job_id = orchestrator.create_job(result.payload.model_dump())
+        if result.trend_report is not None:
+            orchestrator.storage.persist_json(job_id, "trend_research.json", result.trend_report)
     except ValidationError as exc:
         raise HTTPException(
             status_code=422,
@@ -682,6 +730,8 @@ def create_job(
                 for error in exc.errors()
             ],
         ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
 
@@ -705,6 +755,7 @@ def job_json(job_id: str):
                 "duration_ms": details["render"].duration_ms if details["render"] else None,
             },
             "progress": details["progress"],
+            "premium_finishing": details.get("premium_finishing") or {},
         }
 
 
@@ -729,6 +780,8 @@ def job_detail(request: Request, job_id: str):
             "youtube_integration": youtube_integration,
             "review_error": request.query_params.get("review_error"),
             "publish_error": request.query_params.get("publish_error"),
+            "reprocess_error": request.query_params.get("reprocess_error"),
+            "premium_error": request.query_params.get("premium_error"),
             "action_guide": _job_action_guide(
                 details["job"],
                 details.get("monetization_report"),
@@ -739,9 +792,61 @@ def job_detail(request: Request, job_id: str):
     )
 
 
+@app.post("/jobs/{job_id}/delete")
+def delete_job(job_id: str):
+    try:
+        with SessionLocal() as session:
+            resolved_job_id = _resolve_job_id(session, job_id)
+        orchestrator.delete_job(resolved_job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except FatalStepError as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'review_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    return RedirectResponse(url=f"/?{urlencode({'deleted_job': resolved_job_id[:8]})}", status_code=303)
+
+
+@app.post("/jobs/{job_id}/premium-finish")
+def generate_premium_finish(job_id: str, background_tasks: BackgroundTasks):
+    try:
+        with SessionLocal() as session:
+            resolved_job_id = _resolve_job_id(session, job_id)
+        orchestrator.request_premium_finishing(resolved_job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except FatalStepError as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'premium_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    background_tasks.add_task(_generate_premium_finish_background, resolved_job_id)
+    return RedirectResponse(url=f"/jobs/{resolved_job_id}?premium_started=1", status_code=303)
+
+
+@app.post("/jobs/{job_id}/reprocess")
+def reprocess_job_from_step(job_id: str, from_step: str = Form(default="tts")):
+    try:
+        orchestrator.reprocess_job_from_step(job_id, from_step)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except (FatalStepError, ValueError) as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'reprocess_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
+
+
+@app.post("/jobs/{job_id}/scenes/{scene_id}/regenerate")
+def regenerate_scene(job_id: str, scene_id: str, operator_instruction: str | None = Form(default=None)):
+    try:
+        orchestrator.regenerate_scene_and_rerender(job_id, scene_id, operator_instruction=operator_instruction)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except (FatalStepError, RecoverableStepError, ValueError) as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'reprocess_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
+
+
 @app.post("/jobs/{job_id}/review")
 def review_job(
-    request: Request,
     job_id: str,
     reviewer_identity: str = Form(default="tailscale:local-reviewer"),
     action: str = Form(...),
@@ -754,35 +859,39 @@ def review_job(
     originality_confirmed: bool = Form(default=False),
     notes: str | None = Form(default=None),
 ):
-    parsed_reason_codes = []
-    for raw_reason in reason_codes or []:
-        parsed_reason_codes.extend(item.strip() for item in str(raw_reason).split(",") if item.strip())
-    for confirmation_code in confirmation_codes or []:
-        code = str(confirmation_code).strip()
-        if code and code not in parsed_reason_codes:
-            parsed_reason_codes.append(code)
-    for enabled, code in [
-        (rights_confirmed, "rights_confirmed"),
-        (ai_disclosure_confirmed, "ai_disclosure_confirmed"),
-        (fact_review_confirmed, "fact_review_confirmed"),
-        (metadata_confirmed, "metadata_confirmed"),
-        (originality_confirmed, "originality_confirmed"),
-    ]:
-        if enabled and code not in parsed_reason_codes:
-            parsed_reason_codes.append(code)
-    payload = ReviewActionPayload(
-        reviewer_identity=reviewer_identity,
-        action=action,
-        reason_codes=parsed_reason_codes,
-        notes=notes,
-    )
     try:
+        payload = build_review_action_payload(
+            reviewer_identity=reviewer_identity,
+            action=action,
+            reason_codes=reason_codes,
+            confirmation_codes=confirmation_codes,
+            rights_confirmed=rights_confirmed,
+            ai_disclosure_confirmed=ai_disclosure_confirmed,
+            fact_review_confirmed=fact_review_confirmed,
+            metadata_confirmed=metadata_confirmed,
+            originality_confirmed=originality_confirmed,
+            notes=notes,
+        )
         new_job_id = orchestrator.review_job(payload.model_dump(), job_id)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
     except FatalStepError as exc:
         redirect_to = f"/jobs/{job_id}?{urlencode({'review_error': str(exc)})}"
         return RedirectResponse(url=redirect_to, status_code=303)
     redirect_to = f"/jobs/{new_job_id}" if new_job_id else f"/jobs/{job_id}"
     return RedirectResponse(url=redirect_to, status_code=303)
+
+
+@app.post("/jobs/{job_id}/premium-approve")
+def approve_premium_for_publish(job_id: str, reviewer_identity: str = Form(default="tailscale:local-reviewer")):
+    try:
+        orchestrator.approve_premium_for_publish(job_id, reviewer_identity=reviewer_identity)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except FatalStepError as exc:
+        redirect_to = f"/jobs/{job_id}?{urlencode({'review_error': str(exc)})}"
+        return RedirectResponse(url=redirect_to, status_code=303)
+    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
 
 @app.post("/jobs/{job_id}/publish-metadata")
@@ -880,15 +989,15 @@ def record_performance(
     notes: str | None = Form(default=None),
 ):
     try:
-        payload = PerformanceMetricPayload(
+        payload = build_performance_metric_payload(
             source=source,
-            retention_percent=_optional_float(retention_percent),
-            viewed_vs_swiped_away_percent=_optional_float(viewed_vs_swiped_away_percent),
-            rewatch_rate=_optional_float(rewatch_rate),
-            likes=_optional_int(likes),
-            shares=_optional_int(shares),
-            comments=_optional_int(comments),
-            rpm_usd=_optional_float(rpm_usd),
+            retention_percent=retention_percent,
+            viewed_vs_swiped_away_percent=viewed_vs_swiped_away_percent,
+            rewatch_rate=rewatch_rate,
+            likes=likes,
+            shares=shares,
+            comments=comments,
+            rpm_usd=rpm_usd,
             monetization_status=monetization_status,
             notes=notes,
         )

@@ -1,0 +1,680 @@
+{
+  "schema_version": "1.0.0",
+  "benchmark_id": "editorial-v1",
+  "prompt_version": "shorts-retention-v3",
+  "description": "Benchmark inicial para roteiro viral factual em curiosidades do cotidiano.",
+  "cases": [
+    {
+      "case_id": "cotidiano-001-cafe-sono",
+      "case_type": "adversarial_publicavel",
+      "category": "saude_leve",
+      "topic": "Por que cafe tarde pode baguncar seu sono",
+      "target_duration_sec": 45,
+      "evidence_profile": "saude_biologia",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "contraste entre energia aparente e sono atrasado",
+        "loop_question": "se cafe nao cria energia, por que parece desligar o cansaco?",
+        "payoff_direction": "a pista e a adenosina, nao uma bateria extra"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "A cafeina e um estimulante que pode deixar a pessoa mais alerta."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "A FDA orienta que cafeina perto da hora de dormir pode atrapalhar o sono em algumas pessoas."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "FDA: Spilling the Beans: How Much Caffeine is Too Much?",
+            "url": "https://www.fda.gov/food/information-consumers-using-dietary-supplements/spilling-beans-how-much-caffeine-too-much"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "Cafeina pode aumentar alerta e atrapalhar o sono quando tomada perto da hora de dormir.",
+            "safe_language": "Cafe tarde pode adiar a sensacao de sono em algumas pessoas.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["cafe da energia do nada", "cafe rouba exatamente horas de sono", "cafe funciona igual para todo mundo"],
+            "aggressive_hook_options": ["Cafe nao cria energia. Ele pode esconder o aviso de sono.", "Seu cafe da tarde pode estar mentindo para o seu corpo."],
+            "retention_use": {
+              "hook": "cafe parece energia, mas pode ser mascara de cansaco",
+              "loop": "o cansaco nao sumiu, entao para onde ele foi?",
+              "escalation": "alerta percebido sobe enquanto o horario do sono pode atrasar",
+              "payoff": "a pista e a adenosina bloqueada",
+              "loop_close": "o primeiro gole vira um botao de soneca para o sono"
+            },
+            "visual_metaphors": ["alarme de sono silenciado", "luz de bateria falsa", "xicara cobrindo um aviso"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-002-maos-sabao",
+      "case_type": "real_publicavel",
+      "category": "cotidiano",
+      "topic": "Por que sabao tira sujeira que agua sozinha nao tira",
+      "target_duration_sec": 45,
+      "evidence_profile": "institucional_saude",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "agua parece suficiente, mas deixa parte do problema grudado",
+        "loop_question": "como algo tao comum desmonta sujeira invisivel?",
+        "payoff_direction": "sabao ajuda a soltar oleo e germes para a agua levar"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "O CDC orienta lavar as maos com sabao e agua para remover germes."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "Sabao ajuda a remover sujeira, oleos e microrganismos da pele durante a lavagem."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "CDC: When and How to Wash Your Hands",
+            "url": "https://www.cdc.gov/handwashing/when-how-handwashing.html"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "Sabao ajuda a soltar oleos, sujeira e germes para que a agua remova durante a lavagem.",
+            "safe_language": "Sabao nao e so perfume: ele ajuda a desgrudar o que agua sozinha remove pior.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["sabao mata todos os germes instantaneamente", "agua sem sabao nao remove nada", "vinte segundos esterilizam a pele"],
+            "aggressive_hook_options": ["Agua sozinha pode deixar o inimigo grudado.", "Sua mao parece limpa antes da parte mais importante."],
+            "retention_use": {
+              "hook": "mao limpa visualmente ainda pode ter sujeira oleosa",
+              "loop": "por que espuma muda o jogo?",
+              "escalation": "oleo segura sujeira, sabao ajuda a soltar, agua carrega embora",
+              "payoff": "o truque e desgrudar antes de enxaguar",
+              "loop_close": "a espuma era a ferramenta, nao a decoracao"
+            },
+            "visual_metaphors": ["sujeira presa em oleo", "espuma levantando uma pelicula", "agua carregando particulas"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-003-microondas",
+      "case_type": "adversarial_publicavel",
+      "category": "tecnologia_popular",
+      "topic": "Por que micro-ondas nao cozinha de dentro para fora",
+      "target_duration_sec": 45,
+      "evidence_profile": "tecnologia_consumo",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "derrubar a frase popular de dentro para fora",
+        "loop_question": "se nao vem de dentro, por que esquenta tao rapido?",
+        "payoff_direction": "ondas penetram parte do alimento e o calor tambem se espalha por conducao"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "Forno de micro-ondas aquece alimentos usando energia de micro-ondas absorvida por moleculas no alimento."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "O aquecimento em micro-ondas pode ser desigual, e o calor continua se distribuindo dentro do alimento depois."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "FDA: Microwave Oven Radiation",
+            "url": "https://www.fda.gov/radiation-emitting-products/resources-you-radiation-emitting-products/microwave-oven-radiation"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "Micro-ondas aquecem quando sua energia e absorvida no alimento, mas isso nao significa cozinhar magicamente de dentro para fora.",
+            "safe_language": "O micro-ondas pode aquecer rapido e desigual; o calor ainda precisa se espalhar.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["micro-ondas cozinha sempre de dentro para fora", "micro-ondas deixa comida radioativa", "micro-ondas aquece perfeitamente por igual"],
+            "aggressive_hook_options": ["Seu micro-ondas nao esta cozinhando do jeito que voce acha.", "A maior mentira do micro-ondas mora no meio do prato."],
+            "retention_use": {
+              "hook": "frase popular parece obvia, mas e incompleta",
+              "loop": "por que o centro as vezes continua frio?",
+              "escalation": "energia absorvida, pontos quentes, conducao depois",
+              "payoff": "rapido nao significa uniforme nem de dentro para fora",
+              "loop_close": "o prato girando era uma pista do problema"
+            },
+            "visual_metaphors": ["prato com centro frio", "mapa de pontos quentes", "onda invisivel entrando no alimento"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-004-gps-relatividade",
+      "case_type": "real_publicavel",
+      "category": "tecnologia_popular",
+      "topic": "Por que o GPS precisa corrigir o tempo dos satelites",
+      "target_duration_sec": 45,
+      "evidence_profile": "tecnologia_fisica",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "o mapa do celular depende de relogios que nao batem igual",
+        "loop_question": "como uma diferenca minuscula vira erro na rua?",
+        "payoff_direction": "tempo preciso e parte da posicao"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "Sistemas de navegacao por satelite dependem de medicao precisa de tempo."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "Efeitos relativisticos precisam ser considerados nos relogios de satelites GPS para manter precisao."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "NIST: Relativity and GPS",
+            "url": "https://www.nist.gov/pml/time-and-frequency-division/popular-links/time-and-frequency-z/relativity-and-gps"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "GPS depende de relogios extremamente precisos, e correcoes relativisticas ajudam a manter a posicao confiavel.",
+            "safe_language": "O ponto azul do celular depende de tempo medido com precisao absurda.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["Einstein inventou o GPS", "sem relatividade todo GPS para na hora", "o GPS ve sua rua do espaco como uma camera"],
+            "aggressive_hook_options": ["Seu mapa so funciona porque o tempo no satelite nao pode ser tratado como comum.", "O ponto azul do celular comeca em um relogio no espaco."],
+            "retention_use": {
+              "hook": "mapa cotidiano depende de fisica invisivel",
+              "loop": "por que relogio vira localizacao?",
+              "escalation": "sinal viaja, tempo mede distancia, diferenca pequena cresce",
+              "payoff": "corrigir tempo e corrigir lugar",
+              "loop_close": "o ponto azul era um relogio disfarçado"
+            },
+            "visual_metaphors": ["ponto azul ligado a satelites", "relogio orbital", "linhas de tempo virando distancia"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-005-cheiro-chuva",
+      "case_type": "real_publicavel",
+      "category": "cotidiano",
+      "topic": "De onde vem o cheiro de chuva no asfalto seco",
+      "target_duration_sec": 45,
+      "evidence_profile": "cotidiano_biologia",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "o cheiro aparece antes de voce ver a chuva direito",
+        "loop_question": "como o chao seco manda cheiro para o ar?",
+        "payoff_direction": "gotas podem levantar aerossois com compostos do solo"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "O cheiro de chuva pode envolver compostos como geosmina, associados ao solo."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "Pesquisadores do MIT descreveram gotas de chuva liberando aerossois ao atingir superficies porosas."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "MIT News: How rain gives rise to a fresh scent",
+            "url": "https://news.mit.edu/2015/rainfall-can-release-aerosols-0114"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "Parte do cheiro de chuva pode vir de compostos do solo carregados por aerossois liberados quando gotas batem no chao.",
+            "safe_language": "O cheiro de chuva pode ser o chao falando em particulas minusculas.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["chuva tem cheiro proprio puro", "todo cheiro de chuva vem so do asfalto", "geosmina e perfume da nuvem"],
+            "aggressive_hook_options": ["O cheiro da chuva pode sair do chao, nao do ceu.", "Antes da agua molhar tudo, o solo ja sobe pelo ar."],
+            "retention_use": {
+              "hook": "cheiro parece vir da chuva, mas pode subir do chao",
+              "loop": "como uma gota levanta cheiro?",
+              "escalation": "gota bate, bolhas prendem ar, aerossois escapam",
+              "payoff": "o nariz pega o solo em miniatura",
+              "loop_close": "o primeiro cheiro era o impacto, nao a nuvem"
+            },
+            "visual_metaphors": ["gota levantando bolhas", "particulas saindo do asfalto", "solo virando nuvem invisivel"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-006-espelho-embaca",
+      "case_type": "real_publicavel",
+      "category": "cotidiano",
+      "topic": "Por que o espelho do banheiro embaca depois do banho",
+      "target_duration_sec": 45,
+      "evidence_profile": "cotidiano_fisica",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "o espelho some sem estar sujo",
+        "loop_question": "por que vapor invisivel vira parede branca?",
+        "payoff_direction": "ar quente e umido encontra superficie mais fria e condensa"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "Condensacao acontece quando vapor de agua passa para agua liquida."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "Superficies frias podem fazer vapor de agua do ar condensar em goticulas."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "NOAA SciJinks: Condensation",
+            "url": "https://scijinks.gov/clouds/"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "O espelho embaca quando vapor de agua do ar condensa em goticulas na superficie mais fria.",
+            "safe_language": "O branco no espelho e um monte de goticulas pequenas, nao sujeira.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["o espelho absorve vapor", "o vidro fica sujo instantaneamente", "o vapor congela no banheiro"],
+            "aggressive_hook_options": ["Seu espelho nao fica sujo. Ele vira uma nuvem grudada.", "Depois do banho, o banheiro desenha uma nuvem no vidro."],
+            "retention_use": {
+              "hook": "espelho desaparece sem sujeira",
+              "loop": "como ar invisivel vira branco?",
+              "escalation": "ar quente carrega vapor, vidro mais frio muda o estado",
+              "payoff": "sao goticulas minusculas espalhando luz",
+              "loop_close": "apagar o espelho era fazer uma nuvem plana"
+            },
+            "visual_metaphors": ["nuvem no vidro", "goticulas microscopicas", "vapor encontrando superficie fria"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-007-banana-escurece",
+      "case_type": "real_publicavel",
+      "category": "cotidiano",
+      "topic": "Por que banana cortada escurece tao rapido",
+      "target_duration_sec": 45,
+      "evidence_profile": "cotidiano_quimica",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "a fruta parece estragar em minutos",
+        "loop_question": "o que mudou quando a faca entrou?",
+        "payoff_direction": "corte expoe tecido ao oxigenio e permite reacoes de escurecimento"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "Frutas cortadas podem escurecer por reacoes enzimaticas quando seus tecidos entram em contato com oxigenio."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "Escurecimento enzimatico envolve compostos fenolicos e enzimas como polifenol oxidase."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "Library of Congress: Why do apple slices turn brown?",
+            "url": "https://www.loc.gov/everyday-mysteries/food-and-nutrition/item/why-do-apple-slices-turn-brown-after-being-cut/"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "Banana cortada pode escurecer porque o corte expoe tecidos ao oxigenio e ativa reacoes enzimaticas parecidas com as de outras frutas.",
+            "safe_language": "A faca abre a porta para uma reacao que muda a cor.",
+            "support_level": "indirect",
+            "allowed_script_use": true,
+            "do_not_claim": ["banana escurece porque apodrece instantaneamente", "oxigenio queima a banana como fogo", "escurecimento sempre significa perigo"],
+            "aggressive_hook_options": ["A faca liga um relogio marrom na banana.", "A banana nao escurece por drama. Ela reage ao ar."],
+            "retention_use": {
+              "hook": "corte parece pequeno, mudanca visual e rapida",
+              "loop": "o que a faca liberou?",
+              "escalation": "tecido aberto, oxigenio entra, enzimas reagem",
+              "payoff": "a cor e sinal de reacao, nao apodrecimento instantaneo",
+              "loop_close": "a primeira fatia ja tinha ligado o processo"
+            },
+            "visual_metaphors": ["relogio marrom", "porta aberta para oxigenio", "linha de corte mudando de cor"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-008-ponto-cego",
+      "case_type": "real_publicavel",
+      "category": "percepcao_comportamento",
+      "topic": "Por que voce nao percebe o ponto cego do proprio olho",
+      "target_duration_sec": 45,
+      "evidence_profile": "percepcao",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "existe um buraco na visao que voce quase nunca nota",
+        "loop_question": "como o cerebro esconde uma falta real de imagem?",
+        "payoff_direction": "o ponto onde o nervo optico sai nao tem fotorreceptores, e o cerebro completa a cena"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "O ponto cego existe onde o nervo optico deixa o olho e nao ha celulas sensiveis a luz."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "Normalmente nao percebemos o ponto cego porque a visao dos dois olhos e o processamento cerebral completam a cena."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "National Eye Institute: How the Eyes Work",
+            "url": "https://www.nei.nih.gov/learn-about-eye-health/healthy-vision/how-eyes-work"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "Existe um ponto cego no olho, mas a percepcao normalmente completa a cena sem voce notar.",
+            "safe_language": "Sua visao tem uma falha real que o cerebro costuma esconder.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["o cerebro inventa tudo que voce ve", "voce e cego sem perceber", "o ponto cego prova que nada e real"],
+            "aggressive_hook_options": ["Existe um buraco na sua visao agora.", "Seu olho apaga uma parte do mundo e voce nao percebe."],
+            "retention_use": {
+              "hook": "buraco invisivel na propria visao",
+              "loop": "por que nao aparece um ponto preto?",
+              "escalation": "nervo sai, falta receptor, outro olho ajuda, cerebro completa",
+              "payoff": "a ausencia vira continuidade",
+              "loop_close": "o buraco estava presente desde o primeiro frame"
+            },
+            "visual_metaphors": ["quadro com pedaco faltando preenchido", "ponto apagado no campo visual", "cerebro remendando imagem"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-009-luz-sono",
+      "case_type": "adversarial_publicavel",
+      "category": "saude_leve",
+      "topic": "Por que luz forte a noite pode confundir seu sono",
+      "target_duration_sec": 45,
+      "evidence_profile": "saude_biologia",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "a tela nao precisa fazer barulho para empurrar o sono",
+        "loop_question": "como luz vira sinal de horario para o corpo?",
+        "payoff_direction": "luz noturna pode afetar sinais circadianos como melatonina"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "Exposicao a luz a noite pode afetar o ritmo circadiano."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "Luz a noite pode suprimir melatonina em algumas condicoes."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "NIH: Light, sleep and circadian rhythms",
+            "url": "https://www.nigms.nih.gov/education/fact-sheets/Pages/circadian-rhythms.aspx"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "Luz forte a noite pode sinalizar horario errado ao corpo e afetar ritmos ligados ao sono.",
+            "safe_language": "A luz da noite pode empurrar sinais internos de sono em algumas pessoas.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["tela causa insonia em todo mundo", "luz azul destrói seu cerebro", "olhar celular tira exatamente horas de sono"],
+            "aggressive_hook_options": ["A tela pode mentir para o relogio do seu corpo.", "Seu quarto escuro perde para uma luz pequena na hora errada."],
+            "retention_use": {
+              "hook": "luz sem som muda sinal interno",
+              "loop": "como brilho vira horario?",
+              "escalation": "olho capta luz, relogio interno ajusta sinais, sono pode atrasar",
+              "payoff": "o problema e o corpo receber madrugada como se fosse cedo",
+              "loop_close": "a tela era um mini amanhecer fora de hora"
+            },
+            "visual_metaphors": ["mini amanhecer no travesseiro", "relogio interno sendo adiantado", "quarto escuro furado por luz"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-010-sal-gelo",
+      "case_type": "real_publicavel",
+      "category": "cotidiano",
+      "topic": "Por que sal ajuda a derreter gelo",
+      "target_duration_sec": 45,
+      "evidence_profile": "cotidiano_quimica",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "sal parece tempero, mas muda a regra do gelo",
+        "loop_question": "como graos secos baguncam agua congelada?",
+        "payoff_direction": "sal reduz o ponto de congelamento da agua"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "Sal pode reduzir o ponto de congelamento da agua."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "Por isso sais sao usados para ajudar a derreter gelo em estradas em determinadas condicoes."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "USGS: Water Science School, freezing point and saltwater",
+            "url": "https://www.usgs.gov/special-topics/water-science-school/science/saline-water-and-salinity"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "Sal reduz o ponto de congelamento da agua, o que ajuda gelo a derreter em certas condicoes.",
+            "safe_language": "Sal muda a temperatura em que a agua consegue ficar congelada.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["sal esquenta o gelo como fogo", "sal sempre derrete qualquer gelo em qualquer frio", "sal desaparece com gelo instantaneamente"],
+            "aggressive_hook_options": ["Sal nao esquenta o gelo. Ele trapaceia a regra do congelamento.", "Um grao de sal muda a guerra entre agua e gelo."],
+            "retention_use": {
+              "hook": "sal parece aquecer, mas o truque e outro",
+              "loop": "como derrete sem esquentar?",
+              "escalation": "gelo tem agua na superficie, sal se mistura, congelamento fica mais dificil",
+              "payoff": "a regra de congelar mudou",
+              "loop_close": "o sal nao era calor, era sabotagem"
+            },
+            "visual_metaphors": ["regra de congelamento sendo puxada para baixo", "graos abrindo trilhas no gelo", "fronteira entre agua e gelo"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-011-pressao-ouvido",
+      "case_type": "real_publicavel",
+      "category": "cotidiano",
+      "topic": "Por que o ouvido estala no aviao ou na serra",
+      "target_duration_sec": 45,
+      "evidence_profile": "cotidiano_saude",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "o estalo parece defeito, mas e ajuste de pressao",
+        "loop_question": "por que engolir muda o ouvido?",
+        "payoff_direction": "a tuba auditiva ajuda equalizar pressao entre ouvido medio e ambiente"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "Mudancas de altitude podem criar diferenca de pressao entre o ouvido medio e o ambiente."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "A tuba auditiva ajuda a equalizar a pressao no ouvido medio."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "MedlinePlus: Ear barotrauma",
+            "url": "https://medlineplus.gov/ency/article/001064.htm"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "O ouvido pode estalar em mudancas de altitude quando a tuba auditiva equaliza diferencas de pressao.",
+            "safe_language": "O estalo pode ser o ouvido tentando igualar pressao.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["o ouvido explode no aviao", "todo estalo e perigoso", "mascar chiclete cura qualquer dor de ouvido"],
+            "aggressive_hook_options": ["O estalo no ouvido pode ser uma porta de pressao abrindo.", "No aviao, seu ouvido briga com o ar antes de voce perceber."],
+            "retention_use": {
+              "hook": "estalo vira sinal de ajuste",
+              "loop": "por que engolir mexe no ouvido?",
+              "escalation": "altitude muda pressao, membrana sente, tuba auditiva abre",
+              "payoff": "o clique e a pressao tentando empatar",
+              "loop_close": "o barulho era uma valvula, nao um defeito"
+            },
+            "visual_metaphors": ["valvula de pressao", "balanca entre ouvido e ar", "porta pequena abrindo"]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "cotidiano-012-agua-gelada-copo",
+      "case_type": "adversarial_publicavel",
+      "category": "cotidiano",
+      "topic": "Por que o copo sua quando a bebida esta gelada",
+      "target_duration_sec": 45,
+      "evidence_profile": "cotidiano_fisica",
+      "task_focus": ["script", "repair", "audit"],
+      "retention_brief": {
+        "hook_direction": "o copo parece vazar sem estar furado",
+        "loop_question": "de onde vem agua do lado de fora?",
+        "payoff_direction": "vapor do ar condensa na superficie fria"
+      },
+      "fact_pack": {
+        "status": "verified",
+        "provider": "benchmark_fixture",
+        "facts": [
+          {
+            "fact_id": "F1",
+            "claim": "Vapor de agua no ar pode condensar em superficies frias."
+          },
+          {
+            "fact_id": "F2",
+            "claim": "As goticulas do lado de fora de um copo gelado vem do ar ao redor, nao da bebida atravessando o vidro."
+          }
+        ],
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "NOAA SciJinks: Condensation",
+            "url": "https://scijinks.gov/clouds/"
+          }
+        ],
+        "evidence_cards": [
+          {
+            "card_id": "E1",
+            "source_fact_ids": ["F1", "F2"],
+            "source_ids": ["S1"],
+            "claim": "Um copo gelado sua porque vapor de agua do ar condensa na superficie fria do lado de fora.",
+            "safe_language": "A agua de fora do copo pode vir do ar, nao da bebida.",
+            "support_level": "direct",
+            "allowed_script_use": true,
+            "do_not_claim": ["vidro transpira como pele", "a bebida atravessa o copo", "copo gelado cria agua do nada"],
+            "aggressive_hook_options": ["Seu copo nao esta vazando. Ele esta roubando agua do ar.", "A agua fora do copo nao veio de dentro dele."],
+            "retention_use": {
+              "hook": "copo parece vazar",
+              "loop": "se vidro nao tem furo, de onde veio a agua?",
+              "escalation": "ar tem vapor, superficie fria muda o estado, goticulas aparecem",
+              "payoff": "o copo captura agua invisivel",
+              "loop_close": "o vazamento era o ar ficando liquido"
+            },
+            "visual_metaphors": ["agua invisivel virando gota", "copo capturando vapor", "vazamento falso"]
+          }
+        ]
+      }
+    }
+  ]
+}

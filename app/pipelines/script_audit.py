@@ -12,20 +12,13 @@ class ScriptAuditDomain(BasePipeline):
     def __getattr__(self, name: str) -> Any:
         return getattr(self.owner, name)
 
-    def _text_publish_audit(self, job_id: str, script: dict[str, Any], fact_pack: dict[str, Any]) -> dict[str, Any]:
-        if self.settings.simple_shorts_mode and fact_pack.get("status") == "skipped":
-            audit = {"passed": True, "reasons": [], "provider": "simple_shorts_mode", "skipped": True}
-            self.storage.persist_json(
-                job_id,
-                "text_publish_audit.json",
-                {
-                    "schema_version": self.settings.schema_version,
-                    "job_id": job_id,
-                    "created_at": utcnow().isoformat(),
-                    "audit": self._serialize_for_json(audit),
-                },
-            )
-            return audit
+    def _text_publish_audit(
+        self,
+        job_id: str,
+        script: dict[str, Any],
+        fact_pack: dict[str, Any],
+        topic_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if fact_pack.get("provider") == "user_declared_fact_check" and fact_pack.get("status") == "verified":
             audit = {
                 "passed": True,
@@ -59,6 +52,7 @@ class ScriptAuditDomain(BasePipeline):
                 "claim_trace": script.get("claim_trace"),
             },
             "fact_pack": fact_pack,
+            "topic": topic_context or {},
             "hashtags": ["#shorts"],
             "audit_phase": "text_before_assets",
         }

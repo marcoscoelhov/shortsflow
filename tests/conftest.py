@@ -28,5 +28,7 @@ def isolate_youtube_settings(monkeypatch):
     monkeypatch.setattr(support.orchestrator.settings, "tiktok_auto_publish_enabled", False)
     monkeypatch.setattr(support.main_module.settings, "tiktok_access_token", None)
     monkeypatch.setattr(support.orchestrator.settings, "tiktok_access_token", None)
+    monkeypatch.setattr(support.main_module.settings, "render_primary_backend", "ffmpeg")
+    monkeypatch.setattr(support.orchestrator.settings, "render_primary_backend", "ffmpeg")
     yield
     support.orchestrator.stop_event.clear()
