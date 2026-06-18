@@ -79,6 +79,12 @@ class PublishSlot:
         return datetime.fromisoformat(self.scheduled_for_local).replace(tzinfo=local_tz).astimezone(UTC)
 
 
+@dataclass(frozen=True)
+class PublishPlan:
+    slot: PublishSlot
+    source: str
+
+
 class AutomationService:
     def __init__(self, orchestrator: Any) -> None:
         self.orchestrator = orchestrator
@@ -184,28 +190,32 @@ class AutomationService:
                 run = self._finish_run(run.run_id, status="failed", error="; ".join(preflight["missing_items"]))
                 return serialize_run(run)
 
-            target_slots = self._vacant_publish_slots()
-            if not target_slots:
+            target_plan = self._vacant_publish_plan()
+            if not target_plan:
                 run = self._finish_run(run.run_id, status="skipped", skipped_reason="no_vacant_day")
                 return serialize_run(run)
-            self._set_run_target(run.run_id, target_slots[0].local_date, target_slots[0].scheduled_for_utc())
+            target_slots = [item.slot for item in target_plan]
+            self._set_run_target(run.run_id, target_plan[0].slot.local_date, target_plan[0].slot.scheduled_for_utc())
 
             scheduled_results: list[dict[str, str]] = []
-            backlog_result = self._run_publishable_backlog(run.run_id, target_slots)
+            backlog_result = self._run_publishable_backlog(run.run_id, target_plan)
             if isinstance(backlog_result, list):
                 scheduled_results.extend(backlog_result)
             elif backlog_result:
                 return serialize_run(self._get_run(run.run_id))
 
-            remaining_slots = target_slots[len(scheduled_results) :]
+            scheduled_slot_keys = {str(item.get("scheduled_for_local") or "") for item in scheduled_results}
+            remaining_plan = [item for item in target_plan if item.slot.scheduled_for_local not in scheduled_slot_keys]
 
             for _ in range(1, self.settings.automation_max_generation_attempts + 1):
-                if not remaining_slots:
+                if not remaining_plan:
                     break
+                plan_item = remaining_plan[0]
                 attempt_result = self._run_generation_attempt(
                     run.run_id,
                     self._next_attempt_number(run.run_id),
-                    remaining_slots[0],
+                    plan_item.slot,
+                    source=plan_item.source,
                     finish_run=False,
                 )
                 if attempt_result.get("scheduled"):
@@ -213,10 +223,14 @@ class AutomationService:
                         {
                             "job_id": str(attempt_result.get("job_id") or ""),
                             "schedule_id": str(attempt_result.get("schedule_id") or ""),
-                            "scheduled_for_local": remaining_slots[0].scheduled_for_local,
+                            "scheduled_for_local": plan_item.slot.scheduled_for_local,
+                            "source": plan_item.source,
                         }
                     )
-                    remaining_slots = remaining_slots[1:]
+                    remaining_plan = remaining_plan[1:]
+                    continue
+                if attempt_result.get("skip_slot"):
+                    remaining_plan = remaining_plan[1:]
                     continue
                 if attempt_result.get("provider_limit"):
                     error = str(attempt_result.get("error") or "provider_limit")
@@ -358,6 +372,15 @@ class AutomationService:
                 times.append(normalized)
         return times
 
+    def _automation_publish_source_for_time(self, publish_time: str) -> str:
+        primary_time = datetime.strptime(str(self.settings.automation_publish_time), "%H:%M").strftime("%H:%M")
+        secondary_time = datetime.strptime(SECONDARY_AUTOMATION_PUBLISH_TIME, "%H:%M").strftime("%H:%M")
+        if publish_time == secondary_time:
+            return AUTOMATION_SOURCE_AUTO_TOPIC
+        if publish_time == primary_time:
+            return AUTOMATION_SOURCE_READY_SCRIPT
+        return AUTOMATION_SOURCE_AUTO_TOPIC
+
     def _vacant_publish_slots(self) -> list[PublishSlot]:
         local_tz = ZoneInfo(self.settings.automation_daily_timezone)
         today = datetime.now(local_tz).date()
@@ -369,12 +392,18 @@ class AutomationService:
             local_dt = scheduled_at.astimezone(local_tz)
             occupied.add((local_dt.date(), local_dt.strftime("%H:%M")))
         slots: list[PublishSlot] = []
-        for publish_time in self._automation_publish_times():
-            for offset in range(1, self.settings.automation_fill_window_days + 1):
+        for offset in range(1, self.settings.automation_fill_window_days + 1):
+            for publish_time in self._automation_publish_times():
                 candidate = today + timedelta(days=offset)
                 if (candidate, publish_time) not in occupied:
                     slots.append(PublishSlot(local_date=candidate, local_time=publish_time, timezone=self.settings.automation_daily_timezone))
         return slots
+
+    def _vacant_publish_plan(self) -> list[PublishPlan]:
+        return [
+            PublishPlan(slot=slot, source=self._automation_publish_source_for_time(slot.local_time))
+            for slot in self._vacant_publish_slots()
+        ]
 
     def _first_vacant_day(self) -> date | None:
         slot = next(iter(self._vacant_publish_slots()), None)
@@ -412,16 +441,26 @@ class AutomationService:
         self._finish_run(run_id, status="succeeded", result_job_id=job_id, result_schedule_id=schedule_id)
         return True
 
-    def _run_publishable_backlog(self, run_id: str, target_slots: list[PublishSlot] | date) -> list[dict[str, str]]:
-        slots = self._coerce_publish_slots(target_slots)
-        if not slots:
+    def _run_publishable_backlog(self, run_id: str, target_slots: list[PublishPlan] | list[PublishSlot] | date) -> list[dict[str, str]]:
+        plan = self._coerce_publish_plan(target_slots)
+        if not plan:
             return []
         candidates = self._publishable_backlog_candidates()
         scheduled_results: list[dict[str, str]] = []
-        for candidate in candidates:
-            if len(scheduled_results) >= len(slots):
-                break
+        used_job_ids: set[str] = set()
+        for plan_item in plan:
+            candidate = next(
+                (
+                    item
+                    for item in candidates
+                    if str(item["job_id"]) not in used_job_ids and self._backlog_candidate_matches_source(item, plan_item.source)
+                ),
+                None,
+            )
+            if candidate is None:
+                continue
             job_id = candidate["job_id"]
+            used_job_ids.add(str(job_id))
             classification = candidate["classification"]
             attempt = self._create_attempt(run_id, self._next_attempt_number(run_id), AUTOMATION_SOURCE_BACKLOG, job_id=job_id)
             self._merge_attempt_report(attempt.attempt_id, classification)
@@ -456,7 +495,7 @@ class AutomationService:
                     self._finish_attempt(attempt.attempt_id, status="not_eligible", error=f"job_status={status}")
                     continue
 
-                target_slot = slots[len(scheduled_results)]
+                target_slot = plan_item.slot
                 schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
             except Exception as exc:  # noqa: BLE001
                 self._finish_attempt(attempt.attempt_id, status="publish_failed", error=str(exc))
@@ -467,9 +506,13 @@ class AutomationService:
                     "job_id": job_id,
                     "schedule_id": schedule_id,
                     "scheduled_for_local": target_slot.scheduled_for_local,
+                    "source": str(candidate.get("job_origin") or plan_item.source),
                 }
             )
         return scheduled_results
+
+    def _backlog_candidate_matches_source(self, candidate: dict[str, Any], source: str) -> bool:
+        return str(candidate.get("job_origin") or "") == source
 
     def _publishable_backlog_candidates(self) -> list[dict[str, Any]]:
         with session_scope() as session:
@@ -496,14 +539,14 @@ class AutomationService:
                 report = self._monetization_report(job)
                 classification = self.classify_failure(job.status, job.failure_reason, report)
                 if job.status == "approved_for_publish":
-                    candidates.append({"job_id": job.job_id, "status": job.status, "classification": classification})
+                    candidates.append({"job_id": job.job_id, "status": job.status, "job_origin": job.job_origin, "classification": classification})
                     continue
                 if job.status == "ready_for_upload":
                     if not report.get("hard_blockers"):
-                        candidates.append({"job_id": job.job_id, "status": job.status, "classification": classification})
+                        candidates.append({"job_id": job.job_id, "status": job.status, "job_origin": job.job_origin, "classification": classification})
                     continue
                 if self._only_safe_visual_review_remains(report):
-                    candidates.append({"job_id": job.job_id, "status": job.status, "classification": classification})
+                    candidates.append({"job_id": job.job_id, "status": job.status, "job_origin": job.job_origin, "classification": classification})
             return candidates
 
     def _only_safe_visual_review_remains(self, report: dict[str, Any]) -> bool:
@@ -556,11 +599,18 @@ class AutomationService:
         attempt_number: int,
         target_slot: PublishSlot | date,
         *,
+        source: str | None = None,
         finish_run: bool = True,
     ) -> dict[str, Any]:
-        selected_script = self._select_ready_script_item()
-        source = AUTOMATION_SOURCE_READY_SCRIPT if selected_script else AUTOMATION_SOURCE_AUTO_TOPIC
+        selected_script = None if source == AUTOMATION_SOURCE_AUTO_TOPIC else self._select_ready_script_item()
+        source = source or (AUTOMATION_SOURCE_READY_SCRIPT if selected_script else AUTOMATION_SOURCE_AUTO_TOPIC)
+        if source not in {AUTOMATION_SOURCE_READY_SCRIPT, AUTOMATION_SOURCE_AUTO_TOPIC}:
+            raise ValueError(f"automation_source_not_supported={source}")
         attempt = self._create_attempt(run_id, attempt_number, source, ready_script_item_id=selected_script.script_item_id if selected_script else None)
+        if source == AUTOMATION_SOURCE_READY_SCRIPT and not selected_script:
+            error = "Banco de roteiros: não há roteiro disponível para o slot diário."
+            self._finish_attempt(attempt.attempt_id, status="not_eligible", error=error)
+            return {"scheduled": False, "skip_slot": True, "error": error}
         job_id: str | None = None
         try:
             payload = self._job_payload_from_ready_script(selected_script) if selected_script else self._automatic_topic_payload()
@@ -1125,6 +1175,19 @@ class AutomationService:
         if isinstance(target_slots, date):
             return [self._coerce_publish_slot(target_slots)]
         return [self._coerce_publish_slot(slot) for slot in target_slots]
+
+    def _coerce_publish_plan(self, target_slots: list[PublishPlan] | list[PublishSlot] | date) -> list[PublishPlan]:
+        if isinstance(target_slots, date):
+            slot = self._coerce_publish_slot(target_slots)
+            return [PublishPlan(slot=slot, source=self._automation_publish_source_for_time(slot.local_time))]
+        plan: list[PublishPlan] = []
+        for target_slot in target_slots:
+            if isinstance(target_slot, PublishPlan):
+                plan.append(target_slot)
+                continue
+            slot = self._coerce_publish_slot(target_slot)
+            plan.append(PublishPlan(slot=slot, source=self._automation_publish_source_for_time(slot.local_time)))
+        return plan
 
     def _publication_schedule_id(self, job_id: str) -> str | None:
         with session_scope() as session:

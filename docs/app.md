@@ -423,9 +423,9 @@ scripts/install_automation_timer.sh
 scripts/install_analytics_sync_timer.sh
 ```
 
-O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de agenda a partir de amanha. Ele preenche primeiro os slots do horario configurado (`automation_publish_time`) ao longo da janela e, quando esses slots ja estao ocupados ou ha backlog suficiente, usa um segundo slot diario as 18:00 de Brasilia. Antes de gerar conteudo novo, o ciclo agenda backlog publicavel ja aprovado ou autoaprovavel; se ainda sobrarem slots, tenta consumir um roteiro pronto aleatorio do banco, filtrado por similaridade narrativa. Se o banco estiver vazio ou saturado por similaridade, usa Tema Automatico.
+O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de agenda a partir de amanha. A agenda automatica trabalha com dois slots diarios: o horario configurado (`automation_publish_time`) e reservado para **Banco de Roteiros Prontos**, e o segundo slot e fixo as 18:00 de Brasilia para **Tema Automatico**. Antes de gerar conteudo novo, o ciclo agenda backlog publicavel ja aprovado ou autoaprovavel somente quando a origem do job combina com a origem esperada do slot; se ainda sobrarem slots, gera um job da origem daquele horario. Se nao houver roteiro pronto disponivel, o slot do banco fica registrado como nao elegivel e o ciclo ainda pode tentar o slot automatico.
 
-Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` para 11h em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
+Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` no horario do slot em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
 
 ## Coleta de performance
 

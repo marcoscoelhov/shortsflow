@@ -341,7 +341,7 @@ def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch
 
     def fake_schedule_publication(scheduled_job_id: str, payload: dict) -> None:
         assert scheduled_job_id == job_id
-        assert payload["scheduled_for_local"] == "2099-06-10T11:00"
+        assert payload["scheduled_for_local"] == "2099-06-10T18:00"
         assert payload["timezone"] == "America/Sao_Paulo"
         assert payload["youtube_visibility"] == "public"
         with SessionLocal() as session:
@@ -351,7 +351,7 @@ def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch
                     job_id=job_id,
                     schema_version="1.0.0",
                     content_hash=f"{job_id}-schedule",
-                    scheduled_for_utc=datetime(2099, 6, 10, 14, 0, tzinfo=UTC),
+                    scheduled_for_utc=datetime(2099, 6, 10, 21, 0, tzinfo=UTC),
                     timezone="America/Sao_Paulo",
                     youtube_visibility="public",
                     status="scheduled",
@@ -363,7 +363,7 @@ def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch
             session.commit()
 
     monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
-    monkeypatch.setattr(service, "_vacant_publish_slots", lambda: [PublishSlot(target_day, "11:00", "America/Sao_Paulo")])
+    monkeypatch.setattr(service, "_vacant_publish_slots", lambda: [PublishSlot(target_day, "18:00", "America/Sao_Paulo")])
     monkeypatch.setattr(service, "_select_ready_script_item", lambda: None)
     monkeypatch.setattr(service, "_automatic_topic_payload", lambda: {"seed_theme": "Automacao sucesso"})
     monkeypatch.setattr(orchestrator, "create_job", fake_create_job)
@@ -392,6 +392,124 @@ def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch
     assert attempt.status == "scheduled"
     assert attempt.score == 0.93
 
+def test_automation_daily_cycle_schedules_ready_script_and_automatic_topic_slots(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    service.set_automation_enabled(True)
+    target_day = datetime(2099, 6, 10).date()
+    with SessionLocal() as session:
+        for item in session.scalars(select(ReadyScriptItem).where(ReadyScriptItem.status == "available")).all():
+            item.status = "needs_review"
+        session.commit()
+    import_result = service.import_ready_script_batch(
+        """Título: Banco ocupa o primeiro slot diário
+Hook: O primeiro vídeo do dia vem do banco validado.
+Loop: O que impede o automático de tomar esse lugar?
+Beats: O ciclo separa os slots por origem.
+O segundo slot fica para geração automática.
+Payoff: A agenda diária mantém os dois fluxos ativos.
+Fechamento: Um banco, um automático.
+Hashtags: #curiosidades #shorts""",
+        fact_check_confirmed=True,
+        source="test-daily-two-slots",
+    )
+    assert import_result.imported == 1
+    created_payloads: list[dict] = []
+    scheduled_payloads: list[tuple[str, dict]] = []
+
+    def fake_create_job(payload: dict) -> str:
+        created_payloads.append(dict(payload))
+        job_id = f"daily-two-slots-{payload['job_origin']}"
+        with SessionLocal() as session:
+            _create_basic_job(session, job_id=job_id, status="queued", seed_theme=str(payload["seed_theme"]))
+            session.flush()
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.job_origin = str(payload["job_origin"])
+            job.creation_via = str(payload["creation_via"])
+            session.commit()
+        return job_id
+
+    def fake_process_job(job_id: str) -> str:
+        with SessionLocal() as session:
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.status = "ready_for_upload"
+            job.quality_summary = {
+                "assets": {"asset_semantic_score_avg": 0.93},
+                "monetization": {"passed": True, "final_status": "ready_for_upload", "hard_blockers": [], "manual_required": []},
+            }
+            session.commit()
+        return "ready_for_upload"
+
+    def fake_review_job(payload: dict, reviewed_job_id: str) -> None:
+        assert payload["action"] == "approve"
+        with SessionLocal() as session:
+            job = session.get(Job, reviewed_job_id)
+            assert job is not None
+            job.status = "approved_for_publish"
+            job.review_state = "approved"
+            session.commit()
+
+    def fake_schedule_publication(scheduled_job_id: str, payload: dict) -> None:
+        scheduled_payloads.append((scheduled_job_id, payload))
+        scheduled_for_utc = datetime.fromisoformat(payload["scheduled_for_local"]).replace(tzinfo=ZoneInfo(payload["timezone"])).astimezone(UTC)
+        with SessionLocal() as session:
+            session.add(
+                PublicationSchedule(
+                    schedule_id=f"{scheduled_job_id}-schedule",
+                    job_id=scheduled_job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"{scheduled_job_id}-schedule",
+                    scheduled_for_utc=scheduled_for_utc,
+                    timezone=payload["timezone"],
+                    youtube_visibility=payload["youtube_visibility"],
+                    status="scheduled",
+                    notes=payload["notes"],
+                )
+            )
+            session.commit()
+
+    monkeypatch.setattr(orchestrator.settings, "automation_max_generation_attempts", 2)
+    monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
+    monkeypatch.setattr(
+        service,
+        "_vacant_publish_slots",
+        lambda: [
+            PublishSlot(target_day, "11:00", "America/Sao_Paulo"),
+            PublishSlot(target_day, "18:00", "America/Sao_Paulo"),
+        ],
+    )
+    monkeypatch.setattr(service, "_run_publishable_backlog", lambda _run_id, _target_plan: [])
+    monkeypatch.setattr(
+        service,
+        "_automatic_topic_payload",
+        lambda: {
+            "seed_theme": "Tema automático diário",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 35,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "automation_source=automatic_topic",
+            "requested_angle": None,
+            "job_origin": "automatic_topic",
+            "creation_via": "daily_cycle",
+        },
+    )
+    monkeypatch.setattr(orchestrator, "create_job", fake_create_job)
+    monkeypatch.setattr(orchestrator, "process_job", fake_process_job)
+    monkeypatch.setattr(service, "evaluate_autoapproval", lambda _job_id: {"eligible": True, "score": 0.93, "threshold": 0.82, "reasons": [], "components": {}})
+    monkeypatch.setattr(orchestrator, "review_job", fake_review_job)
+    monkeypatch.setattr(orchestrator, "schedule_publication", fake_schedule_publication)
+
+    run_result = service.run_daily_cycle(force=True)
+
+    assert run_result["status"] == "succeeded", run_result
+    assert run_result["metadata"]["scheduled_count"] == 2
+    assert [payload["job_origin"] for payload in created_payloads] == ["ready_script_bank", "automatic_topic"]
+    assert [payload["scheduled_for_local"] for _, payload in scheduled_payloads] == ["2099-06-10T11:00", "2099-06-10T18:00"]
+    assert [item["source"] for item in run_result["metadata"]["scheduled_jobs"]] == ["ready_script_bank", "automatic_topic"]
+
 def test_automation_schedules_visual_review_only_backlog_job(monkeypatch) -> None:
     service = AutomationService(orchestrator)
     service.set_automation_enabled(True)
@@ -419,6 +537,10 @@ def test_automation_schedules_visual_review_only_backlog_job(monkeypatch) -> Non
             },
             artifact_index={"render": "render/final.mp4", "publish_package": "publish_package.json"},
         )
+        session.flush()
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.job_origin = "ready_script_bank"
         session.add(
             SceneAsset(
                 asset_id=f"{job_id}-asset",
@@ -526,6 +648,7 @@ def test_automation_schedules_visual_review_only_backlog_job(monkeypatch) -> Non
     assert artifact["reviewer"] == "automation_visual_review"
     with SessionLocal() as session:
         job = session.get(Job, job_id)
+        assert job is not None
         attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.job_id == job_id))
     assert job is not None
     assert job.quality_summary["assets"]["asset_visual_real_vision_checked"] is True
@@ -648,8 +771,8 @@ def test_automation_fills_multiple_backlog_slots_before_generating(monkeypatch) 
     job_ids = ["automation-backlog-fill-1", "automation-backlog-fill-2", "automation-backlog-fill-3"]
     slots = [
         PublishSlot(datetime(2099, 6, 10).date(), "11:00", "America/Sao_Paulo"),
-        PublishSlot(datetime(2099, 6, 11).date(), "11:00", "America/Sao_Paulo"),
         PublishSlot(datetime(2099, 6, 10).date(), "18:00", "America/Sao_Paulo"),
+        PublishSlot(datetime(2099, 6, 11).date(), "11:00", "America/Sao_Paulo"),
     ]
     with SessionLocal() as session:
         for index, job_id in enumerate(job_ids, start=1):
@@ -661,6 +784,10 @@ def test_automation_fills_multiple_backlog_slots_before_generating(monkeypatch) 
                 artifact_index={"render": "render/final.mp4", "publish_package": "publish_package.json"},
                 updated_at=datetime(2099, 1, index, tzinfo=UTC),
             )
+            session.flush()
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.job_origin = "automatic_topic" if index == 2 else "ready_script_bank"
             session.add(
                 RenderOutput(
                     render_id=f"{job_id}-render",
@@ -711,8 +838,8 @@ def test_automation_fills_multiple_backlog_slots_before_generating(monkeypatch) 
     assert run_result["metadata"]["scheduled_count"] == 3
     assert [payload["scheduled_for_local"] for _, payload in scheduled_payloads] == [
         "2099-06-10T11:00",
-        "2099-06-11T11:00",
         "2099-06-10T18:00",
+        "2099-06-11T11:00",
     ]
     with SessionLocal() as session:
         assert session.query(PublicationSchedule).filter(PublicationSchedule.job_id.in_(job_ids)).count() == 3
@@ -778,6 +905,10 @@ def test_ready_script_is_released_after_scene_plan_technical_failure(monkeypatch
     service.set_automation_enabled(True)
     target_day = datetime(2099, 6, 12).date()
     job_id = "automation-ready-script-scene-failure"
+    with SessionLocal() as session:
+        for item in session.scalars(select(ReadyScriptItem).where(ReadyScriptItem.status == "available")).all():
+            item.status = "needs_review"
+        session.commit()
     import_result = service.import_ready_script_batch(
         """Título: Roteiro reutilizavel apos falha tecnica
 Hook: Uma falha técnica não deve queimar este roteiro.
