@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.competitive_scout import CompetitiveScout
 from app.db import session_scope
 from app.editorial.repetition import build_channel_repetition_report
 from app.job_origin import CREATION_VIA_DAILY_CYCLE, JOB_ORIGIN_AUTOMATIC_TOPIC, JOB_ORIGIN_READY_SCRIPT_BANK
@@ -185,9 +186,17 @@ class AutomationService:
                     run = self._finish_run(run.run_id, status="skipped", skipped_reason="automation_disabled")
                     return serialize_run(run)
 
+            scout_result = self._run_competitive_scout_automation()
+            self._merge_run_metadata(run.run_id, {"competitive_scout": scout_result})
+
             preflight = self._youtube_preflight()
             if not preflight["passed"]:
-                run = self._finish_run(run.run_id, status="failed", error="; ".join(preflight["missing_items"]))
+                run = self._finish_run(
+                    run.run_id,
+                    status="failed",
+                    error="; ".join(preflight["missing_items"]),
+                    run_metadata={"competitive_scout": scout_result},
+                )
                 return serialize_run(run)
 
             target_plan = self._vacant_publish_plan()
@@ -321,6 +330,13 @@ class AutomationService:
             if not run:
                 raise KeyError(run_id)
             return run
+
+    def _merge_run_metadata(self, run_id: str, metadata: dict[str, Any]) -> None:
+        with session_scope() as session:
+            run = session.get(AutomationRun, run_id)
+            if not run:
+                raise KeyError(run_id)
+            run.run_metadata = {**dict(run.run_metadata or {}), **metadata}
 
     def _set_run_target(self, run_id: str, target_day: date, target_utc: datetime) -> None:
         with session_scope() as session:
@@ -991,6 +1007,28 @@ class AutomationService:
             creation_via=CREATION_VIA_DAILY_CYCLE,
         ).model_dump()
 
+    def _run_competitive_scout_automation(self) -> dict[str, Any]:
+        try:
+            return CompetitiveScout(settings=self.settings).run_automation_cycle(niche_id=self.settings.niche_id)
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "failed", "reason": str(exc)}
+
+    def _active_retention_guidance_notes(self) -> str | None:
+        try:
+            guidance = CompetitiveScout(settings=self.settings).active_retention_guidance(niche_id=self.settings.niche_id)
+        except Exception:
+            return None
+        if not guidance:
+            return None
+        text = str(guidance.get("guidance_text") or "").strip()
+        if not text:
+            return None
+        return (
+            "Aprendizado competitivo ativo no ciclo diario. Use como diretriz estrutural de retencao, "
+            "sem copiar palavras, roteiro literal ou exemplos de Shorts de referencia.\n"
+            f"{text}"
+        )
+
     def _automatic_topic_payload(self) -> dict[str, Any]:
         with session_scope() as session:
             recent_topics = session.scalars(
@@ -1009,6 +1047,9 @@ class AutomationService:
             seed_theme = random.choice(DEFAULT_AUTOMATION_TOPIC_POOL)
             requested_angle = None
             notes = "input_mode=theme\nautomation_source=automatic_topic\ntrend_research=unavailable\ntrend_source=fallback_pool"
+        retention_guidance = self._active_retention_guidance_notes()
+        if retention_guidance:
+            notes = "\n".join([notes, retention_guidance])
         return TopicRequestCreate(
             seed_theme=seed_theme,
             niche_id=self.settings.niche_id,

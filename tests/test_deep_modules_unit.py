@@ -299,6 +299,7 @@ def test_hub_job_request_builds_manual_title_payload() -> None:
         retention_optimized_duration_sec=50,
         viral_prompt_template="Use curiosidade forte.",
         trend_seed_resolver=lambda _niche: (_ for _ in ()).throw(AssertionError("manual title must not resolve trends")),
+        learned_retention_guidance="Experimento ativo: copie o esqueleto, troque palavras e fatos.",
     )
 
     assert result.trend_report is None
@@ -306,6 +307,8 @@ def test_hub_job_request_builds_manual_title_payload() -> None:
     assert result.payload.creation_via == "hub"
     assert result.payload.requested_angle == "inteligencia biologica impossivel"
     assert "input_mode=title" in str(result.payload.notes)
+    assert "Aprendizado competitivo aprovado para experimento" in str(result.payload.notes)
+    assert "copie o esqueleto" in str(result.payload.notes)
 
 
 def test_hub_job_request_empty_title_uses_automatic_topic_notes_mode() -> None:

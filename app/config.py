@@ -107,6 +107,19 @@ class Settings(BaseSettings):
     performance_sync_active_window_days: int = 45
     performance_sync_archive_window_days: int = 180
     performance_sync_batch_limit: int = 10
+    competitive_scout_min_maturity_hours: int = 24
+    competitive_scout_max_video_duration_sec: int = 90
+    competitive_scout_reference_batch_limit: int = 25
+    competitive_scout_min_reference_views: int = 10_000
+    competitive_scout_min_profile_references: int = 6
+    competitive_scout_automation_enabled: bool = True
+    competitive_scout_auto_approve_profiles: bool = True
+    competitive_scout_auto_start_experiments: bool = True
+    competitive_scout_auto_promote_profiles: bool = True
+    competitive_scout_queries: str = "curiosidades ciencia shorts\ncuriosidades cotidiano shorts"
+    retention_experiment_target_job_count: int = 3
+    retention_experiment_success_retention_percent: float = 80.0
+    retention_experiment_min_views: int = 100
     minimax_commercial_rights_confirmed: bool = False
     edge_tts_commercial_rights_confirmed: bool = False
     minimax_rights_evidence_url: str | None = None
@@ -299,6 +312,41 @@ class Settings(BaseSettings):
     def validate_performance_sync_batch_limit(cls, value: int) -> int:
         if not 1 <= value <= 100:
             raise ValueError("performance_sync_batch_limit must be between 1 and 100")
+        return value
+
+    @field_validator("competitive_scout_reference_batch_limit", "competitive_scout_min_profile_references", "retention_experiment_target_job_count")
+    @classmethod
+    def validate_competitive_scout_positive_ints(cls, value: int) -> int:
+        if not 1 <= value <= 100:
+            raise ValueError("competitive scout counts must be between 1 and 100")
+        return value
+
+    @field_validator("competitive_scout_min_maturity_hours")
+    @classmethod
+    def validate_competitive_scout_maturity(cls, value: int) -> int:
+        if not 0 <= value <= 720:
+            raise ValueError("competitive_scout_min_maturity_hours must be between 0 and 720")
+        return value
+
+    @field_validator("competitive_scout_max_video_duration_sec")
+    @classmethod
+    def validate_competitive_scout_duration(cls, value: int) -> int:
+        if not 1 <= value <= 240:
+            raise ValueError("competitive_scout_max_video_duration_sec must be between 1 and 240")
+        return value
+
+    @field_validator("competitive_scout_min_reference_views", "retention_experiment_min_views")
+    @classmethod
+    def validate_competitive_scout_min_views(cls, value: int) -> int:
+        if not 0 <= value <= 100_000_000:
+            raise ValueError("competitive scout minimum views must be between 0 and 100000000")
+        return value
+
+    @field_validator("retention_experiment_success_retention_percent")
+    @classmethod
+    def validate_retention_experiment_success_retention(cls, value: float) -> float:
+        if not 0 <= value <= 100:
+            raise ValueError("retention_experiment_success_retention_percent must be between 0 and 100")
         return value
 
     @field_validator("minimax_image_aspect_ratio")

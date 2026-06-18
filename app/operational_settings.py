@@ -138,6 +138,41 @@ OPERATIONAL_SETTING_SPECS = (
         max_value=100,
         step="1",
     ),
+    OperationalSettingSpec(
+        "competitive_scout_automation_enabled",
+        "Scout competitivo automático",
+        "Crescimento",
+        "checkbox",
+        description="Roda scout, síntese e avanço de experimentos dentro do ciclo diário de automação.",
+    ),
+    OperationalSettingSpec("competitive_scout_auto_approve_profiles", "Autoaprovar perfis do scout", "Crescimento", "checkbox"),
+    OperationalSettingSpec("competitive_scout_auto_start_experiments", "Autoiniciar experimentos", "Crescimento", "checkbox"),
+    OperationalSettingSpec("competitive_scout_auto_promote_profiles", "Autopromover vencedores", "Crescimento", "checkbox"),
+    OperationalSettingSpec(
+        "competitive_scout_reference_batch_limit",
+        "Lote do scout",
+        "Crescimento",
+        "number",
+        min_value=1,
+        max_value=100,
+        step="1",
+    ),
+    OperationalSettingSpec(
+        "competitive_scout_min_profile_references",
+        "Refs por perfil",
+        "Crescimento",
+        "number",
+        min_value=1,
+        max_value=100,
+        step="1",
+    ),
+    OperationalSettingSpec(
+        "competitive_scout_queries",
+        "Buscas do scout",
+        "Crescimento",
+        "textarea",
+        description="Uma busca por linha. Usada quando nao ha canal de referencia aprovado ou para complementar descoberta.",
+    ),
 )
 
 OPERATIONAL_INFO_SPECS = (

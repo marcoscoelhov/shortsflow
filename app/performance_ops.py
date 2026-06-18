@@ -6,8 +6,16 @@ from typing import Any
 from sqlalchemy import select
 
 from app.db import session_scope
-from app.growth_metrics import optional_float_value, optional_int_value
-from app.models import Job, PerformanceMetric, PublicationSchedule, YouTubeAnalyticsSnapshot
+from app.growth_metrics import build_channel_growth_report, optional_float_value, optional_int_value
+from app.models import (
+    Job,
+    PerformanceMetric,
+    PublicationSchedule,
+    Script,
+    TopicPlan,
+    TopicRequest,
+    YouTubeAnalyticsSnapshot,
+)
 from app.pipelines.common import model_payload
 from app.utils import new_id, stable_hash, utcnow
 from app.youtube_api import YouTubeIntegrationError
@@ -147,11 +155,42 @@ class PerformanceOperations:
                 "start_date": snapshot_record["start_date"],
                 "end_date": snapshot_record["end_date"],
                 "summary_metrics": summary,
+                "breakdowns": snapshot_payload.get("breakdowns") or {},
+                "extended_errors": (snapshot_payload.get("raw_response") or {}).get("extended_errors") or {},
             }
             quality_summary["performance"] = performance_report["latest"] or {}
             job.quality_summary = quality_summary
         self._append_event(job_id, "youtube.analytics_snapshot_synced", "succeeded", {"days": days, "youtube_video_id": youtube_video_id})
         return self._serialize_for_json(snapshot_payload)
+
+    def build_channel_growth_report(self, *, minimum_views: int = 100) -> dict[str, Any]:
+        latest_snapshots: dict[str, dict[str, Any]] = {}
+        with session_scope() as session:
+            rows = session.execute(
+                select(YouTubeAnalyticsSnapshot, Job, PublicationSchedule, TopicRequest, Script, TopicPlan)
+                .join(Job, Job.job_id == YouTubeAnalyticsSnapshot.job_id)
+                .join(PublicationSchedule, PublicationSchedule.job_id == Job.job_id, isouter=True)
+                .join(TopicRequest, TopicRequest.job_id == Job.job_id, isouter=True)
+                .join(Script, Script.job_id == Job.job_id, isouter=True)
+                .join(TopicPlan, TopicPlan.job_id == Job.job_id, isouter=True)
+                .order_by(YouTubeAnalyticsSnapshot.fetched_at.desc())
+                .limit(500)
+            ).all()
+            for snapshot, job, schedule, topic_request, script, topic_plan in rows:
+                if job.job_id in latest_snapshots:
+                    continue
+                latest_snapshots[job.job_id] = {
+                    "job_id": job.job_id,
+                    "youtube_video_id": snapshot.youtube_video_id,
+                    "title": script.title if script else job.topic_summary,
+                    "topic": job.topic_summary or (topic_request.seed_theme if topic_request else None),
+                    "canonical_topic": topic_plan.canonical_topic if topic_plan else None,
+                    "hook": script.hook if script else None,
+                    "published_at": schedule.published_at.isoformat() if schedule and schedule.published_at else None,
+                    "fetched_at": snapshot.fetched_at.isoformat() if snapshot.fetched_at else None,
+                    "summary_metrics": dict(snapshot.summary_metrics or {}),
+                }
+        return build_channel_growth_report(list(latest_snapshots.values()), minimum_views=minimum_views)
 
     def youtube_analytics_sync_candidates(
         self,

@@ -47,6 +47,7 @@ def compose_hub_notes(
     *,
     retention_optimized_duration_sec: int,
     viral_prompt_template: str,
+    learned_retention_guidance: str | None = None,
 ) -> str:
     normalized_mode = normalize_hub_input_mode(input_mode)
     if normalized_mode == "title":
@@ -68,9 +69,16 @@ def compose_hub_notes(
         "Se ele pedir um formato de saida diferente, ignore esse formato e mantenha o JSON interno obrigatorio do app.\n"
         f"{viral_prompt_template}"
     )
+    learned_retention_note = None
+    if learned_retention_guidance and learned_retention_guidance.strip():
+        learned_retention_note = (
+            "Aprendizado competitivo aprovado para experimento. Use como diretriz estrutural de retencao, "
+            "sem copiar palavras, roteiro literal ou exemplos de Shorts de referencia.\n"
+            f"{learned_retention_guidance.strip()}"
+        )
     parts = [
         part.strip()
-        for part in [notes, f"input_mode={normalized_mode}", mode_note, seo_note, retention_note, viral_template_note]
+        for part in [notes, f"input_mode={normalized_mode}", mode_note, seo_note, retention_note, learned_retention_note, viral_template_note]
         if part and part.strip()
     ]
     return "\n".join(parts)
@@ -94,6 +102,7 @@ def build_hub_job_request(
     retention_optimized_duration_sec: int,
     viral_prompt_template: str,
     trend_seed_resolver: Callable[[str], HubTrendSeed],
+    learned_retention_guidance: str | None = None,
 ) -> HubJobRequestBuildResult:
     normalized_mode = normalize_hub_input_mode(input_mode)
     angle = selected_angle(custom_angle, requested_angle)
@@ -134,6 +143,7 @@ def build_hub_job_request(
             combined_notes,
             retention_optimized_duration_sec=retention_optimized_duration_sec,
             viral_prompt_template=viral_prompt_template,
+            learned_retention_guidance=learned_retention_guidance,
         ),
         requested_angle=angle or None,
         job_origin=job_origin,

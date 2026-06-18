@@ -843,6 +843,9 @@ class JobOrchestrator:
     def sync_due_youtube_analytics_snapshots(self, *, days: int = 28, limit: int | None = None) -> dict[str, Any]:
         return self.publication_ops.sync_due_youtube_analytics_snapshots(days=days, limit=limit)
 
+    def build_channel_growth_report(self, *, minimum_views: int = 100) -> dict[str, Any]:
+        return self.publication_ops.build_channel_growth_report(minimum_views=minimum_views)
+
     def _steps(self) -> list[StepDefinition]:
         handlers: dict[str, tuple[int, Callable[[Session, Job, int], list[str]]]] = {
             "input_gate": (0, self._step_input_gate),

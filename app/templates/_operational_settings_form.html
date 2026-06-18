@@ -52,6 +52,17 @@
           <strong>{{ field.value }}</strong>
           {% if field.description %}<small>{{ field.description }}</small>{% endif %}
         </div>
+        {% elif field.input_type == "textarea" %}
+        <div class="field">
+          <label for="ops_{{ field.key }}{% if not settings_form_dialog|default(false) %}_page{% endif %}">{{ field.label }}</label>
+          <textarea
+            id="ops_{{ field.key }}{% if not settings_form_dialog|default(false) %}_page{% endif %}"
+            name="{{ field.key }}"
+            rows="3"
+            {% if field.description %}aria-describedby="ops_{{ field.key }}_help{% if not settings_form_dialog|default(false) %}_page{% endif %}"{% endif %}
+          >{{ field.value }}</textarea>
+          {% if field.description %}<small id="ops_{{ field.key }}_help{% if not settings_form_dialog|default(false) %}_page{% endif %}">{{ field.description }}</small>{% endif %}
+        </div>
         {% else %}
         <div class="field">
           <label for="ops_{{ field.key }}{% if not settings_form_dialog|default(false) %}_page{% endif %}">{{ field.label }}</label>

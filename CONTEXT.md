@@ -136,17 +136,105 @@ _Avoid_: backlog massivo, sugestoes ilimitadas, ideias fora do formato de roteir
 Um padrao de tema, hook, ritmo, promessa, payoff ou formato que performou acima do restante e pode inspirar novos **Jobs de Video** sem virar copia.
 _Avoid_: copiar video, tema repetido, template fixo, viral por chute
 
+**Linha Editorial Sustentavel**:
+Uma subdivisao do nicho de curiosidades que consegue gerar **Jobs de Video** recorrentes com retencao, evidencias disponiveis e variedade suficiente.
+_Avoid_: tendencia unica, tema amplo demais, formato impossivel de repetir
+
+**Linha de Curiosidade Cotidiana**:
+Uma **Linha Editorial Sustentavel** baseada em objetos, habitos, casa, cozinha, clima, celular e situacoes familiares.
+_Avoid_: curiosidade abstrata, noticia, tema sem identificacao imediata
+
+**Linha de Percepcao e Corpo Leve**:
+Uma **Linha Editorial Sustentavel** baseada em sensacoes, memoria, sono, visao e comportamento cotidiano sem promessa medica forte.
+_Avoid_: conselho medico, diagnostico, promessa de saude
+
+**Linha de Ciencia Visual Simples**:
+Uma **Linha Editorial Sustentavel** baseada em fenomenos verificaveis com imagem mental forte e explicacao curta.
+_Avoid_: aula enciclopedica, tema abstrato sem visual, afirmacao sem evidencia
+
+**Linha de Tecnologia Popular**:
+Uma **Linha Editorial Sustentavel** baseada em celular, internet, IA e tecnologia comum sem depender de noticia efemera.
+_Avoid_: cobertura de lançamento, rumor, tutorial tecnico
+
+**Linha de Natureza com Payoff Visual**:
+Uma **Linha Editorial Sustentavel** baseada em animais, plantas ou ambientes naturais quando o payoff pode ser visual e memoravel.
+_Avoid_: ficha enciclopedica, curiosidade de animal sem virada, ranking generico
+
 **Canal de Referencia Competitiva**:
 Um canal externo usado para comparar padrões editoriais e descobrir aprendizados aplicaveis aos proximos **Jobs de Video** sem copiar identidade ou roteiro.
 _Avoid_: concorrente generico, canal para copiar, benchmark sem nicho
+
+**Canal Candidato de Referencia**:
+Um canal externo descoberto pelo **Scout Competitivo de Shorts** que ainda precisa de validacao humana antes de virar **Canal de Referencia Competitiva**.
+_Avoid_: referencia aprovada, canal usado sem revisao, concorrente presumido
+
+**Maturidade de Referencia Viral**:
+O tempo minimo apos publicacao antes de tratar um short externo como candidato forte para aprendizado editorial.
+_Avoid_: decidir por pico inicial, tratar video novo como vencedor, comparar sem tempo de teste
+
+**Scout Competitivo de Shorts**:
+Uma leitura automatizada de **Shorts de Referencia Viral** que identifica padroes editoriais aplicaveis como aprendizado, sem alterar a producao sem aprovacao humana.
+_Avoid_: scraper para copiar, ajuste automatico invisivel de prompt, gerador direto de jobs
+
+**Rodada de Scout Competitivo**:
+Uma execucao do **Scout Competitivo de Shorts** para coletar, classificar e sintetizar referencias sem bloquear criacao, revisao ou publicacao.
+_Avoid_: etapa obrigatoria do job, rotina que trava publicacao, analise sem artefato
 
 **Short de Referencia Viral**:
 Um video curto externo com desempenho forte o bastante para servir como amostra de aprendizado editorial.
 _Avoid_: qualquer video popular, copiar roteiro, evidencia sem metricas
 
+**Short Vencedor do Canal**:
+Um **Job de Video** publicado no canal com retencao alta, volume confiavel e sinais suficientes para orientar aprendizado editorial interno.
+_Avoid_: video externo, views isoladas, amostra pequena
+
 **Arquitetura de Retencao do Roteiro**:
 A organizacao de hook, loop, escalada, payoff e fechamento que explica por que um roteiro sustenta atencao ate o fim.
 _Avoid_: transcricao completa, resumo do tema, estilo visual isolado
+
+**Leitura Textual de Referencia**:
+A analise de titulo, descricao, transcricao disponivel e estrutura narrativa de um **Short de Referencia Viral** ou **Short Vencedor do Canal** para extrair aprendizado editorial.
+_Avoid_: analise visual profunda, copiar roteiro, inferir retencao externa
+
+**Transcricao Autorizada de Referencia**:
+Uma transcricao usada na **Leitura Textual de Referencia** quando vem de recurso oficial, conteudo proprio, permissao explicita ou envio humano.
+_Avoid_: download automatico de video externo sem autorizacao, transcricao inventada, burlar ausencia de captions
+
+**Leitura Visual de Referencia**:
+A analise limitada de sinais visuais de um **Short de Referencia Viral** ou **Short Vencedor do Canal**, usada apenas depois da **Leitura Textual de Referencia** provar valor.
+_Avoid_: baixar video externo sem criterio, copiar identidade visual, usar visual como fonte factual
+
+**Perfil de Retencao Aprendido**:
+Um aprendizado editorial versionado derivado de **Shorts Vencedores do Canal** e **Shorts de Referencia Viral**, usado para orientar proximos roteiros sem editar diretamente a **Configuracao Global de Prompt Viral**.
+_Avoid_: prompt drift, copiar exemplos, ajuste invisivel de producao
+
+**Esqueleto de Retencao Vencedor**:
+Um padrao abstrato e reaplicavel de movimentos narrativos derivado de varias amostras vencedoras, mesmo quando desafia o formato atual de roteiro, sem reutilizar palavras, fatos ou narrativa especifica de um unico video.
+_Avoid_: copiar roteiro, encaixar tudo no formato atual, trocar apenas substantivos, depender de uma unica referencia
+
+**Aposta Agressiva de Retencao**:
+Um **Esqueleto de Retencao Vencedor** criado com amostra menor para acelerar aprendizado, podendo virar experimento rapido sem promocao direta.
+_Avoid_: padrao definitivo, prova estatistica, mudanca global imediata
+
+**Experimento de Retencao Aprendida**:
+A aplicacao limitada de um **Perfil de Retencao Aprendido** a poucos **Jobs de Video** para medir efeito antes de virar padrao.
+_Avoid_: promocao direta, teste sem limite, alterar todos os jobs
+
+**Conflito Editorial Experimental**:
+Um conflito entre uma **Aposta Agressiva de Retencao** e um gate editorial existente, tratado como diagnostico revisavel quando nao afeta factualidade, direitos, duracao, idioma ou integridade tecnica.
+_Avoid_: ignorar gate critico, publicar inseguro, esconder conflito
+
+**Sucesso Forte de Retencao Aprendida**:
+O resultado de um **Experimento de Retencao Aprendida** quando pelo menos um **Job de Video** vira **Short Vencedor do Canal**.
+_Avoid_: views sem retencao, melhora subjetiva, promocao sem volume confiavel
+
+**Sucesso Parcial de Retencao Aprendida**:
+O resultado de um **Experimento de Retencao Aprendida** quando o lote melhora claramente a linha editorial, mas ainda nao produz **Short Vencedor do Canal**.
+_Avoid_: tratar como padrao, ignorar aprendizado, concluir sem baseline
+
+**Promocao de Perfil de Retencao**:
+A decisao humana de tornar um **Perfil de Retencao Aprendido** padrao depois de evidencia propria suficiente.
+_Avoid_: promover por concorrente, promover por gosto, mudar prompt global sem medicao
 
 **Sinal Primario de Performance**:
 A metrica que mais pesa para identificar uma **Linha Editorial Vencedora**, priorizando retencao em vez de alcance bruto.
@@ -759,6 +847,34 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Um **Arquivo de Video Final** pertence a exatamente um **Job de Video**.
 - O **Acabamento Editorial Premium** melhora a composicao final do **Arquivo de Video Final** sem mudar o conteudo editorial aprovado.
 - O **Relatorio de Decisao do Torneio** recomenda mudancas de roteamento, mas nao altera a **Configuracao Operacional do Hub** sem aprovacao humana.
+- Um **Scout Competitivo de Shorts** usa **Canais de Referencia Competitiva** curados como fonte inicial antes de recorrer a busca ampla.
+- Um **Scout Competitivo de Shorts** pode descobrir **Canais Candidatos de Referencia**, mas so usa esses canais como **Canais de Referencia Competitiva** depois de validacao humana.
+- O **Centro de Crescimento do Canal** deve concentrar a validacao de **Canais Candidatos de Referencia** e o acompanhamento de **Canais de Referencia Competitiva**.
+- Um **Scout Competitivo de Shorts** pode propor mudancas de aprendizado, mas nao altera a **Configuracao Global de Prompt Viral** sem aprovacao humana.
+- Uma **Rodada de Scout Competitivo** roda com prioridade menor que criacao, revisao, publicacao e coleta de performance do canal.
+- Uma **Rodada de Scout Competitivo** automatizada pode avançar coleta, sintese, experimento e promocao por thresholds, mas falha de scout nao deve bloquear o ciclo principal de criacao/publicacao.
+- Um **Scout Competitivo de Shorts** deve operar dentro do nicho de curiosidades e ajudar a validar **Linhas Editoriais Sustentaveis** antes de estreitar o foco.
+- Um **Scout Competitivo de Shorts** pode coletar sinais diariamente, mas deve respeitar **Maturidade de Referencia Viral** antes de tratar um short externo como vencedor.
+- As linhas candidatas iniciais do **Scout Competitivo de Shorts** sao **Linha de Curiosidade Cotidiana**, **Linha de Percepcao e Corpo Leve**, **Linha de Ciencia Visual Simples**, **Linha de Tecnologia Popular** e **Linha de Natureza com Payoff Visual**.
+- Um **Short Vencedor do Canal** usa retencao real do canal, enquanto um **Short de Referencia Viral** externo usa apenas proxy publico de performance.
+- A primeira versao do **Scout Competitivo de Shorts** prioriza **Leitura Textual de Referencia**; **Leitura Visual de Referencia** fica para uma etapa posterior de menor custo.
+- **Leitura Textual de Referencia** deve usar **Transcricao Autorizada de Referencia**; ausencia de captions em video externo nao autoriza download automatico do conteudo.
+- Um **Perfil de Retencao Aprendido** orienta proximos roteiros como entrada versionada; ele nao substitui nem edita diretamente a **Configuracao Global de Prompt Viral**.
+- Um **Perfil de Retencao Aprendido** deve influenciar o **Roteiro Viral Estruturado** como aprendizado estruturado, nao como nota solta de um **Job de Video**.
+- Um **Perfil de Retencao Aprendido** pode reaplicar um **Esqueleto de Retencao Vencedor**, mas nao deve depender da narrativa especifica de um unico **Short de Referencia Viral**.
+- Um **Esqueleto de Retencao Vencedor** pode desafiar a estrutura atual do **Roteiro Viral Estruturado** quando surge de um lote vencedor, mas deve entrar primeiro como **Aposta Agressiva de Retencao**.
+- No MVP, um **Esqueleto de Retencao Vencedor** pode mudar a arquitetura narrativa interna, mas o **Roteiro Viral Estruturado** ainda deve preservar o contrato de saida esperado pelo pipeline.
+- Uma **Aposta Agressiva de Retencao** pode iniciar **Experimento de Retencao Aprendida** com amostra menor, mas nao pode virar **Promocao de Perfil de Retencao** sem resultado proprio.
+- Um **Conflito Editorial Experimental** pode virar diagnostico revisavel em **Experimento de Retencao Aprendida**, mas gates de factualidade, direitos, duracao, idioma e integridade tecnica continuam bloqueando.
+- Um **Perfil de Retencao Aprendido** deve passar por **Experimento de Retencao Aprendida** antes de uma **Promocao de Perfil de Retencao**.
+- Uma **Promocao de Perfil de Retencao** exige evidencia propria de **Shorts Vencedores do Canal**, nao apenas proxies de **Shorts de Referencia Viral**.
+- Uma **Promocao de Perfil de Retencao** torna o perfil padrao versionado da linha editorial e arquiva perfis promovidos anteriores da mesma linha.
+- Um **Experimento de Retencao Aprendida** deve ser avaliado dentro de uma **Linha Editorial**, nao como mudanca global do canal.
+- Um **Experimento de Retencao Aprendida** com **Sucesso Forte de Retencao Aprendida** ganha prioridade para nova rodada ou promocao.
+- Um **Experimento de Retencao Aprendida** com **Sucesso Parcial de Retencao Aprendida** deve ser ajustado e repetido antes de promocao.
+- Views sem retencao suficiente nao caracterizam **Sucesso Forte de Retencao Aprendida**.
+- Um **Scout Competitivo de Shorts** pode gerar **Propostas de Crescimento** ou **Roteiros Sugeridos por Crescimento**, mas nao cria **Jobs de Video** diretamente.
+- Um **Scout Competitivo de Shorts** deve preservar metadados, metricas publicas e analise derivada de **Shorts de Referencia Viral**, nao midia externa nem roteiros externos completos.
 - O **Movimento Visual de Cena** e uma parte possivel do **Acabamento Editorial Premium**, nao o acabamento inteiro.
 - Uma **Prova Comparativa de Acabamento** compara versoes do mesmo **Job de Video** antes de promover uma abordagem de acabamento a padrao.
 - Uma **Decisao Comparativa de Acabamento** nao substitui a **Revisao Humana** necessaria para publicar um **Job de Video**.

@@ -1,5 +1,5 @@
 from tests.e2e_support import *  # noqa: F403
-from app.growth_metrics import build_growth_score
+from app.growth_metrics import build_channel_growth_report, build_growth_score
 from app.quality.premium_publish_gate import PremiumPublishGateResult
 
 
@@ -374,7 +374,7 @@ def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch
 
     run_result = service.run_daily_cycle(force=True)
 
-    assert run_result["status"] == "succeeded"
+    assert run_result["status"] == "succeeded", run_result
     assert run_result["result_job_id"] == job_id
     assert run_result["result_schedule_id"] == f"{job_id}-schedule"
     assert run_result["attempts_used"] == 1
@@ -3185,10 +3185,49 @@ def test_youtube_build_flow_enables_pkce(monkeypatch, tmp_path) -> None:
         "https://www.googleapis.com/auth/youtube.force-ssl",
         "https://www.googleapis.com/auth/youtube.upload",
         "https://www.googleapis.com/auth/youtube.readonly",
+        "https://www.googleapis.com/auth/yt-analytics.readonly",
     ]
     assert captured["kwargs"]["state"] == "state-123"
     assert captured["kwargs"]["autogenerate_code_verifier"] is True
     assert flow.redirect_uri == "https://example.test/youtube/oauth/callback"
+
+def test_youtube_connection_status_requires_analytics_scope(monkeypatch, tmp_path) -> None:
+    settings = Settings(
+        data_dir=tmp_path,
+        youtube_api_enabled=True,
+        youtube_publish_mode="api",
+        youtube_client_id="client-id",
+        youtube_client_secret="client-secret",
+    )
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    settings.youtube_token_path.write_text(
+        json.dumps(
+            {
+                "token": "token-123",
+                "refresh_token": "refresh-123",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "scopes": [
+                    "https://www.googleapis.com/auth/youtube.force-ssl",
+                    "https://www.googleapis.com/auth/youtube.upload",
+                    "https://www.googleapis.com/auth/youtube.readonly",
+                ],
+                "expiry": "2026-05-12T14:50:58+00:00",
+                "connected_at": "2026-05-12T14:50:59+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    publisher = YouTubePublisher(settings)
+    monkeypatch.setattr(publisher, "_google_dependencies_available", lambda: True)
+
+    status = publisher.connection_status("https://example.test/youtube/oauth/callback")
+
+    assert status.publish_connected is True
+    assert status.analytics_connected is False
+    assert status.reporting_connected is False
+    assert "yt-analytics" in " ".join(status.analytics_missing_items or [])
 
 def test_youtube_exchange_code_restores_saved_code_verifier(monkeypatch, tmp_path) -> None:
     settings = Settings(
@@ -3473,6 +3512,64 @@ def test_growth_score_prioritizes_retention_and_marks_confidence() -> None:
     assert low_volume["confidence"] == "baixa_confianca"
     assert low_volume["stale"] is True
 
+def test_channel_growth_report_surfaces_history_gaps_and_rankings() -> None:
+    report = build_channel_growth_report(
+        [
+            {
+                "job_id": "winner",
+                "title": "Planeta sem estrela",
+                "hook": "Um mundo vaga no escuro.",
+                "summary_metrics": {
+                    "views": 1000,
+                    "averageViewPercentage": 86.0,
+                    "averageViewDuration": 30,
+                    "likes": 70,
+                    "comments": 0,
+                    "shares": 0,
+                    "subscribersGained": 6,
+                    "subscribersLost": 1,
+                    "engagedViews": 820,
+                },
+            },
+            {
+                "job_id": "weak",
+                "title": "Tema abstrato",
+                "hook": "Uma explicação começa devagar.",
+                "summary_metrics": {
+                    "views": 900,
+                    "averageViewPercentage": 42.0,
+                    "averageViewDuration": 14,
+                    "likes": 20,
+                    "comments": 0,
+                    "shares": 0,
+                    "subscribersGained": 0,
+                },
+            },
+            {
+                "job_id": "buried",
+                "title": "Peixe luminoso",
+                "hook": "A isca acende no escuro.",
+                "summary_metrics": {
+                    "views": 120,
+                    "averageViewPercentage": 95.0,
+                    "averageViewDuration": 33,
+                    "likes": 12,
+                    "comments": 0,
+                    "shares": 0,
+                    "subscribersGained": 1,
+                },
+            },
+        ],
+        minimum_views=100,
+    )
+
+    assert report["totals"]["views"] == 2020
+    assert report["totals"]["subscribers_net"] == 6
+    assert report["rankings"]["top_retention"][0]["title"] == "Peixe luminoso"
+    assert report["rankings"]["bottom_retention"][0]["title"] == "Tema abstrato"
+    assert any(gap["kind"] == "retention_gap" for gap in report["gaps"])
+    assert any(gap["kind"] == "share_gap" for gap in report["gaps"])
+
 def test_youtube_analytics_sync_candidates_respect_active_and_archive_windows(monkeypatch) -> None:
     now = datetime(2026, 5, 28, 12, 0, tzinfo=UTC)
     monkeypatch.setattr(orchestrator.settings, "performance_sync_active_window_days", 45)
@@ -3686,6 +3783,11 @@ def test_sync_youtube_analytics_snapshot_persists_snapshot_and_updates_growth_ce
                 "subscribersGained": 3,
             },
             "daily_rows": [{"day": end_date.isoformat(), "views": 240, "averageViewPercentage": 86.5}],
+            "breakdowns": {
+                "traffic_sources": [{"insightTrafficSourceType": "SHORTS", "views": 220}],
+                "countries": [{"country": "BR", "views": 200}],
+                "devices": [{"deviceType": "MOBILE", "views": 230}],
+            },
             "raw_response": {"summary": {}, "daily": {}},
             "fetched_at": datetime(2026, 5, 27, 12, 0, tzinfo=UTC).isoformat(),
         },
@@ -3703,6 +3805,7 @@ def test_sync_youtube_analytics_snapshot_persists_snapshot_and_updates_growth_ce
     assert snapshot.summary_metrics["averageViewPercentage"] == 86.5
     assert metric.retention_percent == 86.5
     assert job and job.quality_summary["youtube_analytics"]["summary_metrics"]["views"] == 240
+    assert job.quality_summary["youtube_analytics"]["breakdowns"]["traffic_sources"][0]["insightTrafficSourceType"] == "SHORTS"
     assert (Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "youtube_analytics_snapshot.json").exists()
     dashboard = client.get("/publication-hub")
     assert "Linhas editoriais por retenção" in dashboard.text

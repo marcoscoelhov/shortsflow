@@ -12,8 +12,10 @@ from app.utils import ensure_dir, new_id
 
 YOUTUBE_WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
-YOUTUBE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
-YOUTUBE_OAUTH_SCOPES = [YOUTUBE_WRITE_SCOPE, YOUTUBE_UPLOAD_SCOPE, YOUTUBE_ANALYTICS_SCOPE]
+YOUTUBE_DATA_READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+YOUTUBE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
+YOUTUBE_REPORTING_SCOPE = YOUTUBE_ANALYTICS_SCOPE
+YOUTUBE_OAUTH_SCOPES = [YOUTUBE_WRITE_SCOPE, YOUTUBE_UPLOAD_SCOPE, YOUTUBE_DATA_READONLY_SCOPE, YOUTUBE_ANALYTICS_SCOPE]
 YOUTUBE_ANALYTICS_METRICS = [
     "views",
     "estimatedMinutesWatched",
@@ -22,6 +24,17 @@ YOUTUBE_ANALYTICS_METRICS = [
     "likes",
     "comments",
     "shares",
+    "subscribersGained",
+]
+YOUTUBE_ANALYTICS_OPTIONAL_METRICS = [
+    "engagedViews",
+    "subscribersLost",
+]
+YOUTUBE_ANALYTICS_BREAKDOWN_METRICS = [
+    "views",
+    "estimatedMinutesWatched",
+    "averageViewDuration",
+    "averageViewPercentage",
     "subscribersGained",
 ]
 
@@ -43,6 +56,8 @@ class YouTubeConnectionStatus:
     publish_connected: bool = False
     analytics_connected: bool = False
     analytics_missing_items: list[str] | None = None
+    reporting_connected: bool = False
+    reporting_missing_items: list[str] | None = None
 
 
 def _iso_or_none(value: datetime | None) -> str | None:
@@ -69,6 +84,7 @@ class YouTubePublisher:
         payload = self._read_json(self.settings.youtube_token_path)
         missing_items: list[str] = []
         analytics_missing_items: list[str] = []
+        reporting_missing_items: list[str] = []
         client_configured = bool(self.settings.youtube_client_id and self.settings.youtube_client_secret)
         dependencies_available = self._google_dependencies_available()
         if not self.settings.youtube_api_enabled:
@@ -82,15 +98,20 @@ class YouTubePublisher:
         if not payload:
             missing_items.append("Canal ainda não conectado por OAuth")
             analytics_missing_items.append("Canal ainda não conectado por OAuth")
+            reporting_missing_items.append("Canal ainda não conectado por OAuth")
         elif YOUTUBE_WRITE_SCOPE not in list(payload.get("scopes") or []):
             missing_items.append("OAuth atual não tem escopo para programar ou editar vídeos, reconecte o canal")
         granted_scopes = list(payload.get("scopes") or []) if payload else []
         if not dependencies_available:
             analytics_missing_items.append("Dependências Google OAuth/API ainda não instaladas no ambiente")
+            reporting_missing_items.append("Dependências Google OAuth/API ainda não instaladas no ambiente")
         if YOUTUBE_ANALYTICS_SCOPE not in granted_scopes:
-            analytics_missing_items.append("OAuth atual não tem escopo de Analytics, reconecte o canal")
+            analytics_missing_items.append("OAuth atual não tem escopo de Analytics (`yt-analytics.readonly`), reconecte o canal")
+        if YOUTUBE_REPORTING_SCOPE not in granted_scopes:
+            reporting_missing_items.append("OAuth atual não tem escopo da YouTube Reporting API (`yt-analytics.readonly`), reconecte o canal")
         publish_connected = bool(payload and YOUTUBE_WRITE_SCOPE in granted_scopes)
         analytics_connected = bool(payload and YOUTUBE_ANALYTICS_SCOPE in granted_scopes and dependencies_available)
+        reporting_connected = bool(payload and YOUTUBE_REPORTING_SCOPE in granted_scopes and dependencies_available)
         return YouTubeConnectionStatus(
             connected=publish_connected,
             client_configured=client_configured,
@@ -103,6 +124,8 @@ class YouTubePublisher:
             publish_connected=publish_connected,
             analytics_connected=analytics_connected,
             analytics_missing_items=analytics_missing_items,
+            reporting_connected=reporting_connected,
+            reporting_missing_items=reporting_missing_items,
         )
 
     def authorization_url(self, redirect_uri: str) -> str:
@@ -332,6 +355,84 @@ class YouTubePublisher:
         payload["youtube_url"] = self.watch_url(normalized)
         return payload
 
+    def fetch_public_channel(self, *, channel_id: str | None = None, handle: str | None = None) -> dict[str, Any]:
+        normalized_channel_id = str(channel_id or "").strip()
+        normalized_handle = str(handle or "").strip()
+        if bool(normalized_channel_id) == bool(normalized_handle):
+            raise YouTubeIntegrationError("Informe exatamente um identificador de canal")
+        service = self._build_youtube_service()
+        params: dict[str, Any] = {"part": "snippet,statistics"}
+        if normalized_channel_id:
+            params["id"] = normalized_channel_id
+        else:
+            params["forHandle"] = normalized_handle
+        response = service.channels().list(**params).execute()
+        items = list(response.get("items") or [])
+        if not items:
+            raise YouTubeIntegrationError("canal de referência não encontrado no YouTube")
+        return self._serialize_response(items[0])
+
+    def search_public_videos(
+        self,
+        *,
+        query: str | None = None,
+        channel_id: str | None = None,
+        published_after: datetime | None = None,
+        max_results: int = 25,
+        order: str = "date",
+        region_code: str | None = None,
+        video_duration: str = "short",
+    ) -> list[dict[str, Any]]:
+        normalized_query = str(query or "").strip()
+        normalized_channel_id = str(channel_id or "").strip()
+        if not normalized_query and not normalized_channel_id:
+            raise YouTubeIntegrationError("busca de referência exige query ou channel_id")
+        service = self._build_youtube_service()
+        remaining = max(1, min(int(max_results or 25), 100))
+        page_token: str | None = None
+        items: list[dict[str, Any]] = []
+        while remaining > 0:
+            page_size = min(remaining, 50)
+            params: dict[str, Any] = {
+                "part": "snippet",
+                "type": "video",
+                "maxResults": page_size,
+                "order": order,
+                "videoDuration": video_duration,
+            }
+            if normalized_query:
+                params["q"] = normalized_query
+            if normalized_channel_id:
+                params["channelId"] = normalized_channel_id
+            if published_after is not None:
+                params["publishedAfter"] = _iso_or_none(published_after)
+            if region_code:
+                params["regionCode"] = region_code
+            if page_token:
+                params["pageToken"] = page_token
+            response = service.search().list(**params).execute()
+            items.extend(self._serialize_response(item) for item in response.get("items") or [])
+            page_token = response.get("nextPageToken")
+            remaining -= page_size
+            if not page_token:
+                break
+        return items
+
+    def fetch_public_videos(self, video_ids: list[str]) -> list[dict[str, Any]]:
+        normalized_ids = [str(video_id or "").strip() for video_id in video_ids if str(video_id or "").strip()]
+        if not normalized_ids:
+            return []
+        service = self._build_youtube_service()
+        videos: list[dict[str, Any]] = []
+        for index in range(0, len(normalized_ids), 50):
+            batch = normalized_ids[index : index + 50]
+            response = service.videos().list(
+                part="snippet,contentDetails,statistics",
+                id=",".join(batch),
+            ).execute()
+            videos.extend(self._serialize_response(item) for item in response.get("items") or [])
+        return videos
+
     def fetch_video_analytics_snapshot(self, *, video_id: str, start_date: date, end_date: date) -> dict[str, Any]:
         normalized = str(video_id or "").strip()
         if not normalized:
@@ -356,19 +457,77 @@ class YouTubePublisher:
             filters=f"video=={normalized}",
             sort="day",
         ).execute()
+        optional_metrics_response, optional_metrics_error = self._optional_analytics_query(
+            service,
+            start_date=start_date,
+            end_date=end_date,
+            metrics=",".join(YOUTUBE_ANALYTICS_OPTIONAL_METRICS),
+            filters=f"video=={normalized}",
+        )
+        country_response, country_error = self._optional_analytics_query(
+            service,
+            start_date=start_date,
+            end_date=end_date,
+            metrics=",".join(YOUTUBE_ANALYTICS_BREAKDOWN_METRICS),
+            dimensions="country",
+            filters=f"video=={normalized}",
+            sort="-views",
+        )
+        summary_metrics = self._analytics_metrics(summary_response)
+        summary_metrics.update(self._analytics_metrics(optional_metrics_response))
+        breakdowns = {
+            "traffic_sources": [],
+            "countries": self._analytics_rows(country_response),
+            "devices": [],
+        }
+        extended_errors = {
+            key: error
+            for key, error in {
+                "optional_metrics": optional_metrics_error,
+                "traffic_sources": "requires_youtube_reporting_api",
+                "countries": country_error,
+                "devices": "requires_youtube_reporting_api",
+            }.items()
+            if error
+        }
         return {
             "video_id": normalized,
             "youtube_url": self.watch_url(normalized),
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "summary_metrics": self._analytics_metrics(summary_response),
+            "summary_metrics": summary_metrics,
             "daily_rows": self._analytics_rows(daily_response),
+            "breakdowns": breakdowns,
             "raw_response": {
                 "summary": self._serialize_response(summary_response),
                 "daily": self._serialize_response(daily_response),
+                "optional_metrics": self._serialize_response(optional_metrics_response),
+                "traffic_sources": {},
+                "countries": self._serialize_response(country_response),
+                "devices": {},
+                "extended_errors": extended_errors,
             },
             "fetched_at": datetime.now(UTC).isoformat(),
         }
+
+    def _optional_analytics_query(self, service: Any, **params: Any) -> tuple[dict[str, Any], str | None]:
+        payload = {
+            "ids": "channel==MINE",
+            **{key: value for key, value in params.items() if value is not None},
+        }
+        if isinstance(payload.get("start_date"), date):
+            payload["startDate"] = payload.pop("start_date").isoformat()
+        if isinstance(payload.get("end_date"), date):
+            payload["endDate"] = payload.pop("end_date").isoformat()
+        try:
+            return self._serialize_response(service.reports().query(**payload).execute()), None
+        except Exception as exc:
+            return {}, str(exc)
+
+    def _build_youtube_service(self) -> Any:
+        credentials = self._load_credentials(refresh=True)
+        discovery, _ = self._google_upload_dependencies()
+        return discovery.build("youtube", "v3", credentials=credentials, cache_discovery=False)
 
     def _analytics_metrics(self, response: dict[str, Any]) -> dict[str, Any]:
         rows = list(response.get("rows") or [])

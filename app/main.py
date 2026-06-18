@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from app.automation import AutomationService
+from app.competitive_scout import CompetitiveScout, HeuristicScoutAnalyzer
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.http_limits import content_length_exceeds, read_request_body_limited, replay_request_body
@@ -121,6 +122,10 @@ _tiktok_integration_context = hub_context._tiktok_integration_context
 _publication_dashboard_context = hub_context._publication_dashboard_context
 _calendar_context = hub_context._calendar_context
 _resolve_job_id = hub_context._resolve_job_id
+
+
+def _competitive_scout_service() -> CompetitiveScout:
+    return CompetitiveScout(settings=settings, analyzer=HeuristicScoutAnalyzer())
 
 
 
@@ -490,6 +495,69 @@ def publication_dashboard_fragment(request: Request):
     )
 
 
+@app.post("/competitive-scout/runs/{run_id}/profiles")
+def build_scout_profiles(
+    run_id: str,
+    min_references: int | None = Form(default=None),
+    aggressive: bool = Form(default=True),
+    return_to: str | None = Form(default=None),
+):
+    try:
+        result = _competitive_scout_service().synthesize_profiles_from_run(run_id, min_references=min_references, aggressive=aggressive)
+    except ValueError as exc:
+        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
+    return _redirect_back(return_to, {"profiles_created": str(len(result.get("created") or []))}, default="/publication-hub")
+
+
+@app.post("/retention-profiles/{profile_id}/approve")
+def approve_retention_profile(profile_id: str, return_to: str | None = Form(default=None)):
+    try:
+        result = _competitive_scout_service().approve_profile(profile_id, action="approve")
+    except ValueError as exc:
+        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
+    return _redirect_back(return_to, {"profile_status": str(result.get("status") or "approved")}, default="/publication-hub")
+
+
+@app.post("/retention-profiles/{profile_id}/reject")
+def reject_retention_profile(profile_id: str, return_to: str | None = Form(default=None)):
+    try:
+        result = _competitive_scout_service().approve_profile(profile_id, action="reject")
+    except ValueError as exc:
+        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
+    return _redirect_back(return_to, {"profile_status": str(result.get("status") or "rejected")}, default="/publication-hub")
+
+
+@app.post("/retention-profiles/{profile_id}/experiments")
+def start_retention_experiment(
+    profile_id: str,
+    target_job_count: int | None = Form(default=None),
+    return_to: str | None = Form(default=None),
+):
+    try:
+        result = _competitive_scout_service().start_experiment(profile_id, target_job_count=target_job_count)
+    except ValueError as exc:
+        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
+    return _redirect_back(return_to, {"experiment_started": str(result.get("experiment_id") or "1")}, default="/publication-hub")
+
+
+@app.post("/retention-experiments/{experiment_id}/evaluate")
+def evaluate_retention_experiment(experiment_id: str, return_to: str | None = Form(default=None)):
+    try:
+        result = _competitive_scout_service().evaluate_experiment(experiment_id)
+    except ValueError as exc:
+        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
+    return _redirect_back(return_to, {"experiment_decision": str(result.get("decision") or "needs_more_data")}, default="/publication-hub")
+
+
+@app.post("/retention-experiments/{experiment_id}/promote")
+def promote_retention_experiment(experiment_id: str, return_to: str | None = Form(default=None)):
+    try:
+        result = _competitive_scout_service().promote_experiment_winner(experiment_id)
+    except ValueError as exc:
+        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
+    return _redirect_back(return_to, {"profile_promoted": str(result.get("profile_id") or "1")}, default="/publication-hub")
+
+
 @app.get("/library", response_class=HTMLResponse)
 def ready_script_library(request: Request):
     return templates.TemplateResponse(
@@ -697,10 +765,13 @@ def create_job(
         )
 
     try:
+        selected_niche = niche_id or HUB_DEFAULT_NICHE
+        scout_service = _competitive_scout_service()
+        active_retention_guidance = scout_service.active_retention_guidance(niche_id=selected_niche)
         result = build_hub_job_request(
             seed_theme=seed_theme,
             input_mode=input_mode,
-            niche_id=niche_id,
+            niche_id=selected_niche,
             language=language,
             target_duration_sec=target_duration_sec,
             tone=tone,
@@ -714,8 +785,11 @@ def create_job(
             retention_optimized_duration_sec=HUB_RETENTION_OPTIMIZED_DURATION_SEC,
             viral_prompt_template=_viral_prompt_template(),
             trend_seed_resolver=resolve_trend_seed,
+            learned_retention_guidance=(active_retention_guidance or {}).get("guidance_text"),
         )
         job_id = orchestrator.create_job(result.payload.model_dump())
+        if active_retention_guidance and active_retention_guidance.get("source_kind") == "experiment":
+            scout_service.attach_job_to_experiment(str(active_retention_guidance["experiment_id"]), job_id)
         if result.trend_report is not None:
             orchestrator.storage.persist_json(job_id, "trend_research.json", result.trend_report)
     except ValidationError as exc:

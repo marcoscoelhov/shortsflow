@@ -187,9 +187,9 @@ Fluxo OAuth:
 - `GET /youtube/connect` cria a URL de autorizacao e persiste `youtube_oauth_state.json`.
 - `GET /youtube/oauth/callback` troca `code` por token e salva `youtube_oauth_token.json`.
 - `POST /youtube/disconnect` remove token e state locais.
-- O status de publicacao e o status de Analytics sao separados: publicar usa `youtube.force-ssl`/`youtube.upload`; Analytics usa `youtube.readonly`.
+- O status de publicacao e o status de Analytics sao separados: publicar usa `youtube.force-ssl`/`youtube.upload`; leitura da Data API usa `youtube.readonly`; Analytics e Reporting usam `yt-analytics.readonly`.
 
-O Centro de Crescimento do Canal usa `YouTubeAnalyticsSnapshot` para salvar leituras de `reports.query` por Job publicado. A coleta automatica roda fora do request da pagina, via CLI/timer dedicado, e atualiza Jobs publicados com `youtube_video_id` conforme a janela ativa de performance.
+O Centro de Crescimento do Canal usa `YouTubeAnalyticsSnapshot` para salvar leituras de `reports.query` por Job publicado. A coleta automatica roda fora do request da pagina, via CLI/timer dedicado, e atualiza Jobs publicados com `youtube_video_id` conforme a janela ativa de performance. Cada snapshot guarda metricas base, linhas diarias e, quando a consulta por video permitir, breakdown por pais dentro do JSON do artefato. Origem de trafego, dispositivo, impressoes e CTR ficam marcados como pendencia da YouTube Reporting API.
 
 O Score de Crescimento e deliberadamente simples: `averageViewPercentage` vira o score principal, `views >= 100` marca confianca, e `subscribersGained`, `shares` e `views` servem como desempate. Likes e comentarios aparecem como contexto, mas nao guiam o ranking principal.
 
@@ -200,7 +200,45 @@ A politica de coleta recorrente e:
 - Jobs sem `youtube_video_id` ficam como pendencia operacional, nao como performance ruim.
 - A pausa de criacao/publicacao automatizada nao pausa a coleta de performance; use `performance_collection_enabled` para esse controle.
 
-As recomendacoes rapidas do Centro de Crescimento sao deterministicas e auditaveis. O relatorio semanal por IA fica separado e so deve rodar quando houver base minima de crescimento suficiente.
+As recomendacoes rapidas do Centro de Crescimento sao deterministicas e auditaveis. O relatorio historico consolidado fica disponivel no Hub e no CLI por `python -m app.cli growth-report`; ele destaca vencedores, piores retencoes, conversao para inscritos e gaps como baixa conversacao, baixo compartilhamento, retencao alta com pouca distribuicao e snapshots zerados. Relatorios de alcance/impressao/CTR dependem da YouTube Reporting API, que e um fluxo separado de relatorios assincronos, nao da chamada sincronica `reports.query`.
+
+## Scout competitivo de Shorts
+
+O scout competitivo mapeia Shorts publicos de referencia para aprender estruturas de retencao sem copiar texto literal. A fase atual cobre descoberta por canais aprovados, canais informados manualmente ou buscas textuais, enriquecimento via YouTube Data API, filtro de maturidade/duracao/views e persistencia auditavel em banco mais JSON.
+
+Comando operacional:
+
+```bash
+python -m app.cli competitive-scout --channel-id UC... --query "curiosidades ciencia shorts" --max-results 25
+```
+
+Se nenhum `--channel-id` nem `--query` for informado, o scout usa `ReferenceChannel` com `status=approved` no nicho escolhido. A busca usa `search.list` com `type=video` e `videoDuration=short`, depois valida a duracao real pelo `contentDetails.duration` de `videos.list`; portanto "Short" e tratado como candidato curto e nao como garantia da plataforma.
+
+A analise usa o provider LLM primario quando disponivel e cai para heuristica deterministica quando nao houver provider ou quando a resposta falhar. No MVP, referencias externas entram com `transcript_source=none`; transcricao ou download de video externo so devem entrar em uma fase posterior com fonte autorizada ou consentida. Os artefatos ficam em `data/artifacts/scout/<run_id>/` e as tabelas principais sao `reference_channels`, `reference_shorts`, `scout_runs`, `learned_retention_profiles`, `retention_experiments` e `retention_experiment_jobs`.
+
+Depois de uma rodada concluida, o operador pode sintetizar **Perfis de Retencao Aprendidos** por linha editorial. O sistema copia agressivamente o esqueleto estatistico do lote, como sequencia de abertura, movimentos de tensao e contrato de payoff, mas registra explicitamente elementos proibidos de copia literal. Perfis nascem como `pending_approval`; so perfis `approved` ou `promoted` podem iniciar **Experimento de Retencao Aprendida**.
+
+Comandos operacionais:
+
+```bash
+python -m app.cli competitive-scout-profiles <run_id>
+python -m app.cli retention-profile-approve <profile_id>
+python -m app.cli retention-experiment-start <profile_id>
+python -m app.cli retention-experiment-evaluate <experiment_id>
+python -m app.cli retention-experiment-promote <experiment_id>
+```
+
+Enquanto houver experimento `running`, os proximos Jobs do mesmo nicho recebem o esqueleto aprovado nas notas editoriais e sao vinculados em `retention_experiment_jobs`. A avaliacao do experimento usa Analytics proprio do canal, com padrao forte em `retention_experiment_success_retention_percent` (padrao 80%) e volume minimo `retention_experiment_min_views` (padrao 100). O resultado pode ser `success_strong`, `success_partial`, `failed` ou `needs_more_data`.
+
+A promocao final e uma acao humana separada e so aceita experimento com `success_strong`. Quando promovido, o perfil vira `promoted`, arquiva qualquer perfil promovido anterior da mesma linha editorial e passa a orientar Jobs futuros do nicho mesmo sem experimento aberto. Isso ajusta o metaprompt efetivo usado na criacao por meio de notas versionadas do Job, mas nao edita automaticamente a Configuracao Global de Prompt Viral.
+
+O ciclo diario de automacao roda o scout competitivo automaticamente quando `competitive_scout_automation_enabled=true` (padrao). Esse ciclo avalia experimentos em andamento, promove vencedores quando `competitive_scout_auto_promote_profiles=true`, executa uma nova rodada de scout com canais aprovados e as buscas de `competitive_scout_queries`, sintetiza perfis, autoaprova quando `competitive_scout_auto_approve_profiles=true` e inicia experimentos quando `competitive_scout_auto_start_experiments=true`. Falha ou ausencia de fonte do scout entra em `AutomationRun.run_metadata.competitive_scout`, mas nao derruba criacao/publicacao do ciclo diario.
+
+Para rodar apenas o scout automatico, sem criar Job nem agenda:
+
+```bash
+python -m app.cli competitive-scout-auto-cycle
+```
 
 ## Publicacao cruzada no TikTok
 
@@ -437,6 +475,12 @@ scripts/install_analytics_sync_timer.sh
 ```
 
 O timer roda as 03h em `America/Sao_Paulo`, depois do ciclo diario principal. A rotina respeita `performance_collection_enabled`, exige OAuth com escopo de Analytics e limita o lote por `performance_sync_batch_limit`.
+
+Para auditar a base consolidada sem abrir o Hub:
+
+```bash
+python -m app.cli growth-report --minimum-views 100
+```
 
 ## Testes
 

@@ -1,0 +1,3 @@
+# Scout competitivo de Shorts com aprovacao humana
+
+YTS Render vai usar um **Scout Competitivo de Shorts** para aprender **Esqueletos de Retencao Vencedores** a partir de **Shorts Vencedores do Canal** e **Shorts de Referencia Viral**, mas esse aprendizado nao altera producao diretamente. O scout comeca por **Canais de Referencia Competitiva** validados, leitura textual e metadata publica; videos externos sem **Transcricao Autorizada de Referencia** nao serao baixados automaticamente. O resultado vira **Perfil de Retencao Aprendido** ou **Aposta Agressiva de Retencao** aprovavel no **Centro de Crescimento do Canal**, com experimentos por **Linha Editorial Sustentavel** e promocao apenas depois de evidencia propria de retencao.

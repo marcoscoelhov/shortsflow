@@ -25,6 +25,36 @@
     <strong>Analytics sincronizado</strong>
     <p>{{ request.query_params.get("analytics_synced") }} snapshot(s) entraram na base de crescimento.</p>
   </section>
+  {% elif request.query_params.get("scout_error") %}
+  <section class="panel status-banner">
+    <strong>Scout não aplicado</strong>
+    <p>{{ request.query_params.get("scout_error") }}</p>
+  </section>
+  {% elif request.query_params.get("profiles_created") %}
+  <section class="panel status-banner">
+    <strong>Perfis sintetizados</strong>
+    <p>{{ request.query_params.get("profiles_created") }} perfil(is) de retenção foram gerados para aprovação.</p>
+  </section>
+  {% elif request.query_params.get("profile_status") %}
+  <section class="panel status-banner">
+    <strong>Perfil atualizado</strong>
+    <p>Status atual: {{ request.query_params.get("profile_status") }}.</p>
+  </section>
+  {% elif request.query_params.get("experiment_started") %}
+  <section class="panel status-banner">
+    <strong>Experimento iniciado</strong>
+    <p>{{ request.query_params.get("experiment_started") }}</p>
+  </section>
+  {% elif request.query_params.get("experiment_decision") %}
+  <section class="panel status-banner">
+    <strong>Experimento avaliado</strong>
+    <p>Decisão: {{ request.query_params.get("experiment_decision") }}.</p>
+  </section>
+  {% elif request.query_params.get("profile_promoted") %}
+  <section class="panel status-banner">
+    <strong>Perfil promovido</strong>
+    <p>{{ request.query_params.get("profile_promoted") }} virou padrão de retenção da linha.</p>
+  </section>
   {% endif %}
 
   <section class="growth-scoreboard" aria-label="Indicadores principais">
@@ -35,6 +65,40 @@
       <small>{{ item.detail }}</small>
     </article>
     {% endfor %}
+  </section>
+
+  <section class="publication-grid growth-grid">
+    {% set channel_engagement_rate = growth.channel_report.totals.engagement_rate|default(none) %}
+    <article class="panel publication-panel growth-data-panel">
+      <p class="eyebrow">Relatório histórico</p>
+      <h3>Todos os publicados sincronizados</h3>
+      <div class="growth-status-grid">
+        <div><strong>Vídeos</strong><span>{{ growth.channel_report.coverage.videos|default(0) }}</span></div>
+        <div><strong>Views</strong><span>{{ growth.channel_report.totals.views|default(0) }}</span></div>
+        <div><strong>Minutos</strong><span>{{ growth.channel_report.totals.watch_minutes|default(0) }}</span></div>
+        <div><strong>Likes</strong><span>{{ growth.channel_report.totals.likes|default(0) }}</span></div>
+        <div><strong>Inscritos líquidos</strong><span>{{ growth.channel_report.totals.subscribers_net|default(0) }}</span></div>
+        <div><strong>Engajamento</strong><span>{% if channel_engagement_rate is not none %}{{ channel_engagement_rate }}%{% else %}-{% endif %}</span></div>
+      </div>
+    </article>
+    <article class="panel publication-panel growth-data-panel">
+      <p class="eyebrow">Gaps detectados</p>
+      <h3>Onde melhorar a leitura</h3>
+      <div class="growth-answer-list">
+        {% for item in growth.channel_report.gaps[:3] %}
+        <div class="growth-answer">
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.impact }}</p>
+          {% if item.examples %}<small>{{ item.examples|join(" · ") }}</small>{% endif %}
+        </div>
+        {% else %}
+        <div class="growth-answer">
+          <strong>Nenhum gap forte ainda</strong>
+          <p>Continue coletando snapshots para confirmar padrões por tema, retenção e conversão.</p>
+        </div>
+        {% endfor %}
+      </div>
+    </article>
   </section>
 
   <section class="panel growth-command-center">
@@ -70,6 +134,105 @@
         </div>
       </article>
       {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel publication-panel growth-focus-panel">
+    <div class="panel-heading-row">
+      <div>
+        <p class="eyebrow">Scout competitivo</p>
+        <h3>Perfis e experimentos de retenção</h3>
+      </div>
+      <p class="publication-note">Perfis aprovados entram em experimento; perfis promovidos orientam os próximos Jobs da linha.</p>
+    </div>
+    <div class="publication-grid growth-grid">
+      <article class="publication-panel">
+        <p class="eyebrow">Rodadas</p>
+        <div class="publication-list">
+          {% for run in growth.competitive_scout.runs[:3] %}
+          <div class="publication-item">
+            <strong>{{ run.status }} · {{ run.shorts_selected }} selecionado(s)</strong>
+            <p>{{ run.run_id }}</p>
+            <small>{{ run.shorts_considered }} analisado(s), {{ run.profiles_created }} perfil(is)</small>
+            {% if run.status == "completed" %}
+            <form method="post" action="/competitive-scout/runs/{{ run.run_id }}/profiles" class="inline-form">
+              <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+              <input type="hidden" name="aggressive" value="true">
+              <button type="submit" class="ghost">Sintetizar perfis</button>
+            </form>
+            {% endif %}
+          </div>
+          {% else %}
+          <div class="publication-item empty">
+            <strong>Nenhuma rodada registrada.</strong>
+            <p>Execute o scout por CLI ou cadastre canais de referência antes de sintetizar perfis.</p>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="publication-panel">
+        <p class="eyebrow">Perfis</p>
+        <div class="publication-list">
+          {% for profile in growth.competitive_scout.profiles[:4] %}
+          <div class="publication-item">
+            <strong>{{ profile.title }}</strong>
+            <p>{{ profile.line_id or "linha indefinida" }} · {{ profile.reference_count }} referência(s) · {{ profile.status }}</p>
+            <small>{{ profile.dominant_skeleton.opening_contract|default("esqueleto pendente") }}</small>
+            <div class="button-row">
+              {% if profile.status == "pending_approval" %}
+              <form method="post" action="/retention-profiles/{{ profile.profile_id }}/approve" class="inline-form">
+                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+                <button type="submit" class="ghost">Aprovar</button>
+              </form>
+              <form method="post" action="/retention-profiles/{{ profile.profile_id }}/reject" class="inline-form">
+                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+                <button type="submit" class="ghost">Rejeitar</button>
+              </form>
+              {% elif profile.status in ["approved", "promoted"] %}
+              <form method="post" action="/retention-profiles/{{ profile.profile_id }}/experiments" class="inline-form">
+                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+                <button type="submit" class="ghost">Iniciar experimento</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+          {% else %}
+          <div class="publication-item empty">
+            <strong>Nenhum perfil para aprovar.</strong>
+            <p>Sintetize uma rodada concluída quando houver referências suficientes por linha.</p>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="publication-panel">
+        <p class="eyebrow">Experimentos</p>
+        <div class="publication-list">
+          {% for experiment in growth.competitive_scout.experiments[:4] %}
+          <div class="publication-item">
+            <strong>{{ experiment.profile_title }}</strong>
+            <p>{{ experiment.status }} · {{ experiment.assigned_job_count }}/{{ experiment.target_job_count }} Job(s)</p>
+            <small>{{ experiment.decision or "aguardando dados próprios" }}</small>
+            <form method="post" action="/retention-experiments/{{ experiment.experiment_id }}/evaluate" class="inline-form">
+              <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+              <button type="submit" class="ghost">Avaliar</button>
+            </form>
+            {% if experiment.decision == "success_strong" and not experiment.result_summary.promoted_profile_id %}
+            <form method="post" action="/retention-experiments/{{ experiment.experiment_id }}/promote" class="inline-form">
+              <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+              <button type="submit" class="ghost">Promover perfil</button>
+            </form>
+            {% endif %}
+          </div>
+          {% else %}
+          <div class="publication-item empty">
+            <strong>Nenhum experimento ativo.</strong>
+            <p>Aprove um perfil para aplicar o esqueleto nos próximos Jobs.</p>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
     </div>
   </section>
 
