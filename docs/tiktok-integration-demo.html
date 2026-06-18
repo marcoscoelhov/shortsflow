@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ShortsFlow | TikTok End-to-End Demo</title>
+    <link rel="icon" href="./shortsflow-mark-1024.png" type="image/png">
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #09090b;
+        --chrome: #0f1117;
+        --panel: #17171b;
+        --panel-strong: #202026;
+        --ink: #f6f1f0;
+        --muted: #b8a5a2;
+        --line: #343035;
+        --accent: #ff5540;
+        --accent-soft: #ffb4a8;
+        --ok: #22c55e;
+        --warn: #f59e0b;
+        --info: #89ceff;
+        --danger: #ff6b5f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        line-height: 1.45;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      a {
+        color: var(--accent-soft);
+        font-weight: 700;
+      }
+
+      .shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr);
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        padding: 22px 18px;
+        background: var(--chrome);
+        border-right: 1px solid var(--line);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--ink);
+        text-decoration: none;
+      }
+
+      .brand img {
+        width: 42px;
+        height: 42px;
+      }
+
+      .brand strong {
+        display: block;
+        line-height: 1.1;
+      }
+
+      .brand span,
+      .label,
+      .badge,
+      .event-time,
+      .step-index {
+        font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
+        font-size: 0.74rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .brand span,
+      .muted,
+      .event-time {
+        color: var(--muted);
+      }
+
+      .nav {
+        display: grid;
+        gap: 8px;
+      }
+
+      .nav a {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 11px 12px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        color: var(--muted);
+        text-decoration: none;
+      }
+
+      .nav a.active {
+        border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+        color: var(--ink);
+      }
+
+      .sidebar-note {
+        margin-top: auto;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .main {
+        padding: 24px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 22px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        max-width: 13ch;
+        font-size: clamp(2.25rem, 5vw, 4.5rem);
+        line-height: 1.03;
+        font-weight: 850;
+      }
+
+      h2 {
+        font-size: 1.2rem;
+      }
+
+      h3 {
+        font-size: 0.98rem;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .hero-copy {
+        padding: clamp(24px, 4vw, 44px);
+      }
+
+      .hero-copy .muted {
+        max-width: 68ch;
+        margin-top: 18px;
+        font-size: 1.04rem;
+      }
+
+      .connection {
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+      }
+
+      .connection-row,
+      .job-row,
+      .api-row,
+      .event-row {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-strong);
+      }
+
+      .connection-row {
+        grid-template-columns: 1fr auto;
+        align-items: center;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 24px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0 9px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .badge.ok {
+        border-color: color-mix(in srgb, var(--ok) 60%, transparent);
+        color: #bff5ce;
+      }
+
+      .badge.warn {
+        border-color: color-mix(in srgb, var(--warn) 60%, transparent);
+        color: #ffe0a3;
+      }
+
+      .badge.info {
+        border-color: color-mix(in srgb, var(--info) 60%, transparent);
+        color: #c9eaff;
+      }
+
+      .badge.danger {
+        border-color: color-mix(in srgb, var(--danger) 60%, transparent);
+        color: #ffc5c0;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1.08fr) minmax(380px, 0.92fr);
+        gap: 18px;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 18px 18px 0;
+      }
+
+      .section-head p {
+        margin-top: 6px;
+      }
+
+      .flow-steps {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        padding: 18px;
+      }
+
+      .step-card {
+        min-height: 148px;
+        display: grid;
+        align-content: start;
+        gap: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        background: var(--panel-strong);
+      }
+
+      .step-card.active {
+        border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent);
+      }
+
+      .step-index {
+        color: var(--accent-soft);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 0 18px 18px;
+      }
+
+      .button {
+        min-height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+        padding: 0 13px;
+        cursor: pointer;
+      }
+
+      .button.primary {
+        border-color: transparent;
+        background: var(--accent);
+        color: #151111;
+        font-weight: 800;
+      }
+
+      .button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .job-list,
+      .api-list,
+      .event-list {
+        display: grid;
+        gap: 10px;
+        padding: 18px;
+      }
+
+      .job-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+      }
+
+      .job-title {
+        display: grid;
+        gap: 5px;
+      }
+
+      .job-title strong {
+        overflow-wrap: anywhere;
+      }
+
+      .job-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .video-preview {
+        display: grid;
+        grid-template-columns: 130px minmax(0, 1fr);
+        gap: 14px;
+        align-items: center;
+        padding: 18px;
+      }
+
+      .phone {
+        aspect-ratio: 9 / 16;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background:
+          linear-gradient(160deg, rgba(255, 85, 64, 0.32), transparent 46%),
+          linear-gradient(24deg, rgba(137, 206, 255, 0.2), transparent 58%),
+          #121217;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+      }
+
+      .phone img {
+        width: 48%;
+        opacity: 0.95;
+      }
+
+      .api-row {
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+      }
+
+      .method {
+        color: var(--info);
+      }
+
+      code {
+        color: #f7d0c9;
+        font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
+        font-size: 0.82rem;
+      }
+
+      .event-row {
+        grid-template-columns: auto 1fr;
+        align-items: start;
+      }
+
+      .review-note {
+        padding: 18px;
+        border-top: 1px solid var(--line);
+      }
+
+      @media (max-width: 1120px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          position: static;
+          height: auto;
+        }
+
+        .nav {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .hero,
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 740px) {
+        .main {
+          padding: 16px;
+        }
+
+        .flow-steps,
+        .nav {
+          grid-template-columns: 1fr;
+        }
+
+        .job-row,
+        .api-row,
+        .connection-row,
+        .video-preview {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="./index.html">
+          <img src="./shortsflow-mark-1024.png" width="42" height="42" alt="">
+          <span>
+            <strong>ShortsFlow</strong>
+            TikTok Review Demo
+          </span>
+        </a>
+
+        <nav class="nav" aria-label="Demo sections">
+          <a class="active" href="#flow">Integration <span>Live</span></a>
+          <a href="#video">Video package <span>Ready</span></a>
+          <a href="#api">TikTok API <span>Mock</span></a>
+          <a href="#events">Audit trail <span>Clean</span></a>
+        </nav>
+
+        <div class="sidebar-note">
+          <p class="label">Sandbox disclosure</p>
+          <p class="muted">This public page demonstrates the complete integration flow with mock data. No TikTok token, credential, or private channel data is exposed.</p>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="label">TikTok Content Posting API</p>
+            <p class="muted">End-to-end sandbox/mockup demo for app review</p>
+          </div>
+          <a href="./demo-videos/tiktok-demo-download.html">Video demo</a>
+        </header>
+
+        <section class="hero">
+          <div class="panel hero-copy">
+            <h1>Publishing flow, start to finish.</h1>
+            <p class="muted">
+              This page shows how ShortsFlow connects an authorized TikTok account,
+              receives an approved short-form video package, queues the TikTok
+              publication, calls the Content Posting API, and tracks the final status.
+            </p>
+          </div>
+
+          <aside class="panel connection" aria-label="Connection status">
+            <div class="connection-row">
+              <div>
+                <p class="label">OAuth scope</p>
+                <strong>video.publish</strong>
+              </div>
+              <span class="badge ok">authorized</span>
+            </div>
+            <div class="connection-row">
+              <div>
+                <p class="label">Privacy level</p>
+                <strong>SELF_ONLY</strong>
+              </div>
+              <span class="badge warn">sandbox</span>
+            </div>
+            <div class="connection-row">
+              <div>
+                <p class="label">Redirect URI</p>
+                <strong>same public domain</strong>
+              </div>
+              <span class="badge ok">verified</span>
+            </div>
+          </aside>
+        </section>
+
+        <section id="flow" class="panel">
+          <div class="section-head">
+            <div>
+              <p class="label">Reviewer walkthrough</p>
+              <h2>Run the complete mocked integration</h2>
+              <p class="muted">Click through the same operational sequence used by the private Hub.</p>
+            </div>
+            <span id="overall-status" class="badge info">waiting</span>
+          </div>
+
+          <div class="flow-steps">
+            <article class="step-card active" data-step-card="1">
+              <span class="step-index">01</span>
+              <h3>Connect TikTok</h3>
+              <p class="muted">The account owner authorizes the app with the required publishing scope.</p>
+            </article>
+            <article class="step-card" data-step-card="2">
+              <span class="step-index">02</span>
+              <h3>Approve video</h3>
+              <p class="muted">The operator reviews script, visuals, audio, metadata, and publish readiness.</p>
+            </article>
+            <article class="step-card" data-step-card="3">
+              <span class="step-index">03</span>
+              <h3>Queue publication</h3>
+              <p class="muted">A TikTok channel publication record is created from the approved job.</p>
+            </article>
+            <article class="step-card" data-step-card="4">
+              <span class="step-index">04</span>
+              <h3>Upload and track</h3>
+              <p class="muted">The worker initializes upload, sends the MP4, and fetches status.</p>
+            </article>
+          </div>
+
+          <div class="controls" aria-label="Demo controls">
+            <button class="button primary" type="button" data-next-step>Run next step</button>
+            <button class="button" type="button" data-reset-demo>Reset demo</button>
+          </div>
+        </section>
+
+        <div class="workspace">
+          <section id="video" class="panel">
+            <div class="section-head">
+              <div>
+                <p class="label">Approved package</p>
+                <h2>Video ready for TikTok</h2>
+              </div>
+              <span id="package-status" class="badge warn">pending approval</span>
+            </div>
+
+            <div class="video-preview">
+              <div class="phone" aria-label="Video preview mockup">
+                <img src="./shortsflow-mark-1024.png" alt="">
+              </div>
+              <div>
+                <h3>Why a hotel bed feels more comfortable</h3>
+                <p class="muted">38 second vertical short, captions included, final render available, metadata reviewed.</p>
+                <div class="job-meta" style="margin-top: 12px">
+                  <span class="badge ok">render passed</span>
+                  <span class="badge ok">metadata ready</span>
+                  <span class="badge ok">rights checked</span>
+                  <span class="badge warn">SELF_ONLY</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="job-list">
+              <article class="job-row">
+                <div class="job-title">
+                  <strong>Job de Video 1c9b8c65</strong>
+                  <span class="muted">Approved for publication, cross-post target TikTok</span>
+                </div>
+                <span id="job-status" class="badge info">reviewed</span>
+              </article>
+            </div>
+          </section>
+
+          <section id="api" class="panel">
+            <div class="section-head">
+              <div>
+                <p class="label">Content Posting API</p>
+                <h2>Mocked API sequence</h2>
+              </div>
+              <span id="api-status" class="badge info">not started</span>
+            </div>
+
+            <div class="api-list">
+              <article class="api-row" data-api-row="creator">
+                <span class="method">POST</span>
+                <code>/v2/post/publish/creator_info/query/</code>
+                <span class="badge">queued</span>
+              </article>
+              <article class="api-row" data-api-row="init">
+                <span class="method">POST</span>
+                <code>/v2/post/publish/video/init/</code>
+                <span class="badge">queued</span>
+              </article>
+              <article class="api-row" data-api-row="upload">
+                <span class="method">PUT</span>
+                <code>upload_url from TikTok</code>
+                <span class="badge">queued</span>
+              </article>
+              <article class="api-row" data-api-row="status">
+                <span class="method">POST</span>
+                <code>/v2/post/publish/status/fetch/</code>
+                <span class="badge">queued</span>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <section id="events" class="panel" style="margin-top: 18px">
+          <div class="section-head">
+            <div>
+              <p class="label">Operational audit trail</p>
+              <h2>What the Hub stores after each step</h2>
+            </div>
+            <span class="badge ok">no secrets shown</span>
+          </div>
+          <div class="event-list" data-events>
+            <article class="event-row">
+              <span class="event-time">00:00</span>
+              <p class="muted">Demo loaded. Waiting for reviewer walkthrough.</p>
+            </article>
+          </div>
+          <div class="review-note">
+            <p class="muted">
+              Production uses a private access token stored on the server. This public demo
+              intentionally masks account identifiers and uses mock responses so the reviewer can
+              verify the integration shape without exposing credentials.
+            </p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const events = document.querySelector("[data-events]");
+      const overallStatus = document.querySelector("#overall-status");
+      const packageStatus = document.querySelector("#package-status");
+      const jobStatus = document.querySelector("#job-status");
+      const apiStatus = document.querySelector("#api-status");
+      const nextButton = document.querySelector("[data-next-step]");
+      const resetButton = document.querySelector("[data-reset-demo]");
+      let step = 0;
+
+      const apiRows = {
+        creator: document.querySelector("[data-api-row='creator'] .badge"),
+        init: document.querySelector("[data-api-row='init'] .badge"),
+        upload: document.querySelector("[data-api-row='upload'] .badge"),
+        status: document.querySelector("[data-api-row='status'] .badge"),
+      };
+
+      const logs = [
+        {
+          status: "connected",
+          badge: "ok",
+          text: "TikTok OAuth context verified. Scope video.publish is present and redirect domain matches the public website.",
+        },
+        {
+          status: "approved",
+          badge: "ok",
+          text: "Video package approved by the operator. Final MP4, caption, hashtags, and privacy level are ready.",
+        },
+        {
+          status: "queued",
+          badge: "warn",
+          text: "TikTok ChannelPublication created from the approved job with privacy_level SELF_ONLY for sandbox review.",
+        },
+        {
+          status: "processing",
+          badge: "ok",
+          text: "Mock Content Posting API flow completed: creator info queried, upload initialized, MP4 uploaded, status fetched.",
+        },
+      ];
+
+      function addEvent(message) {
+        const row = document.createElement("article");
+        row.className = "event-row";
+        const seconds = String(step * 7).padStart(2, "0");
+        row.innerHTML = `<span class="event-time">00:${seconds}</span><p>${message}</p>`;
+        events.prepend(row);
+      }
+
+      function setBadge(element, text, style) {
+        element.className = `badge ${style || ""}`.trim();
+        element.textContent = text;
+      }
+
+      function activateStep(nextStep) {
+        document.querySelectorAll("[data-step-card]").forEach((card) => {
+          card.classList.toggle("active", Number(card.dataset.stepCard) === nextStep);
+        });
+      }
+
+      function runStep() {
+        if (step >= logs.length) return;
+        step += 1;
+        activateStep(Math.min(step + 1, 4));
+        const entry = logs[step - 1];
+        setBadge(overallStatus, entry.status, entry.badge);
+        addEvent(entry.text);
+
+        if (step === 1) {
+          setBadge(apiStatus, "creator info checked", "ok");
+          setBadge(apiRows.creator, "ok", "ok");
+        }
+        if (step === 2) {
+          setBadge(packageStatus, "approved", "ok");
+          setBadge(jobStatus, "approved", "ok");
+        }
+        if (step === 3) {
+          setBadge(jobStatus, "tiktok queued", "warn");
+          setBadge(apiRows.init, "ready", "warn");
+        }
+        if (step === 4) {
+          setBadge(apiStatus, "status fetched", "ok");
+          setBadge(apiRows.init, "ok", "ok");
+          setBadge(apiRows.upload, "ok", "ok");
+          setBadge(apiRows.status, "processing", "ok");
+          setBadge(jobStatus, "processing", "ok");
+          setBadge(overallStatus, "complete", "ok");
+          nextButton.disabled = true;
+        }
+      }
+
+      function resetDemo() {
+        step = 0;
+        setBadge(overallStatus, "waiting", "info");
+        setBadge(packageStatus, "pending approval", "warn");
+        setBadge(jobStatus, "reviewed", "info");
+        setBadge(apiStatus, "not started", "info");
+        Object.values(apiRows).forEach((badge) => setBadge(badge, "queued", ""));
+        activateStep(1);
+        nextButton.disabled = false;
+        events.innerHTML = '<article class="event-row"><span class="event-time">00:00</span><p class="muted">Demo loaded. Waiting for reviewer walkthrough.</p></article>';
+      }
+
+      nextButton.addEventListener("click", runStep);
+      resetButton.addEventListener("click", resetDemo);
+    </script>
+  </body>
+</html>

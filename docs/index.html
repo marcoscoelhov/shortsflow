@@ -3,16 +3,21 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>YTS Render</title>
+    <title>ShortsFlow | TikTok Publishing Workflow</title>
+    <link rel="icon" href="./shortsflow-mark-1024.png" type="image/png">
     <style>
       :root {
-        color-scheme: light;
-        --ink: #15191f;
-        --muted: #596272;
-        --line: #d9dee7;
-        --panel: #ffffff;
-        --bg: #f6f8fb;
-        --accent: #0f766e;
+        color-scheme: dark;
+        --bg: #09090b;
+        --panel: #17171b;
+        --panel-strong: #1f1f22;
+        --ink: #f6f1f0;
+        --muted: #b8a5a2;
+        --line: #343035;
+        --accent: #ff5540;
+        --accent-soft: #ffb4a8;
+        --ok: #22c55e;
+        --warn: #f59e0b;
       }
 
       * {
@@ -23,82 +28,371 @@
         margin: 0;
         background: var(--bg);
         color: var(--ink);
-        font-family: Arial, Helvetica, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
         line-height: 1.55;
       }
 
-      main {
-        width: min(920px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 48px 0;
-      }
-
-      header,
-      section {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 28px;
-        margin-bottom: 18px;
-      }
-
-      h1,
-      h2 {
-        margin: 0 0 12px;
-        line-height: 1.2;
-      }
-
-      p {
-        margin: 0 0 12px;
-      }
-
-      ul {
-        margin: 0;
-        padding-left: 20px;
-      }
-
       a {
-        color: var(--accent);
+        color: var(--accent-soft);
         font-weight: 700;
       }
 
-      .meta {
+      main {
+        width: min(1120px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 32px 0 56px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 16px 0 36px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--ink);
+        text-decoration: none;
+      }
+
+      .brand img {
+        width: 42px;
+        height: 42px;
+      }
+
+      .brand strong {
+        display: block;
+        font-size: 1rem;
+        line-height: 1.1;
+      }
+
+      .brand span,
+      .eyebrow,
+      .pill {
         color: var(--muted);
-        font-size: 0.95rem;
+        font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+      }
+
+      nav a {
+        color: var(--muted);
+        text-decoration: none;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
+        gap: 28px;
+        align-items: stretch;
+      }
+
+      .hero-copy,
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .hero-copy {
+        padding: clamp(28px, 5vw, 54px);
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        line-height: 1.12;
+      }
+
+      h1 {
+        max-width: 12ch;
+        font-size: clamp(2.6rem, 7vw, 5.7rem);
+        font-weight: 850;
+      }
+
+      h2 {
+        font-size: clamp(1.5rem, 3vw, 2.15rem);
+      }
+
+      h3 {
+        font-size: 1rem;
+      }
+
+      p {
+        margin: 0;
+        max-width: 72ch;
+      }
+
+      .lede {
+        margin-top: 22px;
+        color: var(--muted);
+        font-size: clamp(1.05rem, 2vw, 1.25rem);
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 28px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0 16px;
+        color: var(--ink);
+        text-decoration: none;
+      }
+
+      .button.primary {
+        border-color: transparent;
+        background: var(--accent);
+        color: #161111;
+      }
+
+      .demo-card {
+        padding: 20px;
+      }
+
+      video {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #050506;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .demo-card p {
+        margin-top: 14px;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 28px;
+      }
+
+      .panel {
+        padding: 22px;
+      }
+
+      .panel h3,
+      .panel h2 {
+        margin-bottom: 10px;
+      }
+
+      .panel p,
+      li {
+        color: var(--muted);
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 28px;
+      }
+
+      .step {
+        min-height: 148px;
+        background: var(--panel-strong);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+      }
+
+      .step .pill {
+        color: var(--accent-soft);
+      }
+
+      .step h3 {
+        margin: 12px 0 8px;
+      }
+
+      section {
+        margin-top: 32px;
+      }
+
+      ul {
+        margin: 14px 0 0;
+        padding-left: 20px;
+      }
+
+      .legal {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-top: 24px;
+      }
+
+      @media (max-width: 860px) {
+        .topbar,
+        .hero {
+          display: block;
+        }
+
+        nav {
+          margin-top: 18px;
+        }
+
+        .demo-card {
+          margin-top: 16px;
+        }
+
+        .grid,
+        .flow {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
     <main>
-      <header>
-        <h1>YTS Render</h1>
-        <p class="meta">Private short-form video publishing workflow</p>
-        <p>
-          YTS Render is an internal tool used by its operator to prepare, review,
-          schedule, and publish approved short-form videos to the operator's own
-          creator channels.
-        </p>
+      <header class="topbar">
+        <a class="brand" href="./index.html" aria-label="ShortsFlow home">
+          <img src="./shortsflow-mark-1024.png" width="42" height="42" alt="">
+          <span>
+            <strong>ShortsFlow</strong>
+            TikTok Publishing Workflow
+          </span>
+        </a>
+        <nav aria-label="Public navigation">
+          <a href="#flow">End-to-end flow</a>
+          <a href="./tiktok-integration-demo.html">Live demo</a>
+          <a href="./demo-videos/tiktok-demo-download.html">Demo video</a>
+          <a href="./tiktok-privacy.html">Privacy</a>
+          <a href="./tiktok-terms.html">Terms</a>
+        </nav>
       </header>
 
-      <section>
-        <h2>TikTok integration</h2>
-        <p>
-          The TikTok integration is used only after the TikTok account owner
-          authorizes the application. It publishes videos that were already
-          approved and scheduled inside the private YTS Render workflow.
-        </p>
-        <ul>
-          <li>No public user registration is offered.</li>
-          <li>No third-party creator accounts are managed.</li>
-          <li>No TikTok data is sold, rented, or used for advertising.</li>
-        </ul>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Private creator publishing system</p>
+          <h1 id="hero-title">ShortsFlow</h1>
+          <p class="lede">
+            ShortsFlow is the public identity for the YTS Render review and
+            publishing workflow. It helps one authorized channel operator create,
+            review, schedule, and publish approved short-form videos to YouTube
+            and TikTok.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="./demo-videos/tiktok-demo-download.html">Watch TikTok demo</a>
+            <a class="button" href="./tiktok-integration-demo.html">Open live mockup</a>
+            <a class="button" href="./tiktok-callback.html">OAuth redirect page</a>
+          </div>
+        </div>
+
+        <aside class="panel demo-card" aria-label="TikTok integration demo">
+          <video controls preload="metadata" src="./demo-videos/tiktok-developer-review-demo.mp4"></video>
+          <p>
+            The sandbox/mockup review demos show the complete TikTok Content
+            Posting API flow: OAuth context, approved video package, TikTok
+            publication queue, upload request, and status tracking.
+          </p>
+        </aside>
       </section>
 
-      <section>
-        <h2>Legal</h2>
-        <p><a href="./tiktok-terms.html">Terms of Service</a></p>
-        <p><a href="./tiktok-privacy.html">Privacy Policy</a></p>
+      <section class="grid" aria-label="Service boundaries">
+        <article class="panel">
+          <h3>Authorized account only</h3>
+          <p>
+            TikTok publishing runs only after the TikTok account owner grants
+            access. ShortsFlow does not offer public user registration.
+          </p>
+        </article>
+        <article class="panel">
+          <h3>Human review first</h3>
+          <p>
+            Videos pass through script, visual, audio, render, monetization, and
+            review gates before any automated TikTok posting job is eligible.
+          </p>
+        </article>
+        <article class="panel">
+          <h3>Operational audit trail</h3>
+          <p>
+            The hub records scheduling state, TikTok publish identifiers, status
+            checks, and errors so duplicate posting can be avoided.
+          </p>
+        </article>
       </section>
+
+      <section id="flow" class="panel" aria-labelledby="flow-title">
+        <p class="eyebrow">TikTok Content Posting API</p>
+        <h2 id="flow-title">End-to-end integration flow</h2>
+        <div class="flow">
+          <article class="step">
+            <span class="pill">01</span>
+            <h3>Connect</h3>
+            <p>The authorized TikTok account grants the required publishing scope through TikTok OAuth.</p>
+          </article>
+          <article class="step">
+            <span class="pill">02</span>
+            <h3>Approve</h3>
+            <p>The operator reviews the generated short, metadata, captions, audio, and quality gates.</p>
+          </article>
+          <article class="step">
+            <span class="pill">03</span>
+            <h3>Publish</h3>
+            <p>ShortsFlow creates a TikTok publication record and submits the approved video package.</p>
+          </article>
+          <article class="step">
+            <span class="pill">04</span>
+            <h3>Track</h3>
+            <p>The worker syncs TikTok publication status and stores the outcome in the private hub.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="grid" aria-label="TikTok data usage">
+        <article class="panel">
+          <h3>Data processed</h3>
+          <p>
+            Access token, creator info, generated video file, caption, hashtags,
+            publish identifier, publication status, and TikTok API errors.
+          </p>
+        </article>
+        <article class="panel">
+          <h3>Data purpose</h3>
+          <p>
+            The data is used only to publish approved videos, check status, avoid
+            duplicate posts, and show operational state to the operator.
+          </p>
+        </article>
+        <article class="panel">
+          <h3>No third-party marketplace</h3>
+          <p>
+            ShortsFlow does not manage unrelated creator accounts and does not
+            sell, rent, or use TikTok data for advertising.
+          </p>
+        </article>
+      </section>
+
+      <footer class="legal">
+        <a href="./tiktok-terms.html">Terms of Service</a>
+        <a href="./tiktok-privacy.html">Privacy Policy</a>
+        <a href="./tiktok-callback.html">Redirect URI page</a>
+        <a href="https://github.com/marcoscoelhov/yts-render">Project repository</a>
+      </footer>
     </main>
   </body>
 </html>

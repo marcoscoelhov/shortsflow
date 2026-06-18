@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>YTS Render TikTok Callback</title>
+    <title>ShortsFlow | TikTok Callback</title>
+    <link rel="icon" href="./shortsflow-mark-1024.png" type="image/png">
     <style>
       body {
         margin: 0;
@@ -36,15 +37,32 @@
         color: #0f766e;
         font-weight: 700;
       }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: #15191f;
+        text-decoration: none;
+      }
+
+      .brand img {
+        width: 36px;
+        height: 36px;
+      }
     </style>
   </head>
   <body>
     <main>
       <article>
+        <a class="brand" href="./index.html">
+          <img src="./shortsflow-mark-1024.png" width="36" height="36" alt="">
+          <strong>ShortsFlow</strong>
+        </a>
         <h1>TikTok authorization callback</h1>
         <p>
           This static page is used as the registered TikTok OAuth redirect URI
-          for YTS Render.
+          for ShortsFlow.
         </p>
         <p>
           After TikTok redirects back here, copy the <code>code</code> parameter
@@ -56,7 +74,7 @@
           did not complete and the app configuration or requested scopes should
           be reviewed in TikTok for Developers.
         </p>
-        <p><a href="./index.html">Back to YTS Render</a></p>
+        <p><a href="./index.html">Back to ShortsFlow</a></p>
       </article>
     </main>
   </body>
