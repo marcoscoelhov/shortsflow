@@ -113,10 +113,24 @@ class Settings(BaseSettings):
     competitive_scout_min_reference_views: int = 10_000
     competitive_scout_min_profile_references: int = 6
     competitive_scout_automation_enabled: bool = True
-    competitive_scout_auto_approve_profiles: bool = True
-    competitive_scout_auto_start_experiments: bool = True
-    competitive_scout_auto_promote_profiles: bool = True
-    competitive_scout_queries: str = "curiosidades ciencia shorts\ncuriosidades cotidiano shorts"
+    competitive_scout_auto_approve_profiles: bool = False
+    competitive_scout_auto_start_experiments: bool = False
+    competitive_scout_auto_promote_profiles: bool = False
+    competitive_scout_llm_analysis_enabled: bool = True
+    competitive_scout_global_enabled: bool = True
+    competitive_scout_regions: str = "IN\nUS\nID\nBR\nMX\nJP\nPH\nVN\nTH\nKR"
+    competitive_scout_max_query_region_pairs: int = 30
+    competitive_scout_max_analyses_per_run: int = 20
+    competitive_scout_queries: str = (
+        "interesting facts shorts\n"
+        "science facts shorts\n"
+        "daily facts shorts\n"
+        "animal facts shorts\n"
+        "curiosidades ciencia shorts\n"
+        "datos curiosos shorts\n"
+        "fakta unik shorts\n"
+        "amazing facts hindi shorts"
+    )
     retention_experiment_target_job_count: int = 3
     retention_experiment_success_retention_percent: float = 80.0
     retention_experiment_min_views: int = 100
@@ -314,7 +328,13 @@ class Settings(BaseSettings):
             raise ValueError("performance_sync_batch_limit must be between 1 and 100")
         return value
 
-    @field_validator("competitive_scout_reference_batch_limit", "competitive_scout_min_profile_references", "retention_experiment_target_job_count")
+    @field_validator(
+        "competitive_scout_reference_batch_limit",
+        "competitive_scout_min_profile_references",
+        "competitive_scout_max_query_region_pairs",
+        "competitive_scout_max_analyses_per_run",
+        "retention_experiment_target_job_count",
+    )
     @classmethod
     def validate_competitive_scout_positive_ints(cls, value: int) -> int:
         if not 1 <= value <= 100:

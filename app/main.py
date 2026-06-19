@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
@@ -29,7 +30,7 @@ from app.hub_prompt import (
     sanitize_viral_prompt_template,
 )
 from app.llm_tournament import latest_llm_tournament_decision_summary
-from app.models import Job, Script, TopicPlan, TopicRequest
+from app.models import CompetitiveScoutAutoRun, Job, Script, TopicPlan, TopicRequest
 from app.operational_settings import (
     apply_operational_settings,
     build_operational_settings_context,
@@ -45,12 +46,13 @@ from pydantic import ValidationError
 
 from app.schemas import PublicationSchedulePayload
 from app.topic_scout import TopicScout
-from app.utils import path_from_uri
+from app.utils import new_id, path_from_uri, stable_hash, utcnow
 from app.web_redirects import redirect_back as _redirect_back
 from app.youtube_api import YouTubeIntegrationError
 
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 automation_service = AutomationService(orchestrator)
 LLM_TOURNAMENT_OUTPUT_ROOT = (settings.data_dir / "llm_tournament").resolve()
 
@@ -60,6 +62,16 @@ def _generate_premium_finish_background(job_id: str) -> None:
         orchestrator.generate_premium_finishing(job_id)
     except Exception as exc:  # noqa: BLE001
         orchestrator.record_premium_finishing_failure(job_id, str(exc))
+
+
+def _log_render_startup_preflight() -> None:
+    if str(settings.render_primary_backend).lower() != "remotion":
+        return
+    status = orchestrator.premium_finishing.renderer.preflight_environment()
+    if status["ready"]:
+        logger.info("remotion preflight passed project_dir=%s", status["project_dir"])
+        return
+    logger.warning("remotion preflight failed missing_items=%s", "; ".join(str(item) for item in status["missing_items"]))
 
 
 def _request_path_with_query(request: Request) -> str:
@@ -128,17 +140,89 @@ def _competitive_scout_service() -> CompetitiveScout:
     return CompetitiveScout(settings=settings, analyzer=HeuristicScoutAnalyzer())
 
 
+def _serialize_competitive_scout_auto_run(run: CompetitiveScoutAutoRun | None) -> dict[str, Any] | None:
+    if run is None:
+        return None
+    return {
+        "auto_run_id": run.auto_run_id,
+        "status": run.status,
+        "niche_id": run.niche_id,
+        "scout_run_id": run.scout_run_id,
+        "shorts_selected": run.shorts_selected,
+        "error": run.error,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "result": run.result_payload or {},
+    }
 
 
+def _acquire_competitive_scout_auto_run(niche_id: str) -> tuple[dict[str, Any], bool]:
+    selected_niche = (niche_id or settings.niche_id or HUB_DEFAULT_NICHE).strip() or HUB_DEFAULT_NICHE
+    now = utcnow()
+    stale_before = now - timedelta(hours=6)
+    with SessionLocal() as session:
+        running = session.scalar(
+            select(CompetitiveScoutAutoRun)
+            .where(CompetitiveScoutAutoRun.niche_id == selected_niche)
+            .where(CompetitiveScoutAutoRun.status.in_(["queued", "running"]))
+            .order_by(CompetitiveScoutAutoRun.created_at.desc())
+            .limit(1)
+        )
+        if running and (running.started_at or running.created_at) >= stale_before:
+            return _serialize_competitive_scout_auto_run(running) or {}, False
+        if running:
+            running.status = "failed"
+            running.finished_at = now
+            running.error = "stale_competitive_scout_auto_run_replaced"
+        run = CompetitiveScoutAutoRun(
+            auto_run_id=new_id(),
+            schema_version=settings.schema_version,
+            content_hash=stable_hash({"niche_id": selected_niche, "created_at": now.isoformat()}),
+            created_at=now,
+            status="queued",
+            niche_id=selected_niche,
+            result_payload={"source": "hub_manual_trigger"},
+        )
+        session.add(run)
+        session.commit()
+        return _serialize_competitive_scout_auto_run(run) or {}, True
 
 
+def _finish_competitive_scout_auto_run(auto_run_id: str, result: dict[str, Any], *, error: str | None = None) -> None:
+    scout_run = result.get("scout_run") if isinstance(result.get("scout_run"), dict) else {}
+    result_status = str(result.get("status") or "completed")
+    status = "failed" if error or result_status == "failed" else result_status
+    with SessionLocal() as session:
+        run = session.get(CompetitiveScoutAutoRun, auto_run_id)
+        if not run:
+            return
+        run.status = status
+        run.finished_at = utcnow()
+        run.error = error or (str(result.get("reason")) if status == "failed" and result.get("reason") else None)
+        run.scout_run_id = str(scout_run.get("run_id")) if scout_run.get("run_id") else None
+        run.shorts_selected = int(scout_run.get("shorts_selected") or 0)
+        run.result_payload = result
+        run.content_hash = stable_hash({"auto_run_id": run.auto_run_id, "status": run.status, "result": result, "error": run.error})
+        session.commit()
 
 
-
-
-
-
-
+def _execute_competitive_scout_auto_run(auto_run_id: str) -> None:
+    with SessionLocal() as session:
+        run = session.get(CompetitiveScoutAutoRun, auto_run_id)
+        if not run or run.status not in {"queued", "running"}:
+            return
+        run.status = "running"
+        run.started_at = utcnow()
+        run.error = None
+        session.commit()
+        niche_id = run.niche_id
+    try:
+        result = _competitive_scout_service().run_automation_cycle(niche_id=niche_id)
+    except Exception as exc:  # noqa: BLE001
+        _finish_competitive_scout_auto_run(auto_run_id, {"status": "failed", "reason": str(exc)}, error=str(exc))
+        return
+    _finish_competitive_scout_auto_run(auto_run_id, result)
 
 
 def artifact_url(uri: str | None) -> str:
@@ -232,6 +316,7 @@ templates.env.globals["creation_via_display"] = _creation_via_display
 async def lifespan(app: FastAPI):
     init_db()
     apply_operational_settings(settings)
+    _log_render_startup_preflight()
     orchestrator.start_worker()
     yield
     orchestrator.stop_worker()
@@ -507,6 +592,34 @@ def build_scout_profiles(
     except ValueError as exc:
         return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
     return _redirect_back(return_to, {"profiles_created": str(len(result.get("created") or []))}, default="/publication-hub")
+
+
+@app.post("/competitive-scout/auto-cycle")
+def run_competitive_scout_auto_cycle(
+    background_tasks: BackgroundTasks,
+    niche_id: str = Form(default="curiosidades"),
+    return_to: str | None = Form(default=None),
+):
+    auto_run, created = _acquire_competitive_scout_auto_run(niche_id)
+    if created:
+        background_tasks.add_task(_execute_competitive_scout_auto_run, str(auto_run["auto_run_id"]))
+    params = {
+        "scout_auto_status": str(auto_run.get("status") or "queued"),
+        "scout_auto_run": str(auto_run.get("auto_run_id") or ""),
+        "shorts_selected": str(auto_run.get("shorts_selected") or 0),
+    }
+    if not created:
+        params["scout_auto_existing"] = "1"
+    return _redirect_back(return_to, params, default="/publication-hub")
+
+
+@app.get("/competitive-scout/auto-runs/{auto_run_id}")
+def competitive_scout_auto_run_status(auto_run_id: str):
+    with SessionLocal() as session:
+        run = session.get(CompetitiveScoutAutoRun, auto_run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="competitive scout auto run not found")
+        return _serialize_competitive_scout_auto_run(run)
 
 
 @app.post("/retention-profiles/{profile_id}/approve")

@@ -22,6 +22,10 @@ class TikTokConnectionStatus:
     token_configured: bool
     ready: bool
     missing_items: list[str]
+    auth_mode: str = "manual_access_token"
+    oauth_managed: bool = False
+    token_refresh_managed: bool = False
+    contract_note: str = "Token configurado manualmente; OAuth e refresh não são gerenciados pelo Hub."
 
 
 class TikTokPublisher:
@@ -39,6 +43,10 @@ class TikTokPublisher:
             token_configured=bool(self.settings.tiktok_access_token),
             ready=not missing_items,
             missing_items=missing_items,
+            auth_mode="manual_access_token",
+            oauth_managed=False,
+            token_refresh_managed=False,
+            contract_note="Token configurado manualmente; OAuth e refresh não são gerenciados pelo Hub.",
         )
 
     def query_creator_info(self) -> dict[str, Any]:

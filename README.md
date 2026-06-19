@@ -9,6 +9,7 @@ O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipelin
 - Hub SSR em `http://127.0.0.1:8080`, com lista paginada de jobs, detalhe focado em aprovar e agendar, dashboard de publicacao e calendario mensal.
 - Worker em thread, iniciado no lifespan do FastAPI, responsavel pelo pipeline e tambem pela publicacao agendada quando o modo YouTube esta em `api`.
 - Banco padrao em SQLite e artefatos em `data/artifacts/<job_id>/`.
+- Render principal padrao via Remotion; FFmpeg permanece como caminho legado apenas por configuracao explicita.
 - Integracao real com YouTube disponivel por OAuth e upload via API quando o modo API esta ligado no Hub.
 - Politica de retencao automatica para artefatos temporarios: jobs continuam visiveis no hub mesmo depois da limpeza dos arquivos pesados.
 - Arquitetura modularizada para manutencao local: `JobOrchestrator` coordena lifecycle, lease, retry, eventos e worker; pipelines, providers, contexto do hub e publicacao ficam em modulos donos.
@@ -26,6 +27,11 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 
 cp .env.example .env
+
+cd remotion
+npm install
+npm run typecheck
+cd ..
 ```
 
 Para rodar sem custo de API:
@@ -136,6 +142,8 @@ Ajustes operacionais nao secretos ficam no Hub de Revisao, em Configurações:
 
 O Hub persiste esses valores como sobreposicoes operacionais no banco. Use `Restaurar .env` no modal para limpar as sobreposicoes e voltar aos defaults do ambiente/codigo.
 
+Quando `YTS_HUB_AUTH_TOKEN` esta configurado, navegacao `GET`/`HEAD` pode usar o cookie `yts_hub_token`, mas mutacoes `POST` exigem `x-yts-hub-token` ou `Authorization: Bearer <token>`. O token do TikTok e manual: o Hub nao gerencia OAuth ou refresh. Metricas de origem de trafego, dispositivo, impressoes e CTR continuam pendentes ate existir adapter real da YouTube Reporting API.
+
 ### MiniMax para imagens
 
 A geracao de imagens usa a mesma chave resolvida de texto MiniMax como credencial primaria:
@@ -187,6 +195,27 @@ YTS_ELEVENLABS_MODEL_ID=eleven_multilingual_v2
 ```
 
 Se `YTS_TTS_PRIMARY_PROVIDER=edge_tts`, o app ignora Gemini e ElevenLabs e usa Edge TTS diretamente.
+
+## Render principal
+
+O backend operacional padrao e Remotion, alinhado ao contrato atual de acabamento premium. O worker chama o binario local em `remotion/node_modules/.bin/remotion`, por isso o setup precisa instalar as dependencias Node do subprojeto antes de rodar Jobs de Video.
+
+Valide Remotion depois de instalar dependencias:
+
+```bash
+cd remotion
+npm run typecheck
+```
+
+Configuracao padrao:
+
+```env
+YTS_RENDER_PRIMARY_BACKEND=remotion
+```
+
+O caminho FFmpeg ainda existe para manutencao e diagnostico, mas nao deve ser tratado como default operacional.
+
+No startup, o Hub registra aviso se o runtime Remotion estiver incompleto. `/healthz` tambem expõe `render.remotion_ready` e os itens ausentes.
 
 ## YouTube e OAuth
 

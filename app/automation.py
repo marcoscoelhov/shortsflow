@@ -632,6 +632,9 @@ class AutomationService:
             payload = self._job_payload_from_ready_script(selected_script) if selected_script else self._automatic_topic_payload()
             job_id = self.orchestrator.create_job(payload)
             self._attach_job_to_attempt(attempt.attempt_id, job_id)
+            retention_experiment_assignment = self._attach_job_to_active_retention_experiment(job_id) if source == AUTOMATION_SOURCE_AUTO_TOPIC else None
+            if retention_experiment_assignment:
+                self._merge_attempt_report(attempt.attempt_id, {"retention_experiment": retention_experiment_assignment})
             if selected_script:
                 self._mark_ready_script_in_progress(selected_script.script_item_id)
             status = self.orchestrator.process_job(job_id)
@@ -1010,6 +1013,12 @@ class AutomationService:
     def _run_competitive_scout_automation(self) -> dict[str, Any]:
         try:
             return CompetitiveScout(settings=self.settings).run_automation_cycle(niche_id=self.settings.niche_id)
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "failed", "reason": str(exc)}
+
+    def _attach_job_to_active_retention_experiment(self, job_id: str) -> dict[str, Any] | None:
+        try:
+            return CompetitiveScout(settings=self.settings).attach_job_to_active_experiment(job_id, niche_id=self.settings.niche_id)
         except Exception as exc:  # noqa: BLE001
             return {"status": "failed", "reason": str(exc)}
 

@@ -1,63 +1,74 @@
 {% set growth_return_to = growth_return_to|default('/publication-hub') %}
+{% set scout_runs = growth.competitive_scout.runs %}
+{% set scout_profiles = growth.competitive_scout.profiles %}
+{% set scout_experiments = growth.competitive_scout.experiments %}
+{% set latest_run = scout_runs[0] if scout_runs else none %}
+{% set latest_profile = scout_profiles[0] if scout_profiles else none %}
+{% set latest_experiment = scout_experiments[0] if scout_experiments else none %}
 <section id="publication-hub" class="publication-shell" data-dashboard="growth" data-auto-refresh="true" data-refresh-interval-ms="30000" hx-get="/publication-hub/fragment" hx-trigger="every 30s" hx-swap="outerHTML" hx-sync="this:replace">
-  <section class="panel publication-hero growth-hero growth-decision-hero">
-    <div class="growth-decision-copy">
-      <p class="eyebrow">Painel de decisão</p>
-      <h2>Centro de Crescimento do Canal</h2>
+  <section class="panel growth-hero-panel" aria-labelledby="growth-page-title">
+    <div class="growth-hero-copy">
+      <p class="eyebrow">Crescimento</p>
+      <h2 id="growth-page-title">Centro de Crescimento do Canal</h2>
       <strong>{{ growth.decision.headline }}</strong>
-      <p class="publication-note">{{ growth.decision.body }}</p>
+      <p>{{ growth.decision.body }}</p>
     </div>
-    <div class="growth-decision-status">
+    <div class="growth-hero-status" aria-live="polite">
       <span>{{ growth.decision.status }}</span>
       <strong>{{ growth.sync_candidates_count }}</strong>
       <small>coletas pendentes agora</small>
-      <small aria-live="polite">Atualizado {{ growth.refreshed_at_label }}</small>
+      <small>Atualizado {{ growth.refreshed_at_label }}</small>
     </div>
   </section>
 
   {% if request.query_params.get("analytics_error") %}
-  <section class="panel status-banner">
+  <section class="panel status-banner growth-feedback is-danger">
     <strong>Analytics não sincronizado</strong>
     <p>{{ request.query_params.get("analytics_error") }}</p>
   </section>
   {% elif request.query_params.get("analytics_synced") %}
-  <section class="panel status-banner">
+  <section class="panel status-banner growth-feedback is-success">
     <strong>Analytics sincronizado</strong>
     <p>{{ request.query_params.get("analytics_synced") }} snapshot(s) entraram na base de crescimento.</p>
   </section>
   {% elif request.query_params.get("scout_error") %}
-  <section class="panel status-banner">
+  <section class="panel status-banner growth-feedback is-danger">
     <strong>Scout não aplicado</strong>
     <p>{{ request.query_params.get("scout_error") }}</p>
   </section>
+  {% elif request.query_params.get("scout_auto_status") %}
+  <section class="panel status-banner growth-feedback is-success">
+    <strong>Scout concluído</strong>
+    <p>Rodada {{ request.query_params.get("scout_run") or "nova" }} terminou com {{ request.query_params.get("shorts_selected") or "0" }} referência(s) selecionada(s).</p>
+  </section>
   {% elif request.query_params.get("profiles_created") %}
-  <section class="panel status-banner">
+  <section class="panel status-banner growth-feedback is-success">
     <strong>Perfis sintetizados</strong>
     <p>{{ request.query_params.get("profiles_created") }} perfil(is) de retenção foram gerados para aprovação.</p>
   </section>
   {% elif request.query_params.get("profile_status") %}
-  <section class="panel status-banner">
+  <section class="panel status-banner growth-feedback is-success">
     <strong>Perfil atualizado</strong>
     <p>Status atual: {{ request.query_params.get("profile_status") }}.</p>
   </section>
   {% elif request.query_params.get("experiment_started") %}
-  <section class="panel status-banner">
+  <section class="panel status-banner growth-feedback is-success">
     <strong>Experimento iniciado</strong>
     <p>{{ request.query_params.get("experiment_started") }}</p>
   </section>
   {% elif request.query_params.get("experiment_decision") %}
-  <section class="panel status-banner">
+  <section class="panel status-banner growth-feedback is-success">
     <strong>Experimento avaliado</strong>
     <p>Decisão: {{ request.query_params.get("experiment_decision") }}.</p>
   </section>
   {% elif request.query_params.get("profile_promoted") %}
-  <section class="panel status-banner">
+  <section class="panel status-banner growth-feedback is-success">
     <strong>Perfil promovido</strong>
     <p>{{ request.query_params.get("profile_promoted") }} virou padrão de retenção da linha.</p>
   </section>
   {% endif %}
 
-  <section class="growth-scoreboard" aria-label="Indicadores principais">
+  <section class="growth-scoreboard growth-scoreboard-readable" aria-label="Resumo de saúde do crescimento">
     {% for item in growth.scoreboard %}
     <article class="growth-scorecard {{ item.state }}">
       <span>{{ item.label }}</span>
@@ -67,11 +78,245 @@
     {% endfor %}
   </section>
 
-  <section class="publication-grid growth-grid">
+  <section class="panel growth-command-center growth-next-actions" aria-labelledby="growth-next-actions-title">
+    <div class="panel-heading-row">
+      <div>
+        <p class="eyebrow">Próximo passo</p>
+        <h3 id="growth-next-actions-title">O que fazer agora</h3>
+      </div>
+      <p class="publication-note">A ordem abaixo evita decisões com dados incompletos.</p>
+    </div>
+    <div class="growth-action-list">
+      {% for item in growth.action_items %}
+      <article class="growth-action-row {% if not item.enabled %}is-muted{% endif %}">
+        <div class="growth-action-priority">{{ item.priority }}</div>
+        <div class="growth-action-copy">
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.body }}</p>
+        </div>
+        <div class="growth-action-metric">
+          <strong>{{ item.metric }}</strong>
+          <small>{{ item.metric_label }}</small>
+        </div>
+        <div class="growth-action-control">
+          {% if item.kind == "sync_due" %}
+          <form method="post" action="/youtube-analytics/sync-due" class="inline-form">
+            <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+            <input type="hidden" name="days" value="{{ growth.window_days }}">
+            <button type="submit" class="ghost" {% if not item.enabled %}disabled{% endif %}>
+              <span class="material-symbols-outlined" aria-hidden="true">sync</span>
+              {{ item.action_label }}
+            </button>
+          </form>
+          {% elif item.href %}
+          <a class="button-link ghost-link" href="{{ item.href }}">
+            <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+            {{ item.action_label }}
+          </a>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel growth-learning-panel" aria-labelledby="growth-learning-title">
+    <div class="panel-heading-row">
+      <div>
+        <p class="eyebrow">Aprendizado do mercado</p>
+        <h3 id="growth-learning-title">Scout, perfil e teste no canal</h3>
+      </div>
+      <form method="post" action="/competitive-scout/auto-cycle" class="inline-form growth-scout-run-form" onsubmit="return confirm('Rodar scout agora consome quota da YouTube Data API e pode demorar alguns minutos. Continuar?')">
+        <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+        <input type="hidden" name="niche_id" value="{{ settings.niche_id|default('curiosidades') }}">
+        <button type="submit" class="ghost">
+          <span class="material-symbols-outlined" aria-hidden="true">travel_explore</span>
+          Rodar scout agora
+        </button>
+      </form>
+    </div>
+    {% set latest_auto_run = (growth.competitive_scout.auto_runs or [None])[0] %}
+    {% if latest_auto_run %}
+    <p class="section-note">
+      Scout manual {{ latest_auto_run.status }}
+      {% if latest_auto_run.scout_run_id %}· rodada {{ latest_auto_run.scout_run_id[:8] }}{% endif %}
+      {% if latest_auto_run.error %}· {{ latest_auto_run.error }}{% endif %}
+    </p>
+    {% endif %}
+
+    <div class="growth-learning-flow" aria-label="Sequência do aprendizado">
+      <article class="growth-learning-step">
+        <span>1</span>
+        <div>
+          <strong>Buscar referências</strong>
+          {% if latest_run %}
+          <p>{{ latest_run.shorts_selected }} Short(s) selecionado(s) em {{ latest_run.shorts_considered }} analisado(s).</p>
+          <small>Rodada {{ latest_run.run_id[:8] }} · {{ latest_run.status }}</small>
+          {% else %}
+          <p>Nenhuma rodada registrada ainda.</p>
+          <small>Rode o scout para criar a primeira base.</small>
+          {% endif %}
+        </div>
+      </article>
+      <article class="growth-learning-step">
+        <span>2</span>
+        <div>
+          <strong>Virar padrão de retenção</strong>
+          {% if latest_profile %}
+          <p>{{ latest_profile.title }}</p>
+          <small>{{ latest_profile.reference_count }} referência(s) · {{ latest_profile.status }}</small>
+          {% else %}
+          <p>Nenhum perfil pronto para uso.</p>
+          <small>Uma linha precisa bater o mínimo de referências.</small>
+          {% endif %}
+        </div>
+      </article>
+      <article class="growth-learning-step">
+        <span>3</span>
+        <div>
+          <strong>Testar nos próximos Jobs</strong>
+          {% if latest_experiment %}
+          <p>{{ latest_experiment.assigned_job_count }}/{{ latest_experiment.target_job_count }} Job(s) já entraram no teste.</p>
+          <small>{{ latest_experiment.status }} · {{ latest_experiment.decision or "aguardando dados próprios" }}</small>
+          {% else %}
+          <p>Nenhum experimento ativo.</p>
+          <small>Aprove um perfil para começar.</small>
+          {% endif %}
+        </div>
+      </article>
+    </div>
+
+    <div class="growth-learning-columns">
+      <article class="growth-learning-column">
+        <div class="growth-column-head">
+          <p class="eyebrow">Rodadas</p>
+          <strong>O que foi encontrado</strong>
+        </div>
+        <div class="publication-list">
+          {% for run in scout_runs[:3] %}
+          <div class="publication-item growth-compact-item">
+            <div>
+              <strong>{{ run.shorts_selected }} selecionado(s)</strong>
+              <p>{{ run.shorts_considered }} analisado(s), {{ run.profiles_created }} perfil(is)</p>
+              <small>Rodada {{ run.run_id[:8] }} · {{ run.status }}</small>
+            </div>
+            {% if run.status == "completed" %}
+            <form method="post" action="/competitive-scout/runs/{{ run.run_id }}/profiles" class="inline-form">
+              <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+              <input type="hidden" name="aggressive" value="true">
+              <button type="submit" class="ghost">
+                <span class="material-symbols-outlined" aria-hidden="true">schema</span>
+                Gerar perfil
+              </button>
+            </form>
+            {% endif %}
+          </div>
+          {% else %}
+          <div class="publication-item empty">
+            <strong>Nenhuma rodada registrada.</strong>
+            <p>Use “Rodar scout agora” ou mantenha o ciclo automático ligado.</p>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="growth-learning-column">
+        <div class="growth-column-head">
+          <p class="eyebrow">Perfis</p>
+          <strong>O que pode orientar roteiros</strong>
+        </div>
+        <div class="publication-list">
+          {% for profile in scout_profiles[:4] %}
+          <div class="publication-item growth-compact-item">
+            <div>
+              <strong>{{ profile.title }}</strong>
+              <p>{{ profile.line_id or "linha indefinida" }} · {{ profile.reference_count }} referência(s)</p>
+              <small>{{ profile.status }} · {{ profile.dominant_skeleton.opening_contract|default("esqueleto pendente") }}</small>
+            </div>
+            <div class="button-row">
+              {% if profile.status == "pending_approval" %}
+              <form method="post" action="/retention-profiles/{{ profile.profile_id }}/approve" class="inline-form">
+                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+                <button type="submit" class="ghost">
+                  <span class="material-symbols-outlined" aria-hidden="true">check</span>
+                  Aprovar
+                </button>
+              </form>
+              <form method="post" action="/retention-profiles/{{ profile.profile_id }}/reject" class="inline-form">
+                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+                <button type="submit" class="ghost">
+                  <span class="material-symbols-outlined" aria-hidden="true">block</span>
+                  Rejeitar
+                </button>
+              </form>
+              {% elif profile.status in ["approved", "promoted"] %}
+              <form method="post" action="/retention-profiles/{{ profile.profile_id }}/experiments" class="inline-form">
+                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+                <button type="submit" class="ghost">
+                  <span class="material-symbols-outlined" aria-hidden="true">science</span>
+                  Testar
+                </button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+          {% else %}
+          <div class="publication-item empty">
+            <strong>Nenhum perfil para aprovar.</strong>
+            <p>Depois do scout, o perfil aparece aqui quando houver referências suficientes.</p>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="growth-learning-column">
+        <div class="growth-column-head">
+          <p class="eyebrow">Experimentos</p>
+          <strong>O que está sendo provado</strong>
+        </div>
+        <div class="publication-list">
+          {% for experiment in scout_experiments[:4] %}
+          <div class="publication-item growth-compact-item">
+            <div>
+              <strong>{{ experiment.profile_title }}</strong>
+              <p>{{ experiment.assigned_job_count }}/{{ experiment.target_job_count }} Job(s) · {{ experiment.status }}</p>
+              <small>{{ experiment.decision or "aguardando dados próprios" }}</small>
+            </div>
+            <div class="button-row">
+              <form method="post" action="/retention-experiments/{{ experiment.experiment_id }}/evaluate" class="inline-form">
+                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+                <button type="submit" class="ghost">
+                  <span class="material-symbols-outlined" aria-hidden="true">analytics</span>
+                  Avaliar
+                </button>
+              </form>
+              {% if experiment.decision == "success_strong" and not experiment.result_summary.promoted_profile_id %}
+              <form method="post" action="/retention-experiments/{{ experiment.experiment_id }}/promote" class="inline-form">
+                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
+                <button type="submit" class="ghost">
+                  <span class="material-symbols-outlined" aria-hidden="true">upgrade</span>
+                  Promover
+                </button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+          {% else %}
+          <div class="publication-item empty">
+            <strong>Nenhum experimento ativo.</strong>
+            <p>Aprove um perfil e ele será testado nos próximos Jobs da linha.</p>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="publication-grid growth-grid growth-support-grid">
     {% set channel_engagement_rate = growth.channel_report.totals.engagement_rate|default(none) %}
     <article class="panel publication-panel growth-data-panel">
-      <p class="eyebrow">Relatório histórico</p>
-      <h3>Todos os publicados sincronizados</h3>
+      <p class="eyebrow">Base de leitura</p>
+      <h3>Performance sincronizada</h3>
       <div class="growth-status-grid">
         <div><strong>Vídeos</strong><span>{{ growth.channel_report.coverage.videos|default(0) }}</span></div>
         <div><strong>Views</strong><span>{{ growth.channel_report.totals.views|default(0) }}</span></div>
@@ -82,8 +327,8 @@
       </div>
     </article>
     <article class="panel publication-panel growth-data-panel">
-      <p class="eyebrow">Gaps detectados</p>
-      <h3>Onde melhorar a leitura</h3>
+      <p class="eyebrow">Riscos claros</p>
+      <h3>Onde melhorar primeiro</h3>
       <div class="growth-answer-list">
         {% for item in growth.channel_report.gaps[:3] %}
         <div class="growth-answer">
@@ -101,147 +346,13 @@
     </article>
   </section>
 
-  <section class="panel growth-command-center">
-    <div class="panel-heading-row">
-      <div>
-        <p class="eyebrow">Ordem de execução</p>
-        <h3>O que fazer agora</h3>
-      </div>
-      <p class="publication-note">Ações ordenadas pelo que destrava decisões reais.</p>
-    </div>
-    <div class="growth-action-list">
-      {% for item in growth.action_items %}
-      <article class="growth-action-row {% if not item.enabled %}is-muted{% endif %}">
-        <div class="growth-action-priority">{{ item.priority }}</div>
-        <div>
-          <strong>{{ item.title }}</strong>
-          <p>{{ item.body }}</p>
-        </div>
-        <div class="growth-action-metric">
-          <strong>{{ item.metric }}</strong>
-          <small>{{ item.metric_label }}</small>
-        </div>
-        <div class="growth-action-control">
-          {% if item.kind == "sync_due" %}
-          <form method="post" action="/youtube-analytics/sync-due" class="inline-form">
-            <input type="hidden" name="return_to" value="{{ growth_return_to }}">
-            <input type="hidden" name="days" value="{{ growth.window_days }}">
-            <button type="submit" class="ghost" {% if not item.enabled %}disabled{% endif %}>{{ item.action_label }}</button>
-          </form>
-          {% elif item.href %}
-          <a class="button-link ghost-link" href="{{ item.href }}">{{ item.action_label }}</a>
-          {% endif %}
-        </div>
-      </article>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="panel publication-panel growth-focus-panel">
-    <div class="panel-heading-row">
-      <div>
-        <p class="eyebrow">Scout competitivo</p>
-        <h3>Perfis e experimentos de retenção</h3>
-      </div>
-      <p class="publication-note">Perfis aprovados entram em experimento; perfis promovidos orientam os próximos Jobs da linha.</p>
-    </div>
-    <div class="publication-grid growth-grid">
-      <article class="publication-panel">
-        <p class="eyebrow">Rodadas</p>
-        <div class="publication-list">
-          {% for run in growth.competitive_scout.runs[:3] %}
-          <div class="publication-item">
-            <strong>{{ run.status }} · {{ run.shorts_selected }} selecionado(s)</strong>
-            <p>{{ run.run_id }}</p>
-            <small>{{ run.shorts_considered }} analisado(s), {{ run.profiles_created }} perfil(is)</small>
-            {% if run.status == "completed" %}
-            <form method="post" action="/competitive-scout/runs/{{ run.run_id }}/profiles" class="inline-form">
-              <input type="hidden" name="return_to" value="{{ growth_return_to }}">
-              <input type="hidden" name="aggressive" value="true">
-              <button type="submit" class="ghost">Sintetizar perfis</button>
-            </form>
-            {% endif %}
-          </div>
-          {% else %}
-          <div class="publication-item empty">
-            <strong>Nenhuma rodada registrada.</strong>
-            <p>Execute o scout por CLI ou cadastre canais de referência antes de sintetizar perfis.</p>
-          </div>
-          {% endfor %}
-        </div>
-      </article>
-
-      <article class="publication-panel">
-        <p class="eyebrow">Perfis</p>
-        <div class="publication-list">
-          {% for profile in growth.competitive_scout.profiles[:4] %}
-          <div class="publication-item">
-            <strong>{{ profile.title }}</strong>
-            <p>{{ profile.line_id or "linha indefinida" }} · {{ profile.reference_count }} referência(s) · {{ profile.status }}</p>
-            <small>{{ profile.dominant_skeleton.opening_contract|default("esqueleto pendente") }}</small>
-            <div class="button-row">
-              {% if profile.status == "pending_approval" %}
-              <form method="post" action="/retention-profiles/{{ profile.profile_id }}/approve" class="inline-form">
-                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
-                <button type="submit" class="ghost">Aprovar</button>
-              </form>
-              <form method="post" action="/retention-profiles/{{ profile.profile_id }}/reject" class="inline-form">
-                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
-                <button type="submit" class="ghost">Rejeitar</button>
-              </form>
-              {% elif profile.status in ["approved", "promoted"] %}
-              <form method="post" action="/retention-profiles/{{ profile.profile_id }}/experiments" class="inline-form">
-                <input type="hidden" name="return_to" value="{{ growth_return_to }}">
-                <button type="submit" class="ghost">Iniciar experimento</button>
-              </form>
-              {% endif %}
-            </div>
-          </div>
-          {% else %}
-          <div class="publication-item empty">
-            <strong>Nenhum perfil para aprovar.</strong>
-            <p>Sintetize uma rodada concluída quando houver referências suficientes por linha.</p>
-          </div>
-          {% endfor %}
-        </div>
-      </article>
-
-      <article class="publication-panel">
-        <p class="eyebrow">Experimentos</p>
-        <div class="publication-list">
-          {% for experiment in growth.competitive_scout.experiments[:4] %}
-          <div class="publication-item">
-            <strong>{{ experiment.profile_title }}</strong>
-            <p>{{ experiment.status }} · {{ experiment.assigned_job_count }}/{{ experiment.target_job_count }} Job(s)</p>
-            <small>{{ experiment.decision or "aguardando dados próprios" }}</small>
-            <form method="post" action="/retention-experiments/{{ experiment.experiment_id }}/evaluate" class="inline-form">
-              <input type="hidden" name="return_to" value="{{ growth_return_to }}">
-              <button type="submit" class="ghost">Avaliar</button>
-            </form>
-            {% if experiment.decision == "success_strong" and not experiment.result_summary.promoted_profile_id %}
-            <form method="post" action="/retention-experiments/{{ experiment.experiment_id }}/promote" class="inline-form">
-              <input type="hidden" name="return_to" value="{{ growth_return_to }}">
-              <button type="submit" class="ghost">Promover perfil</button>
-            </form>
-            {% endif %}
-          </div>
-          {% else %}
-          <div class="publication-item empty">
-            <strong>Nenhum experimento ativo.</strong>
-            <p>Aprove um perfil para aplicar o esqueleto nos próximos Jobs.</p>
-          </div>
-          {% endfor %}
-        </div>
-      </article>
-    </div>
-  </section>
-
-  <section class="publication-grid growth-grid">
+  <section class="publication-grid growth-grid growth-support-grid">
     <article class="panel publication-panel growth-data-panel">
-      <p class="eyebrow">Estado da base</p>
+      <p class="eyebrow">Estado operacional</p>
       <h3>Coleta de performance</h3>
       <div class="growth-status-grid">
         <div><strong>Fonte</strong><span>{% if integration.analytics_connected %}Analytics conectado{% else %}Analytics pendente{% endif %}</span></div>
+        <div><strong>Reporting API</strong><span>{% if integration.reporting_connected %}conectada{% else %}não implementada{% endif %}</span></div>
         <div><strong>Coleta</strong><span>{% if growth.collection_enabled %}ativa{% else %}pausada{% endif %}</span></div>
         <div><strong>Última leitura</strong><span>{{ growth.last_snapshot_at[:16] if growth.last_snapshot_at else "nenhuma" }}</span></div>
         <div><strong>Janela ativa</strong><span>{{ growth.active_window_days }} dias</span></div>
@@ -258,9 +369,22 @@
         {% endfor %}
       </div>
       {% endif %}
+      {% if integration.reporting_missing_items %}
+      <div class="publication-list">
+        {% for item in integration.reporting_missing_items %}
+        <div class="publication-item">
+          <strong>Reporting pendente</strong>
+          <p>{{ item }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% if integration.publish_mode == "api" and integration.api_enabled and integration.client_configured and not integration.analytics_connected %}
       <div class="button-row">
-        <a class="button-link" href="/youtube/connect">Autorizar leitura de métricas</a>
+        <a class="button-link" href="/youtube/connect">
+          <span class="material-symbols-outlined" aria-hidden="true">link</span>
+          Autorizar leitura de métricas
+        </a>
       </div>
       {% endif %}
     </article>
@@ -277,25 +401,23 @@
         <div><strong>Cruzados pendentes</strong><span>{{ metrics.tiktok_scheduled_count }}</span></div>
       </div>
       <div class="growth-answer">
-        {% if metrics.unscheduled_approved_count %}
         <strong>Resposta do painel</strong>
+        {% if metrics.unscheduled_approved_count %}
         <p>Há conteúdo aprovado suficiente para preencher a agenda. O gargalo atual é transformar aprovação em horário salvo.</p>
         {% elif metrics.awaiting_approval_count %}
-        <strong>Resposta do painel</strong>
         <p>A agenda não tem backlog aprovado suficiente. A próxima alavanca é revisar e aprovar Jobs elegíveis.</p>
         {% else %}
-        <strong>Resposta do painel</strong>
         <p>O funil de publicação está limpo. O próximo ganho vem da leitura de performance.</p>
         {% endif %}
       </div>
     </article>
   </section>
 
-  <section class="panel publication-panel growth-focus-panel">
+  <section class="panel publication-panel growth-focus-panel" aria-labelledby="growth-ranking-title">
     <div class="panel-heading-row">
       <div>
-        <p class="eyebrow">Ranking editorial</p>
-        <h3>Linhas editoriais por retenção</h3>
+        <p class="eyebrow">Evidência editorial</p>
+        <h3 id="growth-ranking-title">Linhas editoriais por retenção</h3>
       </div>
       <p class="publication-note">Score = retenção média. Volume mínimo de confiança: {{ growth.volume_minimum }} views.</p>
     </div>
@@ -329,7 +451,7 @@
     </div>
   </section>
 
-  <section class="publication-grid growth-grid">
+  <section class="publication-grid growth-grid growth-support-grid">
     <article class="panel publication-panel">
       <div class="panel-heading-row">
         <div>
@@ -350,7 +472,10 @@
           <form method="post" action="/jobs/{{ entry.job_id }}/youtube-analytics/sync" class="inline-form">
             <input type="hidden" name="return_to" value="{{ growth_return_to }}">
             <input type="hidden" name="days" value="{{ growth.window_days }}">
-            <button type="submit" class="ghost">Sincronizar Analytics</button>
+            <button type="submit" class="ghost">
+              <span class="material-symbols-outlined" aria-hidden="true">sync</span>
+              Sincronizar Analytics
+            </button>
           </form>
           {% endif %}
         </div>
@@ -364,7 +489,7 @@
     </article>
 
     <article class="panel publication-panel">
-      <p class="eyebrow">Assistente de crescimento</p>
+      <p class="eyebrow">Recomendações</p>
       <h3>Recomendações rápidas</h3>
       <div class="growth-answer-list">
         {% for item in growth.recommendations %}

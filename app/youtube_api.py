@@ -15,6 +15,10 @@ YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_DATA_READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
 YOUTUBE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
 YOUTUBE_REPORTING_SCOPE = YOUTUBE_ANALYTICS_SCOPE
+YOUTUBE_REPORTING_NOT_IMPLEMENTED_MESSAGE = (
+    "YouTube Reporting API ainda não implementada neste app; origem de trafego, dispositivo, impressoes e CTR "
+    "ficam indisponiveis."
+)
 YOUTUBE_OAUTH_SCOPES = [YOUTUBE_WRITE_SCOPE, YOUTUBE_UPLOAD_SCOPE, YOUTUBE_DATA_READONLY_SCOPE, YOUTUBE_ANALYTICS_SCOPE]
 YOUTUBE_ANALYTICS_METRICS = [
     "views",
@@ -109,9 +113,10 @@ class YouTubePublisher:
             analytics_missing_items.append("OAuth atual não tem escopo de Analytics (`yt-analytics.readonly`), reconecte o canal")
         if YOUTUBE_REPORTING_SCOPE not in granted_scopes:
             reporting_missing_items.append("OAuth atual não tem escopo da YouTube Reporting API (`yt-analytics.readonly`), reconecte o canal")
+        reporting_missing_items.append(YOUTUBE_REPORTING_NOT_IMPLEMENTED_MESSAGE)
         publish_connected = bool(payload and YOUTUBE_WRITE_SCOPE in granted_scopes)
         analytics_connected = bool(payload and YOUTUBE_ANALYTICS_SCOPE in granted_scopes and dependencies_available)
-        reporting_connected = bool(payload and YOUTUBE_REPORTING_SCOPE in granted_scopes and dependencies_available)
+        reporting_connected = False
         return YouTubeConnectionStatus(
             connected=publish_connected,
             client_configured=client_configured,

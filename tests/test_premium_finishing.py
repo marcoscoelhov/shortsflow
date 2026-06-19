@@ -362,6 +362,7 @@ def test_remotion_cli_renderer_uses_absolute_artifact_paths(tmp_path, monkeypatc
     entrypoint.parent.mkdir(parents=True)
     remotion_bin.write_text("#!/bin/sh\n", encoding="utf-8")
     entrypoint.write_text("export {};\n", encoding="utf-8")
+    (project_dir / "package-lock.json").write_text("{}", encoding="utf-8")
     plan_path = tmp_path / "data" / "artifacts" / "job" / "render" / "edit_plan.json"
     output_path = tmp_path / "data" / "artifacts" / "job" / "render" / "premium.mp4"
     log_path = tmp_path / "data" / "artifacts" / "job" / "render" / "remotion.log"
@@ -397,6 +398,34 @@ def test_remotion_cli_renderer_uses_absolute_artifact_paths(tmp_path, monkeypatc
     assert "<premium.mp4>" in log_text
 
 
+def test_remotion_cli_renderer_preflight_reports_missing_runtime(tmp_path) -> None:
+    renderer = RemotionCliRenderer(project_dir=tmp_path / "remotion")
+
+    status = renderer.preflight_environment()
+
+    assert status["ready"] is False
+    assert "remotion/node_modules/.bin/remotion ausente; rode npm install em remotion/" in status["missing_items"]
+    with pytest.raises(FatalStepError, match="rode npm install em remotion"):
+        renderer.assert_environment_ready()
+
+
+def test_remotion_cli_renderer_preflight_accepts_installed_runtime(tmp_path) -> None:
+    project_dir = tmp_path / "remotion"
+    remotion_bin = project_dir / "node_modules" / ".bin" / "remotion"
+    entrypoint = project_dir / "src" / "index.ts"
+    remotion_bin.parent.mkdir(parents=True)
+    entrypoint.parent.mkdir(parents=True)
+    remotion_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    entrypoint.write_text("export {};\n", encoding="utf-8")
+    (project_dir / "package-lock.json").write_text("{}", encoding="utf-8")
+    (project_dir / "package-lock.json").write_text("{}", encoding="utf-8")
+
+    status = RemotionCliRenderer(project_dir=project_dir).preflight_environment()
+
+    assert status["ready"] is True
+    assert status["missing_items"] == []
+
+
 def test_remotion_cli_renderer_rejects_missing_local_media_before_render(tmp_path, monkeypatch) -> None:
     project_dir = tmp_path / "remotion"
     remotion_bin = project_dir / "node_modules" / ".bin" / "remotion"
@@ -405,6 +434,7 @@ def test_remotion_cli_renderer_rejects_missing_local_media_before_render(tmp_pat
     entrypoint.parent.mkdir(parents=True)
     remotion_bin.write_text("#!/bin/sh\n", encoding="utf-8")
     entrypoint.write_text("export {};\n", encoding="utf-8")
+    (project_dir / "package-lock.json").write_text("{}", encoding="utf-8")
     plan_path = tmp_path / "data" / "artifacts" / "job" / "render" / "edit_plan.json"
     output_path = tmp_path / "data" / "artifacts" / "job" / "render" / "premium.mp4"
     log_path = tmp_path / "data" / "artifacts" / "job" / "render" / "remotion.log"
@@ -439,6 +469,7 @@ def test_remotion_cli_renderer_rejects_local_media_outside_allowed_root(tmp_path
     entrypoint.parent.mkdir(parents=True)
     remotion_bin.write_text("#!/bin/sh\n", encoding="utf-8")
     entrypoint.write_text("export {};\n", encoding="utf-8")
+    (project_dir / "package-lock.json").write_text("{}", encoding="utf-8")
     allowed_root = tmp_path / "data" / "artifacts"
     outside_asset = tmp_path / "private" / "secret.png"
     outside_asset.parent.mkdir(parents=True)

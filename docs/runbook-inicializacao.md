@@ -109,7 +109,7 @@ curl http://127.0.0.1:8080/healthz
 Resposta esperada:
 
 ```json
-{"status":"ok","app":"YTS Render","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net"}
+{"status":"ok","app":"YTS Render","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
 ```
 
 Se estiver usando outra porta, ajuste a URL do `curl`.

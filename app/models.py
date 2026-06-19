@@ -387,6 +387,24 @@ class ScoutRun(Base):
     summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
+class CompetitiveScoutAutoRun(Base):
+    __tablename__ = "competitive_scout_auto_runs"
+
+    auto_run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    schema_version: Mapped[str] = mapped_column(String, default="1.0.0")
+    content_hash: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="queued", index=True)
+    niche_id: Mapped[str] = mapped_column(String, default="curiosidades", index=True)
+    scout_run_id: Mapped[str | None] = mapped_column(ForeignKey("scout_runs.run_id"), nullable=True, index=True)
+    shorts_selected: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
 class LearnedRetentionProfile(Base):
     __tablename__ = "learned_retention_profiles"
 

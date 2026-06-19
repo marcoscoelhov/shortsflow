@@ -16,16 +16,41 @@ class RemotionCliRenderer:
         self.timeout_sec = timeout_sec
         self.allowed_media_root = allowed_media_root.resolve() if allowed_media_root else None
 
+    def preflight_environment(self) -> dict[str, object]:
+        remotion_bin = self.project_dir / "node_modules" / ".bin" / "remotion"
+        entrypoint = self.project_dir / "src" / "index.ts"
+        package_lock = self.project_dir / "package-lock.json"
+        missing_items: list[str] = []
+        if not self.project_dir.exists():
+            missing_items.append("diretorio remotion/ ausente")
+        if not remotion_bin.exists():
+            missing_items.append("remotion/node_modules/.bin/remotion ausente; rode npm install em remotion/")
+        if not entrypoint.exists():
+            missing_items.append("remotion/src/index.ts ausente")
+        if not package_lock.exists():
+            missing_items.append("remotion/package-lock.json ausente")
+        return {
+            "backend": "remotion",
+            "ready": not missing_items,
+            "missing_items": missing_items,
+            "project_dir": str(self.project_dir),
+            "remotion_bin": str(remotion_bin),
+            "entrypoint": str(entrypoint),
+        }
+
+    def assert_environment_ready(self) -> None:
+        status = self.preflight_environment()
+        missing_items = [str(item) for item in status["missing_items"]]
+        if missing_items:
+            raise FatalStepError("; ".join(missing_items))
+
     def render(self, *, plan_path: Path, output_path: Path, log_path: Path) -> list[str]:
         remotion_bin = self.project_dir / "node_modules" / ".bin" / "remotion"
         entrypoint = self.project_dir / "src" / "index.ts"
         resolved_plan_path = plan_path.resolve()
         resolved_output_path = output_path.resolve()
         resolved_log_path = log_path.resolve()
-        if not remotion_bin.exists():
-            raise FatalStepError("dependencias do Remotion nao instaladas; rode npm install em remotion/")
-        if not entrypoint.exists():
-            raise FatalStepError("entrypoint do Remotion nao encontrado em remotion/src/index.ts")
+        self.assert_environment_ready()
         command = [
             str(remotion_bin),
             "render",

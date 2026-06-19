@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from app.config import Settings, get_settings
 from app.db import session_scope
 from app.growth_metrics import build_growth_score
-from app.models import LearnedRetentionProfile, ReferenceChannel, ReferenceShort, RetentionExperiment, RetentionExperimentJob, ScoutRun, YouTubeAnalyticsSnapshot
+from app.models import Job, LearnedRetentionProfile, ReferenceChannel, ReferenceShort, RetentionExperiment, RetentionExperimentJob, ScoutRun, YouTubeAnalyticsSnapshot
 from app.providers.errors import ProviderFailure
 from app.providers.llm import LLMProviderRegistry
 from app.utils import ensure_dir, new_id, read_json, stable_hash, utcnow, word_tokens, write_json
@@ -22,6 +22,21 @@ from app.youtube_api import YouTubePublisher
 
 SCOUT_ANALYSIS_PROMPT_VERSION = "shorts-scout-v1"
 HEURISTIC_SCOUT_PROMPT_VERSION = "shorts-scout-heuristic-v1"
+EXPERIMENT_UNPUBLISHABLE_JOB_STATUSES = {
+    "failed",
+    "script_quality_failed",
+    "scene_plan_quality_failed",
+    "asset_quality_failed",
+    "subtitle_quality_failed",
+    "render_quality_failed",
+    "blocked_for_monetization",
+    "rejected",
+}
+EXPERIMENT_AWAITING_PUBLICATION_JOB_STATUSES = {
+    "monetization_review",
+    "ready_for_upload",
+    "approved_for_publish",
+}
 
 
 LINE_KEYWORDS: dict[str, set[str]] = {
@@ -44,6 +59,13 @@ LINE_KEYWORDS: dict[str, set[str]] = {
         "pão",
         "roupa",
         "sol",
+        "curious",
+        "curiosities",
+        "daily",
+        "everyday",
+        "facts",
+        "fakta",
+        "unik",
     },
     "percepcao_corpo_leve": {
         "bocejo",
@@ -57,6 +79,16 @@ LINE_KEYWORDS: dict[str, set[str]] = {
         "sensacao",
         "sensação",
         "sono",
+        "body",
+        "brain",
+        "cuerpo",
+        "eye",
+        "memory",
+        "otak",
+        "piel",
+        "skin",
+        "sleep",
+        "tubuh",
     },
     "ciencia_visual_simples": {
         "atmosfera",
@@ -68,6 +100,15 @@ LINE_KEYWORDS: dict[str, set[str]] = {
         "raio",
         "vulcao",
         "vulcão",
+        "ciencia",
+        "light",
+        "planet",
+        "physics",
+        "science",
+        "sains",
+        "space",
+        "universe",
+        "volcano",
     },
     "tecnologia_popular": {
         "algoritmo",
@@ -79,6 +120,11 @@ LINE_KEYWORDS: dict[str, set[str]] = {
         "smartphone",
         "tecnologia",
         "whatsapp",
+        "ai",
+        "battery",
+        "smartphone",
+        "technology",
+        "teknologi",
     },
     "natureza_payoff_visual": {
         "abelha",
@@ -91,6 +137,15 @@ LINE_KEYWORDS: dict[str, set[str]] = {
         "polvo",
         "tubarao",
         "tubarão",
+        "alam",
+        "animal",
+        "animals",
+        "animales",
+        "hewan",
+        "nature",
+        "naturaleza",
+        "plant",
+        "shark",
     },
 }
 
@@ -123,6 +178,7 @@ class ReferenceShortCandidate:
     confidence: str
     performance_proxy: dict[str, Any]
     raw_metadata: dict[str, Any]
+    discovery_contexts: list[dict[str, Any]]
 
     @property
     def youtube_url(self) -> str:
@@ -309,7 +365,7 @@ class CompetitiveScout:
     ) -> None:
         self.settings = settings or get_settings()
         self.youtube = youtube or YouTubePublisher(self.settings)
-        self.analyzer = analyzer or LLMScoutAnalyzer()
+        self.analyzer = analyzer or (LLMScoutAnalyzer() if self.settings.competitive_scout_llm_analysis_enabled else HeuristicScoutAnalyzer())
 
     def approved_reference_channel_ids(self, *, niche_id: str = "curiosidades") -> list[str]:
         with session_scope() as session:
@@ -701,24 +757,47 @@ class CompetitiveScout:
             for snapshot in snapshots:
                 if snapshot.job_id not in latest_by_job:
                     latest_by_job[snapshot.job_id] = snapshot
+            jobs_by_id = {
+                job.job_id: job
+                for job in session.scalars(select(Job).where(Job.job_id.in_(job_ids))).all()
+            } if job_ids else {}
             evaluated_jobs: list[dict[str, Any]] = []
             for assignment in assignments:
                 snapshot = latest_by_job.get(assignment.job_id)
+                job = jobs_by_id.get(assignment.job_id)
                 score = build_growth_score(dict(snapshot.summary_metrics or {}) if snapshot else {}, fetched_at=snapshot.fetched_at if snapshot else None, minimum_views=min_views)
+                job_status = job.status if job else None
                 metrics = {
                     "views": score["views"],
                     "retention_percent": score["retention_percent"],
                     "confidence": score["confidence"],
                     "score": score["score"],
                     "youtube_video_id": snapshot.youtube_video_id if snapshot else None,
+                    "job_status": job_status,
                 }
                 assignment.metrics = metrics
-                assignment.status = "measured" if snapshot else "awaiting_analytics"
+                if snapshot and score["confidence"] == "confiavel" and score["retention_percent"] is not None:
+                    assignment.status = "measured"
+                elif snapshot:
+                    assignment.status = "measured_low_confidence"
+                elif job_status in EXPERIMENT_UNPUBLISHABLE_JOB_STATUSES:
+                    assignment.status = "unpublishable"
+                elif job_status == "published":
+                    assignment.status = "awaiting_analytics"
+                elif job_status in EXPERIMENT_AWAITING_PUBLICATION_JOB_STATUSES:
+                    assignment.status = "awaiting_publication"
+                else:
+                    assignment.status = "assigned"
                 assignment.content_hash = stable_hash({"experiment_id": experiment_id, "job_id": assignment.job_id, "status": assignment.status, "metrics": metrics})
                 evaluated_jobs.append({"job_id": assignment.job_id, **metrics})
             reliable = [item for item in evaluated_jobs if item["confidence"] == "confiavel" and item["retention_percent"] is not None]
             winners = [item for item in reliable if float(item["retention_percent"] or 0) >= success_threshold]
             partials = [item for item in reliable if float(item["retention_percent"] or 0) >= max(75.0, success_threshold - 5)]
+            pending_assignments = [
+                assignment
+                for assignment in assignments
+                if assignment.status in {"assigned", "awaiting_publication", "awaiting_analytics", "measured_low_confidence"}
+            ]
             if winners:
                 decision = "success_strong"
                 experiment.status = "completed"
@@ -727,18 +806,22 @@ class CompetitiveScout:
                 decision = "success_partial"
                 experiment.status = "completed"
                 experiment.finished_at = utcnow()
-            elif len(assignments) >= int(experiment.target_job_count or 0) and len(reliable) >= len(assignments):
+            elif len(assignments) >= int(experiment.target_job_count or 0) and not pending_assignments:
                 decision = "failed"
                 experiment.status = "completed"
                 experiment.finished_at = utcnow()
             else:
                 decision = "needs_more_data"
                 experiment.status = "running"
+                experiment.finished_at = None
             summary = {
                 "decision": decision,
                 "target_job_count": experiment.target_job_count,
                 "assigned_jobs": len(assignments),
                 "measured_jobs": len(reliable),
+                "low_confidence_measured_jobs": len([assignment for assignment in assignments if assignment.status == "measured_low_confidence"]),
+                "unpublishable_jobs": len([assignment for assignment in assignments if assignment.status == "unpublishable"]),
+                "pending_jobs": len(pending_assignments),
                 "success_threshold_retention_percent": success_threshold,
                 "minimum_views": min_views,
                 "winner_job_ids": [item["job_id"] for item in winners],
@@ -889,16 +972,16 @@ class CompetitiveScout:
         why_examples: list[str] = []
         for short in shorts:
             analysis = dict(short.analysis_summary or {})
-            for item in analysis.get("observed_structure") or []:
+            for item in self._analysis_items(analysis.get("observed_structure")):
                 if str(item or "").strip():
                     structure_counter[str(item).strip()] += 1
-            for item in analysis.get("retention_moves") or []:
+            for item in self._analysis_items(analysis.get("retention_moves")):
                 if str(item or "").strip():
                     move_counter[str(item).strip()] += 1
-            for item in analysis.get("risks") or []:
+            for item in self._analysis_items(analysis.get("risks")):
                 if str(item or "").strip():
                     risk_counter[str(item).strip()] += 1
-            for item in analysis.get("forbidden_copy_elements") or []:
+            for item in self._analysis_items(analysis.get("forbidden_copy_elements")):
                 if str(item or "").strip():
                     forbidden_counter[str(item).strip()] += 1
             why = str(analysis.get("why_it_might_work") or "").strip()
@@ -934,6 +1017,23 @@ class CompetitiveScout:
             "top_reference_video_ids": [short.youtube_video_id for short in references[:6]],
         }
 
+    def _analysis_items(self, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            raw_items = re.split(r"[\n;]+", value)
+        elif isinstance(value, (list, tuple, set)):
+            raw_items = list(value)
+        else:
+            raw_items = [value]
+        items: list[str] = []
+        for raw in raw_items:
+            text = str(raw or "").strip()
+            if not text:
+                continue
+            items.append(text[:240])
+        return items
+
     def _short_reference_json(self, short: ReferenceShort) -> dict[str, Any]:
         return {
             "reference_short_id": short.reference_short_id,
@@ -949,21 +1049,60 @@ class CompetitiveScout:
 
     def _profile_guidance_text(self, profile: LearnedRetentionProfile, *, experiment_id: str | None, promoted: bool = False) -> str:
         skeleton = dict(profile.dominant_skeleton or {})
-        sequence = skeleton.get("structure_sequence") or []
-        moves = skeleton.get("retention_moves") or []
-        forbidden = skeleton.get("forbidden_copy_elements") or []
+        moves = self._transferable_guidance_moves(skeleton)
+        forbidden = self._transferable_forbidden_copy_items(skeleton)
         header = "Perfil de Retencao Promovido ativo." if promoted else "Experimento de Retencao Aprendida ativo."
         source_line = f"profile_id={profile.profile_id}" if promoted else f"experiment_id={experiment_id}\nprofile_id={profile.profile_id}"
         return (
             f"{header}\n"
             f"{source_line}\n"
             f"line_id={profile.line_id or 'indefinida'}\n"
-            "Objetivo: copiar agressivamente o esqueleto de retencao vencedor do lote, sem copiar palavras, narrativa literal ou exemplos especificos.\n"
-            f"Sequencia dominante: {' -> '.join(str(item) for item in sequence[:8])}\n"
-            f"Movimentos de retencao: {' | '.join(str(item) for item in moves[:8])}\n"
-            f"Proibido copiar: {' | '.join(str(item) for item in forbidden[:8])}\n"
-            f"Diretriz: {skeleton.get('generator_directive') or 'preserve o esqueleto e gere roteiro original com fatos proprios.'}"
+            "Objetivo: transferir apenas a funcao narrativa do esqueleto vencedor, sem copiar palavras, fatos, exemplos, lingua ou identidade visual de Shorts de referencia.\n"
+            f"Movimentos transferiveis: {' | '.join(moves)}\n"
+            f"Proibido copiar: {' | '.join(forbidden)}\n"
+            "Diretriz: gere roteiro original em pt-BR, com evidencia propria, hook cotidiano especifico, escalada curta e payoff no ultimo terco."
         )
+
+    def _transferable_guidance_moves(self, skeleton: dict[str, Any]) -> list[str]:
+        text = " ".join(str(item or "") for item in list(skeleton.get("structure_sequence") or []) + list(skeleton.get("retention_moves") or [])).lower()
+        moves: list[str] = []
+
+        def add(condition: bool, item: str) -> None:
+            if condition and item not in moves:
+                moves.append(item)
+
+        add(any(token in text for token in ["curiosity gap", "pergunta", "what if", "lacuna"]), "abrir com lacuna de curiosidade concreta")
+        add(any(token in text for token in ["contraste", "subvert", "oposta", "paradox", "choque"]), "mostrar um contraste cotidiano antes de explicar")
+        add(any(token in text for token in ["pattern interrupt", "virada", "twist", "darker", "micro"]), "usar microviradas entre os beats")
+        add(any(token in text for token in ["fast-paced", "ritmo", "rapid", "rápid"]), "manter frases curtas e progressao rapida")
+        add(any(token in text for token in ["text-on-screen", "visual", "overlays", "imagem"]), "ancorar cada beat em imagem mental ou visual claro")
+        add(any(token in text for token in ["payoff", "ultimo", "último", "final"]), "segurar o payoff para o ultimo terco")
+        add(any(token in text for token in ["superlative", "highest", "strongest", "insane", "99%"]), "usar promessa especifica e verificavel, sem exagero factual")
+        defaults = [
+            "abrir com lacuna de curiosidade concreta",
+            "mostrar um contraste cotidiano antes de explicar",
+            "usar microviradas entre os beats",
+            "segurar o payoff para o ultimo terco",
+        ]
+        for item in defaults:
+            if len(moves) >= 6:
+                break
+            if item not in moves:
+                moves.append(item)
+        return moves[:6]
+
+    def _transferable_forbidden_copy_items(self, skeleton: dict[str, Any]) -> list[str]:
+        text = " ".join(str(item or "") for item in skeleton.get("forbidden_copy_elements") or []).lower()
+        items = [
+            "titulo literal",
+            "sequencia exata de fatos",
+            "frases, cadencia ou idioma do video externo",
+            "branding, nomes de canal, hashtags ou emojis do criador",
+            "visual assets, musica ou ordem de cortes do original",
+        ]
+        if "disclaimer" in text:
+            items.append("disclaimers ou descricoes copiadas")
+        return items[:6]
 
     def run(
         self,
@@ -1015,15 +1154,54 @@ class CompetitiveScout:
         limit = max_results_per_source or int(self.settings.competitive_scout_reference_batch_limit)
         target_channels = [item.strip() for item in (channel_ids or self.approved_reference_channel_ids(niche_id=niche_id)) if item.strip()]
         target_queries = [item.strip() for item in (queries or []) if item.strip()]
+        query_search_plans = self._query_search_plans(target_queries)
         search_items: list[dict[str, Any]] = []
         for channel_id in target_channels:
-            search_items.extend(self.youtube.search_public_videos(channel_id=channel_id, max_results=limit, order="date", video_duration="short"))
-        for query in target_queries:
-            search_items.extend(self.youtube.search_public_videos(query=query, max_results=limit, order="relevance", region_code="BR", video_duration="short"))
+            items = self.youtube.search_public_videos(channel_id=channel_id, max_results=limit, order="date", video_duration="short")
+            search_items.extend(
+                self._annotate_search_item(
+                    item,
+                    {
+                        "source": "channel",
+                        "channel_id": channel_id,
+                        "region_code": None,
+                    },
+                )
+                for item in items
+            )
+        for plan in query_search_plans:
+            items = self.youtube.search_public_videos(
+                query=plan["query"],
+                max_results=limit,
+                order="relevance",
+                region_code=plan["region_code"],
+                video_duration="short",
+            )
+            search_items.extend(self._annotate_search_item(item, plan) for item in items)
+        discovery_contexts_by_video_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for item in search_items:
+            video_id = self._video_id_from_search(item)
+            if not video_id:
+                continue
+            context = dict(item.get("_scout_discovery_context") or {})
+            if context and context not in discovery_contexts_by_video_id[video_id]:
+                discovery_contexts_by_video_id[video_id].append(context)
         video_ids = list(dict.fromkeys(self._video_id_from_search(item) for item in search_items if self._video_id_from_search(item)))
         videos = self.youtube.fetch_public_videos(video_ids)
-        candidates = [candidate for video in videos if (candidate := self._candidate_from_video(video, now=effective_now)) is not None]
-        selected = [candidate for candidate in candidates if self._is_selected_reference(candidate, now=effective_now)]
+        candidates = [
+            candidate
+            for video in videos
+            if (
+                candidate := self._candidate_from_video(
+                    video,
+                    now=effective_now,
+                    discovery_contexts=discovery_contexts_by_video_id.get(str(video.get("id") or "").strip(), []),
+                )
+            )
+            is not None
+        ]
+        matched = [candidate for candidate in candidates if self._is_selected_reference(candidate, now=effective_now)]
+        selected = sorted(matched, key=lambda candidate: candidate.performance_score, reverse=True)[: int(self.settings.competitive_scout_max_analyses_per_run)]
         analyses = [
             {
                 "candidate": candidate,
@@ -1038,8 +1216,11 @@ class CompetitiveScout:
             "niche_id": niche_id,
             "channels_considered": len(target_channels),
             "queries_considered": len(target_queries),
+            "regions_considered": sorted({str(plan["region_code"]) for plan in query_search_plans if plan.get("region_code")}),
+            "search_requests_considered": len(target_channels) + len(query_search_plans),
             "search_items": len(search_items),
             "videos_enriched": len(videos),
+            "shorts_matched_filters": len(matched),
             "shorts_selected": len(selected),
             "selected": [
                 {
@@ -1047,6 +1228,7 @@ class CompetitiveScout:
                     "title": item["candidate"].title,
                     "line_id": item["candidate"].line_id,
                     "performance_proxy": item["candidate"].performance_proxy,
+                    "discovery_contexts": item["candidate"].discovery_contexts,
                     "analysis": item["analysis"],
                 }
                 for item in analyses
@@ -1066,12 +1248,15 @@ class CompetitiveScout:
             "status": "completed",
             "channels_considered": len(target_channels),
             "queries_considered": len(target_queries),
+            "regions_considered": sorted({str(plan["region_code"]) for plan in query_search_plans if plan.get("region_code")}),
+            "search_requests_considered": len(target_channels) + len(query_search_plans),
             "shorts_considered": len(candidates),
+            "shorts_matched_filters": len(matched),
             "shorts_selected": len(selected),
             "artifact_path": artifact_path,
         }
 
-    def _candidate_from_video(self, video: dict[str, Any], *, now: datetime) -> ReferenceShortCandidate | None:
+    def _candidate_from_video(self, video: dict[str, Any], *, now: datetime, discovery_contexts: list[dict[str, Any]] | None = None) -> ReferenceShortCandidate | None:
         video_id = str(video.get("id") or "").strip()
         snippet = dict(video.get("snippet") or {})
         content_details = dict(video.get("contentDetails") or {})
@@ -1110,7 +1295,8 @@ class CompetitiveScout:
             performance_score=float(proxy["score"]),
             confidence=confidence,
             performance_proxy=proxy,
-            raw_metadata=video,
+            raw_metadata={**video, "_scout_discovery_contexts": list(discovery_contexts or [])},
+            discovery_contexts=list(discovery_contexts or []),
         )
 
     def _is_selected_reference(self, candidate: ReferenceShortCandidate, *, now: datetime) -> bool:
@@ -1284,6 +1470,7 @@ class CompetitiveScout:
             "performance_score": candidate.performance_score,
             "confidence": candidate.confidence,
             "performance_proxy": candidate.performance_proxy,
+            "discovery_contexts": candidate.discovery_contexts,
         }
 
     def _video_id_from_search(self, item: dict[str, Any]) -> str:
@@ -1291,3 +1478,31 @@ class CompetitiveScout:
         if isinstance(raw_id, dict):
             return str(raw_id.get("videoId") or "").strip()
         return str(raw_id or "").strip()
+
+    def _query_search_plans(self, queries: list[str]) -> list[dict[str, Any]]:
+        if not queries:
+            return []
+        regions = self._global_regions() if bool(self.settings.competitive_scout_global_enabled) else ["BR"]
+        plans: list[dict[str, Any]] = []
+        for query in queries:
+            for region_code in regions:
+                plans.append(
+                    {
+                        "source": "query",
+                        "query": query,
+                        "region_code": region_code,
+                    }
+                )
+        return plans[: int(self.settings.competitive_scout_max_query_region_pairs)]
+
+    def _global_regions(self) -> list[str]:
+        raw = str(getattr(self.settings, "competitive_scout_regions", "") or "")
+        regions = []
+        for item in re.split(r"[\s,;]+", raw):
+            region = item.strip().upper()
+            if re.fullmatch(r"[A-Z]{2}", region) and region not in regions:
+                regions.append(region)
+        return regions or ["BR"]
+
+    def _annotate_search_item(self, item: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        return {**dict(item or {}), "_scout_discovery_context": {key: value for key, value in context.items() if value is not None}}

@@ -159,7 +159,7 @@ Etapas atuais de `JobOrchestrator._steps()`:
 | `tts` | 2 | Gera narracao e metadados basicos de audio. |
 | `subtitle_alignment` | 1 | Normaliza legenda e arquivos de render. |
 | `background_music` | 1 | Seleciona ou gera trilha, faz mix e valida audio final. |
-| `render` | 1 | Gera `render/final.mp4` vertical via FFmpeg, com enquadramento estável por cena. |
+| `render` | 1 | Gera `render/final.mp4` vertical via Remotion por padrao, com `render/remotion.log`, `render/edit_plan.json` e `premium_finishing_report.json`. |
 | `monetization_readiness_gate` | 0 | Consolida direitos, disclosure, factualidade, repeticao e publish readiness. |
 | `publish_to_review_hub` | 0 | Persiste o pacote de publicacao e leva o job ao hub. |
 
@@ -187,9 +187,9 @@ Fluxo OAuth:
 - `GET /youtube/connect` cria a URL de autorizacao e persiste `youtube_oauth_state.json`.
 - `GET /youtube/oauth/callback` troca `code` por token e salva `youtube_oauth_token.json`.
 - `POST /youtube/disconnect` remove token e state locais.
-- O status de publicacao e o status de Analytics sao separados: publicar usa `youtube.force-ssl`/`youtube.upload`; leitura da Data API usa `youtube.readonly`; Analytics e Reporting usam `yt-analytics.readonly`.
+- O status de publicacao e o status de Analytics sao separados: publicar usa `youtube.force-ssl`/`youtube.upload`; leitura da Data API usa `youtube.readonly`; Analytics usa `yt-analytics.readonly`. A YouTube Reporting API ainda nao tem adapter neste app, portanto o status operacional de Reporting permanece `reporting_connected=false` mesmo quando o OAuth de Analytics esta correto.
 
-O Centro de Crescimento do Canal usa `YouTubeAnalyticsSnapshot` para salvar leituras de `reports.query` por Job publicado. A coleta automatica roda fora do request da pagina, via CLI/timer dedicado, e atualiza Jobs publicados com `youtube_video_id` conforme a janela ativa de performance. Cada snapshot guarda metricas base, linhas diarias e, quando a consulta por video permitir, breakdown por pais dentro do JSON do artefato. Origem de trafego, dispositivo, impressoes e CTR ficam marcados como pendencia da YouTube Reporting API.
+O Centro de Crescimento do Canal usa `YouTubeAnalyticsSnapshot` para salvar leituras de `reports.query` por Job publicado. A coleta automatica roda fora do request da pagina, via CLI/timer dedicado, e atualiza Jobs publicados com `youtube_video_id` conforme a janela ativa de performance. Cada snapshot guarda metricas base, linhas diarias e, quando a consulta por video permitir, breakdown por pais dentro do JSON do artefato. Origem de trafego, dispositivo, impressoes e CTR ficam marcados como pendencia da YouTube Reporting API ate existir implementacao real de criacao/download de relatorios assincronos.
 
 O Score de Crescimento e deliberadamente simples: `averageViewPercentage` vira o score principal, `views >= 100` marca confianca, e `subscribersGained`, `shares` e `views` servem como desempate. Likes e comentarios aparecem como contexto, mas nao guiam o ranking principal.
 
@@ -200,7 +200,7 @@ A politica de coleta recorrente e:
 - Jobs sem `youtube_video_id` ficam como pendencia operacional, nao como performance ruim.
 - A pausa de criacao/publicacao automatizada nao pausa a coleta de performance; use `performance_collection_enabled` para esse controle.
 
-As recomendacoes rapidas do Centro de Crescimento sao deterministicas e auditaveis. O relatorio historico consolidado fica disponivel no Hub e no CLI por `python -m app.cli growth-report`; ele destaca vencedores, piores retencoes, conversao para inscritos e gaps como baixa conversacao, baixo compartilhamento, retencao alta com pouca distribuicao e snapshots zerados. Relatorios de alcance/impressao/CTR dependem da YouTube Reporting API, que e um fluxo separado de relatorios assincronos, nao da chamada sincronica `reports.query`.
+As recomendacoes rapidas do Centro de Crescimento sao deterministicas e auditaveis. O relatorio historico consolidado fica disponivel no Hub e no CLI por `python -m app.cli growth-report`; ele destaca vencedores, piores retencoes, conversao para inscritos e gaps como baixa conversacao, baixo compartilhamento, retencao alta com pouca distribuicao e snapshots zerados. Relatorios de alcance/impressao/CTR dependem da YouTube Reporting API, que e um fluxo separado de relatorios assincronos, nao da chamada sincronica `reports.query`, e ainda nao esta implementada no runtime.
 
 ## Scout competitivo de Shorts
 
@@ -213,6 +213,8 @@ python -m app.cli competitive-scout --channel-id UC... --query "curiosidades cie
 ```
 
 Se nenhum `--channel-id` nem `--query` for informado, o scout usa `ReferenceChannel` com `status=approved` no nicho escolhido. A busca usa `search.list` com `type=video` e `videoDuration=short`, depois valida a duracao real pelo `contentDetails.duration` de `videos.list`; portanto "Short" e tratado como candidato curto e nao como garantia da plataforma.
+
+Quando `competitive_scout_global_enabled=true`, as buscas textuais sao expandidas por regioes fortes em Shorts definidas em `competitive_scout_regions` (padrao: `IN`, `US`, `ID`, `BR`, `MX`, `JP`, `PH`, `VN`, `TH`, `KR`). Para controlar custo e quota, a rodada respeita `competitive_scout_max_query_region_pairs` antes de chamar `search.list` e `competitive_scout_max_analyses_per_run` depois dos filtros de views, duracao e maturidade. Se `competitive_scout_llm_analysis_enabled=false`, a analise dos candidatos usa apenas heuristica local, sem chamada de LLM pago. Os artefatos registram `regions_considered`, `search_requests_considered`, `shorts_matched_filters` e `discovery_contexts` por Short selecionado.
 
 A analise usa o provider LLM primario quando disponivel e cai para heuristica deterministica quando nao houver provider ou quando a resposta falhar. No MVP, referencias externas entram com `transcript_source=none`; transcricao ou download de video externo so devem entrar em uma fase posterior com fonte autorizada ou consentida. Os artefatos ficam em `data/artifacts/scout/<run_id>/` e as tabelas principais sao `reference_channels`, `reference_shorts`, `scout_runs`, `learned_retention_profiles`, `retention_experiments` e `retention_experiment_jobs`.
 
@@ -228,11 +230,13 @@ python -m app.cli retention-experiment-evaluate <experiment_id>
 python -m app.cli retention-experiment-promote <experiment_id>
 ```
 
-Enquanto houver experimento `running`, os proximos Jobs do mesmo nicho recebem o esqueleto aprovado nas notas editoriais e sao vinculados em `retention_experiment_jobs`. A avaliacao do experimento usa Analytics proprio do canal, com padrao forte em `retention_experiment_success_retention_percent` (padrao 80%) e volume minimo `retention_experiment_min_views` (padrao 100). O resultado pode ser `success_strong`, `success_partial`, `failed` ou `needs_more_data`.
+Enquanto houver experimento `running`, os proximos Jobs do mesmo nicho recebem o esqueleto aprovado nas notas editoriais e sao vinculados em `retention_experiment_jobs`. A avaliacao do experimento usa Analytics proprio do canal, com padrao forte em `retention_experiment_success_retention_percent` (padrao 80%) e volume minimo `retention_experiment_min_views` (padrao 100). Jobs que falham antes de ficarem publicaveis entram como `unpublishable`; snapshots de Analytics ainda sem volume confiavel entram como `measured_low_confidence` e mantem o experimento em `needs_more_data`. Quando o alvo do experimento ja foi preenchido e nao ha Jobs pendentes de publicacao, Analytics ou volume confiavel, isso tambem pode encerrar o experimento como `failed`. O resultado pode ser `success_strong`, `success_partial`, `failed` ou `needs_more_data`.
 
 A promocao final e uma acao humana separada e so aceita experimento com `success_strong`. Quando promovido, o perfil vira `promoted`, arquiva qualquer perfil promovido anterior da mesma linha editorial e passa a orientar Jobs futuros do nicho mesmo sem experimento aberto. Isso ajusta o metaprompt efetivo usado na criacao por meio de notas versionadas do Job, mas nao edita automaticamente a Configuracao Global de Prompt Viral.
 
-O ciclo diario de automacao roda o scout competitivo automaticamente quando `competitive_scout_automation_enabled=true` (padrao). Esse ciclo avalia experimentos em andamento, promove vencedores quando `competitive_scout_auto_promote_profiles=true`, executa uma nova rodada de scout com canais aprovados e as buscas de `competitive_scout_queries`, sintetiza perfis, autoaprova quando `competitive_scout_auto_approve_profiles=true` e inicia experimentos quando `competitive_scout_auto_start_experiments=true`. Falha ou ausencia de fonte do scout entra em `AutomationRun.run_metadata.competitive_scout`, mas nao derruba criacao/publicacao do ciclo diario.
+O ciclo diario de automacao roda o scout competitivo automaticamente quando `competitive_scout_automation_enabled=true` (padrao). Esse ciclo avalia experimentos em andamento, executa uma nova rodada de scout com canais aprovados e as buscas de `competitive_scout_queries`, e sintetiza perfis para revisao. Por padrao, `competitive_scout_auto_approve_profiles`, `competitive_scout_auto_start_experiments` e `competitive_scout_auto_promote_profiles` ficam desligados para preservar decisao humana; quando ligados explicitamente, o ciclo autoaprova perfis, inicia experimentos ou promove vencedores conforme cada flag. Com o scout global ligado, essas buscas sao repetidas nas regioes configuradas ate o limite de pares busca/regiao. Falha ou ausencia de fonte do scout entra em `AutomationRun.run_metadata.competitive_scout`, mas nao derruba criacao/publicacao do ciclo diario.
+
+No Hub, `POST /competitive-scout/auto-cycle` nao executa mais a rodada dentro do request HTTP. A rota cria uma linha em `competitive_scout_auto_runs`, agenda a execucao em background e redireciona com `scout_auto_run=<id>`. O status persistido fica em `GET /competitive-scout/auto-runs/{auto_run_id}` e tambem aparece no Centro de Crescimento; o fragmento ja atualiza a cada 30s.
 
 Para rodar apenas o scout automatico, sem criar Job nem agenda:
 
@@ -244,7 +248,7 @@ python -m app.cli competitive-scout-auto-cycle
 
 Quando `YTS_TIKTOK_AUTO_PUBLISH_ENABLED=true`, jobs que ja entraram na agenda ou publicacao do YouTube ganham um registro em `ChannelPublication` para o canal `tiktok`. Jobs com agenda futura seguem o mesmo horario planejado; jobs ja publicados entram em retropostagem controlada, limitada por `YTS_TIKTOK_RETROPOST_DAILY_LIMIT` (padrao 1 por dia).
 
-O envio usa a Content Posting API oficial do TikTok com `YTS_TIKTOK_ACCESS_TOKEN` e escopo `video.publish`. A API exige consulta de creator info, privacidade compativel com a conta e pode restringir clientes nao auditados a publicacoes privadas; essas recusas ficam registradas como `publish_failed` no canal TikTok.
+O envio usa a Content Posting API oficial do TikTok com `YTS_TIKTOK_ACCESS_TOKEN` e escopo `video.publish`. Esse token e configurado manualmente no ambiente; o Hub nao gerencia OAuth, refresh token nem ciclo de renovacao do TikTok. A API exige consulta de creator info, privacidade compativel com a conta e pode restringir clientes nao auditados a publicacoes privadas; essas recusas ficam registradas como `publish_failed` no canal TikTok.
 
 O contexto de integracao exposto no hub usa:
 
@@ -289,6 +293,8 @@ O contexto de integracao exposto no hub usa:
 | `POST` | `/jobs/{job_id}/performance` | Registra metricas manuais do YouTube Studio. |
 | `POST` | `/jobs/{job_id}/youtube-analytics/sync` | Sincroniza snapshot de Analytics do YouTube para um job publicado com `youtube_video_id`. |
 | `POST` | `/youtube-analytics/sync-due` | Sincroniza o lote de Jobs publicados que ja estao elegiveis para nova coleta. |
+| `POST` | `/competitive-scout/auto-cycle` | Enfileira uma rodada manual assíncrona do scout competitivo. |
+| `GET` | `/competitive-scout/auto-runs/{auto_run_id}` | Consulta status persistido da rodada manual do scout competitivo. |
 | `GET` | `/healthz` | Healthcheck do app. |
 
 Arquivos sob `data/artifacts/` sao servidos por `/artifacts/...` quando ainda existem.
@@ -319,9 +325,11 @@ Defaults importantes:
 
 Camadas de configuracao:
 
-- `.env`: boot, infraestrutura e segredos. Inclui `YTS_APP_URL`, `YTS_HUB_AUTH_TOKEN`, `YTS_DATABASE_URL`, chaves de provedores, OAuth do YouTube, token do TikTok e exposicao Tailnet.
+- `.env`: boot, infraestrutura e segredos. Inclui `YTS_APP_URL`, `YTS_HUB_AUTH_TOKEN`, `YTS_DATABASE_URL`, chaves de provedores, OAuth do YouTube, token manual do TikTok e exposicao Tailnet.
 - Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, planejador de cenas, fonte de musica, autopopulacao do banco local, TTS primario, modo de publicacao, API do YouTube, publicacao cruzada no TikTok, horario do ciclo diario, horario padrao de publicacao, janela da agenda, score minimo e coleta de performance. O gerador de imagens aparece como informacao operacional; hoje, em execucao real, ele e MiniMax.
 - defaults do codigo: valores seguros usados quando nem `.env` nem Hub definem uma sobreposicao.
+
+Quando `YTS_HUB_AUTH_TOKEN` esta configurado, requisicoes `GET` e `HEAD` aceitam o cookie `yts_hub_token` para navegacao. Requisicoes `POST` exigem `x-yts-hub-token` ou `Authorization: Bearer <token>`; cookie nao autentica mutacoes por desenho.
 
 As sobreposicoes do Hub ficam na tabela `operational_settings`. Elas sao aplicadas no startup do FastAPI e nos comandos `yts-render automation-run` e `yts-render analytics-sync-run`. Segredos nunca devem ser adicionados a essa tabela; novos campos editaveis precisam entrar pela allowlist em `app/operational_settings.py`.
 
@@ -397,9 +405,14 @@ asset_visual_gate.json
 visual_review_report.json
 render/final.mp4
 render/poster.jpg
-render/ffmpeg.log
-render_motion_plan.json
+render/remotion.log
+render/edit_plan.json
+premium_finishing_report.json
 ```
+
+Como Remotion e o backend padrao por ADR-0012, o ambiente operacional precisa ter `npm install` executado dentro de `remotion/`. Quando `YTS_RENDER_PRIMARY_BACKEND=ffmpeg` for usado para manutencao legado, os artefatos voltam a incluir `render/ffmpeg.log` e `render_motion_plan.json`.
+
+O boot do Hub roda um preflight do Remotion antes de iniciar o worker e registra aviso claro se `remotion/node_modules/.bin/remotion`, `remotion/src/index.ts` ou `remotion/package-lock.json` estiverem ausentes. `/healthz` tambem expõe `render.primary_backend`, `render.remotion_ready` e `render.remotion_missing_items`.
 
 `artifact_url()` converte `file://...` dentro de `data/artifacts/` para `/artifacts/...`. Quando o arquivo ja foi removido, a UI nao renderiza link quebrado.
 

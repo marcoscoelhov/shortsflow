@@ -8,12 +8,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@remotion/captions": "4.0.476",
-    "@remotion/cli": "4.0.476",
-    "@remotion/media": "4.0.476",
+    "@remotion/captions": "4.0.481",
+    "@remotion/cli": "4.0.481",
+    "@remotion/media": "4.0.481",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "remotion": "4.0.476"
+    "remotion": "4.0.481"
   },
   "devDependencies": {
     "@types/react": "^18.2.79",

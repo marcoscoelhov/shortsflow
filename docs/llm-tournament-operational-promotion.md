@@ -37,6 +37,12 @@ Usar o **Relatorio de Decisao do Torneio** para orientar roteamento de LLMs sem 
 pytest -q tests/test_llm_tournament.py tests/test_llm_tournament_probe.py tests/test_llm_tournament_runner.py
 ```
 
+## Fechamento sem rodada completa em 2026-06-19
+
+A triagem limitada `data/llm_tournament/runs/20260619-121650-textual/textual_triage_results.json` foi suficiente para validar compatibilidade real e expor riscos, mas nao para promover modelos. A rodada completa foi pausada para evitar gasto adicional e nao gerou **Relatorio de Decisao do Torneio**.
+
+Decisao: manter roteamento atual do Hub. Nao promover `grok-4.20-non-reasoning` apesar de bom comportamento em `script` e `repair`, porque `audit` nao teve sobrevivente. Nao promover `minimax-m3`, porque houve timeout, `provider_limit` e corte por orcamento de falhas. A proxima rodada real exige autorizacao explicita.
+
 ## Notas para a proxima rodada full
 
 Melhorias que nao mudam o criterio do torneio:

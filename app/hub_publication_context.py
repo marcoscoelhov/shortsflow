@@ -11,6 +11,7 @@ from app.growth_metrics import build_growth_score
 from app.hub_status import NEEDS_ACTION_JOB_STATUSES
 from app.models import (
     ChannelPublication,
+    CompetitiveScoutAutoRun,
     Job,
     LearnedRetentionProfile,
     PublicationSchedule,
@@ -67,6 +68,8 @@ class HubPublicationContext:
             "publish_connected": status.publish_connected,
             "analytics_connected": status.analytics_connected,
             "analytics_missing_items": status.analytics_missing_items or [],
+            "reporting_connected": status.reporting_connected,
+            "reporting_missing_items": status.reporting_missing_items or [],
             "client_configured": status.client_configured,
             "dependencies_available": status.dependencies_available,
             "redirect_uri": redirect_uri,
@@ -83,6 +86,10 @@ class HubPublicationContext:
             "token_configured": status.token_configured,
             "ready": status.ready,
             "missing_items": status.missing_items,
+            "auth_mode": status.auth_mode,
+            "oauth_managed": status.oauth_managed,
+            "token_refresh_managed": status.token_refresh_managed,
+            "contract_note": status.contract_note,
             "privacy_level": self.settings.tiktok_privacy_level,
             "retropost_daily_limit": self.settings.tiktok_retropost_daily_limit,
         }
@@ -208,6 +215,13 @@ class HubPublicationContext:
                 session.scalars(
                     select(ScoutRun)
                     .order_by(ScoutRun.started_at.desc(), ScoutRun.created_at.desc())
+                    .limit(5)
+                ).all()
+            )
+            scout_auto_runs = list(
+                session.scalars(
+                    select(CompetitiveScoutAutoRun)
+                    .order_by(CompetitiveScoutAutoRun.created_at.desc())
                     .limit(5)
                 ).all()
             )
@@ -371,6 +385,20 @@ class HubPublicationContext:
             },
         ]
         competitive_scout = {
+            "auto_runs": [
+                {
+                    "auto_run_id": run.auto_run_id,
+                    "status": run.status,
+                    "niche_id": run.niche_id,
+                    "scout_run_id": run.scout_run_id,
+                    "shorts_selected": run.shorts_selected,
+                    "error": run.error,
+                    "created_at": run.created_at.isoformat() if run.created_at else None,
+                    "started_at": run.started_at.isoformat() if run.started_at else None,
+                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                }
+                for run in scout_auto_runs
+            ],
             "runs": [
                 {
                     "run_id": run.run_id,

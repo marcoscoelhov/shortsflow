@@ -37,14 +37,24 @@ Implementar o **Torneio de LLMs** como comparacao textual controlada, barata e a
 
 ## Falta Executar
 
-- [ ] Rodar uma **Triagem Textual do Torneio** real limitada por candidatos para validar custo, timeout e compatibilidade fora de mock.
-  Do instead: usar `--candidate` para 2 ou 3 modelos finalistas provaveis antes de rodar todos.
+- [x] Rodar uma **Triagem Textual do Torneio** real limitada por candidatos para validar custo, timeout e compatibilidade fora de mock.
+  Do instead: usar `--candidate` para 2 ou 3 modelos finalistas provaveis antes de rodar todos. Executado em `data/llm_tournament/runs/20260619-121650-textual/textual_triage_results.json`.
 
 - [ ] Gerar o primeiro **Relatorio de Decisao do Torneio** real a partir de uma rodada textual completa.
-  Do instead: rodar `--textual-round`, abrir `decision_report.md` e revisar artefatos dos finalistas antes de recomendar mudanca no Hub.
+  Do instead: manter adiado ate haver autorizacao explicita para gasto com providers. A tentativa limitada iniciada em 2026-06-19 foi interrompida antes de gerar `decision_report.md`; nao usar esse run parcial para promocao operacional.
 
 - [ ] Rodar teste de regressao depois de cada rodada real relevante.
   Do instead: executar `pytest -q tests/test_llm_tournament.py tests/test_llm_tournament_probe.py tests/test_llm_tournament_runner.py`.
+
+## Fechamento sem novo gasto em 2026-06-19
+
+A fase operacional foi encerrada sem novas chamadas a LLM depois da decisao de pausar gastos. A unica evidencia real preservada e a triagem limitada `20260619-121650-textual`, com estes resultados:
+
+- `script`: `grok-4.20-non-reasoning` sobreviveu; `minimax-m3` teve 1 timeout em 3 tarefas.
+- `repair`: `grok-4.20-non-reasoning` sobreviveu; `minimax-m3` teve timeouts, `provider_limit` e cortes por `failure_budget_exceeded`.
+- `audit`: nenhum candidato sobreviveu; os dois acumularam vetos objetivos, principalmente `missed_expected_issue`.
+
+Conclusao operacional: nao promover nenhum modelo a partir dessa evidencia parcial. A proxima acao sem custo e rodar somente `--plan-only` e testes locais. Qualquer rodada real completa precisa de autorizacao explicita.
 
 ## Comandos
 
@@ -71,7 +81,7 @@ python scripts/run_llm_tournament.py \
   --max-failures-per-candidate 2
 ```
 
-Rodada com tabela de precos:
+Rodada real com tabela de precos, somente com autorizacao explicita para gasto:
 
 ```bash
 python scripts/run_llm_tournament.py \
