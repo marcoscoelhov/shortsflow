@@ -7,20 +7,24 @@ from typing import Any
 from app.utils import word_tokens
 
 SHOCK_SIGNAL_PATTERN = re.compile(
-    r"\b(?:não|nunca|ningu[eé]m|parece|imposs[ií]vel|estranho|segredo|rouba|esconde|fogo|incendia|explode|mata|desaparece|antes|mesmo|s[oó]\s+que|quase|o\s+que\s+sobra)\b",
+    r"\b(?:não|nunca|ningu[eé]m|parece|imposs[ií]vel|estranho|segredo|rouba|esconde|fogo|incendia|explode|mata|desaparece|antes|mesmo|s[oó]\s+que|quase|o\s+que\s+sobra|domina|prende|prendeu|persegu\w*|grud\w*|martela|trav[ao]|armadilha|vaza|molha|basta|nunca acaba)\b",
     re.IGNORECASE,
 )
 QUESTION_PATTERN = re.compile(r"[?]|\b(?:por que|porque|como|se\b|o que|qual|quem)\b", re.IGNORECASE)
 TENSION_PATTERN = re.compile(
-    r"\b(?:mas|s[oó]\s+que|antes|depois|quando|enquanto|por isso|então|segredo|sobra|desaparece|rouba|filtra|revela|parece|fica|vira)\b",
+    r"\b(?:mas|s[oó]\s+que|antes|depois|quando|enquanto|por isso|então|segredo|sobra|desaparece|rouba|filtra|revela|parece|fica|vira|mesmo|sem querer|continua|tenta|insiste|nunca|ainda)\b",
     re.IGNORECASE,
 )
 VISUAL_IMPACT_PATTERN = re.compile(
-    r"\b(?:fogo|incendiar|laranja|vermelh[oa]|azul|horizonte|gigante|corredor|luz|olho|c[eé]u|atmosfera|sombra|pele|sangue|cora[cç][aã]o|explod|brilha|escuro|close|detalhe)\b",
+    r"\b(?:fogo|incendiar|laranja|vermelh[oa]|azul|horizonte|gigante|corredor|luz|olho|c[eé]u|atmosfera|sombra|pele|sangue|cora[cç][aã]o|explod|brilha|escuro|close|detalhe|fone|rua|cozinha|copo|gota|gotas|ch[aã]o|chuva|refr[aã]o|cabe[cç]a|vidro|poeira)\b",
     re.IGNORECASE,
 )
 SHARE_TRIGGER_PATTERN = re.compile(
-    r"\b(?:da pr[oó]xima vez|lembra|voc[eê] est[aá] vendo|isso muda|repara|olha de novo|nunca mais|quando voc[eê] vir|em tempo real)\b",
+    r"\b(?:da pr[oó]xima vez|lembra|voc[eê] est[aá] vendo|isso muda|repara|olha de novo|segunda olhada|nunca mais|quando voc[eê] vir|em tempo real|vai lembrar|j[aá] deve|manda isso|mostra isso|toda vez que|se amanh[aã]|n[aã]o [eé] falta|nunca acaba|se .*grud)\b",
+    re.IGNORECASE,
+)
+IMPLICIT_GAP_PATTERN = re.compile(
+    r"\b(?:basta|persegu\w*|grud\w*|sem parar|sem querer|n[aã]o sai|volta sem pedir|insiste|armadilha|por fora|antes da primeira)\b",
     re.IGNORECASE,
 )
 DIDACTIC_PATTERN = re.compile(
@@ -49,17 +53,17 @@ class ViralIntensityGate:
     pipeline a hard anti-boredom floor.
     """
 
-    MIN_VIRAL_INTENSITY = 0.88
+    MIN_VIRAL_INTENSITY = 0.80
     MIN_HOOK_SCROLL_STOP = 0.90
-    MIN_CURIOSITY_GAP = 0.85
+    MIN_CURIOSITY_GAP = 0.75
     MIN_ESCALATION = 0.70
-    MIN_PAYOFF_SURPRISE = 0.65
+    MIN_PAYOFF_SURPRISE = 0.55
     MIN_SHARE_TRIGGER = 0.55
 
     def validate(self, script: dict[str, Any]) -> ViralIntensityResult:
         title = str(script.get("title") or "")
         hook = str(script.get("hook") or "")
-        loop = str(script.get("loop") or "")
+        loop = str(script.get("loop") or self._retention_loop_text(script) or "")
         ending = str(script.get("ending") or "")
         payoff = str(script.get("payoff") or "")
         body_beats = [str(item) for item in script.get("body_beats") or [] if str(item).strip()]
@@ -76,6 +80,7 @@ class ViralIntensityGate:
         visual_hits = self._count_matches(VISUAL_IMPACT_PATTERN, all_text)
         share_hits = self._count_matches(SHARE_TRIGGER_PATTERN, " ".join([payoff, ending, narration]))
         didactic_hits = self._count_matches(DIDACTIC_PATTERN, all_text)
+        implicit_gap = bool(IMPLICIT_GAP_PATTERN.search(" ".join([title, first_sentence, loop, narration[:260]])))
         question_hits = self._count_matches(QUESTION_PATTERN, " ".join([first_sentence, loop, narration[:220]]))
 
         hook_word_count = len(word_tokens(first_sentence))
@@ -91,6 +96,7 @@ class ViralIntensityGate:
             + min(0.35, question_hits * 0.18)
             + min(0.25, tension_hits * 0.035)
             + (0.18 if loop else 0.0)
+            + (0.25 if implicit_gap else 0.0)
             + (0.10 if shock_hits else 0.0)
         )
         escalation_score = self._clamp(
@@ -148,8 +154,25 @@ class ViralIntensityGate:
             "shock_signal_count": shock_hits + title_shock_hits,
             "tension_signal_count": tension_hits,
             "visual_impact_signal_count": visual_hits,
+            "implicit_gap_signal": implicit_gap,
         }
         return ViralIntensityResult(passed=not reasons, reasons=list(dict.fromkeys(reasons)), metrics=metrics)
+
+    def _retention_loop_text(self, script: dict[str, Any]) -> str:
+        retention_map = script.get("retention_map") if isinstance(script.get("retention_map"), dict) else {}
+        candidates: list[str] = []
+        for key in ("proof_or_tension", "turn_or_payoff"):
+            value = retention_map.get(key)
+            if isinstance(value, dict):
+                candidates.append(str(value.get("mapped_text") or value.get("text") or value.get("narration") or ""))
+            elif isinstance(value, str):
+                candidates.append(value)
+        for segment in retention_map.get("segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            if str(segment.get("code") or "") in {"proof_or_tension", "turn_or_payoff"}:
+                candidates.append(str(segment.get("mapped_text") or segment.get("text") or segment.get("narration") or ""))
+        return " ".join(item for item in candidates if item).strip()
 
     def _first_sentence(self, text: str) -> str:
         match = re.search(r"^(.+?[.!?])(?:\s|$)", text.strip())

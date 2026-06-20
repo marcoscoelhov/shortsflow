@@ -293,12 +293,28 @@ class ScriptPipeline(BasePipeline):
             self._persist_script_rejection(job_id, script, {"viral_intensity": metrics}, ["script_viral_intensity_low"])
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(result.reasons[:6])}")
         repair_reasons = [str(reason) for reason in result.reasons]
+        original_metrics = self._viral_intensity_metrics(result, ready_script_mode=False, raise_on_fail=False)
         try:
             candidate = self.providers.creative.repair_script(script, repair_reasons, plan_dict)
         except Exception as exc:  # noqa: BLE001
+            self._persist_script_rejection(
+                job_id,
+                script,
+                {"viral_intensity": original_metrics, "viral_intensity_repair_error": f"{type(exc).__name__}: {exc}"},
+                repair_reasons,
+            )
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(repair_reasons[:6])}") from exc
         repaired_result = self.viral_intensity_gate.validate(candidate)
         if not repaired_result.passed:
+            repaired_metrics = self._viral_intensity_metrics(repaired_result, ready_script_mode=False, raise_on_fail=False)
+            repaired_metrics["viral_intensity_repair_attempted"] = True
+            repaired_metrics["viral_intensity_original_reasons"] = repair_reasons
+            self._persist_script_rejection(
+                job_id,
+                candidate,
+                {"viral_intensity": repaired_metrics, "viral_intensity_original": original_metrics},
+                repaired_result.reasons,
+            )
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(repaired_result.reasons[:6])}")
         repaired_metrics = self._viral_intensity_metrics(repaired_result, ready_script_mode=False)
         repaired_metrics["viral_intensity_repair_attempted"] = True
@@ -618,7 +634,10 @@ class ScriptPipeline(BasePipeline):
         return self.repair_domain._claim_trace_metrics(*args, **kwargs)
 
     def _persist_script_rejection(self, *args: Any, **kwargs: Any) -> Any:
-        return self.repair_domain._persist_script_rejection(*args, **kwargs)
+        repair_domain = getattr(self, "repair_domain", None)
+        if repair_domain is None:
+            return None
+        return repair_domain._persist_script_rejection(*args, **kwargs)
 
 
 

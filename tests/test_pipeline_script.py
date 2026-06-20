@@ -1060,6 +1060,31 @@ def test_fact_pack_rejects_verified_source_for_wrong_primary_topic(monkeypatch) 
     assert report["status"] == "limited"
     assert report["topic_alignment"]["passed"] is False
 
+def test_fact_pack_accepts_low_risk_common_knowledge_policy(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que o espelho embaça no banho?",
+        angle="Conectar vapor quente, vidro frio e gotículas minúsculas em uma situação familiar.",
+        hook_promise="O espelho não fica sujo: ele vira uma tela de gotículas.",
+        search_terms=["espelho embaça banho", "vapor vidro frio"],
+        entities=["Espelho", "Vapor", "Gotículas"],
+        title_candidates=["Por que o espelho embaça no banho quente?"],
+        quality_metrics={"editorial_mode": "viral_curiosidades"},
+    )
+    request = SimpleNamespace(seed_theme="Por que o espelho embaça no banho?", notes=None, requested_angle=None)
+
+    report = pipeline._build_fact_pack(topic_plan, request)
+
+    assert report["status"] == "limited"
+    assert report["factual_status"] == "common_knowledge_accepted"
+    assert report["topic_alignment"]["passed"] is True
+    assert report["topic_alignment"]["reason"] == "common_knowledge_low_risk_accepted"
+    assert report["viral_truth_policy"]["automatic_publish_allowed"] is True
+    assert report["viral_truth_policy"]["copywriting_allowed"] is True
+
+
 def test_script_pipeline_requires_verified_fact_pack_for_factual_real_topics(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
     monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
@@ -1996,6 +2021,53 @@ def test_publish_readiness_requires_verified_fact_pack_for_viral_curiosidades() 
     assert readiness["passed"] is False
     assert "manual_review_required" in readiness["reasons"]
 
+def test_publish_readiness_allows_low_risk_common_knowledge_policy() -> None:
+    fact_pack = {
+        "status": "limited",
+        "facts": [],
+        "sources": [],
+        "common_knowledge_allowed": True,
+        "viral_truth_policy": {
+            "mode": "viral_entertainment_low_risk",
+            "factual_status": "common_knowledge_accepted",
+            "automatic_publish_allowed": True,
+            "copywriting_allowed": True,
+        },
+    }
+    script = {
+        **_base_script("O espelho não fica sujo. Ele vira uma tela de gotículas."),
+        "source_fact_ids": [],
+        "claim_trace": [
+            {
+                "text": "O vapor quente forma gotículas no vidro frio.",
+                "source_fact_ids": [],
+                "grounding": "common_knowledge",
+            }
+        ],
+    }
+
+    readiness = orchestrator.monetization_pipeline.publish_readiness_report(
+        None,
+        SimpleNamespace(canonical_topic="Por que o espelho embaça no banho?", angle="cotidiano", quality_metrics={"editorial_mode": "viral_curiosidades"}),
+        fact_pack,
+        ["#shorts", "#curiosidades", "#banho"],
+        {
+            "script_gate_pass": True,
+            "scene_plan_gate_pass": True,
+            "asset_gate_pass": True,
+            "subtitle_gate_pass": True,
+            "render_gate_pass": True,
+        },
+        script,
+        {"passed": True, "reasons": [], "provider": "test"},
+    )
+    claims_report = orchestrator.monetization_pipeline.build_fact_claims_report(None, None, fact_pack, script)
+
+    assert readiness["low_risk_common_knowledge_auto_allowed"] is True
+    assert "manual_review_required" not in readiness["reasons"]
+    assert claims_report["requires_fact_review"] is False
+
+
 def test_strict_validation_keeps_script_gate_blocking() -> None:
     script = _base_script(
         "Você sabia que café tira o sono? "
@@ -2920,6 +2992,38 @@ def test_fact_pack_consistency_rejects_source_ids_when_fact_pack_limited() -> No
     reasons = orchestrator.script_pipeline._fact_pack_consistency_reasons(script, {"status": "limited", "facts": []})
 
     assert "invented_source_fact_ids" in reasons
+
+
+def test_fact_pack_consistency_accepts_common_knowledge_for_low_risk_limited_pack() -> None:
+    script = _base_script("O copo gelado parece vazar, mas a água vem do ar em volta dele.")
+    script["claim_trace"] = [
+        {
+            "text": "O copo gelado parece vazar, mas a água vem do ar em volta dele.",
+            "source_fact_ids": [],
+            "grounding": "common_knowledge",
+        }
+    ]
+
+    reasons = orchestrator.script_pipeline._fact_pack_consistency_reasons(
+        script,
+        {"status": "limited", "facts": [], "common_knowledge_allowed": True},
+    )
+
+    assert "factual_claim_trace_missing" not in reasons
+
+
+def test_attach_claim_trace_marks_low_risk_limited_pack_as_common_knowledge() -> None:
+    script = _base_script("O solo causa aquele cheiro de chuva quando as primeiras gotas mexem na poeira.")
+    script.pop("claim_trace", None)
+
+    updated = orchestrator.script_pipeline._attach_claim_trace(
+        script,
+        {"status": "limited", "facts": [], "common_knowledge_allowed": True},
+    )
+
+    assert updated["claim_trace"]
+    assert updated["claim_trace"][0]["grounding"] == "common_knowledge"
+
 
 def test_step_script_persists_generation_debug_on_provider_failure(monkeypatch) -> None:
     job_id = orchestrator.create_job(

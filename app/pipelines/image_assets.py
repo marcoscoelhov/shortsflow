@@ -16,9 +16,10 @@ MINIMAX_IMAGE_PROMPT_MAX_CHARS = 1500
 MINIMAX_IMAGE_PROMPT_TARGET_CHARS = 1200
 
 NO_TEXT_IMAGE_CONSTRAINT = (
-    "clean vertical cinematic image, no readable text anywhere, no letters, no words, "
-    "no numbers, no symbols, no logo, no watermark, no captions, no subtitles, "
-    "no typography, no labels, no UI, no signs, no text printed on objects"
+    "vertical cinematic documentary realism, photorealistic, natural lighting, text is forbidden, "
+    "no text of any kind, no readable text anywhere, no fake letters, no letters, no words, no numbers, "
+    "no symbols, no logo, no watermark, no captions, no subtitles, no typography, no labels, no UI, "
+    "no signs, no posters, no billboards, no packaging text, no screen text, no text printed on objects"
 )
 
 SINGLE_VERTICAL_IMAGE_CONSTRAINT = (
@@ -399,7 +400,7 @@ class ImageAssetDomain:
             if all(term in narration or term in normalized for term in terms):
                 return hint
         domain_style = self.visual_domain_style(scene)
-        return f"vertical cinematic {domain_style} of {english_subject}"
+        return f"vertical cinematic {domain_style}, photorealistic editorial documentary image of {english_subject}"
 
     def semantic_scene_directive(self, scene: dict[str, Any], scene_hint: str) -> str:
         narration = str(scene.get("narration_text") or "").strip()
@@ -414,16 +415,20 @@ class ImageAssetDomain:
     def visual_domain_style(self, scene: dict[str, Any]) -> str:
         domain = self.normalized_visual_domain(scene)
         if self.is_science_visual_domain(scene):
-            return "scientific documentary realism"
+            return "photorealistic science documentary realism"
         if any(term in domain for term in ("miniature", "diorama", "maquete", "model", "craft", "artesanal")):
-            return "miniature craft documentary realism"
+            return "miniature craft documentary realism, practical effects macro photography"
         if any(term in domain for term in ("urban", "urbano", "cidade", "city", "street", "rua")):
-            return "urban documentary realism"
+            return "urban cinematic documentary realism"
         if any(term in domain for term in ("historical", "histórico", "historico", "cultural", "culture")):
-            return "cultural documentary realism"
+            return "cultural cinematic documentary realism"
+        if any(term in domain for term in ("macro", "object", "objeto", "physical", "material")):
+            return "photorealistic macro documentary realism"
+        if any(term in domain for term in ("product", "editorial", "photography", "fotografia")):
+            return "product/editorial photography realism"
         if "documentary realism" in domain:
-            return "documentary realism"
-        return "documentary realism"
+            return "cinematic documentary realism"
+        return "cinematic documentary realism"
 
     def domain_style_directive(self, scene: dict[str, Any]) -> str:
         style = self.visual_domain_style(scene)
@@ -439,6 +444,8 @@ class ImageAssetDomain:
         replacements = {
             "vertical cinematic scientific image": f"vertical cinematic {style}",
             "clean vertical cinematic scientific image": f"clean vertical cinematic {style}",
+            "vertical cinematic documentary illustration": f"vertical cinematic {style}, photorealistic editorial documentary image",
+            "documentary illustration": style,
             "scientific visualization": style,
             "scientific documentary realism": style,
             "scientific documentary": style,
@@ -485,6 +492,7 @@ class ImageAssetDomain:
                 "sem capa",
                 "sem tipografia",
                 "focused on the described phenomenon",
+                "documentary illustration",
                 "showing subject closeup",
                 "showing subject in context",
                 "showing process or mechanism",
@@ -540,9 +548,11 @@ class ImageAssetDomain:
         extra_constraints = [
             "main subject unmistakable and relevant to the narration beat",
             "every visible object blank and unbranded",
-            "no text on cups, packages, screens, charts or labels",
+            "no text on cups, packages, screens, charts, labels, posters, billboards or background objects",
             SINGLE_VERTICAL_IMAGE_CONSTRAINT,
             "avoid random props, generic sci-fi objects and irrelevant backgrounds",
+            "avoid anime, manga, cartoon, comic panel, flat vector art, 2D icon style and infographic style unless explicitly required",
+            "do not render even decorative glyphs, fake writing, blurred words or unreadable pseudo-text",
         ]
         if "no readable text anywhere" not in prompt_lower:
             prompt = f"{prompt}, {NO_TEXT_IMAGE_CONSTRAINT}".strip(", ")
@@ -606,7 +616,7 @@ class ImageAssetDomain:
 
     def minimax_no_text_constraint(self, scene: dict[str, Any]) -> str:
         if self.is_miniature_diorama_domain(scene):
-            return "no readable text, letters, numbers, logos, watermarks, signs, labels or UI"
+            return "text is forbidden, no readable text, no fake letters, no letters, no words, no numbers, no logos, no watermarks, no signs, no labels or UI"
         return NO_TEXT_IMAGE_CONSTRAINT
 
     def minimax_safe_image_prompt(self, prompt: str, scene: dict[str, Any]) -> str:

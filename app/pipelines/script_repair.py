@@ -7,7 +7,7 @@ from app.editorial.retention import attach_retention_metadata, build_retention_m
 from app.pipelines.base import BasePipeline
 from app.pipelines.common import RecoverableStepError
 from app.pipelines.script_metrics import normalize_script_metrics
-from app.quality.script_gate import REWATCH_LOOP_PATTERN
+from app.quality.script_gate import REWATCH_LOOP_PATTERN, ScriptGateResult
 from app.utils import sentence_split, stable_hash, tokenize, word_tokens
 
 
@@ -42,8 +42,6 @@ class ScriptRepairDomain(BasePipeline):
         if any(source_id not in valid_ids for source_id in trace_source_ids):
             reasons.append("invented_claim_trace_fact_ids")
         fact_risk = self.script_gate._fact_risk_report(script)  # noqa: SLF001
-        if fact_risk.get("blocked") and len(used_ids) < len(valid_ids):
-            reasons.append("high_risk_claims_need_fact_pack_grounding")
         risky_claims = []
         seen_risky_claims: set[str] = set()
         for claim in fact_risk.get("claims", []):
@@ -54,15 +52,24 @@ class ScriptRepairDomain(BasePipeline):
                 continue
             seen_risky_claims.add(key)
             risky_claims.append(claim)
-        grounded_trace = [
+        acceptable_trace = [
             item
             for item in trace
             if isinstance(item, dict)
             and str(item.get("text") or "").strip()
-            and any(str(source_id) in valid_ids for source_id in (item.get("source_fact_ids") or []))
+            and (
+                any(str(source_id) in valid_ids for source_id in (item.get("source_fact_ids") or []))
+                or str(item.get("grounding") or "").strip().lower() in {"common_knowledge", "user_input"}
+                or (
+                    str(item.get("grounding") or "").strip().lower() == "conservative"
+                    and bool(fact_pack.get("common_knowledge_allowed"))
+                )
+            )
         ]
-        if risky_claims and len(grounded_trace) < len(risky_claims):
+        if risky_claims and len(acceptable_trace) < len(risky_claims):
             reasons.append("factual_claim_trace_missing")
+        if fact_risk.get("blocked") and risky_claims and len(acceptable_trace) < len(risky_claims):
+            reasons.append("high_risk_claims_need_fact_pack_grounding")
         for item in trace:
             if not isinstance(item, dict) or str(item.get("grounding") or "").strip().lower() != "conservative":
                 continue
@@ -554,27 +561,61 @@ class ScriptRepairDomain(BasePipeline):
             for fact in fact_pack.get("facts") or []
             if fact.get("fact_id")
         }
-        existing = updated.get("claim_trace")
-        if isinstance(existing, list) and existing:
-            updated["claim_trace"] = self._normalize_claim_trace(existing, valid_ids)
-            return updated
         risk_report = self.script_gate._fact_risk_report(updated)  # noqa: SLF001
         claims = [claim for claim in risk_report.get("claims", []) if claim.get("score", 0) > 0]
+        existing = updated.get("claim_trace")
+        if isinstance(existing, list) and existing:
+            normalized_existing = self._normalize_claim_trace(existing, valid_ids)
+            for item in normalized_existing:
+                if str(item.get("grounding") or "").strip().lower() != "missing":
+                    continue
+                matching_claim = next(
+                    (
+                        claim
+                        for claim in claims
+                        if str(claim.get("text") or "").strip()
+                        and str(claim.get("text") or "").strip()[:80] in str(item.get("text") or "")
+                    ),
+                    None,
+                )
+                if matching_claim and self._common_knowledge_claim_allowed(matching_claim, fact_pack):
+                    item["grounding"] = "common_knowledge"
+            updated["claim_trace"] = normalized_existing
+            return updated
         if not claims:
             updated["claim_trace"] = []
             return updated
         trace: list[dict[str, Any]] = []
         for claim in claims:
+            grounding = "missing"
+            if claim.get("conservative_language"):
+                grounding = "conservative"
+            elif self._common_knowledge_claim_allowed(claim, fact_pack):
+                grounding = "common_knowledge"
             trace.append(
                 {
                     "text": str(claim.get("text") or "").strip(),
                     "source_fact_ids": [],
-                    "grounding": "conservative" if claim.get("conservative_language") else "missing",
+                    "grounding": grounding,
                     "risk_types": claim.get("risk_types") or [],
                 }
             )
         updated["claim_trace"] = trace
         return updated
+
+    def _common_knowledge_claim_allowed(self, claim: dict[str, Any], fact_pack: dict[str, Any]) -> bool:
+        if not isinstance(fact_pack, dict) or not fact_pack.get("common_knowledge_allowed"):
+            return False
+        risk_types = {str(item) for item in (claim.get("risk_types") or [])}
+        if risk_types & {"precise_number_or_unit", "dated_history_or_technical_event", "health_or_biology_claim", "known_topic_unsupported_claim"}:
+            return False
+        if int(claim.get("score") or 0) > 1:
+            return False
+        text = str(claim.get("text") or "").lower()
+        high_risk_markers = {"cura", "câncer", "cancer", "diabetes", "dosagem", "remédio", "remedio", "garante", "sem exceção", "sem excecao"}
+        if any(marker in text for marker in high_risk_markers):
+            return False
+        return bool(risk_types <= {"technical_causal_claim", "absolute_claim"})
 
     def _sanitize_source_fact_ids(self, script: dict[str, Any], fact_pack: dict[str, Any]) -> dict[str, Any]:
         updated = dict(script)
@@ -632,6 +673,7 @@ class ScriptRepairDomain(BasePipeline):
         script["qa_metrics"] = normalize_script_metrics(dict(script.get("qa_metrics") or {}))
         gate_result = self.script_gate.validate(script, target_duration_sec)
         fact_pack = plan_dict.get("fact_pack") if isinstance(plan_dict.get("fact_pack"), dict) else {}
+        gate_result = self._downgrade_grounded_fact_risk(script, fact_pack, gate_result)
         consistency_reasons = self._fact_pack_consistency_reasons(script, fact_pack)
         attempts_log: list[dict[str, Any]] = [
             {
@@ -684,6 +726,7 @@ class ScriptRepairDomain(BasePipeline):
             repaired = self._postprocess_script_for_quality(repaired, plan_dict, last_reasons)
             repaired["qa_metrics"] = normalize_script_metrics(dict(repaired.get("qa_metrics") or {}))
             repaired_gate = self.script_gate.validate(repaired, target_duration_sec)
+            repaired_gate = self._downgrade_grounded_fact_risk(repaired, fact_pack, repaired_gate)
             repaired_consistency_reasons = self._fact_pack_consistency_reasons(repaired, plan_dict.get("fact_pack"))
             attempts_log.append(
                 {
@@ -717,6 +760,7 @@ class ScriptRepairDomain(BasePipeline):
             fallback_repaired = self._postprocess_script_for_quality(fallback_repaired, plan_dict, last_reasons)
             fallback_repaired["qa_metrics"] = normalize_script_metrics(dict(fallback_repaired.get("qa_metrics") or {}))
             fallback_gate = self.script_gate.validate(fallback_repaired, target_duration_sec)
+            fallback_gate = self._downgrade_grounded_fact_risk(fallback_repaired, fact_pack, fallback_gate)
             fallback_consistency_reasons = self._fact_pack_consistency_reasons(fallback_repaired, plan_dict.get("fact_pack"))
             attempts_log.append(
                 {
@@ -741,6 +785,37 @@ class ScriptRepairDomain(BasePipeline):
             last_reasons = [*fallback_gate.reasons, *fallback_consistency_reasons]
 
         raise RecoverableStepError(f"script quality gate failed: {', '.join(last_reasons)}")
+
+    def _downgrade_grounded_fact_risk(
+        self,
+        script: dict[str, Any],
+        fact_pack: dict[str, Any],
+        gate_result: ScriptGateResult,
+    ) -> ScriptGateResult:
+        if fact_pack.get("status") != "verified" or "factual_risk_requires_conservative_rewrite" not in gate_result.reasons:
+            return gate_result
+        trace_report = dict(gate_result.metrics.get("claim_trace") or {})
+        if trace_report.get("risky_claim_count", 0) <= 0 or trace_report.get("missing_risky_claim_trace", True):
+            return gate_result
+        trace = script.get("claim_trace") if isinstance(script.get("claim_trace"), list) else []
+        valid_ids = {str(fact.get("fact_id")) for fact in fact_pack.get("facts") or [] if isinstance(fact, dict) and fact.get("fact_id")}
+        grounded_items = [
+            item
+            for item in trace
+            if isinstance(item, dict)
+            and (
+                any(str(source_id) in valid_ids for source_id in (item.get("source_fact_ids") or []))
+                or str(item.get("grounding") or "").strip().lower() in {"common_knowledge", "user_input", "conservative"}
+            )
+        ]
+        if len(grounded_items) < int(trace_report.get("risky_claim_count") or 0):
+            return gate_result
+        reasons = [reason for reason in gate_result.reasons if reason != "factual_risk_requires_conservative_rewrite"]
+        metrics = dict(gate_result.metrics)
+        metrics["script_quality_gate_reasons"] = reasons
+        metrics["script_quality_gate_pass"] = not reasons
+        metrics["grounded_fact_risk_accepted"] = True
+        return ScriptGateResult(passed=not reasons, reasons=reasons, metrics=metrics)
 
     def _validate_ready_script_without_repair(
         self,

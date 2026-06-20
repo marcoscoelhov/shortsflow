@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     asset_generation_timeout_sec: float = 75.0
     asset_generation_regeneration_rounds: int = 2
     asset_generation_parallelism: int = 3
+    vision_verifier_provider: str = "local_openai"
+    local_vision_base_url: str = "http://127.0.0.1:8081/v1"
+    local_vision_model: str = "minicpm-v-4.6-q4"
+    vision_verifier_timeout_sec: float = 240.0
     background_music_enabled: bool = True
     background_music_provider: str = "local_bank"
     background_music_gain_db: float = -17.0
@@ -233,6 +237,7 @@ class Settings(BaseSettings):
         "qwen_timeout_sec",
         "gemini_text_timeout_sec",
         "gemini_tts_timeout_sec",
+        "vision_verifier_timeout_sec",
     )
     @classmethod
     def validate_positive_timeout(cls, value: float) -> float:
@@ -255,6 +260,15 @@ class Settings(BaseSettings):
         if not 1 <= value <= 8:
             raise ValueError("asset_generation_parallelism must be between 1 and 8")
         return value
+
+    @field_validator("vision_verifier_provider")
+    @classmethod
+    def validate_vision_verifier_provider(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"minimax_mmx", "local_openai", "auto", "disabled"}
+        if normalized not in allowed:
+            raise ValueError("vision_verifier_provider must be one of: minimax_mmx, local_openai, auto, disabled")
+        return normalized
 
     @field_validator("background_music_provider")
     @classmethod

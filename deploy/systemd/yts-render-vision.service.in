@@ -1,0 +1,25 @@
+[Unit]
+Description=YTS Render local vision verifier (MiniCPM-V 4.6 via llama.cpp)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO_ROOT__
+Environment=YTS_REPO_ROOT=__REPO_ROOT__
+ExecStart=__REPO_ROOT__/data/vendor/llama.cpp/build/bin/llama-server \
+  -m __REPO_ROOT__/data/models/minicpm-v-4.6/MiniCPM-V-4_6-Q4_K_M.gguf \
+  --mmproj __REPO_ROOT__/data/models/minicpm-v-4.6/mmproj-model-f16.gguf \
+  --host 127.0.0.1 \
+  --port 8081 \
+  --threads 2 \
+  --threads-batch 2 \
+  --ctx-size 4096
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStartSec=300
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

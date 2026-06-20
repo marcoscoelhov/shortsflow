@@ -39,6 +39,19 @@ class MonetizationPipeline(BasePipeline):
     def _ready_script_bank_human_validated(self, job: Job, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
         return job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK and self._ready_script_fact_check_confirmed(fact_pack, script_artifact)
 
+    def _low_risk_common_knowledge_auto_allowed(self, fact_pack: dict[str, Any], fact_risk: dict[str, Any] | None = None) -> bool:
+        policy = fact_pack.get("viral_truth_policy") if isinstance(fact_pack, dict) else None
+        if not isinstance(policy, dict):
+            return False
+        if fact_pack.get("status") == "verified":
+            return True
+        if not bool(policy.get("automatic_publish_allowed")):
+            return False
+        if policy.get("factual_status") != "common_knowledge_accepted":
+            return False
+        fact_risk = fact_risk or {"blocked": False, "high_risk_claim_count": 0}
+        return not bool(fact_risk.get("blocked")) and int(fact_risk.get("high_risk_claim_count") or 0) == 0
+
     def step_monetization_readiness(self, session: Session, job: Job, attempt: int) -> list[str]:
         report = self.build_monetization_report(session, job)
         self.storage.persist_json(job.job_id, "rights_registry.json", self._serialize_for_json(report["rights_registry"]))
@@ -545,10 +558,12 @@ class MonetizationPipeline(BasePipeline):
             else:
                 ungrounded_trace.append(normalized_item)
         factual_topic = resolve_editorial_mode(topic_plan, None) == "factual_strict"
+        low_risk_common_auto_allowed = self._low_risk_common_knowledge_auto_allowed(fact_pack, fact_risk)
         requires_review = (
             fact_pack.get("status") != "verified"
+            and not low_risk_common_auto_allowed
             and (factual_topic or fact_risk.get("claim_count", 0) > 0 or bool(ungrounded_trace))
-        )
+        ) or (fact_pack.get("status") != "verified" and low_risk_common_auto_allowed and bool(ungrounded_trace))
         claim_sources = [
             {
                 "claim": fact.get("claim"),
@@ -569,6 +584,8 @@ class MonetizationPipeline(BasePipeline):
             "claim_sources": claim_sources,
             "risk_report": fact_risk,
             "editorial_rule": fact_pack.get("editorial_rule"),
+            "viral_truth_policy": fact_pack.get("viral_truth_policy"),
+            "low_risk_common_knowledge_auto_allowed": low_risk_common_auto_allowed,
         }
 
     def build_channel_repetition_report(self, session: Session, job: Job, topic_plan: TopicPlan | None, script: Script | None) -> dict[str, Any]:
@@ -1108,6 +1125,7 @@ class MonetizationPipeline(BasePipeline):
         fact_risk = self.script_gate._fact_risk_report(script_dict) if script_dict else {"blocked": False, "claim_count": 0}  # noqa: SLF001
         editorial_mode = resolve_editorial_mode(topic_plan, None) if topic_plan else "viral_curiosidades"
         factual_topic = editorial_mode == "factual_strict"
+        low_risk_common_auto_allowed = self._low_risk_common_knowledge_auto_allowed(fact_pack, fact_risk)
         reasons: list[str] = []
         failed_quality_items = [key for key, passed in checklist.items() if not passed]
         if failed_quality_items:
@@ -1128,7 +1146,7 @@ class MonetizationPipeline(BasePipeline):
             reasons.append("weak_ending")
         if minimax_audit and minimax_audit.get("passed") is False:
             reasons.extend(str(reason) for reason in minimax_audit.get("reasons") or ["minimax_audit_failed"])
-        if fact_pack.get("status") != "verified":
+        if fact_pack.get("status") != "verified" and not low_risk_common_auto_allowed:
             reasons.append("manual_review_required")
         return {
             "passed": not reasons,
@@ -1139,6 +1157,8 @@ class MonetizationPipeline(BasePipeline):
             "fact_risk": fact_risk,
             "minimax_audit": minimax_audit or {"skipped": True},
             "editorial_mode": editorial_mode,
+            "viral_truth_policy": fact_pack.get("viral_truth_policy"),
+            "low_risk_common_knowledge_auto_allowed": low_risk_common_auto_allowed,
         }
 
     def script_to_dict(self, script: Script) -> dict[str, Any]:

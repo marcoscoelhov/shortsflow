@@ -38,6 +38,70 @@ class ScriptFactPackDomain(BasePipeline):
     def _build_research_brief(self, topic_plan: Any, request: Any) -> dict[str, Any]:
         return build_research_brief(topic_plan, request)
 
+    def _viral_truth_policy(
+        self,
+        topic_plan: TopicPlan,
+        request: TopicRequest,
+        research_brief: dict[str, Any],
+        *,
+        source_status: str,
+    ) -> dict[str, Any]:
+        """Return the editorial factual policy for viral entertainment scripts.
+
+        The goal is not academic proof for every everyday observation. It is a
+        monetizable viral guardrail: allow copywriting, metaphor, and low-risk
+        common mechanisms while still requiring evidence for high-risk or
+        specific claims.
+        """
+        editorial_mode = self._editorial_mode(topic_plan, request)
+        scope = str(research_brief.get("claim_scope") or "general_curiosity")
+        evidence_profile = str(research_brief.get("evidence_profile") or "cotidiano_observacional")
+        topic_text = " ".join(
+            str(part or "")
+            for part in [
+                getattr(request, "seed_theme", ""),
+                getattr(topic_plan, "canonical_topic", ""),
+                getattr(topic_plan, "angle", ""),
+                getattr(topic_plan, "hook_promise", ""),
+            ]
+        )
+        normalized_topic = self._normalize_fact_text(topic_text)
+        high_risk_pattern = re.compile(
+            r"\b(?:saude|saúde|medic|doenca|doença|ansiedade|depressao|depressão|suplemento|remedio|remédio|"
+            r"tratamento|cura|risco|perigo|morte|crime|politica|política|eleicao|eleição|dinheiro|investimento|"
+            r"preco|preço|taxa|lei|juridico|jurídico|religiao|religião|guerra|tragédia|tragedia)\b"
+        )
+        low_risk_common = (
+            editorial_mode == "viral_curiosidades"
+            and evidence_profile in {"cotidiano_observacional"}
+            and scope in {"general_curiosity", "explanatory_mechanism", "visual_craft_observation"}
+            and not research_brief.get("required_evidence_term_groups")
+            and not high_risk_pattern.search(normalized_topic)
+        )
+        if low_risk_common:
+            return {
+                "mode": "viral_entertainment_low_risk",
+                "factual_status": "common_knowledge_accepted" if source_status != "verified" else "verified",
+                "source_requirement": "not_required_for_low_risk_common_knowledge",
+                "automatic_publish_allowed": True,
+                "copywriting_allowed": True,
+                "allowed_framing": ["observable_common", "low_risk_common_mechanism", "viral_metaphor", "dramatic_framing"],
+                "must_repair_or_block": ["precise_numbers", "dates", "medical_or_safety_claims", "financial_claims", "invented_sources", "literal_false_payoff"],
+                "guidance": (
+                    "Entertain without lying: hooks may use metaphor and tension, but the payoff must leave a truthful low-risk explanation. "
+                    "Prefer softening absolutes over killing viral copy."
+                ),
+            }
+        return {
+            "mode": "factual_guardrail",
+            "factual_status": "verified" if source_status == "verified" else "review_or_sources_required",
+            "source_requirement": "required_for_specific_or_high_risk_claims" if editorial_mode == "factual_strict" else "recommended_for_specific_claims",
+            "automatic_publish_allowed": source_status == "verified",
+            "copywriting_allowed": editorial_mode == "viral_curiosidades",
+            "allowed_framing": ["dramatic_framing", "conservative_language"],
+            "must_repair_or_block": ["unsupported_specific_claims", "precise_numbers", "dates", "health_claims", "engineering_claims", "invented_sources"],
+        }
+
     def _normalize_evidence_cards(self, fact_pack: dict[str, Any], research_brief: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         if not isinstance(fact_pack, dict):
             return []
@@ -181,9 +245,27 @@ class ScriptFactPackDomain(BasePipeline):
                         pack["queries_attempted"] = query_batch
                         pack["research_brief"] = research_brief
                         pack["evidence_cards"] = self._normalize_evidence_cards(pack, research_brief)
+                        pack["viral_truth_policy"] = self._viral_truth_policy(topic_plan, request, research_brief, source_status="verified")
+                        pack["factual_status"] = pack["viral_truth_policy"].get("factual_status")
                         return pack
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
+        common_knowledge_allowed = self._editorial_mode(topic_plan, request) == "viral_curiosidades"
+        viral_truth_policy = self._viral_truth_policy(topic_plan, request, research_brief, source_status="limited")
+        low_risk_common_accepted = bool(viral_truth_policy.get("automatic_publish_allowed"))
+        editorial_rule = (
+            "No source facts were retrieved. This is low-risk viral entertainment/common knowledge: observations, simple everyday mechanisms, "
+            "metaphor and dramatic framing may be used with grounding='common_knowledge'. Keep the payoff truthful, soften absolutes, "
+            "and avoid precise numbers, dates, medical/safety/financial claims, invented sources, or unsupported technical specificity."
+            if low_risk_common_accepted
+            else (
+                "No source facts were retrieved. Everyday, low-risk common-knowledge observations may be used with "
+                "grounding='common_knowledge', but the script must avoid precise numbers, dates, medical/scientific/engineering "
+                "causality, and absolute claims unless already present in the user input."
+                if common_knowledge_allowed
+                else "No source facts were retrieved. Script must avoid precise numbers, dates, medical/scientific/engineering causality, and absolute claims unless already present in the user input."
+            )
+        )
         return {
             "status": "limited",
             "query_used": cleaned_queries[0] if cleaned_queries else request.seed_theme,
@@ -191,11 +273,15 @@ class ScriptFactPackDomain(BasePipeline):
             "facts": [],
             "evidence_cards": [],
             "sources": [],
-            "editorial_rule": "No source facts were retrieved. Script must avoid precise numbers, dates, medical/scientific/engineering causality, and absolute claims unless already present in the user input.",
+            "common_knowledge_allowed": common_knowledge_allowed,
+            "viral_truth_policy": viral_truth_policy,
+            "factual_status": viral_truth_policy.get("factual_status"),
+            "editorial_rule": editorial_rule,
             "topic_alignment": {
-                "passed": False,
-                "reason": "no_relevant_source_retrieved",
+                "passed": low_risk_common_accepted,
+                "reason": "common_knowledge_low_risk_accepted" if low_risk_common_accepted else "no_relevant_source_retrieved",
                 "claim_scope": research_brief.get("claim_scope"),
+                "evidence_profile": research_brief.get("evidence_profile"),
                 "primary_terms": research_brief.get("primary_terms"),
                 "mechanism_terms": research_brief.get("mechanism_terms"),
             },

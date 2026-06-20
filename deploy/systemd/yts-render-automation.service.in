@@ -1,7 +1,7 @@
 [Unit]
 Description=YTS Render daily automation cycle
-After=network-online.target tailscaled.service yts-render-hub.service
-Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service yts-render-hub.service yts-render-vision.service
+Wants=network-online.target tailscaled.service yts-render-vision.service
 
 [Service]
 Type=oneshot

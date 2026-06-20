@@ -14,11 +14,18 @@ Use estrutura de copywriting agressiva para retenção:
 4. Escalada em 3 a 5 beats: cada frase deve revelar algo mais forte, mais estranho ou mais visual que a anterior.
 5. Payoff atrasado: guarde a explicacao mais surpreendente para o ultimo terco.
 6. Fechamento com recontextualizacao forte ou loop: termine fazendo o espectador repensar o primeiro hook, com frase memoravel.
+Obrigatório para o roteiro passar no gate:
+- hook deve criar uma interrupção de rolagem, não apenas explicar o tema
+- body_beats deve ter exatamente 3 a 5 frases independentes em escalada; nunca compacte os beats em uma frase só
+- full_narration deve ser hook + body_beats + ending, sem perder nenhum beat
+- inclua um share trigger implícito: algo que faça a pessoa pensar “vou mandar isso para alguém”
+- o payoff precisa ser menos óbvio que o hook; se o espectador já adivinha tudo na primeira frase, reescreva
 Retenção:
 - cada frase deve criar motivo para assistir a proxima
 - evite frase neutra, didatica ou enciclopedica quando puder virar tensão, contraste ou consequência
 - use curiosidade concreta, causalidade e imagens mentais fortes
 - priorize consequencia visual especifica, tensão concreta ou virada verificavel sobre lista de fatos soltos
+- para curiosidades cotidianas de senso comum, não invente precisão nem fonte; use linguagem simples e observacional
 SEO:
 - palavra-chave principal cedo no titulo quando natural
 - titulo com curiosidade especifica, 45 a 75 caracteres quando possivel
@@ -31,7 +38,12 @@ Proibido:
 - nao comece com "voce sabia", "você sabia", "ja imaginou", "já imaginou", "nesse video" ou aberturas genericas equivalentes
 - o hook deve abrir direto com contraste, consequencia, conflito ou fato especifico
 - nao entregue a explicacao completa no primeiro beat; abra um loop e feche depois
-- nao use clickbait falso: todo choque precisa ser provado no roteiro"""
+- nao use clickbait falso: todo choque precisa ser provado no roteiro
+Modelos de hook mais fortes que explicação neutra:
+- "Seu copo não está vazando. O ar está deixando água nele."
+- "A chuva ainda não caiu, mas o chão já mandou o cheiro."
+- "Esse refrão não grudou por acaso. Ele deixou uma armadilha aberta."
+"""
 HUB_SETTINGS_FILENAME = "hub_settings.json"
 MAX_VIRAL_PROMPT_TEMPLATE_CHARS = 12000
 
@@ -42,6 +54,8 @@ def hub_settings_path(data_dir: Path) -> Path:
 
 
 def sanitize_viral_prompt_template(template: str | None) -> str:
+    if template == DEFAULT_VIRAL_PROMPT_TEMPLATE:
+        return DEFAULT_VIRAL_PROMPT_TEMPLATE
     cleaned = (template or "").strip()
     if not cleaned:
         return DEFAULT_VIRAL_PROMPT_TEMPLATE

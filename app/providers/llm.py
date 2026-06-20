@@ -314,9 +314,11 @@ class MockCreativeProvider:
                     "primary_subject": subject,
                     "topic_hint": subject,
                     "image_prompt": (
-                        f"vertical cinematic documentary illustration of {subject}, "
-                        f"showing {visual_intent}, "
-                        "focused on the described phenomenon, no random people, no readable text, no watermark, no collage"
+                        f"vertical cinematic documentary realism, photorealistic editorial image of {subject}, "
+                        f"showing {visual_intent} as concrete visual evidence in a real-world environment, "
+                        "natural lighting, shallow depth of field, high-detail textures, subtle film grain, strong first-frame hook, "
+                        "single full-frame 9:16 composition, no anime, no manga, no cartoon, no flat vector art, "
+                        "no readable text anywhere, no logo, no watermark, no UI, no collage"
                     ),
                     "fallback_queries": [subject, f"{subject} fenomeno", f"{subject} espaco"],
                 }
@@ -483,7 +485,9 @@ title, hook, body_beats, ending, cta, full_narration, estimated_duration_sec, ke
 Mapeamento editorial obrigatório:
 - title equivale ao Título
 - hook equivale ao Hook de 0 a 2 segundos
-- body_beats equivale aos Beats em escalada; mantenha o loop aberto nos beats iniciais e entregue o payoff no último beat ou no último terço da narração
+- body_beats equivale aos Beats em escalada; deve conter exatamente 3 a 5 frases independentes, nunca uma frase única compactada
+- mantenha o loop aberto nos beats iniciais e entregue o payoff no último beat ou no último terço da narração
+- full_narration deve ser a concatenação fiel de hook + todos os body_beats + ending, sem perder nenhum beat
 - ending equivale ao Fechamento; ele deve recontextualizar o hook e provocar replay mental
 - hashtags não fazem parte deste JSON e não devem aparecer nos campos narrados
 - se Entrada JSON.structured_viral_contract existir, trate esse contrato como obrigatório: o JSON interno deve satisfazer Título, Hook, Loop, Beats, Payoff, Fechamento e Hashtags conforme os internal_target descritos no contrato
@@ -525,6 +529,10 @@ Regras:
 - proibido começar hook ou full_narration com "você sabia", "voce sabia", "já imaginou", "ja imaginou", "nesse vídeo", "nesse video" ou fórmulas genéricas equivalentes
 - comece direto por contraste, consequência, conflito ou fato específico
 - cada body_beat deve entregar um fato concreto que sustente a promessa do titulo e aumente a curiosidade
+- se Entrada JSON.fact_pack.viral_truth_policy.automatic_publish_allowed=true, aplique a Viral Truth Policy: entretenha sem mentir; preserve copywriting viral, metáforas visuais e tensão, mas faça o payoff deixar uma leitura verdadeira
+- metáforas virais de baixo risco são permitidas quando o contexto corrige a leitura literal; exemplo: “parece nascer do nada” pode funcionar se depois explicar a formação de modo simples
+- não mate retenção com linguagem acadêmica desnecessária; troque absolutos por formulações fortes porém seguras quando isso bastar
+- se o tema for cotidiano e de senso comum, você pode usar observações comuns sem fonte, mas sem números precisos, datas, claims médicos, engenharia específica ou causalidade técnica forte
 - fatos acima de viralidade: não invente números, nacionalidades, planos, materiais, causas técnicas ou soluções de engenharia se eles não estiverem na Entrada JSON ou forem conhecimento extremamente consolidado
 - se houver incerteza factual, use formulação conservadora e geral em vez de precisão falsa; prefira “engenheiros reduziram a inclinação removendo solo sob a base” a números específicos não verificados
 - evite frases absolutas/enganosas como “está garantida”, “a física prova”, “domina a física”, “desafia a física” ou “a inclinação sustenta”
@@ -540,6 +548,7 @@ Regras:
 - source_fact_ids deve listar somente fact_id existentes em fact_pack.facts; inclua pelo menos 2 quando houver 2+ fatos disponíveis
 - claim_trace deve mapear cada afirmação factual de risco do texto narrado para fact_id existentes em fact_pack.facts; formato: lista de objetos com text, source_fact_ids e grounding
 - se uma afirmação factual não tiver fact_id direto, remova o detalhe ou use grounding="conservative" com linguagem como "pode", "em geral", "tende a"; nunca use grounding para justificar exagero
+- para observações cotidianas de baixo risco e senso comum, use grounding="common_knowledge" e source_fact_ids=[]
 - se fact_pack.status não for "verified" ou facts estiver vazio, source_fact_ids deve ser [] e o roteiro deve evitar precisão factual forte sem fonte
 - não cite fontes no texto narrado; use os fatos como bastidor e mantenha retenção viral
 - key_facts deve listar apenas fatos que o roteiro realmente usa, sem exagero e sem detalhe técnico duvidoso
@@ -568,6 +577,9 @@ Fonte da verdade:
 - A Imagem de Hook Visual precisa funcionar sem audio em menos de um segundo.
 - Nao revele payoff visual antes do ultimo terco quando o roteiro depender de surpresa.
 - Se o tema nao for cientifico, nao force linguagem de scientific visualization.
+- Para MiniMax image-01, prefira por padrao visual_domain="cinematic documentary realism" ou uma variação realista concreta: photorealistic macro documentary para objetos/fenomenos fisicos; urban cinematic documentary realism para comportamento humano; product/editorial photography para objetos cotidianos.
+- Evite como dominio padrao: anime, manga, cartoon, flat vector, infographic, comic panel, 2D icon. Use esses estilos só se o roteiro pedir explicitamente um experimento visual lúdico.
+- MiniMax tende a performar melhor com cenas realistas, fotografia editorial/documental, pessoas reais, objetos materiais, luz natural/cinematografica e ambientes concretos.
 
 Responda JSON estrito com exatamente estes campos:
 visual_thesis, visual_domain, visual_world,
@@ -575,7 +587,7 @@ hook_frame, loop_policy, beat_progression, payoff_frame
 
 Schema:
 - visual_thesis: frase curta com a ideia visual central do Short
-- visual_domain: dominio visual apropriado ao roteiro, ex: science documentary realism, craft documentary realism, urban miniature realism
+- visual_domain: dominio visual apropriado ao roteiro, ex: cinematic documentary realism, photorealistic macro documentary, urban cinematic documentary realism, product/editorial photography, science documentary realism, craft documentary realism, urban miniature realism
 - visual_world: continuidade visual leve que une as cenas
 - hook_frame: objeto com promise, positive_read, recommended_visual_intent, must_show, must_hide, negative_reads, readability_test
 - loop_policy: objeto com open_question, forbidden_early_reveal
@@ -615,6 +627,7 @@ Regras obrigatórias:
 - se Contexto da pauta JSON.editorial_mode for "factual_strict", preserve o grounding factual e remova qualquer mecanismo sem lastro
 - preserve a régua editorial do app: hook forte, loop aberto, beats em escalada, payoff no último terço e fechamento que provoque replay
 - se os motivos incluírem weak_loop_closure ou ending_not_connected_to_hook, corrija o bloco loop_close sem criar final genérico repetitivo
+- se os motivos incluírem body_beat_count_invalid, reestruture body_beats para exatamente 3 a 5 frases independentes e faça full_narration incluir hook + todos os body_beats + ending
 - se os motivos incluírem weak_ending, reescreva o ending para pagar a promessa do hook e apontar concretamente de volta ao início
 - se os motivos incluírem off_topic, remova desvios e alinhe título, hook, beats, payoff e ending ao canonical_topic, angle e hook_promise do contexto
 - se os motivos incluírem unsupported_claim, remova a afirmação sem lastro ou substitua por formulação diretamente sustentada por facts[].claim
@@ -641,10 +654,11 @@ Regras obrigatórias:
 - cada beat deve ficar mais estranho, visual ou impactante que o anterior
 - fatos acima de viralidade: remova números, nacionalidades, planos, materiais, causas técnicas ou soluções de engenharia que não estejam bem sustentados pelo contexto
 - evite frases absolutas/enganosas como “está garantida”, “a física prova”, “domina a física”, “desafia a física” ou “a inclinação sustenta”
+- se Contexto da pauta JSON.fact_pack.viral_truth_policy.automatic_publish_allowed=true, corrija sem matar o copywriting: preserve metáfora viral de baixo risco quando o payoff deixar a verdade clara; suavize absolutos em vez de transformar o texto em aula
 - se os motivos incluírem factual_risk_requires_conservative_rewrite, reescreva TODA afirmação de risco factual: números precisos, datas, porcentagens, medidas, causalidade técnica, claims médicos/biológicos, engenharia e frases absolutas
 - se os motivos incluírem fact_pack_source_ids_missing ou high_risk_claims_need_fact_pack_grounding, use apenas facts[].claim do fact_pack no Contexto da pauta JSON e preencha source_fact_ids com os fact_id usados
 - se os motivos incluírem invented_source_fact_ids, remova source_fact_ids inventados; se fact_pack não estiver verified, use source_fact_ids=[]
-- se os motivos incluírem factual_claim_trace_missing, preencha claim_trace para cada afirmação factual de risco com fact_id existente ou reescreva a afirmação de modo conservador
+- se os motivos incluírem factual_claim_trace_missing, preencha claim_trace para cada afirmação factual de risco com fact_id existente, grounding="common_knowledge" para senso comum de baixo risco, ou reescreva a afirmação de modo conservador
 - claim_trace deve ter objetos com text, source_fact_ids e grounding; source_fact_ids só pode conter ids existentes no fact_pack
 - para afirmações de alto risco sem fonte explícita, use linguagem conservadora: “pode”, “tende a”, “em geral”, “uma das explicações”, “cerca de”, ou remova o detalhe específico
 - se um detalhe técnico parecer duvidoso, substitua por formulação conservadora e verificável
@@ -673,6 +687,7 @@ Regras:
 - reasons deve usar slugs curtos em inglês, ex: unsupported_claim, weak_ending, weak_hashtags, invented_source_fact_ids, low_retention.
 - avalie off_topic somente comparando o roteiro com Entrada JSON.topic; não infira outro tema apenas por estilo ou vocabulário
 - use unsupported_claim apenas para afirmação factual concreta sem apoio no fact_pack; metáfora, tensão editorial e linguagem explicitamente conservadora não bastam
+- se fact_pack.viral_truth_policy.automatic_publish_allowed=true, não reprove senso comum de baixo risco por falta de fonte; reprove apenas se o roteiro induzir crença falsa, inventar fonte/número, fizer claim médico/risco/financeiro ou terminar com payoff literalmente enganoso
 - use invented_source_fact_ids somente quando source_fact_ids ou claim_trace contiverem IDs ausentes em fact_pack.facts
 - use weak_ending somente quando o ending não pagar a promessa do hook ou estiver truncado/genérico; preferência estilística isolada não basta
 - scores de 0 a 1.
@@ -720,20 +735,23 @@ Excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas e nomes d
 Regras obrigatorias para image_prompt:
 - image_prompt MUST be written in English only, even when the narration is pt-BR
 - keep image_prompt compact for MiniMax image-01, under 900 characters; no long negative-prompt wall
+- default style for MiniMax image-01: vertical cinematic documentary realism, photorealistic editorial/documentary image, natural lighting, shallow depth of field, high-detail textures, subtle film grain
+- use photorealistic macro documentary for physical object phenomena; use urban cinematic documentary realism for human behavior; use subtle surreal visual metaphor only when the concept is invisible
+- avoid anime, manga, cartoon, comic panel, flat vector, 2D icon, infographic, glossy toy-like 3D render unless the approved visual_contract explicitly requires it
 - describe one cinematic visual scene for 9:16 vertical shorts with objects that fit visual_contract.visual_domain when present
 - every image_prompt must depict the concrete fact in that scene's narration_text, not just the generic visual_intent
 - if visual_contract exists, every image_prompt must obey the scene's visual_intent and the visual contract; do not override it with generic scientific styling
 - if visual_contract.visual_domain is miniature/diorama/model city/craft, keep every scene inside that same miniature diorama world, even when narration mentions movies, games, cameras or motion blur
-- specify main subject, action, scale, camera angle and required visible elements; avoid vague mood-only prompts
+- specify main subject, action, scale, camera angle, real-world location, visible cause/effect and required visible elements; avoid vague mood-only prompts
 - scene with order=1 is the visual hook frame: make it instantly legible in under one second, with a concrete result, movement, contrast, threat, paradox, or impossible-looking factual consequence tied to the hook and its own narration_text
 - for scene order=1, avoid calm establishing shots, generic beauty shots, neutral portraits, abstract ambience, or vague scientific background
 - for scene order=1, do not reveal a later payoff unless that payoff is already present in its narration_text
-- do not copy the title, narration phrases, Portuguese words, numbers, written names, or any visible text
+- text is forbidden in the image: do not copy the title, narration phrases, Portuguese words, English words, numbers, written names, fake letters, signs, labels, captions, subtitles, UI text, posters, billboards, packaging text, screen text, charts with text, or any visible typography
 - avoid abstract props, floating spheres, random packages, cups, containers, lab glassware, generic sci-fi objects, or irrelevant backgrounds unless directly required by the narration
 - for miniature/diorama/model city/craft prompts, keep the positive subject to outdoor model streets, blank tiny buildings, toy cars, street lamps, road markings, camera lens and craft lights; never request hands, scale-reference props, plastic blocks, shop interiors, food, bowls, jars, full-size people, human characters, weapons, game characters, screens, UI, posters, billboards, signs, labels, product boxes, cups or tabletop clutter
 - make the central subject unmistakable in every frame
-- never request title cards, posters, covers, signs, labels, captions, labeled diagrams, labeled charts, UI, interfaces, or infographics
-- include in every image_prompt: no readable text anywhere, no logo, no watermark
+- never request title cards, posters, covers, signs, labels, captions, labeled diagrams, labeled charts, UI, interfaces, infographics, subtitles, text overlays, fake glyphs, typography, written notes, packaging text, screen text, or billboards
+- include in every image_prompt: vertical cinematic documentary realism, photorealistic, natural lighting, no text of any kind, no readable text anywhere, no letters, no words, no numbers, no logo, no watermark
 - Example for narration about blue blood: "octopus anatomy close-up with blue copper-rich blood vessels, cinematic underwater realism, no readable text anywhere"
 - Example for narration about color change: "octopus changing skin color and texture while camouflaging from a predator, cinematic underwater realism, no readable text anywhere"
 """
