@@ -28,27 +28,6 @@
 </section>
 {% endif %}
 
-{% if automation.last_run and automation.last_run.status == "failed" %}
-<section class="panel status-banner">
-  <strong>Ciclo de automação não agendou publicação</strong>
-  <p>{{ automation.last_run.error }}</p>
-  {% if automation.last_run.metadata.ready_script_publish_policy %}
-  <p>{{ automation.last_run.metadata.ready_script_publish_policy }}</p>
-  {% endif %}
-  {% if automation.last_run.metadata.publish_blockers %}
-  <div class="publication-list compact">
-    {% for blocker in automation.last_run.metadata.publish_blockers %}
-    <div class="publication-item">
-      <strong>{{ blocker.source_label }}{% if blocker.job_id %} · {{ blocker.job_id[:8] }}{% endif %}</strong>
-      <p>{{ blocker.reason or blocker.status }}</p>
-      {% if blocker.job_id %}<a class="text-link" href="/jobs/{{ blocker.job_id }}">Abrir job</a>{% endif %}
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-</section>
-{% endif %}
-
 <section class="jobs-action-row" aria-label="Ações de jobs">
   <div class="jobs-filter-pills" aria-label="Filtros rápidos">
     <a class="{% if not filters.status %}active{% endif %}" href="/?per_page={{ pagination.per_page }}" {% if not filters.status %}aria-current="page"{% endif %}>Todos</a>

@@ -48,7 +48,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     {% block head_extra %}{% endblock %}
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css?v=hub-growth-20260618">
+    <link rel="stylesheet" href="/static/styles.css?v=automation-alerts-topbar-20260621">
     <script src="/static/htmx.min.js" defer></script>
   </head>
   <body>
@@ -69,6 +69,14 @@
           <button type="button" class="topbar-icon topbar-search-trigger" data-open-search aria-label="Buscar jobs">
             <span class="material-symbols-outlined" aria-hidden="true">search</span>
           </button>
+          {% set automation_alert_active = automation is defined and automation.last_run and automation.last_run.status == "failed" %}
+          {% set automation_blockers = automation.last_run.metadata.publish_blockers if automation_alert_active and automation.last_run.metadata.publish_blockers else [] %}
+          {% if automation_alert_active %}
+          <button type="button" class="topbar-icon notification-icon has-alert" data-open-automation-alerts aria-label="Abrir notificações da automação">
+            <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
+            <span class="notification-dot" aria-hidden="true">{{ automation_blockers|length if automation_blockers else 1 }}</span>
+          </button>
+          {% endif %}
           <button type="button" class="topbar-icon sidebar-toggle" data-toggle-sidebar aria-label="Colapsar sidebar" aria-pressed="false">
             <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
           </button>
@@ -227,6 +235,31 @@
       {% set settings_return_to = return_to %}
       {% include "_operational_settings_form.html" %}
     </dialog>
+    {% if automation_alert_active %}
+    <dialog id="automation-alerts-modal" class="schedule-picker-modal automation-alerts-modal" aria-labelledby="automation-alerts-title">
+      <div class="schedule-picker-card automation-alerts-card">
+        {{ ui.dialog_head("Notificações", "Automação", "automation-alerts-title", "automation-alerts", "Fechar notificações") }}
+        <section class="automation-alert-summary">
+          <strong>Ciclo de automação não agendou publicação</strong>
+          <p>{{ automation.last_run.error }}</p>
+          {% if automation.last_run.metadata.ready_script_publish_policy %}
+          <p>{{ automation.last_run.metadata.ready_script_publish_policy }}</p>
+          {% endif %}
+        </section>
+        {% if automation_blockers %}
+        <div class="publication-list compact automation-alert-list">
+          {% for blocker in automation_blockers %}
+          <article class="publication-item automation-alert-item">
+            <strong>{{ blocker.source_label }}{% if blocker.job_id %} · {{ blocker.job_id[:8] }}{% endif %}</strong>
+            <p>{{ blocker.reason or blocker.status }}</p>
+            {% if blocker.job_id %}<a class="text-link" href="/jobs/{{ blocker.job_id }}">Abrir job</a>{% endif %}
+          </article>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </dialog>
+    {% endif %}
     <script>
       (() => {
         const root = document.documentElement;
@@ -267,6 +300,12 @@
         openSelector: "[data-open-operational-settings]",
         closeSelector: "[data-close-operational-settings]",
         initialFocusSelector: "input:not([type='hidden']), select, textarea",
+      });
+      window.bindHubDialog({
+        dialog: document.getElementById("automation-alerts-modal"),
+        openSelector: "[data-open-automation-alerts]",
+        closeSelector: "[data-close-automation-alerts]",
+        initialFocusSelector: "a, button",
       });
       (() => {
         const mode = document.querySelector("#input_mode");
