@@ -897,17 +897,33 @@ class JobOrchestrator:
                     job.current_step = step.name
                     self._cli_progress(job_id, step.name, "cached", f"{step_label}attempt={attempt}")
                     return True
-                execution = StepExecution(
-                    execution_id=new_id(),
-                    job_id=job_id,
-                    step_name=step.name,
-                    attempt=attempt,
-                    status="running",
-                    input_hash=input_hash,
-                    output_refs=[],
-                    started_at=utcnow(),
+                execution = session.scalar(
+                    select(StepExecution).where(
+                        StepExecution.job_id == job_id,
+                        StepExecution.step_name == step.name,
+                        StepExecution.attempt == attempt,
+                        StepExecution.input_hash == input_hash,
+                        StepExecution.status != "succeeded",
+                    )
                 )
-                session.add(execution)
+                if execution:
+                    execution.status = "running"
+                    execution.output_refs = []
+                    execution.started_at = utcnow()
+                    execution.finished_at = None
+                else:
+                    execution = StepExecution(
+                        execution_id=new_id(),
+                        job_id=job_id,
+                        step_name=step.name,
+                        attempt=attempt,
+                        status="running",
+                        input_hash=input_hash,
+                        output_refs=[],
+                        started_at=utcnow(),
+                    )
+                    session.add(execution)
+                execution_id = execution.execution_id
                 job.current_step = step.name
                 job.lease_owner = self.worker_id
                 job.lease_expires_at = utcnow() + self._lease_delta()
@@ -918,13 +934,7 @@ class JobOrchestrator:
                     job = session.get(Job, job_id)
                     assert job
                     refs = step.handler(session, job, attempt)
-                    execution = session.scalar(
-                        select(StepExecution).where(
-                            StepExecution.job_id == job_id,
-                            StepExecution.step_name == step.name,
-                            StepExecution.attempt == attempt,
-                        )
-                    )
+                    execution = session.get(StepExecution, execution_id)
                     assert execution
                     execution.status = "succeeded"
                     execution.output_refs = refs

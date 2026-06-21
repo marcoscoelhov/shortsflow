@@ -1014,6 +1014,68 @@ def test_automation_runs_visual_review_when_fact_review_also_remains(monkeypatch
     assert attempt.status == "not_eligible"
     assert attempt.score_report["classification"] == "visual_review_partial_repairable"
     assert attempt.score_report["visual_review"]["passed"] is True
+    assert attempt.score_report["decision"] == "skip_remaining_blockers"
+    assert attempt.score_report["eligible_after_visual_review"] is False
+    assert attempt.score_report["slot"]["scheduled_for_local"] == "2099-06-11T11:00"
+    assert attempt.score_report["monetization_before"]["manual_required"] == ["fact_review_required", "visual_review_required"]
+    assert attempt.score_report["monetization_after"]["manual_required"] == ["fact_review_required"]
+    observability = service._automation_observability_metadata(run.run_id)
+    assert observability["partial_repairs"] == [
+        {
+            "attempt_number": attempt.attempt_number,
+            "source": "publishable_backlog",
+            "source_label": "Backlog",
+            "job_id": job_id,
+            "status": "not_eligible",
+            "reason": "job_status=monetization_review",
+            "decision": "skip_remaining_blockers",
+            "remaining_manual_required": ["fact_review_required"],
+            "remaining_hard_blockers": [],
+            "scheduled_for_local": "2099-06-11T11:00",
+        }
+    ]
+    assert observability["automation_notifications"][0]["kind"] == "partial_repair"
+
+
+def test_topbar_exposes_successful_automation_partial_repair_notification() -> None:
+    job_id = "automation-topbar-partial-repair"
+    page = main_module.templates.env.get_template("base.html").render(
+        request=SimpleNamespace(url=SimpleNamespace(path="/", query="")),
+        filters={},
+        settings=main_module.settings,
+        operational_settings={},
+        automation={
+            "last_run": {
+                "status": "succeeded",
+                "error": None,
+                "metadata": {
+                    "automation_notifications": [
+                        {
+                            "kind": "partial_repair",
+                            "title": "Candidato reparado parcialmente",
+                            "job_id": job_id,
+                            "status": "not_eligible",
+                            "reason": "Revisão visual automática aprovada, mas ainda há bloqueios manuais.",
+                            "remaining_manual_required": ["fact_review_required"],
+                        }
+                    ],
+                },
+            }
+        },
+        viral_prompt_template="",
+        return_to="/",
+        hub_defaults={
+            "niche_id": "curiosidades",
+            "seed_theme": "",
+            "suggested_seed_theme": "",
+            "target_duration_sec": 50,
+        },
+    )
+
+    assert "data-open-automation-alerts" in page
+    assert "Ciclo de automação agendou com observações" in page
+    assert "Candidato reparado parcialmente" in page
+    assert "fact_review_required" in page
 
 
 def test_monetization_step_runs_auto_visual_review_by_default(monkeypatch) -> None:

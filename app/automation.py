@@ -392,6 +392,7 @@ class AutomationService:
                 "publish_times": self._automation_publish_times(),
                 "schedule_complete": not unfilled_slots,
                 "unfilled_slots": unfilled_slots,
+                **self._automation_observability_metadata(run_id),
             },
         )
 
@@ -528,28 +529,62 @@ class AutomationService:
                     used_job_ids.add(str(job_id))
                     classification = candidate["classification"]
                     attempt = self._create_attempt(run_id, self._next_attempt_number(run_id), AUTOMATION_SOURCE_BACKLOG, job_id=job_id)
-                    self._merge_attempt_report(attempt.attempt_id, classification)
+                    self._merge_attempt_report(
+                        attempt.attempt_id,
+                        {
+                            **classification,
+                            "slot": {
+                                "scheduled_for_local": target_slot.scheduled_for_local,
+                                "timezone": target_slot.timezone,
+                                "source": source,
+                            },
+                            "candidate": {
+                                "status_before": candidate["status"],
+                                "job_origin": candidate.get("job_origin"),
+                            },
+                            "decision": "evaluating_backlog_candidate",
+                        },
+                    )
                     try:
                         status = candidate["status"]
                         confirmation_codes: list[str] = []
                         if status == "monetization_review":
+                            before_report = self._monetization_report_for_job_id(job_id)
+                            self._merge_attempt_report(attempt.attempt_id, {"monetization_before": self._automation_report_summary(before_report)})
                             visual_result = self._run_auto_visual_review(job_id)
                             self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
                             if not visual_result["passed"]:
+                                self._merge_attempt_report(
+                                    attempt.attempt_id,
+                                    {"decision": "skip_visual_review_failed", "eligible_after_visual_review": False},
+                                )
                                 self._finish_attempt(
                                     attempt.attempt_id,
                                     status="not_eligible",
                                     error="automatic_visual_review_failed: " + ", ".join(visual_result["reasons"]),
                                 )
                                 continue
-                            self._refresh_monetization_after_visual_review(job_id)
+                            refreshed_report = self._refresh_monetization_after_visual_review(job_id)
+                            refreshed_summary = self._automation_report_summary(refreshed_report)
+                            self._merge_attempt_report(
+                                attempt.attempt_id,
+                                {
+                                    "monetization_after": refreshed_summary,
+                                    "eligible_after_visual_review": refreshed_summary["final_status"] == "ready_for_upload",
+                                },
+                            )
                             status = self._job_status(job_id)
                             confirmation_codes.append("visual_review_confirmed")
 
                         if status == "ready_for_upload":
+                            self._merge_attempt_report(attempt.attempt_id, {"decision": "score_autoapproval"})
                             score_report = self.evaluate_autoapproval(job_id)
                             self._set_attempt_score(attempt.attempt_id, score_report)
                             if not score_report["eligible"]:
+                                self._merge_attempt_report(
+                                    attempt.attempt_id,
+                                    {"decision": "skip_score_failed", "eligible_after_visual_review": False},
+                                )
                                 self._finish_attempt(
                                     attempt.attempt_id,
                                     status="score_failed",
@@ -557,11 +592,22 @@ class AutomationService:
                                 )
                                 continue
                         elif status != "approved_for_publish":
+                            current_report = self._monetization_report_for_job_id(job_id)
+                            self._merge_attempt_report(
+                                attempt.attempt_id,
+                                {
+                                    "decision": "skip_remaining_blockers",
+                                    "eligible_after_visual_review": False,
+                                    "monetization_after": self._automation_report_summary(current_report),
+                                },
+                            )
                             self._finish_attempt(attempt.attempt_id, status="not_eligible", error=f"job_status={status}")
                             continue
 
+                        self._merge_attempt_report(attempt.attempt_id, {"decision": "schedule_candidate"})
                         schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
                     except Exception as exc:  # noqa: BLE001
+                        self._merge_attempt_report(attempt.attempt_id, {"decision": "publish_attempt_failed"})
                         self._finish_attempt(attempt.attempt_id, status="publish_failed", error=str(exc))
                         continue
                     self._finish_attempt(attempt.attempt_id, status="scheduled")
@@ -750,14 +796,15 @@ class AutomationService:
                 confirmation_codes.append("visual_review_confirmed")
             schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
         except Exception as exc:  # noqa: BLE001
-            self._finish_attempt(attempt.attempt_id, status="failed", error=str(exc))
+            error = str(exc)
+            self._finish_attempt(attempt.attempt_id, status="failed", error=error)
             if selected_script:
                 self._finalize_ready_script_failure(
                     selected_script.script_item_id,
                     {"classification": "technical_retry_pending"},
-                    str(exc),
+                    error,
                 )
-            return {"scheduled": False}
+            return {"scheduled": False, "provider_limit": self._is_provider_limit_error(error), "error": error}
         self._finish_attempt(attempt.attempt_id, status="scheduled")
         if selected_script:
             self._mark_ready_script_scheduled(selected_script.script_item_id, job_id)
@@ -801,6 +848,26 @@ class AutomationService:
             "hard_blockers": list(summary.get("hard_blockers") or []),
             "manual_required": list(summary.get("manual_required") or []),
             "publish_readiness": dict(summary.get("publish_readiness") or {}),
+        }
+
+    def _monetization_report_for_job_id(self, job_id: str) -> dict[str, Any]:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            if not job:
+                raise KeyError(job_id)
+            return self._monetization_report(job)
+
+    def _automation_report_summary(self, report: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "passed": bool(report.get("passed")),
+            "final_status": report.get("final_status"),
+            "hard_blockers": [str(item) for item in report.get("hard_blockers") or []],
+            "manual_required": [str(item) for item in report.get("manual_required") or []],
+            "publish_readiness_reasons": [
+                str(item)
+                for item in (report.get("publish_readiness") or {}).get("reasons")
+                or []
+            ],
         }
 
     def _classify_job_failure(self, job_id: str, status: str) -> dict[str, Any]:
@@ -868,17 +935,50 @@ class AutomationService:
         return {"classification": "unclassified_failure", "matched_reasons": matched_reasons, "retry_from_step": None}
 
     def _automation_failure_metadata(self, run_id: str, *, final_reason: str) -> dict[str, Any]:
+        observability = self._automation_observability_metadata(run_id)
+        return {
+            "final_reason": final_reason,
+            **observability,
+            "ready_script_publish_policy": (
+                "Roteiros do banco preservam a aprovação humana do texto. Editorial, factualidade, metadados, "
+                "retenção narrativa, similaridade e score viram diagnóstico; publicação automática só pode parar "
+                "por bloqueios técnicos, visuais, direitos, disclosure, duração, áudio, render ou YouTube."
+            ),
+        }
+
+    def _automation_observability_metadata(self, run_id: str) -> dict[str, Any]:
         with session_scope() as session:
             attempts = session.scalars(
                 select(AutomationAttempt)
                 .where(AutomationAttempt.run_id == run_id)
                 .order_by(AutomationAttempt.attempt_number.asc(), AutomationAttempt.created_at.asc())
             ).all()
+            partial_repairs = []
+            for attempt in attempts:
+                report = dict(attempt.score_report or {})
+                visual_review = dict(report.get("visual_review") or {})
+                monetization_after = dict(report.get("monetization_after") or {})
+                if report.get("classification") != "visual_review_partial_repairable" or not visual_review.get("passed"):
+                    continue
+                partial_repairs.append(
+                    {
+                        "attempt_number": attempt.attempt_number,
+                        "source": attempt.source,
+                        "source_label": self._automation_source_label(attempt.source),
+                        "job_id": attempt.job_id,
+                        "status": attempt.status,
+                        "reason": attempt.error or "Revisão visual automática aprovada, mas ainda há bloqueios manuais.",
+                        "decision": report.get("decision"),
+                        "remaining_manual_required": list(monetization_after.get("manual_required") or []),
+                        "remaining_hard_blockers": list(monetization_after.get("hard_blockers") or []),
+                        "scheduled_for_local": (report.get("slot") or {}).get("scheduled_for_local"),
+                    }
+                )
             blockers = [
                 {
                     "attempt_number": attempt.attempt_number,
                     "source": attempt.source,
-                    "source_label": "Banco de roteiros" if attempt.source == AUTOMATION_SOURCE_READY_SCRIPT else "Tema automático",
+                    "source_label": self._automation_source_label(attempt.source),
                     "job_id": attempt.job_id,
                     "status": attempt.status,
                     "reason": attempt.error,
@@ -886,15 +986,38 @@ class AutomationService:
                 for attempt in attempts
                 if attempt.status not in {"scheduled"} or attempt.error
             ]
+        partial_attempt_numbers = {repair["attempt_number"] for repair in partial_repairs}
+        notifications = [
+            {
+                "kind": "partial_repair",
+                "title": "Candidato reparado parcialmente",
+                **repair,
+            }
+            for repair in partial_repairs
+        ]
+        notifications.extend(
+            {
+                "kind": "publish_blocker",
+                "title": "Candidato não agendado",
+                **blocker,
+            }
+            for blocker in blockers
+            if blocker.get("reason") and blocker.get("attempt_number") not in partial_attempt_numbers
+        )
         return {
-            "final_reason": final_reason,
             "publish_blockers": blockers,
-            "ready_script_publish_policy": (
-                "Roteiros do banco preservam a aprovação humana do texto. Editorial, factualidade, metadados, "
-                "retenção narrativa, similaridade e score viram diagnóstico; publicação automática só pode parar "
-                "por bloqueios técnicos, visuais, direitos, disclosure, duração, áudio, render ou YouTube."
-            ),
+            "partial_repairs": partial_repairs,
+            "automation_notifications": notifications[:10],
         }
+
+    def _automation_source_label(self, source: str | None) -> str:
+        if source == AUTOMATION_SOURCE_READY_SCRIPT:
+            return "Banco de roteiros"
+        if source == AUTOMATION_SOURCE_BACKLOG:
+            return "Backlog"
+        if source == AUTOMATION_SOURCE_RESUME:
+            return "Retomada de publish"
+        return "Tema automático"
 
     def _is_provider_limit_error(self, message: str) -> bool:
         normalized = message.lower()
@@ -1182,8 +1305,9 @@ class AutomationService:
         if metadata_score is None:
             metadata_score = 1.0 if not metadata_review.get("requires_metadata_review") else 0.7
         asset_score = as_score(asset_summary.get("asset_semantic_score_avg"))
-        if asset_score is None:
-            asset_score = 1.0
+        asset_score_missing = asset_score is None
+        if asset_score_missing:
+            asset_score = 0.0
 
         if factual_score < 0.80:
             reasons.append("factual_score_below_threshold")
@@ -1193,6 +1317,8 @@ class AutomationService:
             reasons.append("metadata_score_below_threshold")
         if asset_score < 0.80:
             reasons.append("asset_semantic_score_below_threshold")
+        if asset_score_missing:
+            reasons.append("asset_semantic_score_missing")
 
         component_scores = [factual_score, retention_score, metadata_score, asset_score]
         composite = sum(component_scores) / len(component_scores)

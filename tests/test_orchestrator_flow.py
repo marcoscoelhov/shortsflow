@@ -163,6 +163,45 @@ def test_sqlite_lock_retry_uses_fresh_transaction(monkeypatch) -> None:
     assert [session.commits for session in sessions] == [0, 0, 1]
     assert all(session.closed for session in sessions)
 
+
+def test_run_step_reuses_orphaned_running_execution_after_worker_crash() -> None:
+    job_id = "orphaned-step-execution-resume"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="running", current_step="input_gate")
+        session.flush()
+        job = session.get(Job, job_id)
+        assert job is not None
+        input_hash = stable_hash(orchestrator._build_step_input(session, job, "input_gate"))
+        execution = StepExecution(
+            execution_id="orphaned-step-execution-row",
+            job_id=job_id,
+            step_name="input_gate",
+            attempt=1,
+            status="running",
+            input_hash=input_hash,
+            output_refs=[],
+            started_at=utcnow() - timedelta(minutes=30),
+        )
+        session.add(execution)
+        session.commit()
+
+    calls = {"count": 0}
+
+    def handler(_session, _job, _attempt):
+        calls["count"] += 1
+        return ["resumed-output.json"]
+
+    assert orchestrator._run_step(job_id, StepDefinition("input_gate", 0, handler)) is True
+
+    with SessionLocal() as session:
+        rows = session.scalars(select(StepExecution).where(StepExecution.job_id == job_id)).all()
+
+    assert calls["count"] == 1
+    assert len(rows) == 1
+    assert rows[0].execution_id == "orphaned-step-execution-row"
+    assert rows[0].status == "succeeded"
+    assert rows[0].output_refs == ["resumed-output.json"]
+
 def test_operational_settings_route_saves_allowlisted_overrides() -> None:
     client = TestClient(app)
     response = client.post(
@@ -293,6 +332,107 @@ def test_autoapproval_score_blocks_high_repetition() -> None:
     assert report["eligible"] is False
     assert "high_narrative_similarity" in report["reasons"]
     assert report["score"] >= 0.82
+
+
+def test_autoapproval_blocks_when_asset_semantic_score_is_missing() -> None:
+    service = AutomationService(orchestrator)
+    job_id = "auto-score-missing-asset-score"
+    topic_request_id = f"{job_id}-request"
+    with SessionLocal() as session:
+        session.add(
+            Job(
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="auto-score-missing-asset",
+                status="ready_for_upload",
+                niche_id="curiosidades",
+                language="pt-BR",
+                target_duration_sec=45,
+                topic_request_id=topic_request_id,
+                artifact_index={},
+                quality_summary={
+                    "monetization": {"passed": True, "final_status": "ready_for_upload", "hard_blockers": [], "manual_required": []},
+                },
+            )
+        )
+        session.add(
+            TopicRequest(
+                topic_request_id=topic_request_id,
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="auto-score-missing-asset-request",
+                niche_id="curiosidades",
+                seed_theme="Score sem metrica de asset",
+                language="pt-BR",
+                target_duration_sec=45,
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"{job_id}-script",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="auto-score-missing-asset-script",
+                title="Score sem metrica de asset",
+                hook="Sem métrica visual, o cron precisa ser conservador.",
+                body_beats=["A ausência de evidência não é aprovação."],
+                ending="O bloqueio evita publicar artefato não verificado.",
+                cta=None,
+                full_narration="Sem métrica visual, o cron precisa ser conservador. A ausência de evidência não é aprovação. O bloqueio evita publicar artefato não verificado.",
+                estimated_duration_sec=35,
+                key_facts=[],
+                token_count=20,
+                language="pt-BR",
+                qa_metrics={"hook_score": 0.9, "information_density_score": 0.9},
+            )
+        )
+        session.commit()
+
+    report = service.evaluate_autoapproval(job_id)
+
+    assert report["eligible"] is False
+    assert "asset_semantic_score_missing" in report["reasons"]
+    assert report["components"]["asset_semantic_score"] == 0.0
+
+
+def test_generation_attempt_returns_provider_limit_error_from_exception(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    run_id = "automation-provider-limit-return"
+    with SessionLocal() as session:
+        session.add(
+            AutomationRun(
+                run_id=run_id,
+                schema_version="1.0.0",
+                content_hash="automation-provider-limit-return",
+                local_date="2099-12-31",
+                timezone="UTC",
+                status="running",
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(service, "_select_ready_script_item", lambda: None)
+    monkeypatch.setattr(service, "_automatic_topic_payload", lambda: {"seed_theme": "quota", "niche_id": "curiosidades", "language": "pt-BR", "target_duration_sec": 45})
+    monkeypatch.setattr(service.orchestrator, "create_job", lambda _payload: "automation-provider-limit-job")
+    monkeypatch.setattr(service, "_attach_job_to_active_retention_experiment", lambda _job_id: None)
+    monkeypatch.setattr(service.orchestrator, "process_job", lambda _job_id: "ready_for_upload")
+    monkeypatch.setattr(service, "_classify_job_failure", lambda _job_id, _status: {"classification": "publishable", "retry_from_step": None})
+    monkeypatch.setattr(service, "evaluate_autoapproval", lambda _job_id: {"eligible": True, "score": 1.0, "reasons": []})
+    monkeypatch.setattr(service, "_approve_and_schedule", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("provider limit: quota exceeded")))
+
+    result = service._run_generation_attempt(
+        run_id,
+        1,
+        PublishSlot(local_date=datetime(2026, 6, 22).date(), local_time="12:00", timezone="UTC"),
+    )
+
+    assert result == {"scheduled": False, "provider_limit": True, "error": "provider limit: quota exceeded"}
+    with SessionLocal() as session:
+        attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.run_id == run_id))
+
+    assert attempt is not None
+    assert attempt.status == "failed"
+    assert attempt.error == "provider limit: quota exceeded"
 
 def test_autoapproval_score_accepts_high_repetition_with_manual_originality_confirmation() -> None:
     service = AutomationService(orchestrator)
@@ -1304,7 +1444,7 @@ def test_daily_cycle_job_is_claimed_before_worker_can_pick_it() -> None:
         assert job.status == "running"
         assert job.lease_owner == orchestrator.worker_id
         assert job.lease_expires_at is not None
-        assert competing_orchestrator._claim_next_job(session) is None
+        assert competing_orchestrator._claim_next_job(session) != job_id
 
 def test_claim_next_job_retries_transient_sqlite_lock(monkeypatch) -> None:
     test_orchestrator = JobOrchestrator()

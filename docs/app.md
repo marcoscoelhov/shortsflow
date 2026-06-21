@@ -498,6 +498,8 @@ Jobs criados pelo **Ciclo Diario de Automacao** ja nascem com lease exclusivo do
 
 O backlog e avaliado por candidato, nao apenas por slot. Quando um candidato parcial passa na revisao visual automatica mas continua com revisao factual/manual pendente, a tentativa fica registrada como `not_eligible` e o loop continua para outro candidato compativel. Isso preserva o ganho de remover divida visual sem bloquear um job realmente publicavel que esteja logo atras na fila.
 
+Falhas e reparos parciais relevantes entram em `AutomationRun.metadata.automation_notifications` e aparecem pelo icone de notificacoes da topbar. A fila de jobs permanece limpa; o operador deve abrir a notificacao para ver o candidato, a pendencia restante e o link do job.
+
 Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` no horario do slot em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
 
 O lease do worker tem piso de uma hora e heartbeat menos agressivo. Passos reais de imagem, TTS e Remotion/ffmpeg podem segurar SQLite por minutos; esse piso evita que outro worker recupere o mesmo job por heartbeat pulado enquanto a etapa ainda esta legitimamente em execucao.

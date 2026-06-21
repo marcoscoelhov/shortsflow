@@ -69,12 +69,13 @@
           <button type="button" class="topbar-icon topbar-search-trigger" data-open-search aria-label="Buscar jobs">
             <span class="material-symbols-outlined" aria-hidden="true">search</span>
           </button>
-          {% set automation_alert_active = automation is defined and automation.last_run and automation.last_run.status == "failed" %}
+          {% set automation_notifications = automation.last_run.metadata.automation_notifications if automation is defined and automation.last_run and automation.last_run.metadata.automation_notifications else [] %}
+          {% set automation_alert_active = automation is defined and automation.last_run and (automation.last_run.status == "failed" or automation_notifications) %}
           {% set automation_blockers = automation.last_run.metadata.publish_blockers if automation_alert_active and automation.last_run.metadata.publish_blockers else [] %}
           {% if automation_alert_active %}
           <button type="button" class="topbar-icon notification-icon has-alert" data-open-automation-alerts aria-label="Abrir notificações da automação">
             <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
-            <span class="notification-dot" aria-hidden="true">{{ automation_blockers|length if automation_blockers else 1 }}</span>
+            <span class="notification-dot" aria-hidden="true">{{ automation_notifications|length if automation_notifications else (automation_blockers|length if automation_blockers else 1) }}</span>
           </button>
           {% endif %}
           <button type="button" class="topbar-icon sidebar-toggle" data-toggle-sidebar aria-label="Colapsar sidebar" aria-pressed="false">
@@ -240,13 +241,26 @@
       <div class="schedule-picker-card automation-alerts-card">
         {{ ui.dialog_head("Notificações", "Automação", "automation-alerts-title", "automation-alerts", "Fechar notificações") }}
         <section class="automation-alert-summary">
-          <strong>Ciclo de automação não agendou publicação</strong>
-          <p>{{ automation.last_run.error }}</p>
+          <strong>{{ "Ciclo de automação não agendou publicação" if automation.last_run.status == "failed" else "Ciclo de automação agendou com observações" }}</strong>
+          {% if automation.last_run.error %}<p>{{ automation.last_run.error }}</p>{% endif %}
           {% if automation.last_run.metadata.ready_script_publish_policy %}
           <p>{{ automation.last_run.metadata.ready_script_publish_policy }}</p>
           {% endif %}
         </section>
-        {% if automation_blockers %}
+        {% if automation_notifications %}
+        <div class="publication-list compact automation-alert-list">
+          {% for notification in automation_notifications %}
+          <article class="publication-item automation-alert-item">
+            <strong>{{ notification.title }}{% if notification.job_id %} · {{ notification.job_id[:8] }}{% endif %}</strong>
+            <p>{{ notification.reason or notification.status }}</p>
+            {% if notification.remaining_manual_required %}
+            <p>Pendências: {{ notification.remaining_manual_required|join(", ") }}</p>
+            {% endif %}
+            {% if notification.job_id %}<a class="text-link" href="/jobs/{{ notification.job_id }}">Abrir job</a>{% endif %}
+          </article>
+          {% endfor %}
+        </div>
+        {% elif automation_blockers %}
         <div class="publication-list compact automation-alert-list">
           {% for blocker in automation_blockers %}
           <article class="publication-item automation-alert-item">
