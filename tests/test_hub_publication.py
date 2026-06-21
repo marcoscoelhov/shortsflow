@@ -667,6 +667,35 @@ Hashtags: #curiosidades #shorts""",
     assert [payload["scheduled_for_local"] for _, payload in scheduled_payloads] == ["2099-06-10T11:00", "2099-06-10T18:00"]
     assert [item["source"] for item in run_result["metadata"]["scheduled_jobs"]] == ["ready_script_bank", "automatic_topic"]
 
+
+def test_automation_falls_back_to_ready_script_for_evening_slot(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    service.set_automation_enabled(True)
+    target_day = datetime(2099, 6, 10).date()
+    attempted_sources: list[str] = []
+
+    def fake_generation_attempt(_run_id, _attempt_number, _slot, *, source, finish_run):
+        assert finish_run is False
+        attempted_sources.append(source)
+        if source == "automatic_topic":
+            return {"scheduled": False, "provider_limit": True, "error": "automatic topic provider quota exceeded"}
+        return {"scheduled": True, "job_id": "fallback-ready-job", "schedule_id": "fallback-ready-schedule"}
+
+    monkeypatch.setattr(orchestrator.settings, "automation_max_generation_attempts", 2)
+    monkeypatch.setattr(service, "_run_competitive_scout_automation", lambda: {"status": "skipped", "reason": "test"})
+    monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
+    monkeypatch.setattr(service, "_vacant_publish_slots", lambda: [PublishSlot(target_day, "18:00", "America/Sao_Paulo")])
+    monkeypatch.setattr(service, "_run_publishable_backlog", lambda _run_id, _target_plan: [])
+    monkeypatch.setattr(service, "_run_generation_attempt", fake_generation_attempt)
+
+    run_result = service.run_daily_cycle(force=True)
+
+    assert run_result["status"] == "succeeded"
+    assert attempted_sources == ["automatic_topic", "ready_script_bank"]
+    assert run_result["metadata"]["scheduled_jobs"][0]["source"] == "ready_script_bank"
+    assert run_result["metadata"]["schedule_complete"] is True
+    assert run_result["metadata"]["unfilled_slots"] == []
+
 def test_automation_schedules_visual_review_only_backlog_job(monkeypatch) -> None:
     service = AutomationService(orchestrator)
     service.set_automation_enabled(True)
@@ -1158,7 +1187,7 @@ def test_publishable_backlog_allows_cancelled_schedule() -> None:
     assert any(candidate["job_id"] == job_id for candidate in candidates)
 
 
-def test_automation_fills_multiple_backlog_slots_before_generating(monkeypatch) -> None:
+def test_automation_fills_earliest_backlog_day_before_later_dates(monkeypatch) -> None:
     service = AutomationService(orchestrator)
     service.set_automation_enabled(True)
     _allow_premium_publish_gate(monkeypatch)
@@ -1229,14 +1258,45 @@ def test_automation_fills_multiple_backlog_slots_before_generating(monkeypatch) 
     run_result = service.run_daily_cycle(force=True)
 
     assert run_result["status"] == "succeeded"
-    assert run_result["metadata"]["scheduled_count"] == 3
+    assert run_result["metadata"]["scheduled_count"] == 2
     assert [payload["scheduled_for_local"] for _, payload in scheduled_payloads] == [
         "2099-06-10T11:00",
         "2099-06-10T18:00",
-        "2099-06-11T11:00",
     ]
     with SessionLocal() as session:
-        assert session.query(PublicationSchedule).filter(PublicationSchedule.job_id.in_(job_ids)).count() == 3
+        assert session.query(PublicationSchedule).filter(PublicationSchedule.job_id.in_(job_ids)).count() == 2
+
+
+def test_incomplete_successful_automation_run_can_resume_without_force(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    local_date = datetime.now(ZoneInfo(service.settings.automation_daily_timezone)).date().isoformat()
+    with SessionLocal() as session:
+        existing = session.scalar(select(AutomationRun).where(AutomationRun.local_date == local_date))
+        if existing is not None:
+            for attempt in session.scalars(select(AutomationAttempt).where(AutomationAttempt.run_id == existing.run_id)).all():
+                session.delete(attempt)
+            session.delete(existing)
+            session.flush()
+        run = AutomationRun(
+            run_id="automation-incomplete-resume",
+            schema_version="1.0.0",
+            content_hash="automation-incomplete-resume",
+            local_date=local_date,
+            timezone=service.settings.automation_daily_timezone,
+            status="succeeded",
+            started_at=utcnow() - timedelta(minutes=10),
+            finished_at=utcnow() - timedelta(minutes=5),
+            attempts_used=2,
+            run_metadata={"schedule_complete": False, "unfilled_slots": ["2099-06-10T18:00"]},
+        )
+        session.add(run)
+        session.commit()
+
+    resumed = service._acquire_run(local_date, force=False)
+
+    assert resumed.run_id == "automation-incomplete-resume"
+    assert resumed.status == "running"
+    assert resumed.run_metadata["resumed_incomplete_schedule"] is True
 
 
 def test_automation_does_not_schedule_backlog_hard_blocker(monkeypatch) -> None:

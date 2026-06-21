@@ -685,15 +685,15 @@ A revisao feita por uma pessoa no YouTube Studio depois que um **Job de Video** 
 _Avoid_: Revisao Humana, aprovacao previa, gate do hub
 
 **Cadencia Diaria de Geracao**:
-A regra operacional que cria ate tres **Jobs de Video** por dia para tentar preencher um **Dia Vago de Publicacao** sem sobrecarregar provedores, agenda ou revisao posterior.
+A regra operacional que cria ate tres **Jobs de Video** por ciclo para tentar preencher os dois **Horarios de Publicacao** do primeiro dia incompleto sem sobrecarregar provedores, agenda ou revisao posterior.
 _Avoid_: lote grande, geracao ilimitada, backlog automatico, retry aberto
 
 **Primeiro Sucesso Automatizado**:
-O primeiro **Job de Video** do dia que atinge **Elegibilidade Automatizada** e preenche um **Dia Vago de Publicacao**, encerrando novas tentativas naquele dia.
-_Avoid_: gerar todos os candidatos, continuar apos agendar, publicar multiplos por acidente
+O primeiro **Job de Video** do ciclo que atinge **Elegibilidade Automatizada**; ele preenche seu horario, mas o ciclo continua somente ate completar os dois horarios do mesmo dia ou esgotar o limite de tentativas.
+_Avoid_: preencher datas posteriores antes do dia atual, gerar backlog aberto, ultrapassar o limite diario
 
 **Dia Vago de Publicacao**:
-Um dia no fuso de Sao Paulo sem **Horario de Publicacao** ativo na agenda interna.
+Um dia no fuso de Sao Paulo com pelo menos um dos dois **Horarios de Publicacao** automaticos ainda livre na agenda interna.
 _Avoid_: dia sem video no YouTube Studio, slot inferido fora do hub, lacuna manual
 
 **Horario Padrao de Publicacao**:
@@ -749,7 +749,7 @@ A verificacao de que OAuth, modo API, canal e credenciais do YouTube estao pront
 _Avoid_: criar job sem poder agendar, consumir roteiro antes do OAuth, marcar agenda sem YouTube
 
 **Ciclo Diario de Automacao**:
-A execucao diaria as 02h no fuso de Sao Paulo que tenta gerar, autoaprovar e agendar um **Job de Video** para o primeiro **Dia Vago de Publicacao**.
+A execucao diaria as 02h no fuso de Sao Paulo que tenta gerar, autoaprovar e completar os dois **Horarios de Publicacao** do primeiro **Dia Vago de Publicacao**.
 _Avoid_: rodar sob demanda sem registro, horario do servidor, execucao concorrente
 
 **Lock Diario de Automacao**:
@@ -919,6 +919,8 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Um **Lote de Roteiros Prontos** pode ser enviado pela **Barra Lateral Global do Hub**.
 - Um item do **Banco de Roteiros Prontos** deve preservar a intencao autoral do **Roteiro Pronto** consumido.
 - **Ciclo Diario de Automacao** deve priorizar o **Banco de Roteiros Prontos** antes de usar **Tema Automatico**.
+- O horario das 18h deve tentar **Tema Automatico** primeiro e usar o **Banco de Roteiros Prontos** como fallback quando a geracao automatica nao atingir **Elegibilidade Automatizada** dentro do limite do ciclo.
+- O **Ciclo Diario de Automacao** deve completar o primeiro dia incompleto antes de preencher horarios de datas posteriores.
 - O **Banco de Roteiros Prontos** deve usar **Selecao Aleatoria de Roteiro** entre itens disponiveis.
 - **Similaridade Narrativa** em item do **Banco de Roteiros Prontos** deve virar warning, nao fallback.
 - **Fallback para Tema Automatico** deve ocorrer somente quando nao houver **Roteiro Pronto** disponivel no ciclo atual.

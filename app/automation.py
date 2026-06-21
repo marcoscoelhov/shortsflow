@@ -84,6 +84,11 @@ class PublishSlot:
 class PublishPlan:
     slot: PublishSlot
     source: str
+    fallback_source: str | None = None
+
+    @property
+    def sources(self) -> list[str]:
+        return list(dict.fromkeys(source for source in [self.source, self.fallback_source] if source))
 
 
 class AutomationService:
@@ -216,33 +221,43 @@ class AutomationService:
             scheduled_slot_keys = {str(item.get("scheduled_for_local") or "") for item in scheduled_results}
             remaining_plan = [item for item in target_plan if item.slot.scheduled_for_local not in scheduled_slot_keys]
 
-            for _ in range(1, self.settings.automation_max_generation_attempts + 1):
+            generation_attempts = 0
+            current_slot_attempts = 0
+            while generation_attempts < self.settings.automation_max_generation_attempts:
                 if not remaining_plan:
                     break
                 plan_item = remaining_plan[0]
+                source = self._generation_source_for_attempt(plan_item, current_slot_attempts)
                 attempt_result = self._run_generation_attempt(
                     run.run_id,
                     self._next_attempt_number(run.run_id),
                     plan_item.slot,
-                    source=plan_item.source,
+                    source=source,
                     finish_run=False,
                 )
+                generation_attempts += 1
+                current_slot_attempts += 1
                 if attempt_result.get("scheduled"):
                     scheduled_results.append(
                         {
                             "job_id": str(attempt_result.get("job_id") or ""),
                             "schedule_id": str(attempt_result.get("schedule_id") or ""),
                             "scheduled_for_local": plan_item.slot.scheduled_for_local,
-                            "source": plan_item.source,
+                            "source": source,
                         }
                     )
                     remaining_plan = remaining_plan[1:]
+                    current_slot_attempts = 0
                     continue
                 if attempt_result.get("skip_slot"):
-                    remaining_plan = remaining_plan[1:]
+                    if source == plan_item.fallback_source or not plan_item.fallback_source:
+                        remaining_plan = remaining_plan[1:]
+                        current_slot_attempts = 0
                     continue
                 if attempt_result.get("provider_limit"):
                     error = str(attempt_result.get("error") or "provider_limit")
+                    if plan_item.fallback_source and source != plan_item.fallback_source:
+                        continue
                     if scheduled_results:
                         return serialize_run(self._finish_successful_schedule_run(run.run_id, scheduled_results, target_slots))
                     return serialize_run(
@@ -271,8 +286,12 @@ class AutomationService:
             existing = session.scalar(select(AutomationRun).where(AutomationRun.local_date == local_date))
             now = utcnow()
             if existing:
-                stale = existing.status == "running" and existing.started_at < now - timedelta(hours=6)
-                if not force and existing.status in {"running", "succeeded", "skipped"} and not stale:
+                started_at = existing.started_at
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=UTC)
+                stale = existing.status == "running" and started_at < now - timedelta(hours=6)
+                incomplete_schedule = existing.status == "succeeded" and (existing.run_metadata or {}).get("schedule_complete") is False
+                if not force and existing.status in {"running", "succeeded", "skipped"} and not stale and not incomplete_schedule:
                     return existing
                 existing.status = "running"
                 existing.started_at = now
@@ -280,7 +299,13 @@ class AutomationService:
                 existing.error = None
                 existing.skipped_reason = None
                 existing.attempts_used = 0
-                existing.run_metadata = {"forced": force, "resumed_stale": stale}
+                existing.result_job_id = None
+                existing.result_schedule_id = None
+                existing.run_metadata = {
+                    "forced": force,
+                    "resumed_stale": stale,
+                    "resumed_incomplete_schedule": incomplete_schedule,
+                }
                 return existing
             run = AutomationRun(
                 run_id=new_id(),
@@ -353,6 +378,8 @@ class AutomationService:
         target_slots: list[PublishSlot],
     ) -> AutomationRun:
         last_result = scheduled_results[-1]
+        scheduled_slot_keys = {str(item.get("scheduled_for_local") or "") for item in scheduled_results}
+        unfilled_slots = [slot.scheduled_for_local for slot in target_slots if slot.scheduled_for_local not in scheduled_slot_keys]
         return self._finish_run(
             run_id,
             status="succeeded",
@@ -363,6 +390,8 @@ class AutomationService:
                 "scheduled_jobs": scheduled_results,
                 "vacant_slots_considered": len(target_slots),
                 "publish_times": self._automation_publish_times(),
+                "schedule_complete": not unfilled_slots,
+                "unfilled_slots": unfilled_slots,
             },
         )
 
@@ -397,6 +426,21 @@ class AutomationService:
             return AUTOMATION_SOURCE_READY_SCRIPT
         return AUTOMATION_SOURCE_AUTO_TOPIC
 
+    def _automation_fallback_source_for_time(self, publish_time: str) -> str | None:
+        secondary_time = datetime.strptime(SECONDARY_AUTOMATION_PUBLISH_TIME, "%H:%M").strftime("%H:%M")
+        return AUTOMATION_SOURCE_READY_SCRIPT if publish_time == secondary_time else None
+
+    def _generation_source_for_attempt(
+        self,
+        plan_item: PublishPlan,
+        current_slot_attempts: int,
+    ) -> str:
+        if not plan_item.fallback_source:
+            return plan_item.source
+        if current_slot_attempts > 0:
+            return plan_item.fallback_source
+        return plan_item.source
+
     def _vacant_publish_slots(self) -> list[PublishSlot]:
         local_tz = ZoneInfo(self.settings.automation_daily_timezone)
         today = datetime.now(local_tz).date()
@@ -416,9 +460,18 @@ class AutomationService:
         return slots
 
     def _vacant_publish_plan(self) -> list[PublishPlan]:
+        slots = self._vacant_publish_slots()
+        if not slots:
+            return []
+        first_incomplete_date = slots[0].local_date
         return [
-            PublishPlan(slot=slot, source=self._automation_publish_source_for_time(slot.local_time))
-            for slot in self._vacant_publish_slots()
+            PublishPlan(
+                slot=slot,
+                source=self._automation_publish_source_for_time(slot.local_time),
+                fallback_source=self._automation_fallback_source_for_time(slot.local_time),
+            )
+            for slot in slots
+            if slot.local_date == first_incomplete_date
         ]
 
     def _first_vacant_day(self) -> date | None:
@@ -466,59 +519,64 @@ class AutomationService:
         used_job_ids: set[str] = set()
         for plan_item in plan:
             target_slot = plan_item.slot
-            for candidate in candidates:
-                if str(candidate["job_id"]) in used_job_ids or not self._backlog_candidate_matches_source(candidate, plan_item.source):
-                    continue
-                job_id = candidate["job_id"]
-                used_job_ids.add(str(job_id))
-                classification = candidate["classification"]
-                attempt = self._create_attempt(run_id, self._next_attempt_number(run_id), AUTOMATION_SOURCE_BACKLOG, job_id=job_id)
-                self._merge_attempt_report(attempt.attempt_id, classification)
-                try:
-                    status = candidate["status"]
-                    confirmation_codes: list[str] = []
-                    if status == "monetization_review":
-                        visual_result = self._run_auto_visual_review(job_id)
-                        self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
-                        if not visual_result["passed"]:
-                            self._finish_attempt(
-                                attempt.attempt_id,
-                                status="not_eligible",
-                                error="automatic_visual_review_failed: " + ", ".join(visual_result["reasons"]),
-                            )
-                            continue
-                        self._refresh_monetization_after_visual_review(job_id)
-                        status = self._job_status(job_id)
-                        confirmation_codes.append("visual_review_confirmed")
-
-                    if status == "ready_for_upload":
-                        score_report = self.evaluate_autoapproval(job_id)
-                        self._set_attempt_score(attempt.attempt_id, score_report)
-                        if not score_report["eligible"]:
-                            self._finish_attempt(
-                                attempt.attempt_id,
-                                status="score_failed",
-                                error=self._automation_score_error(AUTOMATION_SOURCE_BACKLOG, score_report["reasons"]),
-                            )
-                            continue
-                    elif status != "approved_for_publish":
-                        self._finish_attempt(attempt.attempt_id, status="not_eligible", error=f"job_status={status}")
+            slot_scheduled = False
+            for source in plan_item.sources:
+                for candidate in candidates:
+                    if str(candidate["job_id"]) in used_job_ids or not self._backlog_candidate_matches_source(candidate, source):
                         continue
+                    job_id = candidate["job_id"]
+                    used_job_ids.add(str(job_id))
+                    classification = candidate["classification"]
+                    attempt = self._create_attempt(run_id, self._next_attempt_number(run_id), AUTOMATION_SOURCE_BACKLOG, job_id=job_id)
+                    self._merge_attempt_report(attempt.attempt_id, classification)
+                    try:
+                        status = candidate["status"]
+                        confirmation_codes: list[str] = []
+                        if status == "monetization_review":
+                            visual_result = self._run_auto_visual_review(job_id)
+                            self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
+                            if not visual_result["passed"]:
+                                self._finish_attempt(
+                                    attempt.attempt_id,
+                                    status="not_eligible",
+                                    error="automatic_visual_review_failed: " + ", ".join(visual_result["reasons"]),
+                                )
+                                continue
+                            self._refresh_monetization_after_visual_review(job_id)
+                            status = self._job_status(job_id)
+                            confirmation_codes.append("visual_review_confirmed")
 
-                    schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
-                except Exception as exc:  # noqa: BLE001
-                    self._finish_attempt(attempt.attempt_id, status="publish_failed", error=str(exc))
-                    continue
-                self._finish_attempt(attempt.attempt_id, status="scheduled")
-                scheduled_results.append(
-                    {
-                        "job_id": job_id,
-                        "schedule_id": schedule_id,
-                        "scheduled_for_local": target_slot.scheduled_for_local,
-                        "source": str(candidate.get("job_origin") or plan_item.source),
-                    }
-                )
-                break
+                        if status == "ready_for_upload":
+                            score_report = self.evaluate_autoapproval(job_id)
+                            self._set_attempt_score(attempt.attempt_id, score_report)
+                            if not score_report["eligible"]:
+                                self._finish_attempt(
+                                    attempt.attempt_id,
+                                    status="score_failed",
+                                    error=self._automation_score_error(AUTOMATION_SOURCE_BACKLOG, score_report["reasons"]),
+                                )
+                                continue
+                        elif status != "approved_for_publish":
+                            self._finish_attempt(attempt.attempt_id, status="not_eligible", error=f"job_status={status}")
+                            continue
+
+                        schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
+                    except Exception as exc:  # noqa: BLE001
+                        self._finish_attempt(attempt.attempt_id, status="publish_failed", error=str(exc))
+                        continue
+                    self._finish_attempt(attempt.attempt_id, status="scheduled")
+                    scheduled_results.append(
+                        {
+                            "job_id": job_id,
+                            "schedule_id": schedule_id,
+                            "scheduled_for_local": target_slot.scheduled_for_local,
+                            "source": str(candidate.get("job_origin") or source),
+                        }
+                    )
+                    slot_scheduled = True
+                    break
+                if slot_scheduled:
+                    break
         return scheduled_results
 
     def _backlog_candidate_matches_source(self, candidate: dict[str, Any], source: str) -> bool:
@@ -1241,14 +1299,26 @@ class AutomationService:
     def _coerce_publish_plan(self, target_slots: list[PublishPlan] | list[PublishSlot] | date) -> list[PublishPlan]:
         if isinstance(target_slots, date):
             slot = self._coerce_publish_slot(target_slots)
-            return [PublishPlan(slot=slot, source=self._automation_publish_source_for_time(slot.local_time))]
+            return [
+                PublishPlan(
+                    slot=slot,
+                    source=self._automation_publish_source_for_time(slot.local_time),
+                    fallback_source=self._automation_fallback_source_for_time(slot.local_time),
+                )
+            ]
         plan: list[PublishPlan] = []
         for target_slot in target_slots:
             if isinstance(target_slot, PublishPlan):
                 plan.append(target_slot)
                 continue
             slot = self._coerce_publish_slot(target_slot)
-            plan.append(PublishPlan(slot=slot, source=self._automation_publish_source_for_time(slot.local_time)))
+            plan.append(
+                PublishPlan(
+                    slot=slot,
+                    source=self._automation_publish_source_for_time(slot.local_time),
+                    fallback_source=self._automation_fallback_source_for_time(slot.local_time),
+                )
+            )
         return plan
 
     def _publication_schedule_id(self, job_id: str) -> str | None:

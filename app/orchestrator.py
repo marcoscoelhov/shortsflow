@@ -36,6 +36,7 @@ from app.job_failure import build_failure_diagnosis, failure_status_for_step
 from app.job_progress import PIPELINE_STEP_NAMES, build_job_progress
 from app.job_origin import (
     CREATION_VIA_API,
+    CREATION_VIA_DAILY_CYCLE,
     CREATION_VIA_RECREATION,
     JOB_ORIGIN_MANUAL_READY_SCRIPT,
     JOB_ORIGIN_MANUAL_THEME,
@@ -308,6 +309,7 @@ class JobOrchestrator:
             requested_creation_via or (CREATION_VIA_RECREATION if retry_of_job_id else CREATION_VIA_API)
         )
         now = utcnow()
+        inline_processing_claimed = creation_via == CREATION_VIA_DAILY_CYCLE
         job_id = new_id()
         topic_request_id = new_id()
         request_data = {
@@ -329,7 +331,7 @@ class JobOrchestrator:
                         "language": payload["language"],
                     }
                 ),
-                status="queued",
+                status="running" if inline_processing_claimed else "queued",
                 current_step=None,
                 niche_id=payload["niche_id"],
                 language=payload["language"],
@@ -339,6 +341,8 @@ class JobOrchestrator:
                 job_origin=job_origin,
                 creation_via=creation_via,
                 artifact_index={},
+                lease_owner=self.worker_id if inline_processing_claimed else None,
+                lease_expires_at=now + self._lease_delta() if inline_processing_claimed else None,
             )
             topic_request = TopicRequest(**request_data)
             session.add(job)
@@ -369,6 +373,12 @@ class JobOrchestrator:
             job = session.get(Job, job_id)
             if not job:
                 raise KeyError(job_id)
+            if job.status == "running" and job.lease_owner and job.lease_owner != self.worker_id:
+                lease_expires_at = job.lease_expires_at
+                if lease_expires_at and lease_expires_at.tzinfo is None:
+                    lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+                if lease_expires_at and lease_expires_at > utcnow():
+                    return job.status
             if job.status in {
                 "approved",
                 "approved_for_publish",

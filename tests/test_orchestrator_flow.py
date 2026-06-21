@@ -1278,6 +1278,34 @@ def test_claim_next_job_is_atomic_under_concurrency() -> None:
             session.commit()
         orchestrator.start_worker()
 
+
+def test_daily_cycle_job_is_claimed_before_worker_can_pick_it() -> None:
+    from app.orchestrator import JobOrchestrator
+
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "Job diario com posse exclusiva",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 35,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "automation_source=automatic_topic",
+            "requested_angle": None,
+            "job_origin": "automatic_topic",
+            "creation_via": "daily_cycle",
+        }
+    )
+    competing_orchestrator = JobOrchestrator()
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == "running"
+        assert job.lease_owner == orchestrator.worker_id
+        assert job.lease_expires_at is not None
+        assert competing_orchestrator._claim_next_job(session) is None
+
 def test_claim_next_job_retries_transient_sqlite_lock(monkeypatch) -> None:
     test_orchestrator = JobOrchestrator()
     attempts = {"count": 0}
