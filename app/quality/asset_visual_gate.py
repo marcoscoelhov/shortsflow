@@ -198,17 +198,24 @@ def _contains_unnegated_term(corpus: str, term: str) -> bool:
     term_tokens = [token for token in normalized.split() if len(token) >= 3]
     if not term_tokens:
         return False
-    for index, token in enumerate(corpus_tokens):
-        if token not in term_tokens:
+    phrase_len = len(term_tokens)
+    for index in range(0, max(0, len(corpus_tokens) - phrase_len + 1)):
+        if corpus_tokens[index : index + phrase_len] != term_tokens:
             continue
-        before = corpus_tokens[max(0, index - 3) : index]
+        before = corpus_tokens[max(0, index - 5) : index]
         if any(item in NEGATION_TOKENS for item in before):
             continue
-        if len(term_tokens) == 1:
-            return True
-        token_window = corpus_tokens[index : index + max(len(term_tokens) + 4, 6)]
-        if all(item in token_window for item in term_tokens):
-            return True
+        return True
+    if phrase_len > 1:
+        return False
+    token = term_tokens[0]
+    for index, corpus_token in enumerate(corpus_tokens):
+        if corpus_token != token:
+            continue
+        before = corpus_tokens[max(0, index - 5) : index]
+        if any(item in NEGATION_TOKENS for item in before):
+            continue
+        return True
     return False
 
 

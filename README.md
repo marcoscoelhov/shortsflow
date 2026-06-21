@@ -2,7 +2,9 @@
 
 App FastAPI para gerar Shorts verticais em pt-BR, revisar o resultado em um hub web e publicar no YouTube em fluxo manual ou via API.
 
-O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipeline multimidia, gate de monetizacao, aprovacao humana, agenda de publicacao, calendario, metadados de upload e integracao OAuth com YouTube.
+Explicado para leigos: o YTS Render e uma fabrica local de Shorts. Voce entrega uma ideia, titulo ou roteiro; o app transforma isso em roteiro estruturado, imagens, narracao, legenda, musica, video vertical, checklist de publicacao e agenda. A pessoa revisora entra no fim para assistir, aprovar e publicar com seguranca.
+
+O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipeline multimidia, gates de qualidade/factualidade/visual/monetizacao, aprovacao humana, agenda de publicacao, calendario, metadados de upload e integracao OAuth com YouTube.
 
 ## Estado atual
 
@@ -14,6 +16,9 @@ O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipelin
 - Politica de retencao automatica para artefatos temporarios: jobs continuam visiveis no hub mesmo depois da limpeza dos arquivos pesados.
 - Arquitetura modularizada para manutencao local: `JobOrchestrator` coordena lifecycle, lease, retry, eventos e worker; pipelines, providers, contexto do hub e publicacao ficam em modulos donos.
 - Testes divididos por dominio para reduzir o custo de regressao e evitar depender de uma suite e2e monolitica para mudancas locais.
+- Roteiros agora usam explicitamente `hook`, `loop`, `body_beats`, `payoff` e `ending`; o `full_narration` deve concatenar esses blocos sem perder a tensao nem o fechamento.
+- A revisao visual automatica roda por padrao no gate de monetizacao quando aparece `visual_review_required`; se a IA visual confirmar os assets, o relatorio e reconstruido com `visual_review_confirmed`.
+- A mesma revisao visual pode remover divida visual de jobs em backlog; se ainda restar revisao factual/editorial, o job fica pendente e o ciclo tenta outro candidato para o mesmo slot.
 
 ## Comeco rapido
 
@@ -68,13 +73,15 @@ curl http://127.0.0.1:8080/healthz
 
 1. `POST /jobs` cria um job.
 2. O worker processa `input_gate`, `topic_plan`, `script`, `scene_plan`, `asset_generation`, `tts`, `subtitle_alignment`, `background_music`, `render`, `monetization_readiness_gate` e `publish_to_review_hub`.
-3. O job termina em `monetization_review`, `blocked_for_monetization` ou `ready_for_upload`.
-4. O revisor abre `/jobs/{job_id}`, assiste ao video, confere checklist e aprova ou rejeita.
-5. Job aprovado vira `approved_for_publish`.
-6. O operador pode salvar metadados de upload, agendar data e hora, publicar imediatamente, ou reabrir para republicacao depois de um publish errado.
-7. O calendario tambem permite escolher um dia e agendar um job aprovado que ainda nao esteja publicado nem tenha agenda ativa.
-8. Quando o modo YouTube esta em `api`, o worker consome agendas vencidas e faz o upload automaticamente.
-9. Quando o modo esta em `manual`, o hub continua util para aprovacao, agenda local e registro de publicacao manual.
+3. Durante roteiro e fact pack, assuntos cotidianos de baixo risco podem usar conhecimento comum com linguagem conservadora; claims especificos ou sensiveis exigem fonte ou revisao.
+4. A primeira cena recebe tratamento de **hook visual**: precisa ser legivel em menos de um segundo, sem texto renderizado e sem entregar o payoff cedo demais.
+5. O job termina em `monetization_review`, `blocked_for_monetization` ou `ready_for_upload`.
+6. O revisor abre `/jobs/{job_id}`, assiste ao video, confere checklist e aprova ou rejeita.
+7. Job aprovado vira `approved_for_publish`.
+8. O operador pode salvar metadados de upload, agendar data e hora, publicar imediatamente, ou reabrir para republicacao depois de um publish errado.
+9. O calendario tambem permite escolher um dia e agendar um job aprovado que ainda nao esteja publicado nem tenha agenda ativa.
+10. Quando o modo YouTube esta em `api`, o worker consome agendas vencidas e faz o upload automaticamente.
+11. Quando o modo esta em `manual`, o hub continua util para aprovacao, agenda local e registro de publicacao manual.
 
 ## Entradas do hub
 
@@ -141,6 +148,8 @@ Ajustes operacionais nao secretos ficam no Hub de Revisao, em Configurações:
 - horario do ciclo diario, horario padrao de publicacao, janela da agenda, tentativas e score minimo.
 
 O Hub persiste esses valores como sobreposicoes operacionais no banco. Use `Restaurar .env` no modal para limpar as sobreposicoes e voltar aos defaults do ambiente/codigo.
+
+O lease de jobs tem piso operacional longo para passos reais de midia, como imagem, TTS e render. Isso evita que o worker recupere o mesmo job enquanto uma etapa legitima esta demorando e o SQLite pulou heartbeats por lock local.
 
 Quando `YTS_HUB_AUTH_TOKEN` esta configurado, navegacao `GET`/`HEAD` pode usar o cookie `yts_hub_token`, mas mutacoes `POST` exigem `x-yts-hub-token` ou `Authorization: Bearer <token>`. O token do TikTok e manual: o Hub nao gerencia OAuth ou refresh. Metricas de origem de trafego, dispositivo, impressoes e CTR continuam pendentes ate existir adapter real da YouTube Reporting API.
 
@@ -309,6 +318,7 @@ Codigo legado que saiu do runtime ativo fica temporariamente em `legacy/` para a
 
 A documentacao de arquitetura fica em:
 
+- [docs/explicacao-para-leigos.md](docs/explicacao-para-leigos.md): explicacao simples do que o app faz e por que existem gates.
 - [docs/app.md](docs/app.md): mapa tecnico de modulos, estados, rotas, persistencia e operacao.
 - [docs/modularization-plan.md](docs/modularization-plan.md): status da modularizacao forte, contratos preservados e proximos cortes nao bloqueantes.
 - [docs/adr/0004-ai-friendly-modular-orchestrator-boundaries.md](docs/adr/0004-ai-friendly-modular-orchestrator-boundaries.md): decisao de manter o orquestrador como casca compatível e delegar dominios para modulos donos.
@@ -329,5 +339,6 @@ curl https://<hostname>.<tailnet>/healthz
 
 ## Documentacao tecnica
 
+- [docs/explicacao-para-leigos.md](docs/explicacao-para-leigos.md): visao simples para pessoas nao tecnicas
 - [docs/app.md](docs/app.md): arquitetura, estados, rotas, persistencia e operacao tecnica
 - [docs/runbook-inicializacao.md](docs/runbook-inicializacao.md): passos operacionais para subir, validar e usar o hub

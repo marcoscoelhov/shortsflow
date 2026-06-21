@@ -2,6 +2,8 @@
 
 YTS Render e um app FastAPI para gerar Shorts verticais em pt-BR, revisar o resultado em um hub web e publicar no YouTube em fluxo manual ou via API.
 
+Em linguagem simples, ele funciona como uma linha de producao local: recebe uma ideia, titulo ou roteiro, cria o pacote completo de um Short, aplica gates de qualidade e deixa uma pessoa decidir quando aprovar, agendar e publicar. A explicacao para pessoas nao tecnicas fica em [docs/explicacao-para-leigos.md](explicacao-para-leigos.md).
+
 ## Visao geral
 
 Blocos principais:
@@ -29,6 +31,7 @@ Mapa de ownership para novas mudancas:
 | Roteiro, fact pack, auditoria textual e repair | `app/pipelines/script_pipeline.py`, `script_fact_pack.py`, `script_audit.py`, `script_repair.py` | `app/orchestrator.py` |
 | Cenas | `app/pipelines/scene_pipeline.py` | `app/orchestrator.py` |
 | Imagens, TTS, legendas e musica | `app/pipelines/asset_pipeline.py`, `image_assets.py`, `tts_assets.py`, `subtitle_assets.py`, `music_assets.py` | `app/orchestrator.py` |
+| Automacao diaria, backlog e autoaprovacao | `app/automation.py` | `app/main.py` |
 | Render | `app/pipelines/render_pipeline.py` | `app/orchestrator.py` |
 | Monetizacao e pacote de publish | `app/pipelines/monetization_pipeline.py` | `app/main.py` |
 | Revisao, agenda, publish, performance, retencao e canais | `app/publication_ops.py` | `app/main.py` |
@@ -82,7 +85,7 @@ Fechamento: ...
 Hashtags: ...
 ```
 
-O provider de roteiro ainda retorna o JSON interno do app, mas esse JSON precisa satisfazer semanticamente os campos do contrato: `title`, `hook`, `body_beats`, `ending`, `retention_map` e os metadados de publicacao.
+O provider de roteiro ainda retorna o JSON interno do app, mas esse JSON precisa satisfazer semanticamente os campos do contrato: `title`, `hook`, `loop`, `body_beats`, `payoff`, `ending`, `full_narration`, `retention_map` e os metadados de publicacao. O `full_narration` deve ser a concatenacao fiel de `hook + loop + body_beats + payoff + ending`; se vier com vazamento estrutural ou faltando bloco, o repair normaliza a narracao.
 
 O `Roteiro Pronto` exige estes rotulos:
 
@@ -103,6 +106,7 @@ Regras importantes desse modo:
 - `Titulo` vira metadado, nao narracao.
 - a narracao e montada com `Hook`, `Loop`, `Beats`, `Payoff` e `Fechamento`.
 - `Loop` e tratado como tensao narrativa, nao como fato declarado.
+- `Payoff` e a virada/explicacao do ultimo terco e tambem participa do fechamento do loop.
 - fatos declarados entram a partir de `Beats` e `Payoff` sob responsabilidade da confirmacao humana.
 - desvios grandes de formato ou duracao bloqueiam antes de midia; o app nao reescreve automaticamente hook, beats, payoff ou fechamento.
 
@@ -163,7 +167,7 @@ Etapas atuais de `JobOrchestrator._steps()`:
 | `monetization_readiness_gate` | 0 | Consolida direitos, disclosure, factualidade, repeticao e publish readiness. |
 | `publish_to_review_hub` | 0 | Persiste o pacote de publicacao e leva o job ao hub. |
 
-A primeira cena carrega a **Imagem de Hook Visual**: o prompt visual deve tornar o hook legivel em menos de um segundo, com contraste, movimento, resultado ou consequencia concreta, sem revelar payoff que ainda nao apareceu no roteiro.
+A primeira cena carrega a **Imagem de Hook Visual**: o prompt visual deve tornar o hook legivel em menos de um segundo, com contraste, movimento, resultado ou consequencia concreta, sem revelar payoff que ainda nao apareceu no roteiro. Prompts de imagem tambem carregam restricoes fortes contra texto renderizado, marcas, pseudo-letras, telas, copos/embalagens com texto e layouts de painel/split-screen, porque texto acidental em imagem prejudica publicacao e legibilidade.
 
 Cada etapa grava `StepExecution`, eventos em `events.jsonl` e artefatos JSON ou midia no diretorio do job.
 
@@ -341,6 +345,16 @@ Terminologia do painel:
 
 Musica de fundo:
 
+Fact pack e politica factual:
+
+- temas `factual_strict` ou claims sensiveis exigem fontes verificadas ou revisao
+- temas de curiosidade cotidiana de baixo risco podem usar `common_knowledge` quando `viral_truth_policy.automatic_publish_allowed=true`
+- observacoes comuns de produtos domesticos, como celular, tela, controle remoto, escova, ventilador, elevador, fone e micro-ondas, podem entrar nessa politica quando nao falam de plataforma, marca, preco, estatistica, percentual ou taxa
+- `micro-ondas` e normalizado como `micro ondas` antes do match factual, portanto regras novas devem considerar pontuacao removida
+- mesmo em politica de baixo risco, numeros precisos, datas, claims medicos, financeiros, juridicos, engenharia especifica e fontes inventadas continuam bloqueaveis
+
+Musica de fundo:
+
 - o padrao e banco local, alteravel no Hub de Revisao
 - `local_bank` le `YTS_MUSIC_BANK_DIR/manifest.json` e usa apenas faixas aprovadas para YouTube, com licenca ou origem rastreavel
 - a autopopulacao do banco local pode ser ligada ou desligada no Hub
@@ -457,7 +471,11 @@ A job page atual e deliberadamente centrada em decisao:
 
 Conteudo tecnico, erros e artefatos ficam colapsados em paines secundarios.
 
-Quando existir `visual_review_report.json`, o detalhe do job mostra a **Revisao visual auxiliar** dentro de "Qualidade e monetizacao". Esse relatorio e evidencia para a pessoa revisora; ele nao muda sozinho status do job, agenda ou aprovacao.
+Quando existir `visual_review_report.json`, o detalhe do job mostra a **Revisao visual auxiliar** dentro de "Qualidade e monetizacao". Esse relatorio e evidencia para a pessoa revisora; ele nao muda sozinho agenda ou aprovacao.
+
+A etapa `monetization_readiness_gate` roda revisao visual auxiliar por padrao quando o primeiro relatorio aponta `visual_review_required`. Se a IA visual consegue confirmar os assets, o relatorio de monetizacao e reconstruido com `visual_review_confirmed` antes de gravar o status final. Se o verificador visual estiver indisponivel, falhar ou devolver apenas heuristica de prompt, o job continua pedindo revisao visual humana.
+
+Na automacao, a mesma revisao visual auxiliar tambem pode ser usada para backlog. Ela pode confirmar `visual_review_confirmed` e reconstruir o relatorio de monetizacao. Se a unica pendencia era visual, o job pode avancar para autoaprovacao. Se ainda restar `fact_review_required`, publish audit ou outra revisao manual, o job permanece em `monetization_review` e o ciclo diario tenta o proximo candidato do mesmo slot, em vez de desperdicancar a janela de publicacao.
 
 `/jobs` e uma rota de navegacao direta e precisa entregar o shell completo do **Console Operacional**. O mesmo endpoint tambem serve `jobs_table.html` para atualizacoes HTMX da fila quando a requisicao carrega `HX-Request=true`; sem esse header, retornar apenas o fragmento e regressao visual.
 
@@ -465,7 +483,7 @@ O calendario e uma superficie operacional secundaria. Ele mostra slots programad
 
 ## Automacao diaria
 
-A primeira versao roda por CLI e systemd timer, nao por scheduler interno do FastAPI:
+A automacao diaria roda por CLI e systemd timer, nao por scheduler interno do FastAPI:
 
 ```bash
 python -m app.cli automation-run
@@ -476,7 +494,11 @@ scripts/install_analytics_sync_timer.sh
 
 O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de agenda a partir de amanha. A agenda automatica trabalha com dois slots diarios: o horario configurado (`automation_publish_time`) e reservado para **Banco de Roteiros Prontos**, e o segundo slot e fixo as 18:00 de Brasilia para **Tema Automatico**. Antes de gerar conteudo novo, o ciclo agenda backlog publicavel ja aprovado ou autoaprovavel somente quando a origem do job combina com a origem esperada do slot; se ainda sobrarem slots, gera um job da origem daquele horario. Se nao houver roteiro pronto disponivel, o slot do banco fica registrado como nao elegivel e o ciclo ainda pode tentar o slot automatico.
 
+O backlog e avaliado por candidato, nao apenas por slot. Quando um candidato parcial passa na revisao visual automatica mas continua com revisao factual/manual pendente, a tentativa fica registrada como `not_eligible` e o loop continua para outro candidato compativel. Isso preserva o ganho de remover divida visual sem bloquear um job realmente publicavel que esteja logo atras na fila.
+
 Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` no horario do slot em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
+
+O lease do worker tem piso de uma hora e heartbeat menos agressivo. Passos reais de imagem, TTS e Remotion/ffmpeg podem segurar SQLite por minutos; esse piso evita que outro worker recupere o mesmo job por heartbeat pulado enquanto a etapa ainda esta legitimamente em execucao.
 
 ## Coleta de performance
 

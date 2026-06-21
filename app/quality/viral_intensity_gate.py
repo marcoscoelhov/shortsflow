@@ -7,7 +7,7 @@ from typing import Any
 from app.utils import word_tokens
 
 SHOCK_SIGNAL_PATTERN = re.compile(
-    r"\b(?:não|nunca|ningu[eé]m|parece|imposs[ií]vel|estranho|segredo|rouba|esconde|fogo|incendia|explode|mata|desaparece|antes|mesmo|s[oó]\s+que|quase|o\s+que\s+sobra|domina|prende|prendeu|persegu\w*|grud\w*|martela|trav[ao]|armadilha|vaza|molha|basta|nunca acaba)\b",
+    r"\b(?:não|nunca|ningu[eé]m|parece|imposs[ií]vel|estranho|segredo|rouba|esconde|fogo|incendia|explode|mata|desaparece|antes|mesmo|s[oó]\s+que|quase|o\s+que\s+sobra|domina|prende|prendeu|persegu\w*|grud\w*|martela|trav[ao]|armadilha|vaza|molha|basta|nunca acaba|briga|luta|some|sumi[ur]|racha|estala|truque|atravessa|invis[ií]vel|pula[rr]?)\b",
     re.IGNORECASE,
 )
 QUESTION_PATTERN = re.compile(r"[?]|\b(?:por que|porque|como|se\b|o que|qual|quem)\b", re.IGNORECASE)
@@ -16,15 +16,23 @@ TENSION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 VISUAL_IMPACT_PATTERN = re.compile(
-    r"\b(?:fogo|incendiar|laranja|vermelh[oa]|azul|horizonte|gigante|corredor|luz|olho|c[eé]u|atmosfera|sombra|pele|sangue|cora[cç][aã]o|explod|brilha|escuro|close|detalhe|fone|rua|cozinha|copo|gota|gotas|ch[aã]o|chuva|refr[aã]o|cabe[cç]a|vidro|poeira)\b",
+    r"\b(?:fogo|incendiar|laranja|vermelh[oa]|azul|horizonte|gigante|corredor|luz|brilho|reflexo|reflexos|pixel|tela|celular|sol|olho|c[eé]u|atmosfera|sombra|pele|sangue|cora[cç][aã]o|explod|brilha|escuro|close|detalhe|fone|rua|cozinha|copo|gota|gotas|ch[aã]o|chuva|refr[aã]o|cabe[cç]a|vidro|poeira|gelo|cubo|estalo|rachadura|rachaduras|azulejo|tapete|p[eé]|calor|p[aã]o|bolacha|bocejo|boceja\w*|sof[aá]|rosto|sala|elevador)\b",
     re.IGNORECASE,
 )
 SHARE_TRIGGER_PATTERN = re.compile(
-    r"\b(?:da pr[oó]xima vez|lembra|voc[eê] est[aá] vendo|isso muda|repara|olha de novo|segunda olhada|nunca mais|quando voc[eê] vir|em tempo real|vai lembrar|j[aá] deve|manda isso|mostra isso|toda vez que|se amanh[aã]|n[aã]o [eé] falta|nunca acaba|se .*grud)\b",
+    r"\b(?:da pr[oó]xima vez|lembra|voc[eê] est[aá] vendo|isso muda|repara|olha de novo|volta para|primeira imagem|segunda olhada|nunca mais|quando voc[eê] vir|em tempo real|vai lembrar|j[aá] deve|manda isso|mostra isso|toda vez que|se amanh[aã]|n[aã]o [eé] falta|nunca acaba|se .*grud)\b",
     re.IGNORECASE,
 )
 IMPLICIT_GAP_PATTERN = re.compile(
-    r"\b(?:basta|persegu\w*|grud\w*|sem parar|sem querer|n[aã]o sai|volta sem pedir|insiste|armadilha|por fora|antes da primeira)\b",
+    r"\b(?:basta|persegu\w*|grud\w*|sem parar|sem querer|n[aã]o sai|volta sem pedir|insiste|armadilha|por fora|antes da primeira|briga de luz|luta imposs[ií]vel|parece vazar|n[aã]o [eé].{0,40}batendo|racha por dentro|nunca esteve dentro|sem som nenhum|espalhar t[aã]o r[aá]pido|copia sem|reflexo invis[ií]vel)\b",
+    re.IGNORECASE,
+)
+REWATCH_PAYOFF_PATTERN = re.compile(
+    r"\b(?:volta para|primeira imagem|primeira cena|primeira frase|come[cç]o|in[ií]cio|segunda olhada|olha de novo|ver de novo)\b",
+    re.IGNORECASE,
+)
+CONTRAST_GAP_PATTERN = re.compile(
+    r"\b(?:n[aã]o [eé]|parece .{0,30}mas|segredo|truque|na verdade)\b",
     re.IGNORECASE,
 )
 DIDACTIC_PATTERN = re.compile(
@@ -81,6 +89,7 @@ class ViralIntensityGate:
         share_hits = self._count_matches(SHARE_TRIGGER_PATTERN, " ".join([payoff, ending, narration]))
         didactic_hits = self._count_matches(DIDACTIC_PATTERN, all_text)
         implicit_gap = bool(IMPLICIT_GAP_PATTERN.search(" ".join([title, first_sentence, loop, narration[:260]])))
+        contrast_gap = bool(CONTRAST_GAP_PATTERN.search(" ".join([first_sentence, loop, narration[:220]])))
         question_hits = self._count_matches(QUESTION_PATTERN, " ".join([first_sentence, loop, narration[:220]]))
 
         hook_word_count = len(word_tokens(first_sentence))
@@ -97,6 +106,7 @@ class ViralIntensityGate:
             + min(0.25, tension_hits * 0.035)
             + (0.18 if loop else 0.0)
             + (0.25 if implicit_gap else 0.0)
+            + (0.10 if contrast_gap else 0.0)
             + (0.10 if shock_hits else 0.0)
         )
         escalation_score = self._clamp(
@@ -106,14 +116,17 @@ class ViralIntensityGate:
             + min(0.18, visual_hits * 0.025)
             + (0.08 if len(unique_words) >= 45 else -0.05)
         )
+        payoff_text = " ".join([payoff, ending])
         payoff_surprise_score = self._clamp(
             0.18
-            + min(0.30, self._count_matches(SHOCK_SIGNAL_PATTERN, " ".join([payoff, ending])) * 0.15)
-            + min(0.22, self._count_matches(VISUAL_IMPACT_PATTERN, " ".join([payoff, ending])) * 0.045)
+            + min(0.30, self._count_matches(SHOCK_SIGNAL_PATTERN, payoff_text) * 0.15)
+            + min(0.22, self._count_matches(VISUAL_IMPACT_PATTERN, payoff_text) * 0.045)
+            + min(0.14, self._count_matches(TENSION_PATTERN, payoff_text) * 0.035)
             + (0.18 if self._shares_salient_terms(first_sentence, ending) else 0.0)
-            + (0.12 if SHARE_TRIGGER_PATTERN.search(ending) else 0.0)
+            + (0.14 if SHARE_TRIGGER_PATTERN.search(ending) else 0.0)
+            + (0.10 if REWATCH_PAYOFF_PATTERN.search(ending) else 0.0)
         )
-        share_trigger_score = self._clamp(0.20 + min(0.45, share_hits * 0.18) + min(0.20, visual_hits * 0.018))
+        share_trigger_score = self._clamp(0.20 + min(0.45, share_hits * 0.18) + min(0.24, visual_hits * 0.018))
         didactic_penalty = min(0.28, didactic_hits * 0.035)
         neutral_penalty = 0.12 if NEUTRAL_OPENING_PATTERN.search(first_sentence) else 0.0
         viral_intensity_score = self._clamp(
@@ -155,6 +168,7 @@ class ViralIntensityGate:
             "tension_signal_count": tension_hits,
             "visual_impact_signal_count": visual_hits,
             "implicit_gap_signal": implicit_gap,
+            "contrast_gap_signal": contrast_gap,
         }
         return ViralIntensityResult(passed=not reasons, reasons=list(dict.fromkeys(reasons)), metrics=metrics)
 

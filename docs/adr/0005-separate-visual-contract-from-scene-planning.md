@@ -8,3 +8,4 @@ We generate a **Contrato Visual do Roteiro** after the approved script and befor
 - A weak hook image is treated as a visual contract or validation failure, not just an aesthetic issue.
 - Retry behavior is split: regenerate the **Plano de Cenas** when it violates the contract, regenerate only the asset when the image violates an otherwise valid plan.
 - The provider-facing **Especificacao Visual da Cena** stays compact and concrete because MiniMax `image-01` receives one prompt string, not a separate negative prompt contract, and rejects prompts over its character limit.
+- The first scene must keep explicit first-frame-hook language, avoid revealing the later payoff, and carry no-text/no-brand/no-panel constraints even when the prompt is compacted for provider limits.

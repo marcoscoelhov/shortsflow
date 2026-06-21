@@ -36,6 +36,7 @@ Ainda existem cortes incrementais possiveis, mas eles nao bloqueiam a manutencao
 - `app/pipelines/monetization_pipeline.py`: entrada da etapa `monetization_readiness_gate`, rights, disclosure, fact claims, repeticao, metadata, publish package, hashtags, readiness e auditoria de publish.
 - `app/pipelines/common.py`: exceptions de step e helper `model_payload`.
 - `app/providers/`: providers separados por dominio, com imports diretos pelos modulos donos.
+- `app/automation.py`: dono do ciclo diario, backlog publicavel, score de autoaprovacao, revisao visual auxiliar automatizada e agendamento automatico por origem de slot.
 - `app/publication_ops.py`: dono de review, publicacao, agenda por canal, retencao de artifacts, sync YouTube e fila TikTok.
 - `app/hub_context.py`: dono dos context builders do hub, calendario, listas, status operacional e integracoes.
 - `app/routes/health.py`: router isolado para `/healthz`.
@@ -75,7 +76,7 @@ Validacao local do baseline:
 .venv/bin/python -m pytest -q
 ```
 
-Resultado validado: `255 passed, 4 warnings`.
+Resultado validado em 2026-06-21: `509 passed`.
 
 Validacao real isolada, sem mock providers, gerou um job completo ate `monetization_review`, com OpenAI para pauta/roteiro, MiniMax para imagens, EdgeTTS para narracao, banco local para musica, MP4 final 1080x1920 e artifacts persistidos. O fluxo de revisao, agenda manual, publicacao manual e metricas de performance tambem foi validado.
 
@@ -93,12 +94,13 @@ O OAuth real do YouTube foi validado fora do diretorio isolado: `data/youtube_oa
 
 ## Contratos Que Nao Devem Quebrar
 
-- Artifacts: `fact_pack.json`, `script.json`, `scene_plan.json`, `render_output.json`, `monetization_report.json`.
+- Artifacts: `fact_pack.json`, `script.json`, `scene_plan.json`, `render_output.json`, `monetization_report.json`, `asset_visual_gate.json`, `visual_review_report.json`, `render/edit_plan.json`, `premium_finishing_report.json`.
 - Artifacts de publicacao: `publish_package.json`, `publication_schedule.json`, `youtube_publish_attempts.json`, `publish_result.json`.
 - Estados terminais ou operacionais: `monetization_review`, `blocked_for_monetization`, `ready_for_upload`, `approved_for_publish`, `published`, `rejected`.
 - Chaves de `quality_summary`: `script`, `scene_plan`, `assets`, `render`, `monetization`.
 - Eventos em `events.jsonl`.
 - Step names em `JobOrchestrator._steps()`, porque aparecem em progresso, telemetria e artifacts.
+- Estrutura publica de roteiro: `title`, `hook`, `loop`, `body_beats`, `payoff`, `ending`, `full_narration`, `retention_map`, `claim_trace` e `qa_metrics`.
 
 ## Regra Para Novas Mudancas
 

@@ -342,4 +342,4 @@ def test_job_lease_delta_has_floor_for_real_provider_steps(monkeypatch) -> None:
     test_orchestrator = JobOrchestrator()
     monkeypatch.setattr(test_orchestrator.settings, "job_lease_seconds", 60)
 
-    assert test_orchestrator._lease_delta().total_seconds() == 300
+    assert test_orchestrator._lease_delta().total_seconds() == 3600

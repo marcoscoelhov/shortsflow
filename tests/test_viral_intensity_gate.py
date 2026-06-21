@@ -66,6 +66,59 @@ def test_viral_intensity_gate_accepts_scroll_stopping_script() -> None:
     assert result.metrics["curiosity_gap_score"] >= 0.85
 
 
+def test_viral_intensity_gate_accepts_common_sense_visual_conflict_scripts() -> None:
+    scripts = [
+        {
+            "title": "Por que a tela do celular fica horrível no sol?",
+            "hook": "Seu celular perde uma briga de luz que você nem via.",
+            "body_beats": [
+                "Você sai na rua, sol batendo forte, e a tela vira um espelho brilhante.",
+                "A luz do sol é tão intensa que engole o brilho da tela inteira.",
+                "Reflexos na superfície transformam cada pixel em mancha invisível.",
+                "Quanto mais você aumenta o brilho, mais o sol devolve luz de volta na sua cara.",
+                "O segredo não está na tela: está na luta impossível contra a luz ambiente.",
+            ],
+            "ending": "Por isso o celular some no sol. Da próxima vez que você fizer sombra com a mão, vai lembrar dessa briga silenciosa.",
+            "full_narration": (
+                "Seu celular perde uma briga de luz que você nem via. "
+                "Você sai na rua, sol batendo forte, e a tela vira um espelho brilhante. "
+                "A luz do sol é tão intensa que engole o brilho da tela inteira. "
+                "Reflexos na superfície transformam cada pixel em mancha invisível. "
+                "Quanto mais você aumenta o brilho, mais o sol devolve luz de volta na sua cara. "
+                "O segredo não está na tela: está na luta impossível contra a luz ambiente. "
+                "Por isso o celular some no sol. Da próxima vez que você fizer sombra com a mão, vai lembrar dessa briga silenciosa."
+            ),
+        },
+        {
+            "title": "Por que o gelo estala alto dentro do copo?",
+            "hook": "Esse estalo que você ouve não é o gelo batendo no copo.",
+            "body_beats": [
+                "Na verdade ele racha por dentro em frações de segundo.",
+                "O gelo sai do freezer bem mais frio que a bebida.",
+                "Quando toca na água gelada a casca externa contrai rápido.",
+                "Isso cria uma tensão enorme que parte o interior como vidro.",
+                "O barulho vem de rachaduras explodindo dentro do cubo.",
+            ],
+            "ending": "Volta para a primeira imagem e o truque aparece: barulho rachaduras explodindo.",
+            "full_narration": (
+                "Esse estalo que você ouve não é o gelo batendo no copo. "
+                "Na verdade ele racha por dentro em frações de segundo. "
+                "O gelo sai do freezer bem mais frio que a bebida. "
+                "Quando toca na água gelada a casca externa contrai rápido. "
+                "Isso cria uma tensão enorme que parte o interior como vidro. "
+                "O barulho vem de rachaduras explodindo dentro do cubo. "
+                "Volta para a primeira imagem e o truque aparece: barulho rachaduras explodindo."
+            ),
+        },
+    ]
+
+    for script in scripts:
+        result = ViralIntensityGate().validate(script)
+
+        assert result.passed, result
+        assert result.metrics["viral_intensity_score"] >= 0.80
+
+
 def test_script_pipeline_rejects_generated_script_when_viral_intensity_fails() -> None:
     pipeline = ScriptPipeline.__new__(ScriptPipeline)
     pipeline.owner = type("Owner", (), {"viral_intensity_gate": ViralIntensityGate()})()

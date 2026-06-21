@@ -2,6 +2,8 @@
 
 Este runbook serve para retomar o projeto, subir o hub e validar o fluxo atual de geracao, aprovacao e publicacao.
 
+Para uma visao nao tecnica do produto, leia tambem [explicacao-para-leigos.md](explicacao-para-leigos.md). Em resumo: o app pega uma ideia, titulo ou roteiro de Short, gera o pacote de video vertical, aplica gates de seguranca/publicacao e deixa uma pessoa revisar, aprovar, agendar e publicar.
+
 ## 1. Entrar no projeto
 
 ```bash
@@ -143,7 +145,7 @@ Fechamento: ...
 Hashtags: #opcional
 ```
 
-Nesse modo, `Loop` faz parte da narracao como tensao editorial. Os fatos declarados ficam nos beats e no payoff.
+Nesse modo, `Loop` faz parte da narracao como tensao editorial. `Payoff` e a virada/explicacao do ultimo terco. Os fatos declarados ficam nos beats e no payoff, e a narracao final deve concatenar `Hook + Loop + Beats + Payoff + Fechamento`.
 
 Via `curl`:
 
@@ -166,6 +168,8 @@ Estados esperados depois do pipeline:
 - `monetization_review`
 - `blocked_for_monetization`
 - `ready_for_upload`
+
+`monetization_review` nao significa necessariamente erro. Pode indicar que falta revisao visual, factual, editorial ou publish audit. A automacao consegue remover algumas pendencias visuais com revisao auxiliar, mas nao publica automaticamente se ainda restar revisao factual/manual.
 
 Se o job ficar bom para revisar, abra `/jobs/<job_id>` e siga o fluxo:
 
@@ -236,14 +240,22 @@ data/artifacts/<job_id>/
 Arquivos comuns:
 
 ```text
+script.json
+scene_plan.json
+asset_visual_gate.json
+visual_review_report.json
 render/final.mp4
 render/poster.jpg
-render/ffmpeg.log
+render/remotion.log
+render/edit_plan.json
+premium_finishing_report.json
 publish_package.json
 publication_schedule.json
 youtube_publish_attempts.json
 events.jsonl
 ```
+
+`render/ffmpeg.log` ainda pode aparecer quando o backend legado FFmpeg for forçado por configuracao, mas o caminho operacional padrao e Remotion.
 
 ## 12. Retencao automatica
 
@@ -279,7 +291,7 @@ Fatiamento recomendado:
 .venv/bin/python -m pytest -q tests/test_providers_integrations.py
 ```
 
-Se mexer em hub, agenda, publicacao ou retencao, rode `tests/test_hub_publication.py` e a suite completa antes de commit. Testes novos devem entrar na suite de dominio correspondente, nao em uma suite e2e monolitica.
+Se mexer em hub, agenda, publicacao, automacao, revisao visual ou retencao, rode `tests/test_hub_publication.py` e a suite completa antes de commit. Se mexer em prompts/qualidade visual, rode tambem `tests/test_pipeline_assets.py`; se mexer em fact pack, roteiro, loop/payoff ou politica factual, rode `tests/test_pipeline_script.py`. Testes novos devem entrar na suite de dominio correspondente, nao em uma suite e2e monolitica.
 
 ## 14. Expor via Tailscale
 

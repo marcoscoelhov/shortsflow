@@ -1,4 +1,5 @@
 from tests.e2e_support import *  # noqa: F403
+from app.automation import PublishPlan
 from app.growth_metrics import build_channel_growth_report, build_growth_score
 from app.models import LearnedRetentionProfile, RetentionExperiment, RetentionExperimentJob
 from app.quality.premium_publish_gate import PremiumPublishGateResult
@@ -811,6 +812,243 @@ def test_automation_schedules_visual_review_only_backlog_job(monkeypatch) -> Non
     assert "automation_visual_review" in job.quality_summary["assets"]["asset_visual_verification_modes"]
     assert attempt is not None
     assert attempt.score_report["classification"] == "visual_review_repairable"
+
+
+def test_automation_runs_visual_review_when_fact_review_also_remains(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    job_id = "automation-backlog-visual-plus-fact-review"
+    fallback_job_id = "automation-backlog-ready-after-partial-review"
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="monetization_review",
+            seed_theme="Backlog com visual e fato pendentes",
+            quality_summary={
+                "assets": {
+                    "semantic_threshold_pass": True,
+                    "asset_visual_gate_pass": True,
+                    "asset_visual_gate_checked": True,
+                    "asset_visual_verification_modes": ["prompt_heuristic", "vision"],
+                    "asset_visual_real_vision_checked": False,
+                },
+                "monetization": {
+                    "passed": False,
+                    "final_status": "monetization_review",
+                    "hard_blockers": [],
+                    "manual_required": ["fact_review_required", "visual_review_required"],
+                },
+            },
+            artifact_index={"render": "render/final.mp4", "publish_package": "publish_package.json"},
+            updated_at=datetime(2001, 1, 1, tzinfo=UTC),
+        )
+        session.flush()
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.job_origin = "partial_visual_review_test"
+        session.add(
+            SceneAsset(
+                asset_id=f"{job_id}-asset",
+                job_id=job_id,
+                scene_id="scene-1",
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-asset",
+                provider="mock",
+                kind="image",
+                uri="file:///tmp/automation-backlog-visual-plus-fact-review.png",
+                width=1080,
+                height=1920,
+                selected=True,
+                scores={"verification_mode": "vision", "vision_aligned": True, "total_score": 0.92},
+            )
+        )
+        session.add(
+            RenderOutput(
+                render_id=f"{job_id}-render",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-render",
+                video_uri="file:///tmp/automation-backlog-visual-plus-fact-review.mp4",
+                duration_ms=40_000,
+                resolution="1080x1920",
+                video_codec="h264",
+                audio_codec="aac",
+                filesize_bytes=1024,
+                ffmpeg_log_uri="file:///tmp/automation-backlog-visual-plus-fact-review.log",
+            )
+        )
+        _create_basic_job(
+            session,
+            job_id=fallback_job_id,
+            status="approved_for_publish",
+            seed_theme="Backlog pronto depois do parcial",
+            artifact_index={"render": "render/final.mp4", "publish_package": "publish_package.json"},
+            updated_at=datetime(2000, 1, 1, tzinfo=UTC),
+        )
+        session.flush()
+        fallback_job = session.get(Job, fallback_job_id)
+        assert fallback_job is not None
+        fallback_job.job_origin = "partial_visual_review_test"
+        session.add(
+            RenderOutput(
+                render_id=f"{fallback_job_id}-render",
+                job_id=fallback_job_id,
+                schema_version="1.0.0",
+                content_hash=f"{fallback_job_id}-render",
+                video_uri=f"file:///tmp/{fallback_job_id}.mp4",
+                duration_ms=40_000,
+                resolution="1080x1920",
+                video_codec="h264",
+                audio_codec="aac",
+                filesize_bytes=1024,
+                ffmpeg_log_uri=f"file:///tmp/{fallback_job_id}.log",
+            )
+        )
+        job.updated_at = datetime(2001, 1, 1, tzinfo=UTC)
+        fallback_job.updated_at = datetime(2000, 1, 1, tzinfo=UTC)
+        session.commit()
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "passed": False,
+            "final_status": "monetization_review",
+            "hard_blockers": [],
+            "manual_required": ["fact_review_required", "visual_review_required"],
+            "publish_readiness": {"passed": False, "reasons": ["manual_review_required"]},
+        },
+    )
+    orchestrator.storage.persist_json(job_id, "publish_package.json", {"job_id": job_id})
+    orchestrator.storage.persist_json(fallback_job_id, "publish_package.json", {"job_id": fallback_job_id})
+
+    def fake_build_report(session, job, confirmations=None):
+        assert confirmations == {"visual_review_confirmed"}
+        return {
+            "passed": False,
+            "final_status": "monetization_review",
+            "hard_blockers": [],
+            "manual_required": ["fact_review_required"],
+            "warnings": [],
+            "publish_readiness": {"passed": True},
+        }
+
+    scheduled_job_ids: list[str] = []
+
+    def fake_schedule_publication(scheduled_job_id: str, payload: dict) -> None:
+        assert scheduled_job_id == fallback_job_id
+        scheduled_job_ids.append(scheduled_job_id)
+        scheduled_for_utc = datetime.fromisoformat(payload["scheduled_for_local"]).replace(tzinfo=ZoneInfo(payload["timezone"])).astimezone(UTC)
+        with SessionLocal() as session:
+            session.add(
+                PublicationSchedule(
+                    schedule_id=f"{scheduled_job_id}-schedule",
+                    job_id=scheduled_job_id,
+                    schema_version="1.0.0",
+                    content_hash=f"{scheduled_job_id}-schedule",
+                    scheduled_for_utc=scheduled_for_utc,
+                    timezone=payload["timezone"],
+                    youtube_visibility=payload["youtube_visibility"],
+                    status="scheduled",
+                    notes=payload["notes"],
+                )
+            )
+            session.commit()
+
+    monkeypatch.setattr(orchestrator.monetization_pipeline, "build_monetization_report", fake_build_report)
+    monkeypatch.setattr(orchestrator, "schedule_publication", fake_schedule_publication)
+
+    run = service._acquire_run("partial-visual-review", force=True)
+    result = service._run_publishable_backlog(
+        run.run_id,
+        [PublishPlan(slot=PublishSlot(datetime(2099, 6, 11).date(), "11:00", "America/Sao_Paulo"), source="partial_visual_review_test")],
+    )
+
+    assert result == [
+        {
+            "job_id": fallback_job_id,
+            "schedule_id": f"{fallback_job_id}-schedule",
+            "scheduled_for_local": "2099-06-11T11:00",
+            "source": "partial_visual_review_test",
+        }
+    ]
+    assert scheduled_job_ids == [fallback_job_id]
+    artifact = orchestrator._read_job_json(job_id, "auto_visual_review.json")
+    assert artifact["passed"] is True
+    refreshed_report = orchestrator._read_job_json(job_id, "monetization_report.json")
+    assert refreshed_report["manual_required"] == ["fact_review_required"]
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.job_id == job_id))
+    assert job.quality_summary["assets"]["asset_visual_real_vision_checked"] is True
+    assert attempt is not None
+    assert attempt.status == "not_eligible"
+    assert attempt.score_report["classification"] == "visual_review_partial_repairable"
+    assert attempt.score_report["visual_review"]["passed"] is True
+
+
+def test_monetization_step_runs_auto_visual_review_by_default(monkeypatch) -> None:
+    job_id = "monetization-default-auto-visual-review"
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="running",
+            quality_summary={
+                "assets": {
+                    "semantic_threshold_pass": True,
+                    "asset_visual_gate_pass": True,
+                    "asset_visual_gate_checked": True,
+                    "asset_visual_verification_modes": ["prompt_heuristic"],
+                }
+            },
+        )
+        session.commit()
+
+    calls: list[set[str]] = []
+
+    def report(confirmations=None):
+        confirmed = "visual_review_confirmed" in set(confirmations or set())
+        return {
+            "passed": confirmed,
+            "final_status": "ready_for_upload" if confirmed else "monetization_review",
+            "hard_blockers": [],
+            "manual_required": [] if confirmed else ["visual_review_required"],
+            "warnings": [],
+            "rights_registry": {},
+            "ai_disclosure": {},
+            "fact_claims_report": {},
+            "channel_repetition_report": {},
+            "metadata_review": {},
+        }
+
+    def fake_build_report(session, job, extra_confirmations=None):
+        calls.append(set(extra_confirmations or set()))
+        return report(extra_confirmations)
+
+    def fake_review(self, session, job):
+        quality_summary = dict(job.quality_summary or {})
+        assets = dict(quality_summary.get("assets") or {})
+        assets["asset_visual_real_vision_checked"] = True
+        assets["asset_visual_verification_modes"] = ["prompt_heuristic", "automation_visual_review"]
+        quality_summary["assets"] = assets
+        job.quality_summary = quality_summary
+        return {"passed": True, "reasons": [], "reviewer": "automation_visual_review"}
+
+    monkeypatch.setattr(orchestrator.monetization_pipeline, "build_monetization_report", fake_build_report)
+    monkeypatch.setattr("app.pipelines.monetization_pipeline.AutoVisualReviewService.review", fake_review)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        artifacts = orchestrator.monetization_pipeline.step_monetization_readiness(session, job, attempt=1)
+        session.commit()
+
+    assert calls == [set(), {"visual_review_confirmed"}]
+    assert "auto_visual_review.json" in artifacts
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job.quality_summary["monetization"]["manual_required"] == []
+        assert job.quality_summary["monetization"]["final_status"] == "ready_for_upload"
 
 
 def test_auto_visual_review_rejects_prompt_heuristic_only_assets() -> None:

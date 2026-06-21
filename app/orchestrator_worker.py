@@ -40,11 +40,18 @@ class OrchestratorWorkerOperations:
             self.owner.worker_thread = None
 
     def lease_delta(self) -> timedelta:
-        return timedelta(seconds=max(300, self.settings.job_lease_seconds))
+        # Real provider steps (image generation, TTS and Remotion/ffmpeg render) can hold
+        # a SQLite write transaction open for several minutes. Keep the lease long
+        # enough that the worker will not reclaim the same job while the step is still
+        # legitimately running if heartbeat refreshes are skipped by SQLite locks.
+        return timedelta(seconds=max(3600, self.settings.job_lease_seconds))
 
     def start_lease_heartbeat(self, job_id: str) -> threading.Event:
         stop_heartbeat = threading.Event()
-        interval = max(5.0, min(30.0, max(300, self.settings.job_lease_seconds) / 3))
+        # Avoid hammering SQLite while long media steps are running in the same process.
+        # The lease floor above is one hour, so a 10-minute heartbeat is sufficient and
+        # prevents the noisy self-contention seen with 30-second refreshes.
+        interval = max(300.0, min(900.0, max(3600, self.settings.job_lease_seconds) / 6))
 
         def heartbeat() -> None:
             while not stop_heartbeat.wait(interval):

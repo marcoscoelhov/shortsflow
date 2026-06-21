@@ -405,6 +405,48 @@ def test_asset_visual_gate_rejects_weak_hook_asset_against_visual_contract() -> 
     assert "scene-1:hook_must_show_missing_from_asset_prompt" in result.reasons
     assert "scene-1:hook_negative_read_present_in_asset_prompt" in result.reasons
 
+def test_asset_visual_gate_allows_negated_negative_read_in_hook_prompt() -> None:
+    scenes = [
+        {
+            "scene_id": "scene-1",
+            "order": 1,
+            "retention_role": "visual_hook",
+            "visual_intent": "deceptive_establishing",
+            "narration_text": "Esse estalo não é o gelo batendo no copo.",
+            "primary_subject": "cubo de gelo rachando dentro de copo",
+            "image_prompt": "close macro de cubo de gelo rachando, sem mostrar gelo batendo no copo",
+        },
+        {
+            "scene_id": "scene-2",
+            "order": 2,
+            "retention_role": "loop_close",
+            "visual_intent": "loop_close_reframe",
+            "narration_text": "O barulho vem da rachadura por dentro.",
+            "primary_subject": "rachadura no gelo",
+            "image_prompt": "gelo rachando por dentro",
+        },
+    ]
+    selected_assets = [
+        {"scene_id": "scene-1", "semantic_match": 0.95, "total_score": 0.92, "prompt_snapshot": "gelo rachando sem bater no copo"},
+        {"scene_id": "scene-2", "semantic_match": 0.95, "total_score": 0.92, "prompt_snapshot": "rachadura interna no gelo"},
+    ]
+    visual_contract = {
+        "hook_frame": {
+            "recommended_visual_intent": "deceptive_establishing",
+            "must_show": ["gelo"],
+            "must_hide": [],
+            "negative_reads": ["gelo batendo no copo"],
+        },
+        "loop_policy": {"forbidden_early_reveal": []},
+        "payoff_frame": {"recommended_visual_intent": "loop_close_reframe"},
+    }
+
+    result = AssetVisualGate().validate(selected_assets, scenes, visual_contract=visual_contract)
+
+    assert result.passed
+    assert "scene-1:hook_negative_read_present_in_asset_prompt" not in result.reasons
+
+
 def test_subtitle_gate_blocks_markup_leakage() -> None:
     result = SubtitleGate().validate(
         [{"idx": 1, "start_ms": 0, "end_ms": 1000, "text": "Texto bom </prosody"}],

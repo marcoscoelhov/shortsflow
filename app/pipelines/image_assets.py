@@ -16,10 +16,11 @@ MINIMAX_IMAGE_PROMPT_MAX_CHARS = 1500
 MINIMAX_IMAGE_PROMPT_TARGET_CHARS = 1200
 
 NO_TEXT_IMAGE_CONSTRAINT = (
-    "vertical cinematic documentary realism, photorealistic, natural lighting, text is forbidden, "
-    "no text of any kind, no readable text anywhere, no fake letters, no letters, no words, no numbers, "
+    "vertical cinematic documentary realism, photorealistic, natural lighting, every visible object blank and unbranded, "
+    "text is forbidden, no text of any kind, no readable text anywhere, no fake letters, no letters, no words, no numbers, "
     "no symbols, no logo, no watermark, no captions, no subtitles, no typography, no labels, no UI, "
-    "no signs, no posters, no billboards, no packaging text, no screen text, no text printed on objects"
+    "no text on cups, packages, screens, charts or labels, no signs, no posters, no billboards, "
+    "no packaging text, no screen text, no text printed on objects"
 )
 
 SINGLE_VERTICAL_IMAGE_CONSTRAINT = (
@@ -633,6 +634,8 @@ class ImageAssetDomain:
             self.domain_negative_constraints(scene),
             self.minimax_no_text_constraint(scene),
         ]
+        if self.is_visual_hook_scene(scene):
+            required_constraints.insert(0, "first-frame hook for Shorts under one second, concrete contrast or consequence, do not reveal later payoff")
         for constraint in required_constraints:
             if constraint.lower() not in prompt.lower():
                 prompt = f"{prompt}, {constraint}".strip(", ")

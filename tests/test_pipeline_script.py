@@ -671,6 +671,18 @@ def test_script_quality_gate_ignores_internal_retention_map_codes_for_language()
 
     assert "foreign_language_detected" not in result.reasons
 
+def test_script_quality_gate_ignores_portuguese_chance_as_foreign_language() -> None:
+    script = _base_script(
+        "Um bocejo atravessa a sala sem som nenhum. "
+        "A chance cresce quando existe vínculo social entre vocês. "
+        "Da próxima vez, repare quem boceja junto."
+    )
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=35)
+
+    assert "foreign_language_detected" not in result.reasons
+
+
 def test_script_quality_gate_blocks_visible_english_visual_jargon() -> None:
     script = _base_script(
         "Isso não é uma foto aérea. É uma maquete. "
@@ -1083,6 +1095,74 @@ def test_fact_pack_accepts_low_risk_common_knowledge_policy(monkeypatch) -> None
     assert report["topic_alignment"]["reason"] == "common_knowledge_low_risk_accepted"
     assert report["viral_truth_policy"]["automatic_publish_allowed"] is True
     assert report["viral_truth_policy"]["copywriting_allowed"] is True
+
+
+def test_fact_pack_accepts_low_risk_product_observation_policy(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que a tela do celular parece pior no sol?",
+        angle="Conectar brilho da tela, reflexo solar e luz ambiente numa cena comum de rua.",
+        hook_promise="No sol, seu celular perde uma briga de luz.",
+        search_terms=["por que tela de celular fica ruim no sol"],
+        entities=["celular", "tela", "reflexo"],
+        title_candidates=["Por que a tela do celular fica horrível no sol?"],
+        quality_metrics={"editorial_mode": "viral_curiosidades"},
+    )
+    request = SimpleNamespace(seed_theme="Por que a tela do celular parece pior no sol?", notes=None, requested_angle=None)
+
+    report = pipeline._build_fact_pack(topic_plan, request)
+
+    assert report["status"] == "limited"
+    assert report["factual_status"] == "common_knowledge_accepted"
+    assert report["topic_alignment"]["passed"] is True
+    assert report["viral_truth_policy"]["automatic_publish_allowed"] is True
+
+
+def test_fact_pack_accepts_hyphenated_product_after_normalization(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
+    topic_plan = SimpleNamespace(
+        canonical_topic="Por que o micro-ondas deixa parte da comida fria?",
+        angle="Conectar ondas, prato girando e pontos frios numa situação comum de cozinha.",
+        hook_promise="O micro-ondas parece aquecer por fora, mas deixa uma armadilha fria.",
+        search_terms=["por que micro-ondas deixa comida fria"],
+        entities=["micro-ondas", "comida"],
+        title_candidates=["Por que o micro-ondas deixa comida fria?"],
+        quality_metrics={"editorial_mode": "viral_curiosidades"},
+    )
+    request = SimpleNamespace(seed_theme="Por que o micro-ondas deixa parte da comida fria?", notes=None, requested_angle=None)
+
+    report = pipeline._build_fact_pack(topic_plan, request)
+
+    assert report["status"] == "limited"
+    assert report["factual_status"] == "common_knowledge_accepted"
+    assert report["topic_alignment"]["passed"] is True
+    assert report["viral_truth_policy"]["automatic_publish_allowed"] is True
+
+
+def test_fact_pack_does_not_accept_platform_or_stats_as_common_product_observation(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
+    topic_plan = SimpleNamespace(
+        canonical_topic="YouTube é maior do que você imagina",
+        angle="Mostrar dados de plataforma dominante e estatística de crescimento.",
+        hook_promise="Um dado verificável sobre YouTube.",
+        search_terms=["YouTube crescimento estatística"],
+        entities=["YouTube"],
+        title_candidates=["YouTube é maior do que você imagina"],
+        quality_metrics={"editorial_mode": "viral_curiosidades"},
+    )
+    request = SimpleNamespace(seed_theme="Por que YouTube está chamando atenção?", notes=None, requested_angle=None)
+
+    report = pipeline._build_fact_pack(topic_plan, request)
+
+    assert report["status"] == "limited"
+    assert report["topic_alignment"]["passed"] is False
+    assert report["viral_truth_policy"]["automatic_publish_allowed"] is False
 
 
 def test_script_pipeline_requires_verified_fact_pack_for_factual_real_topics(monkeypatch) -> None:
@@ -2903,6 +2983,32 @@ def test_fact_pack_consistency_requires_source_fact_ids_when_verified() -> None:
     reasons = orchestrator.script_pipeline._fact_pack_consistency_reasons(script, fact_pack)
 
     assert "fact_pack_source_ids_missing" in reasons
+
+def test_fact_pack_consistency_accepts_low_risk_common_knowledge_trace_with_verified_pack() -> None:
+    fact_pack = {
+        "status": "verified",
+        "common_knowledge_allowed": True,
+        "viral_truth_policy": {"automatic_publish_allowed": True},
+        "facts": [
+            {"fact_id": "F1", "claim": "Fonte irrelevante sobre infravermelho.", "source_id": "S1"},
+            {"fact_id": "F2", "claim": "Outra fonte irrelevante.", "source_id": "S1"},
+        ],
+    }
+    script = _base_script(
+        "Camiseta preta esquenta no sol. "
+        "A cor escura tende a absorver mais luz e virar calor sentido na pele."
+    )
+    script["source_fact_ids"] = []
+    script["claim_trace"] = [
+        {
+            "text": "A cor escura tende a absorver mais luz e virar calor sentido na pele.",
+            "source_fact_ids": [],
+            "grounding": "common_knowledge",
+        }
+    ]
+
+    assert orchestrator.script_pipeline._fact_pack_consistency_reasons(script, fact_pack) == []
+
 
 def test_fact_pack_consistency_accepts_grounded_source_fact_ids() -> None:
     fact_pack = {

@@ -465,66 +465,60 @@ class AutomationService:
         scheduled_results: list[dict[str, str]] = []
         used_job_ids: set[str] = set()
         for plan_item in plan:
-            candidate = next(
-                (
-                    item
-                    for item in candidates
-                    if str(item["job_id"]) not in used_job_ids and self._backlog_candidate_matches_source(item, plan_item.source)
-                ),
-                None,
-            )
-            if candidate is None:
-                continue
-            job_id = candidate["job_id"]
-            used_job_ids.add(str(job_id))
-            classification = candidate["classification"]
-            attempt = self._create_attempt(run_id, self._next_attempt_number(run_id), AUTOMATION_SOURCE_BACKLOG, job_id=job_id)
-            self._merge_attempt_report(attempt.attempt_id, classification)
-            try:
-                status = candidate["status"]
-                confirmation_codes: list[str] = []
-                if status == "monetization_review":
-                    visual_result = self._run_auto_visual_review(job_id)
-                    self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
-                    if not visual_result["passed"]:
-                        self._finish_attempt(
-                            attempt.attempt_id,
-                            status="not_eligible",
-                            error="automatic_visual_review_failed: " + ", ".join(visual_result["reasons"]),
-                        )
-                        continue
-                    self._refresh_monetization_after_visual_review(job_id)
-                    status = self._job_status(job_id)
-                    confirmation_codes.append("visual_review_confirmed")
-
-                if status == "ready_for_upload":
-                    score_report = self.evaluate_autoapproval(job_id)
-                    self._set_attempt_score(attempt.attempt_id, score_report)
-                    if not score_report["eligible"]:
-                        self._finish_attempt(
-                            attempt.attempt_id,
-                            status="score_failed",
-                            error=self._automation_score_error(AUTOMATION_SOURCE_BACKLOG, score_report["reasons"]),
-                        )
-                        continue
-                elif status != "approved_for_publish":
-                    self._finish_attempt(attempt.attempt_id, status="not_eligible", error=f"job_status={status}")
+            target_slot = plan_item.slot
+            for candidate in candidates:
+                if str(candidate["job_id"]) in used_job_ids or not self._backlog_candidate_matches_source(candidate, plan_item.source):
                     continue
+                job_id = candidate["job_id"]
+                used_job_ids.add(str(job_id))
+                classification = candidate["classification"]
+                attempt = self._create_attempt(run_id, self._next_attempt_number(run_id), AUTOMATION_SOURCE_BACKLOG, job_id=job_id)
+                self._merge_attempt_report(attempt.attempt_id, classification)
+                try:
+                    status = candidate["status"]
+                    confirmation_codes: list[str] = []
+                    if status == "monetization_review":
+                        visual_result = self._run_auto_visual_review(job_id)
+                        self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
+                        if not visual_result["passed"]:
+                            self._finish_attempt(
+                                attempt.attempt_id,
+                                status="not_eligible",
+                                error="automatic_visual_review_failed: " + ", ".join(visual_result["reasons"]),
+                            )
+                            continue
+                        self._refresh_monetization_after_visual_review(job_id)
+                        status = self._job_status(job_id)
+                        confirmation_codes.append("visual_review_confirmed")
 
-                target_slot = plan_item.slot
-                schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
-            except Exception as exc:  # noqa: BLE001
-                self._finish_attempt(attempt.attempt_id, status="publish_failed", error=str(exc))
-                continue
-            self._finish_attempt(attempt.attempt_id, status="scheduled")
-            scheduled_results.append(
-                {
-                    "job_id": job_id,
-                    "schedule_id": schedule_id,
-                    "scheduled_for_local": target_slot.scheduled_for_local,
-                    "source": str(candidate.get("job_origin") or plan_item.source),
-                }
-            )
+                    if status == "ready_for_upload":
+                        score_report = self.evaluate_autoapproval(job_id)
+                        self._set_attempt_score(attempt.attempt_id, score_report)
+                        if not score_report["eligible"]:
+                            self._finish_attempt(
+                                attempt.attempt_id,
+                                status="score_failed",
+                                error=self._automation_score_error(AUTOMATION_SOURCE_BACKLOG, score_report["reasons"]),
+                            )
+                            continue
+                    elif status != "approved_for_publish":
+                        self._finish_attempt(attempt.attempt_id, status="not_eligible", error=f"job_status={status}")
+                        continue
+
+                    schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
+                except Exception as exc:  # noqa: BLE001
+                    self._finish_attempt(attempt.attempt_id, status="publish_failed", error=str(exc))
+                    continue
+                self._finish_attempt(attempt.attempt_id, status="scheduled")
+                scheduled_results.append(
+                    {
+                        "job_id": job_id,
+                        "schedule_id": schedule_id,
+                        "scheduled_for_local": target_slot.scheduled_for_local,
+                        "source": str(candidate.get("job_origin") or plan_item.source),
+                    }
+                )
+                break
         return scheduled_results
 
     def _backlog_candidate_matches_source(self, candidate: dict[str, Any], source: str) -> bool:
@@ -561,18 +555,25 @@ class AutomationService:
                     if not report.get("hard_blockers"):
                         candidates.append({"job_id": job.job_id, "status": job.status, "job_origin": job.job_origin, "classification": classification})
                     continue
-                if self._only_safe_visual_review_remains(report):
+                if self._visual_review_can_be_attempted(report):
                     candidates.append({"job_id": job.job_id, "status": job.status, "job_origin": job.job_origin, "classification": classification})
             return candidates
 
+    def _visual_review_can_be_attempted(self, report: dict[str, Any]) -> bool:
+        """Return True when local vision can remove visual-review debt safely.
+
+        This is intentionally broader than publish eligibility: a job may also need
+        fact/metadata/publish-audit review, but we should still run the automated
+        vision check and rebuild monetization so the visual blocker does not stay
+        stale in backlog. Scheduling still requires the refreshed report to reach
+        ready_for_upload.
+        """
+        manual_required = {str(item) for item in report.get("manual_required") or []}
+        return not report.get("hard_blockers") and bool(manual_required & VISUAL_REVIEW_REQUIREMENTS)
+
     def _only_safe_visual_review_remains(self, report: dict[str, Any]) -> bool:
         manual_required = {str(item) for item in report.get("manual_required") or []}
-        return (
-            not report.get("hard_blockers")
-            and (report.get("publish_readiness") or {}).get("passed") is True
-            and bool(manual_required)
-            and manual_required.issubset(VISUAL_REVIEW_REQUIREMENTS)
-        )
+        return self._visual_review_can_be_attempted(report) and manual_required.issubset(VISUAL_REVIEW_REQUIREMENTS)
 
     def _run_auto_visual_review(self, job_id: str) -> dict[str, Any]:
         with session_scope() as session:
@@ -656,7 +657,10 @@ class AutomationService:
                     "retry": retry_report,
                 },
             )
-            if status == "monetization_review" and classification["classification"] == "visual_review_repairable":
+            if status == "monetization_review" and classification["classification"] in {
+                "visual_review_repairable",
+                "visual_review_partial_repairable",
+            }:
                 visual_result = self._run_auto_visual_review(job_id)
                 self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
                 if visual_result["passed"]:
@@ -680,7 +684,12 @@ class AutomationService:
                         error,
                     )
                 return {"scheduled": False}
-            confirmation_codes = ["visual_review_confirmed"] if status == "ready_for_upload" and classification["classification"] == "visual_review_repairable" else []
+            confirmation_codes: list[str] = []
+            if status == "ready_for_upload" and classification["classification"] in {
+                "visual_review_repairable",
+                "visual_review_partial_repairable",
+            }:
+                confirmation_codes.append("visual_review_confirmed")
             schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
         except Exception as exc:  # noqa: BLE001
             self._finish_attempt(attempt.attempt_id, status="failed", error=str(exc))
@@ -769,9 +778,12 @@ class AutomationService:
                 "matched_reasons": matched_reasons or hard_blockers,
                 "retry_from_step": None,
             }
-        if status == "monetization_review" and self._only_safe_visual_review_remains(monetization_report):
+        if status == "monetization_review" and self._visual_review_can_be_attempted(monetization_report):
+            manual_required = {str(item) for item in monetization_report.get("manual_required") or []}
             return {
-                "classification": "visual_review_repairable",
+                "classification": "visual_review_repairable"
+                if manual_required.issubset(VISUAL_REVIEW_REQUIREMENTS)
+                else "visual_review_partial_repairable",
                 "matched_reasons": list(monetization_report.get("manual_required") or []),
                 "retry_from_step": None,
             }

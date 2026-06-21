@@ -71,9 +71,16 @@ class ScriptFactPackDomain(BasePipeline):
             r"tratamento|cura|risco|perigo|morte|crime|politica|política|eleicao|eleição|dinheiro|investimento|"
             r"preco|preço|taxa|lei|juridico|jurídico|religiao|religião|guerra|tragédia|tragedia)\b"
         )
+        everyday_product_observation = (
+            editorial_mode == "viral_curiosidades"
+            and evidence_profile == "produto_plataforma"
+            and scope in {"general_curiosity", "explanatory_mechanism", "visual_craft_observation"}
+            and bool(re.search(r"\b(?:celular|tela|controle\s+remoto|escova|ventilador|elevador|fone|micro\s*ondas)\b", normalized_topic))
+            and not re.search(r"\b(?:youtube|plataforma|app|aplicativo|marca|fabricante|preco|preço|estatistica|estatística|percentual|taxa)\b", normalized_topic)
+        )
         low_risk_common = (
             editorial_mode == "viral_curiosidades"
-            and evidence_profile in {"cotidiano_observacional"}
+            and (evidence_profile in {"cotidiano_observacional"} or everyday_product_observation)
             and scope in {"general_curiosity", "explanatory_mechanism", "visual_craft_observation"}
             and not research_brief.get("required_evidence_term_groups")
             and not high_risk_pattern.search(normalized_topic)

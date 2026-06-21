@@ -480,14 +480,15 @@ Escreva um roteiro viral de curiosidades em pt-BR.
 Entrada JSON: {json.dumps(topic_plan, ensure_ascii=False)}
 
 Retorne JSON estrito com:
-title, hook, body_beats, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
+title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
 
 Mapeamento editorial obrigatório:
 - title equivale ao Título
 - hook equivale ao Hook de 0 a 2 segundos
+- loop equivale ao Loop/curiosity gap explícito; uma frase curta que abre uma pergunta mental sem entregar a resposta
 - body_beats equivale aos Beats em escalada; deve conter exatamente 3 a 5 frases independentes, nunca uma frase única compactada
-- mantenha o loop aberto nos beats iniciais e entregue o payoff no último beat ou no último terço da narração
-- full_narration deve ser a concatenação fiel de hook + todos os body_beats + ending, sem perder nenhum beat
+- payoff equivale à virada no último terço: a explicação/recontextualização que paga a promessa sem virar aula
+- full_narration deve ser a concatenação fiel de hook + loop + todos os body_beats + payoff + ending, sem perder nenhum bloco
 - ending equivale ao Fechamento; ele deve recontextualizar o hook e provocar replay mental
 - hashtags não fazem parte deste JSON e não devem aparecer nos campos narrados
 - se Entrada JSON.structured_viral_contract existir, trate esse contrato como obrigatório: o JSON interno deve satisfazer Título, Hook, Loop, Beats, Payoff, Fechamento e Hashtags conforme os internal_target descritos no contrato
@@ -619,13 +620,16 @@ Contexto da pauta JSON: {json.dumps(topic_plan, ensure_ascii=False)}
 Motivos de reprovação: {json.dumps(gate_reasons, ensure_ascii=False)}
 
 Retorne JSON estrito com os mesmos campos:
-title, hook, body_beats, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
+title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
 
 Regras obrigatórias:
 - mantenha prompt_version="{EDITORIAL_PROMPT_VERSION}" e preserve/atualize retention_map e visual_opening
 - se Contexto da pauta JSON.editorial_mode for "viral_curiosidades", prefira wording seguro, simples e forte em retenção, sem insistir em mecanismo específico não sustentado
 - se Contexto da pauta JSON.editorial_mode for "factual_strict", preserve o grounding factual e remova qualquer mecanismo sem lastro
 - preserve a régua editorial do app: hook forte, loop aberto, beats em escalada, payoff no último terço e fechamento que provoque replay
+- `loop` deve ser frase curta de curiosidade explícita logo após o hook; não pode ser null
+- `payoff` deve ser frase de virada no último terço; não pode ser null
+- full_narration deve concatenar hook + loop + body_beats + payoff + ending
 - se os motivos incluírem weak_loop_closure ou ending_not_connected_to_hook, corrija o bloco loop_close sem criar final genérico repetitivo
 - se os motivos incluírem body_beat_count_invalid, reestruture body_beats para exatamente 3 a 5 frases independentes e faça full_narration incluir hook + todos os body_beats + ending
 - se os motivos incluírem weak_ending, reescreva o ending para pagar a promessa do hook e apontar concretamente de volta ao início

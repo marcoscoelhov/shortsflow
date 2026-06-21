@@ -34,10 +34,19 @@ class ScriptRepairDomain(BasePipeline):
         valid_ids = {str(fact.get("fact_id")) for fact in facts if fact.get("fact_id")}
         if not valid_ids:
             return []
+        trace_groundings = {str(item.get("grounding") or "").strip().lower() for item in trace if isinstance(item, dict)}
+        low_risk_common_policy = bool((fact_pack.get("viral_truth_policy") or {}).get("automatic_publish_allowed")) and bool(
+            fact_pack.get("common_knowledge_allowed")
+        )
+        only_common_grounded = not source_ids and not trace_source_ids and bool(trace_groundings) and trace_groundings <= {
+            "common_knowledge",
+            "user_input",
+            "conservative",
+        }
         used_ids = {str(item) for item in [*source_ids, *trace_source_ids] if str(item) in valid_ids}
         minimum = min(2, len(valid_ids))
         reasons: list[str] = []
-        if len(used_ids) < minimum:
+        if len(used_ids) < minimum and not (low_risk_common_policy and only_common_grounded):
             reasons.append("fact_pack_source_ids_missing")
         if any(source_id not in valid_ids for source_id in trace_source_ids):
             reasons.append("invented_claim_trace_fact_ids")
@@ -295,15 +304,25 @@ class ScriptRepairDomain(BasePipeline):
             if text:
                 body_beats.append(text.rstrip(".!?") + ".")
         normalized["body_beats"] = body_beats
+        loop = str(normalized.get("loop") or "").strip()
+        payoff = str(normalized.get("payoff") or "").strip()
+        if loop:
+            normalized["loop"] = loop.rstrip(".!?") + ("?" if "?" in loop else ".")
+        if payoff:
+            normalized["payoff"] = payoff.rstrip(".!?") + "."
         narration = str(normalized.get("full_narration") or "").strip()
         narration_has_structured_leak = bool(re.search(r"\{\s*['\"](?:segment|time_range|visual_description|narration)['\"]", narration))
-        if narration_has_structured_leak or not narration:
-            parts = [
-                str(normalized.get("hook") or "").strip(),
-                *body_beats,
-                str(normalized.get("ending") or "").strip(),
-            ]
-            normalized["full_narration"] = " ".join(part.rstrip(".!?") + "." for part in parts if part).strip()
+        expected_parts = [
+            str(normalized.get("hook") or "").strip(),
+            str(normalized.get("loop") or "").strip(),
+            *body_beats,
+            str(normalized.get("payoff") or "").strip(),
+            str(normalized.get("ending") or "").strip(),
+        ]
+        expected_narration = " ".join(part.rstrip(".!?") + ("?" if part.endswith("?") else ".") for part in expected_parts if part).strip()
+        missing_structured_part = bool(expected_narration and self.script_gate._normalize(expected_narration) not in self.script_gate._normalize(narration))
+        if narration_has_structured_leak or not narration or missing_structured_part:
+            normalized["full_narration"] = expected_narration
         return normalized
 
     def _split_long_script_sentences(self, script: dict[str, Any]) -> dict[str, Any]:

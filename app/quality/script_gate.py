@@ -79,7 +79,6 @@ FOREIGN_LANGUAGE_MARKERS = {
     "your",
     "cat",
     "second",
-    "chance",
     "see",
     "heard",
     "mini-cerebro independiente",
