@@ -31,6 +31,9 @@ Check the app health endpoint with `curl http://127.0.0.1:8080/healthz`. Use `no
 ## Coding Style & Naming Conventions
 Follow existing Python style: 4-space indentation, type hints where practical, and `snake_case` for functions, variables, and module names. Keep FastAPI route handlers, SQLAlchemy models, and Pydantic schemas in their current files unless a change clearly justifies a new module. Prefer small helper functions over deeply nested orchestration logic.
 
+## Coding Agent Policy
+For coding tasks, prefer using Codex CLI or a Codex agent as the implementation executor. Hermes keeps ownership of scope, reviews Codex diffs as untrusted patches, runs the canonical tests, verifies behavior, and commits only after independent validation. Small emergency edits may be done directly only when spawning Codex would be slower than the change itself.
+
 ## Testing Guidelines
 Add or update `pytest` coverage for behavioral changes, especially pipeline states, quality gates, and review hub flows. Name tests `test_<behavior>()`. Tests default to mock providers via `YTS_USE_MOCK_PROVIDERS=true`; preserve that pattern so the suite stays deterministic and cheap to run.
 
