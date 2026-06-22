@@ -294,8 +294,16 @@ class ScriptPipeline(BasePipeline):
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(result.reasons[:6])}")
         repair_reasons = [str(reason) for reason in result.reasons]
         original_metrics = self._viral_intensity_metrics(result, ready_script_mode=False, raise_on_fail=False)
+        repair_context = {
+            **plan_dict,
+            "viral_intensity_repair": {
+                "reasons": repair_reasons,
+                "metrics": original_metrics,
+                "instruction": "Corrija especificamente cada métrica abaixo do mínimo; não responda com uma reescrita genérica.",
+            },
+        }
         try:
-            candidate = self.providers.creative.repair_script(script, repair_reasons, plan_dict)
+            candidate = self.providers.creative.repair_script(script, repair_reasons, repair_context)
         except Exception as exc:  # noqa: BLE001
             self._persist_script_rejection(
                 job_id,
@@ -303,6 +311,10 @@ class ScriptPipeline(BasePipeline):
                 {"viral_intensity": original_metrics, "viral_intensity_repair_error": f"{type(exc).__name__}: {exc}"},
                 repair_reasons,
             )
+            if self._viral_intensity_is_warning_only():
+                original_metrics["viral_intensity_warning_only"] = True
+                original_metrics["viral_intensity_repair_error"] = f"{type(exc).__name__}: {exc}"
+                return script, original_metrics, self._persist_viral_intensity_repair(job_id, repair_reasons, original_metrics, False)
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(repair_reasons[:6])}") from exc
         repaired_result = self.viral_intensity_gate.validate(candidate)
         if not repaired_result.passed:
@@ -315,28 +327,45 @@ class ScriptPipeline(BasePipeline):
                 {"viral_intensity": repaired_metrics, "viral_intensity_original": original_metrics},
                 repaired_result.reasons,
             )
+            if self._viral_intensity_is_warning_only():
+                repaired_metrics["viral_intensity_warning_only"] = True
+                return candidate, repaired_metrics, self._persist_viral_intensity_repair(job_id, repair_reasons, repaired_metrics, False)
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(repaired_result.reasons[:6])}")
         repaired_metrics = self._viral_intensity_metrics(repaired_result, ready_script_mode=False)
         repaired_metrics["viral_intensity_repair_attempted"] = True
         repaired_metrics["viral_intensity_original_reasons"] = repair_reasons
+        return candidate, repaired_metrics, self._persist_viral_intensity_repair(job_id, repair_reasons, repaired_metrics, True)
+
+    def _viral_intensity_is_warning_only(self) -> bool:
+        settings = getattr(self.owner, "settings", None)
+        return settings is not None and not bool(getattr(settings, "viral_intensity_hard_block", True))
+
+    def _persist_viral_intensity_repair(
+        self,
+        job_id: str,
+        original_reasons: list[str],
+        metrics: dict[str, Any],
+        repaired_passed: bool,
+    ) -> str | None:
         repair_payload = {
             "job_id": job_id,
-            "original_reasons": repair_reasons,
-            "repaired_passed": repaired_result.passed,
-            "repaired_reasons": repaired_result.reasons,
-            "metrics": repaired_metrics,
+            "original_reasons": original_reasons,
+            "repaired_passed": repaired_passed,
+            "repaired_reasons": metrics.get("viral_intensity_reasons", []),
+            "metrics": metrics,
         }
         if hasattr(self, "storage"):
             try:
                 self.storage.persist_json(job_id, "viral_intensity_repair.json", self._serialize_for_json(repair_payload))
+                return "viral_intensity_repair.json"
             except Exception:  # noqa: BLE001
                 pass
-        return candidate, repaired_metrics, "viral_intensity_repair.json"
+        return "viral_intensity_repair.json"
 
     def _viral_intensity_metrics(self, result: Any, *, ready_script_mode: bool, raise_on_fail: bool = True) -> dict[str, Any]:
         metrics = dict(result.metrics)
         metrics["viral_intensity_reasons"] = result.reasons
-        metrics["viral_intensity_hard_block"] = bool(not result.passed)
+        metrics["viral_intensity_hard_block"] = bool(not result.passed and not self._viral_intensity_is_warning_only())
         if ready_script_mode and not result.passed:
             metrics["viral_intensity_ready_script_blocked"] = True
         if not result.passed and raise_on_fail:
@@ -551,6 +580,9 @@ class ScriptPipeline(BasePipeline):
 
     def _scientific_article_fact_pack(self, *args: Any, **kwargs: Any) -> Any:
         return self.fact_pack_domain._scientific_article_fact_pack(*args, **kwargs)
+
+    def _europepmc_fact_pack(self, *args: Any, **kwargs: Any) -> Any:
+        return self.fact_pack_domain._europepmc_fact_pack(*args, **kwargs)
 
     def _openalex_abstract_text(self, *args: Any, **kwargs: Any) -> Any:
         return self.fact_pack_domain._openalex_abstract_text(*args, **kwargs)

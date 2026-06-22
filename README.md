@@ -222,6 +222,15 @@ Configuracao padrao:
 YTS_RENDER_PRIMARY_BACKEND=remotion
 ```
 
+Para geração real, instale as dependências do compositor antes de iniciar o servidor:
+
+```bash
+cd remotion
+npm ci
+```
+
+O preflight agora interrompe o job antes de consumir provedores quando o Remotion não estiver disponível. A intensidade viral também é configurável: por padrão, um roteiro factual seguro com score abaixo da meta segue para revisão com alerta; use `YTS_VIRAL_INTENSITY_HARD_BLOCK=true` apenas para bloquear a renderização nesses casos.
+
 O caminho FFmpeg ainda existe para manutencao e diagnostico, mas nao deve ser tratado como default operacional.
 
 No startup, o Hub registra aviso se o runtime Remotion estiver incompleto. `/healthz` tambem expõe `render.remotion_ready` e os itens ausentes.

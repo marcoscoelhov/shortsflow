@@ -68,6 +68,10 @@ OPERATIONAL_SETTING_SPECS = (
         description="Cria o plano textual de cenas e prompts; nao gera imagens.",
     ),
     OperationalSettingSpec("llm_enable_fallback", "Fallback ativo", "LLM", "checkbox"),
+    OperationalSettingSpec("viral_intensity_hard_block", "Bloquear roteiro por score viral", "LLM", "checkbox", description="Desative para encaminhar roteiros factualmente seguros para revisão, com o score viral como alerta."),
+    OperationalSettingSpec("viral_intensity_min_score", "Score viral mínimo", "LLM", "number", min_value=0, max_value=1, step="0.01"),
+    OperationalSettingSpec("viral_intensity_min_hook_scroll_stop", "Hook mínimo", "LLM", "number", min_value=0, max_value=1, step="0.01"),
+    OperationalSettingSpec("viral_intensity_min_share_trigger", "Gatilho de compartilhamento mínimo", "LLM", "number", min_value=0, max_value=1, step="0.01"),
     OperationalSettingSpec(
         "background_music_provider",
         "Fonte de trilha",

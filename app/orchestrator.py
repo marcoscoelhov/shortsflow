@@ -235,7 +235,14 @@ class JobOrchestrator:
         self.render_pipeline = RenderPipeline(self)
         self.monetization_pipeline = MonetizationPipeline(self)
         self.script_gate = ScriptQualityGate()
-        self.viral_intensity_gate = ViralIntensityGate()
+        self.viral_intensity_gate = ViralIntensityGate(
+            min_viral_intensity=self.settings.viral_intensity_min_score,
+            min_hook_scroll_stop=self.settings.viral_intensity_min_hook_scroll_stop,
+            min_curiosity_gap=self.settings.viral_intensity_min_curiosity_gap,
+            min_escalation=self.settings.viral_intensity_min_escalation,
+            min_payoff_surprise=self.settings.viral_intensity_min_payoff_surprise,
+            min_share_trigger=self.settings.viral_intensity_min_share_trigger,
+        )
         self.visual_impact_gate = VisualImpactGate()
         self.metadata_ctr_gate = MetadataCTRGate()
         self.growth_score_gate = GrowthScoreGate()
@@ -1115,6 +1122,12 @@ class JobOrchestrator:
             raise FatalStepError("seed_theme too short after normalization")
         if request.target_duration_sec < 35 or request.target_duration_sec > 55:
             raise FatalStepError(f"target_duration_sec outside supported range: {request.target_duration_sec}")
+        render_preflight: dict[str, object] = {"ready": True, "backend": self.settings.render_primary_backend}
+        if not self.settings.use_mock_providers and str(self.settings.render_primary_backend).lower() == "remotion":
+            render_preflight = self.premium_finishing.renderer.preflight_environment()
+            if not render_preflight.get("ready"):
+                missing = "; ".join(str(item) for item in render_preflight.get("missing_items") or [])
+                raise FatalStepError(f"render preflight failed before provider usage: {missing}")
         normalized_language = str(request.language or "").strip().lower().replace("_", "-")
         resolved_language = {
             "pt-br": "pt-BR",
@@ -1143,6 +1156,7 @@ class JobOrchestrator:
             "target_duration_sec": request.target_duration_sec,
             "seed_theme_length": len(normalized_theme),
             "moderation_ok": True,
+            "render_preflight": render_preflight,
         }
         self.storage.persist_json(job.job_id, "input_gate.json", self._serialize_for_json(quality))
         self._append_event(job.job_id, "input_gate.passed", "succeeded", quality)

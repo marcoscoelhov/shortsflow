@@ -14,6 +14,15 @@ def test_render_primary_backend_defaults_to_remotion(monkeypatch) -> None:
     assert settings.render_primary_backend == "remotion"
 
 
+def test_viral_intensity_defaults_to_review_warning(monkeypatch) -> None:
+    monkeypatch.delenv("YTS_VIRAL_INTENSITY_HARD_BLOCK", raising=False)
+    monkeypatch.delenv("YTS_VIRAL_INTENSITY_MIN_SCORE", raising=False)
+    settings = Settings(_env_file=None)
+
+    assert settings.viral_intensity_hard_block is False
+    assert settings.viral_intensity_min_score == 0.72
+
+
 def test_render_primary_backend_accepts_ffmpeg_override(monkeypatch) -> None:
     monkeypatch.delenv("YTS_RENDER_PRIMARY_BACKEND", raising=False)
 

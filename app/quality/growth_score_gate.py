@@ -43,8 +43,10 @@ class GrowthScoreGate:
             + scores["monetization_clearance_score"] * 0.10
         )
         reasons: list[str] = []
-        ready_script_viral_warning = bool(viral.get("viral_intensity_ready_script_warning")) and scores["script_viral_intensity_score"] >= 0.74
-        if viral and not ready_script_viral_warning and (viral.get("viral_intensity_gate_pass") is False or scores["script_viral_intensity_score"] < self.MIN_AXIS_SCORE):
+        viral_warning_only = bool(viral.get("viral_intensity_warning_only")) or (
+            bool(viral.get("viral_intensity_ready_script_warning")) and scores["script_viral_intensity_score"] >= 0.74
+        )
+        if viral and not viral_warning_only and (viral.get("viral_intensity_gate_pass") is False or scores["script_viral_intensity_score"] < self.MIN_AXIS_SCORE):
             reasons.append("script_viral_intensity_low")
         if visual and (visual.get("visual_impact_gate_pass") is False or scores["visual_impact_score"] < self.MIN_AXIS_SCORE):
             reasons.append("visual_impact_low")
@@ -69,7 +71,7 @@ class GrowthScoreGate:
         else:
             decision = "manual_review_required"
         metrics = {**scores, "growth_score": round(growth_score, 3), "growth_score_gate_pass": passed}
-        if ready_script_viral_warning:
+        if viral_warning_only:
             metrics["script_viral_intensity_warning_only"] = True
         return GrowthScoreGateResult(passed, decision, reasons, metrics)
 
