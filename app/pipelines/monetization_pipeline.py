@@ -205,6 +205,7 @@ class MonetizationPipeline(BasePipeline):
             checklist,
             script_artifact,
             self.provider_publish_audit(script_artifact, fact_pack, tags, job.job_id),
+            job_id=job.job_id,
         )
 
         hard_blockers: list[str] = []
@@ -906,7 +907,7 @@ class MonetizationPipeline(BasePipeline):
             description = str(overrides["description"])
         checklist = self.build_quality_checklist(job)
         minimax_audit = self.provider_publish_audit(script_artifact, fact_pack, tags, job.job_id)
-        readiness = self.publish_readiness_report(script, topic_plan, fact_pack, tags, checklist, script_artifact, minimax_audit)
+        readiness = self.publish_readiness_report(script, topic_plan, fact_pack, tags, checklist, script_artifact, minimax_audit, job_id=job.job_id)
         premium_publish_audit = self.read_job_json(job.job_id, "premium_publish_audit.json")
         if premium_publish_audit and not premium_publish_audit.get("passed"):
             readiness = {
@@ -1202,6 +1203,8 @@ class MonetizationPipeline(BasePipeline):
         checklist: dict[str, bool],
         script_artifact: dict[str, Any] | None = None,
         minimax_audit: dict[str, Any] | None = None,
+        *,
+        job_id: str | None = None,
     ) -> dict[str, Any]:
         script_dict = {**(self.script_to_dict(script) if script else {}), **(script_artifact or {})}
         source_ids = script_dict.get("source_fact_ids") or script_dict.get("qa_metrics", {}).get("source_fact_ids") or []
@@ -1244,7 +1247,31 @@ class MonetizationPipeline(BasePipeline):
             else:
                 reasons.append("weak_ending")
         if minimax_audit and minimax_audit.get("passed") is False:
-            reasons.extend(str(reason) for reason in minimax_audit.get("reasons") or ["minimax_audit_failed"])
+            audit_reasons = [str(reason) for reason in minimax_audit.get("reasons") or ["minimax_audit_failed"]]
+            overrideable = [reason for reason in audit_reasons if self.llm_judge.can_override_local_failure([reason])]
+            hard_audit_reasons = [reason for reason in audit_reasons if reason not in overrideable]
+            if overrideable and self.llm_judge.may_consider_override(overrideable):
+                audit_judge = self.llm_judge.judge_editorial(
+                    build_editorial_judge_payload(
+                        script=script_dict,
+                        local_reasons=overrideable,
+                        local_metrics={"publish_audit": minimax_audit},
+                        gate_name="publish_audit",
+                    )
+                )
+                overridden = self.llm_judge.should_override(local_passed=False, local_reasons=overrideable, judge=audit_judge)
+                if overridden:
+                    overrideable = []
+                if job_id:
+                    self._persist_llm_judge_artifact(
+                        job_id,
+                        "editorial",
+                        local_reasons=audit_reasons,
+                        judge_result=audit_judge,
+                        overridden=overridden,
+                    )
+            reasons.extend(overrideable)
+            reasons.extend(hard_audit_reasons)
         if fact_pack.get("status") != "verified" and not low_risk_common_auto_allowed:
             reasons.append("manual_review_required")
         return {
