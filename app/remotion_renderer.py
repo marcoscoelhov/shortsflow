@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from app.pipelines.common import FatalStepError
@@ -10,6 +11,15 @@ from app.utils import ensure_dir, path_from_uri, read_json
 PREMIUM_COMPOSITION_ID = "YtsPremiumShort"
 
 
+def _remotion_cli_bin(project_dir: Path) -> Path:
+    base = project_dir / "node_modules" / ".bin" / "remotion"
+    if sys.platform == "win32":
+        windows_bin = base.with_suffix(".cmd")
+        if windows_bin.exists():
+            return windows_bin
+    return base
+
+
 class RemotionCliRenderer:
     def __init__(self, project_dir: Path | None = None, timeout_sec: int = 900, allowed_media_root: Path | None = None) -> None:
         self.project_dir = project_dir or Path(__file__).resolve().parent.parent / "remotion"
@@ -17,7 +27,7 @@ class RemotionCliRenderer:
         self.allowed_media_root = allowed_media_root.resolve() if allowed_media_root else None
 
     def preflight_environment(self) -> dict[str, object]:
-        remotion_bin = self.project_dir / "node_modules" / ".bin" / "remotion"
+        remotion_bin = _remotion_cli_bin(self.project_dir)
         entrypoint = self.project_dir / "src" / "index.ts"
         package_lock = self.project_dir / "package-lock.json"
         missing_items: list[str] = []
@@ -45,7 +55,7 @@ class RemotionCliRenderer:
             raise FatalStepError("; ".join(missing_items))
 
     def render(self, *, plan_path: Path, output_path: Path, log_path: Path) -> list[str]:
-        remotion_bin = self.project_dir / "node_modules" / ".bin" / "remotion"
+        remotion_bin = _remotion_cli_bin(self.project_dir)
         entrypoint = self.project_dir / "src" / "index.ts"
         resolved_plan_path = plan_path.resolve()
         resolved_output_path = output_path.resolve()

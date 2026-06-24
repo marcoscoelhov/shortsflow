@@ -19,6 +19,7 @@ from app.quality.premium_finishing_gate import PremiumFinishingGate
 from app.render_selection import promote_render_output_to_file
 from app.remotion_renderer import RemotionCliRenderer
 from app.utils import ensure_dir, file_sha256, file_uri, new_id, path_from_uri, read_json, stable_hash, utcnow
+from urllib.parse import unquote, urlparse
 
 
 class PremiumFinishingService:
@@ -454,6 +455,14 @@ class PremiumFinishingService:
                 return path_from_uri(text)
         except Exception:  # noqa: BLE001
             return None
+        if text.startswith("http://") or text.startswith("https://"):
+            parsed = urlparse(text)
+            marker = "/artifacts/"
+            if marker in parsed.path:
+                relative = unquote(parsed.path.split(marker, 1)[1])
+                local_path = (self.settings.artifacts_dir / relative).resolve()
+                if local_path.exists():
+                    return local_path
         path = Path(text)
         return path if path.is_absolute() else None
 
