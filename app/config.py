@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
-    llm_primary_provider: str = "xai"
+    llm_primary_provider: str = "deepseek"
     llm_fallback_provider: str = "openai"
     llm_repair_provider: str = "deepseek"
     llm_scene_provider: str = "deepseek"
@@ -174,7 +174,7 @@ class Settings(BaseSettings):
     xai_timeout_sec: float = 180.0
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_model: str = "deepseek-v4-flash"
     deepseek_timeout_sec: float = 180.0
     qwen_api_key: str | None = None
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
