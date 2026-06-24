@@ -1,4 +1,4 @@
-# YTS Render Context
+# ShortsFlow Context
 
 Este contexto define a linguagem de dominio usada para gerar, revisar e preparar Shorts no projeto.
 

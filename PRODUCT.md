@@ -6,13 +6,13 @@ product
 
 ## Users
 
-YTS Render is used by a solo operator or small channel team producing YouTube Shorts in pt-BR. The operator is usually in an execution loop: create jobs, watch output, approve or reject, schedule publication, check automation state, inspect failures, and keep the channel moving without reading terminal logs.
+ShortsFlow is used by a solo operator or small channel team producing YouTube Shorts in pt-BR. The operator is usually in an execution loop: create jobs, watch output, approve or reject, schedule publication, check automation state, inspect failures, and keep the channel moving without reading terminal logs.
 
 Secondary users are technical maintainers using the Hub de Revisao to validate provider routing, artifacts, OAuth state, publication schedules, and pipeline health. They need high-signal operational evidence without exposing secrets or turning the product into a debugging cockpit.
 
 ## Product Purpose
 
-YTS Render turns editorial ideas, ready scripts, automatic topics, media generation, review, scheduling, and publication into one operational workflow for Shorts. Success means a person can see what needs action now, understand why a job is blocked or ready, and trust the hub as the source of truth for review and publication state.
+ShortsFlow turns editorial ideas, ready scripts, automatic topics, media generation, review, scheduling, and publication into one operational workflow for Shorts. Success means a person can see what needs action now, understand why a job is blocked or ready, and trust the hub as the source of truth for review and publication state.
 
 The product is not a marketing website. It is a work surface for repeated decisions under real production constraints: provider latency, factual quality, monetization readiness, YouTube scheduling, local artifacts, and automation attempts.
 

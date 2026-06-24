@@ -120,7 +120,7 @@ def populate_builtin_music_bank(bank_dir: Path, *, force: bool = False, duration
     tracks = sorted(by_id.values(), key=lambda item: str(item.get("id") or ""))
     manifest = {
         "schema_version": "1.0",
-        "source": "yts_render_builtin_synthetic_music_bank",
+        "source": "shortsflow_builtin_synthetic_music_bank",
         "tracks": tracks,
     }
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -150,11 +150,11 @@ def _manifest_track(preset: dict[str, Any], audio_path: str, license_path: str, 
         "id": preset["id"],
         "path": audio_path,
         "title": preset["title"],
-        "artist": "YTS Render Local Generator",
+        "artist": "ShortsFlow Local Generator",
         "moods": preset["moods"],
         "tags": preset["tags"],
         "license": "local_synthetic_project_owned",
-        "license_note": "Locally generated instrumental bed by YTS Render; no external source material.",
+        "license_note": "Locally generated instrumental bed by ShortsFlow; no external source material.",
         "license_file": license_path,
         "approved_for_youtube": True,
         "requires_attribution": False,
@@ -171,10 +171,10 @@ def _manifest_track(preset: dict[str, Any], audio_path: str, license_path: str, 
 def _license_text(track_id: str) -> str:
     return (
         f"Track: {track_id}\n"
-        "Source: Generated locally by YTS Render built-in synthetic music bank generator.\n"
+        "Source: Generated locally by ShortsFlow built-in synthetic music bank generator.\n"
         "External samples: none.\n"
         "Vocals or lyrics: none.\n"
-        "License: project-owned local synthetic background bed for YTS Render jobs.\n"
+        "License: project-owned local synthetic background bed for ShortsFlow jobs.\n"
         "Attribution required: no.\n"
         "Content ID registered: no.\n"
     )
@@ -289,7 +289,7 @@ def import_minimax_music_artifacts(
     tracks = sorted(by_id.values(), key=lambda item: str(item.get("id") or ""))
     manifest = {
         "schema_version": "1.0",
-        "source": "yts_render_music_bank",
+        "source": "shortsflow_music_bank",
         "updated_at": datetime.now(UTC).isoformat(),
         "tracks": tracks,
     }
@@ -400,7 +400,7 @@ def _minimax_license_text(job_id: str, payload: dict[str, Any]) -> str:
         f"Instrumental: {metadata.get('instrumental') is True}\n"
         f"Vocals or lyrics: {str(metadata.get('vocals_or_lyrics') or 'unknown').strip().lower()}\n"
         f"Human instrumental review confirmed: {bool(metadata.get('human_instrumental_review_confirmed'))}\n"
-        "Imported from local YTS Render artifacts after background music quality gate passed.\n"
+        "Imported from local ShortsFlow artifacts after background music quality gate passed.\n"
         "Original signed provider URL is intentionally not copied with query parameters.\n"
     )
 

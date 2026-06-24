@@ -3,9 +3,9 @@
 {% block content %}
 <section class="jobs-control-hero">
   <div class="jobs-hero-copy">
-    <p class="eyebrow">Operação</p>
-    <h2>Fila de vídeos</h2>
-    <p>Acompanhe geração, revisão, agenda e publicação em uma fila única.</p>
+    <p class="eyebrow">ShortsFlow</p>
+    <h2>Fila de produção</h2>
+    <p>Roteiro, render, revisão e publicação em um fluxo único. Duração padrão: {{ hub_defaults.target_duration_sec }}s.</p>
   </div>
   <ul class="jobs-operation-summary" aria-label="Resumo de operação">
     <li>
@@ -17,6 +17,10 @@
     <li>
       <span>Na fila</span>
       <strong>{{ pagination.total }}</strong>
+    </li>
+    <li>
+      <span>Modo</span>
+      <strong class="jobs-mode-label">{% if settings.use_mock_providers %}Simulado{% else %}Produção{% endif %}</strong>
     </li>
   </ul>
 </section>

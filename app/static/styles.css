@@ -6882,3 +6882,51 @@ textarea {
     width: 100%;
   }
 }
+
+.topbar-provider-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.42rem 0.72rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgb(15 23 42 / 0.55);
+}
+
+.topbar-provider-badge .material-symbols-outlined {
+  font-size: 1rem;
+}
+
+.topbar-provider-badge.is-live {
+  color: var(--success-state-text);
+  border-color: oklch(68% 0.12 150 / 0.35);
+  background: var(--success-state-bg);
+}
+
+.topbar-provider-badge.is-mock {
+  color: var(--warn-state-text);
+  border-color: oklch(72% 0.12 78 / 0.35);
+  background: var(--warn-state-bg);
+}
+
+.jobs-mode-label {
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
+
+.jobs-hero-copy h2 {
+  margin: 0.15rem 0 0.35rem;
+  font-size: clamp(1.55rem, 2.4vw, 2rem);
+  letter-spacing: -0.03em;
+  color: var(--ink-heading);
+}
+
+.jobs-operation-summary strong.jobs-mode-label {
+  font-size: 0.88rem;
+  font-weight: 700;
+}

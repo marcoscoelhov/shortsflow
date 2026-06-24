@@ -1,1 +1,1 @@
-"""yts-render application package."""
+"""ShortsFlow application package."""

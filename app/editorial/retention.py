@@ -5,7 +5,7 @@ from typing import Any
 from app.utils import stable_hash, word_tokens
 
 
-EDITORIAL_PROMPT_VERSION = "shorts-retention-v3"
+EDITORIAL_PROMPT_VERSION = "shortsflow-retention-v4"
 
 GOLDEN_SCRIPT_SAMPLES = {
     "good": [
@@ -74,6 +74,8 @@ def build_retention_map(target_duration_sec: int) -> dict[str, Any]:
             "cada beat deve subir estranheza, imagem mental ou impacto",
             "loop fica aberto até o payoff no último terço",
             "final deve recontextualizar o começo e provocar replay sem parecer template repetido",
+            "cada cena precisa de imagem mental concreta; evitar beats abstratos ou genéricos",
+            "hook visual nos primeiros 2s sem texto renderizado na tela",
         ],
     }
 

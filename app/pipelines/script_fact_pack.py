@@ -852,7 +852,7 @@ class ScriptFactPackDomain(BasePipeline):
 
     def _scientific_article_fact_pack(self, query: str, research_brief: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
-            with httpx.Client(timeout=httpx.Timeout(8.0, connect=3.0), headers={"User-Agent": "yts-render/1.0 fact-pack"}) as client:
+            with httpx.Client(timeout=httpx.Timeout(8.0, connect=3.0), headers={"User-Agent": "shortsflow/0.2 fact-pack"}) as client:
                 response = client.get(
                     "https://api.openalex.org/works",
                     params={

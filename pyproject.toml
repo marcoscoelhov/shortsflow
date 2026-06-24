@@ -1,7 +1,7 @@
 [project]
-name = "yts-render"
-version = "0.1.0"
-description = "MVP de geracao de YouTube Shorts por IA com hub de revisao."
+name = "shortsflow"
+version = "0.2.0"
+description = "ShortsFlow: geracao de YouTube Shorts por IA com hub de revisao e publicacao."
 requires-python = ">=3.12"
 dependencies = [
   "aiofiles==24.1.0",

@@ -10,14 +10,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="YTS_", env_file=".env", extra="ignore")
 
-    app_name: str = "YTS Render"
+    app_name: str = "ShortsFlow"
     app_url: str = "http://127.0.0.1:8080"
     app_host: str = "127.0.0.1"
     app_port: int = 8080
     hub_auth_token: str | None = None
 
     data_dir: Path = Path("data")
-    database_url: str = "sqlite:///data/yts_render.db"
+    database_url: str = "sqlite:///data/shortsflow.db"
     sqlite_busy_timeout_ms: int = 30_000
     sqlite_journal_mode: str = "WAL"
     sqlite_synchronous: str = "NORMAL"
@@ -25,8 +25,8 @@ class Settings(BaseSettings):
 
     niche_id: str = "curiosidades"
     language: str = "pt-BR"
-    target_duration_sec: int = 50
-    scene_target_count: int = 6
+    target_duration_sec: int = 45
+    scene_target_count: int = 7
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     render_primary_backend: str = "remotion"
     asset_generation_timeout_sec: float = 75.0
     asset_generation_regeneration_rounds: int = 2
-    asset_generation_parallelism: int = 3
+    asset_generation_parallelism: int = 4
     vision_verifier_provider: str = "local_openai"
     local_vision_base_url: str = "http://127.0.0.1:8081/v1"
     local_vision_model: str = "minicpm-v-4.6-q4"

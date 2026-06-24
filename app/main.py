@@ -98,7 +98,7 @@ def _shared_template_context(request: Request) -> dict[str, object]:
 templates = Jinja2Templates(directory=str(settings.templates_dir), context_processors=[_shared_template_context])
 
 HUB_DEFAULT_NICHE = "curiosidades"
-HUB_RETENTION_OPTIMIZED_DURATION_SEC = 50
+HUB_RETENTION_OPTIMIZED_DURATION_SEC = 45
 HUB_RANDOM_THEME_POOL = [
     "Por que o pão fica duro e a bolacha fica mole?",
     "Por que o espelho embaça no banho?",

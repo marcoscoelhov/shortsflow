@@ -20,6 +20,12 @@ def healthcheck() -> dict[str, Any]:
         "app": settings.app_name,
         "bind": f"{settings.app_host}:{settings.app_port}",
         "tailnet_url": f"https://{settings.tailscale_hostname}.{settings.tailnet_domain}",
+        "providers": {
+            "mode": "mock" if settings.use_mock_providers else "production",
+            "llm_primary": settings.llm_primary_provider,
+            "tts_primary": settings.tts_primary_provider,
+            "render_backend": settings.render_primary_backend,
+        },
         "render": {
             "primary_backend": settings.render_primary_backend,
             "remotion_ready": bool(remotion["ready"]),

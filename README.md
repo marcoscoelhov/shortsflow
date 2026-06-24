@@ -1,8 +1,8 @@
-# YTS Render
+# ShortsFlow
 
 App FastAPI para gerar Shorts verticais em pt-BR, revisar o resultado em um hub web e publicar no YouTube em fluxo manual ou via API.
 
-Explicado para leigos: o YTS Render e uma fabrica local de Shorts. Voce entrega uma ideia, titulo ou roteiro; o app transforma isso em roteiro estruturado, imagens, narracao, legenda, musica, video vertical, checklist de publicacao e agenda. A pessoa revisora entra no fim para assistir, aprovar e publicar com seguranca.
+Explicado para leigos: o ShortsFlow e uma fabrica local de Shorts. Voce entrega uma ideia, titulo ou roteiro; o app transforma isso em roteiro estruturado, imagens, narracao, legenda, musica, video vertical, checklist de publicacao e agenda. A pessoa revisora entra no fim para assistir, aprovar e publicar com seguranca.
 
 O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipeline multimidia, gates de qualidade/factualidade/visual/monetizacao, aprovacao humana, agenda de publicacao, calendario, metadados de upload e integracao OAuth com YouTube.
 
@@ -23,8 +23,8 @@ O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipelin
 ## Comeco rapido
 
 ```bash
-git clone https://github.com/marcoscoelhov/yts-render.git
-cd yts-render
+git clone https://github.com/marcoscoelhov/shortsflow.git
+cd shortsflow
 
 python3.12 -m venv .venv
 source .venv/bin/activate
@@ -43,7 +43,7 @@ Para rodar sem custo de API:
 
 ```env
 YTS_USE_MOCK_PROVIDERS=true
-YTS_DATABASE_URL=sqlite:///data/yts_render.db
+YTS_DATABASE_URL=sqlite:///data/shortsflow.db
 YTS_DATA_DIR=data
 ```
 

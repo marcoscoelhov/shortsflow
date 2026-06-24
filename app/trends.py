@@ -105,7 +105,7 @@ class TrendResearcher:
 
     def _google_trends_candidates(self) -> list[TrendCandidate]:
         try:
-            with httpx.Client(timeout=httpx.Timeout(self.timeout_sec, connect=3.0), headers={"User-Agent": "yts-render/1.0 trend-research"}) as client:
+            with httpx.Client(timeout=httpx.Timeout(self.timeout_sec, connect=3.0), headers={"User-Agent": "shortsflow/0.2 trend-research"}) as client:
                 response = client.get(self.GOOGLE_TRENDS_BR_URL)
                 response.raise_for_status()
                 xml_text = response.text

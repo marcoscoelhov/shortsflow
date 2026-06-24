@@ -1,5 +1,5 @@
 ---
-name: YTS Render
+name: ShortsFlow
 description: Operational review hub for AI-assisted YouTube Shorts production.
 colors:
   obsidian-bg: "#09090b"
@@ -69,13 +69,13 @@ components:
     padding: "1.2rem"
 ---
 
-# Design System: YTS Render
+# Design System: ShortsFlow
 
 ## 1. Overview
 
 **Creative North Star: "The Production Desk"**
 
-YTS Render should feel like a compact production desk for a channel operator: dark enough for long editing and review sessions, restrained enough for repeated work, and precise enough to separate generation, review, scheduling, and publication decisions. The interface serves the workflow; it should not perform like a brand page.
+ShortsFlow should feel like a compact production desk for a channel operator: dark enough for long editing and review sessions, restrained enough for repeated work, and precise enough to separate generation, review, scheduling, and publication decisions. The interface serves the workflow; it should not perform like a brand page.
 
 The system uses a dark operational shell, warm text, ember accents, and quiet semantic colors. Density is intentional. The user should scan a queue, identify risk, open a job, and decide without decoding decorative UI.
 

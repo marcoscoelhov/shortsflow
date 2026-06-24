@@ -14,7 +14,7 @@ class TopicRequestCreate(BaseModel):
     seed_theme: str = Field(min_length=3)
     niche_id: str = "curiosidades"
     language: str = "pt-BR"
-    target_duration_sec: int = 50
+    target_duration_sec: int = 45
     tone: str = "intrigante_direto"
     cta_style: Literal["none", "soft"] = "none"
     notes: str | None = None

@@ -48,7 +48,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     {% block head_extra %}{% endblock %}
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css?v=automation-alerts-topbar-20260621">
+    <link rel="stylesheet" href="/static/styles.css?v=shortsflow-brand-20260624">
     <script src="/static/htmx.min.js" defer></script>
   </head>
   <body>
@@ -66,6 +66,10 @@
           <input id="topbar_search" name="search" value="{{ filters.search if filters is defined else '' }}" placeholder="Buscar por título, tema ou job_id">
         </form>
         <div class="topbar-actions" aria-label="Ações rápidas">
+          <span class="topbar-provider-badge {% if settings.use_mock_providers %}is-mock{% else %}is-live{% endif %}" title="{% if settings.use_mock_providers %}Providers em modo simulado{% else %}Providers reais ativos{% endif %}">
+            <span class="material-symbols-outlined" aria-hidden="true">{% if settings.use_mock_providers %}science{% else %}bolt{% endif %}</span>
+            <span>{% if settings.use_mock_providers %}Simulado{% else %}Produção{% endif %}</span>
+          </span>
           <button type="button" class="topbar-icon topbar-search-trigger" data-open-search aria-label="Buscar jobs">
             <span class="material-symbols-outlined" aria-hidden="true">search</span>
           </button>
@@ -84,7 +88,7 @@
           <button type="button" class="topbar-icon" data-open-operational-settings aria-label="Abrir configurações">
             <span class="material-symbols-outlined" aria-hidden="true">settings</span>
           </button>
-          <a class="topbar-avatar" href="/settings" aria-label="Abrir configurações">YT</a>
+          <a class="topbar-avatar" href="/settings" aria-label="Abrir configurações">SF</a>
         </div>
       </header>
       <aside class="app-sidebar">

@@ -13,7 +13,7 @@ from app.orchestrator import orchestrator
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="yts-render")
+    parser = argparse.ArgumentParser(prog="shortsflow")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("automation-run", help="Executa um ciclo diario de automacao")
