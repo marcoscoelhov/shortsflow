@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     llm_script_draft_timeout_sec: float = 45.0
     minimax_script_timeout_sec: float = 150.0
     llm_publish_audit_timeout_sec: float = 75.0
+    llm_gate_judge_enabled: bool = True
+    llm_gate_judge_timeout_sec: float = 45.0
+    llm_gate_gray_zone_low: float = 0.72
+    llm_gate_gray_zone_high: float = 0.82
     real_run_allow_mock_fallback: bool = False
     scene_prompt_gate_enabled: bool = True
     asset_semantic_threshold: float = 0.80
@@ -226,6 +230,7 @@ class Settings(BaseSettings):
         "llm_script_draft_timeout_sec",
         "minimax_script_timeout_sec",
         "llm_publish_audit_timeout_sec",
+        "llm_gate_judge_timeout_sec",
         "asset_generation_timeout_sec",
         "minimax_text_timeout_sec",
         "minimax_music_timeout_sec",

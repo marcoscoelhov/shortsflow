@@ -14,6 +14,7 @@ from app.db import session_scope
 from app.models import BackgroundMusicAsset, FallbackEvent, Job, NarrationAsset, SceneAsset, ScenePlan, Script, SubtitleTrack, TopicPlan
 from app.pipelines.common import RecoverableStepError, model_payload
 from app.pipelines.base import BasePipeline
+from app.quality.llm_judge import build_visual_judge_payload
 from app.pipelines.image_assets import ImageAssetDomain
 from app.pipelines.music_assets import MusicDomain
 from app.pipelines.subtitle_assets import SubtitleDomain
@@ -127,12 +128,64 @@ class AssetPipeline(BasePipeline):
             selected_assets.append(result["selected_asset"])
             asset_refs.extend(result["asset_refs"])
         asset_gate = self.asset_gate.validate_selected(selected_assets)
-        if not asset_gate.passed:
-            self.storage.persist_json(job.job_id, "asset_quality_report.json", {"reasons": asset_gate.reasons, "metrics": asset_gate.metrics})
-            raise RecoverableStepError(f"asset quality gate failed: {', '.join(asset_gate.reasons[:6])}")
         visual_contract = self._visual_contract_artifact_payload(job.job_id)
         asset_visual_gate = self.asset_visual_gate.validate(selected_assets, scene_plan.scenes, visual_contract=visual_contract)
         visual_impact_gate = self.visual_impact_gate.validate(selected_assets, scene_plan.scenes, visual_contract=visual_contract)
+        combined_visual_reasons = [*asset_gate.reasons, *asset_visual_gate.reasons, *visual_impact_gate.reasons]
+        visual_gate_passed = asset_gate.passed and asset_visual_gate.passed and visual_impact_gate.passed
+        if not visual_gate_passed and self.llm_judge.may_consider_override(combined_visual_reasons):
+            visual_judge = self.llm_judge.judge_visual_assets(
+                build_visual_judge_payload(
+                    scenes=scene_plan.scenes,
+                    selected_assets=selected_assets,
+                    visual_contract=visual_contract,
+                    local_reasons=combined_visual_reasons,
+                    local_metrics={
+                        "asset_gate": asset_gate.metrics,
+                        "asset_visual_gate": asset_visual_gate.metrics,
+                        "visual_impact_gate": visual_impact_gate.metrics,
+                    },
+                )
+            )
+            if self.llm_judge.should_override(local_passed=False, local_reasons=combined_visual_reasons, judge=visual_judge):
+                asset_gate = type(asset_gate)(True, [], asset_gate.metrics)
+                asset_visual_gate = type(asset_visual_gate)(
+                    True,
+                    [],
+                    {
+                        **asset_visual_gate.metrics,
+                        "asset_visual_gate_pass": True,
+                        "checked": True,
+                        "llm_judge_override": True,
+                    },
+                )
+                visual_impact_gate = type(visual_impact_gate)(
+                    True,
+                    [],
+                    {
+                        **visual_impact_gate.metrics,
+                        "visual_impact_gate_pass": True,
+                        "llm_judge_override": True,
+                    },
+                )
+                self._persist_llm_judge_artifact(
+                    job.job_id,
+                    "visual_assets",
+                    local_reasons=combined_visual_reasons,
+                    judge_result=visual_judge,
+                    overridden=True,
+                )
+            else:
+                self._persist_llm_judge_artifact(
+                    job.job_id,
+                    "visual_assets",
+                    local_reasons=combined_visual_reasons,
+                    judge_result=visual_judge,
+                    overridden=False,
+                )
+        if not asset_gate.passed:
+            self.storage.persist_json(job.job_id, "asset_quality_report.json", {"reasons": asset_gate.reasons, "metrics": asset_gate.metrics})
+            raise RecoverableStepError(f"asset quality gate failed: {', '.join(asset_gate.reasons[:6])}")
         self.storage.persist_json(
             job.job_id,
             "asset_visual_gate.json",

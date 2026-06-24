@@ -87,6 +87,7 @@ from app.quality.scene_gate import ScenePlanGate
 from app.quality.script_gate import ScriptQualityGate
 from app.quality.subtitle_gate import BAD_ENDINGS, SubtitleGate
 from app.quality.growth_score_gate import GrowthScoreGate
+from app.quality.llm_judge import LlmQualityJudge
 from app.quality.metadata_ctr_gate import MetadataCTRGate
 from app.quality.viral_intensity_gate import ViralIntensityGate
 from app.quality.visual_impact_gate import VisualImpactGate
@@ -239,6 +240,13 @@ class JobOrchestrator:
         self.visual_impact_gate = VisualImpactGate()
         self.metadata_ctr_gate = MetadataCTRGate()
         self.growth_score_gate = GrowthScoreGate()
+        self.llm_judge = LlmQualityJudge(
+            enabled=self.settings.llm_gate_judge_enabled,
+            timeout_sec=self.settings.llm_gate_judge_timeout_sec,
+            gray_zone_low=self.settings.llm_gate_gray_zone_low,
+            gray_zone_high=self.settings.llm_gate_gray_zone_high,
+            judge_callable=lambda gate_kind, payload: self.providers.creative.judge_quality_gate(gate_kind, payload),
+        )
         self.visual_contract_gate = VisualContractGate()
         self.scene_gate = ScenePlanGate()
         self.asset_gate = AssetGate()

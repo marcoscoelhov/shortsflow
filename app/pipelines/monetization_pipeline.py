@@ -15,6 +15,11 @@ from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
 from app.models import BackgroundMusicAsset, Job, NarrationAsset, PerformanceMetric, PublicationSchedule, RenderOutput, ReviewRecord, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRequest
 from app.pipelines.base import BasePipeline
 from app.quality.auto_visual_review import AutoVisualReviewService
+from app.quality.llm_judge import (
+    build_editorial_judge_payload,
+    build_growth_judge_payload,
+    build_metadata_judge_payload,
+)
 from app.utils import iso_now, stable_hash, word_tokens
 
 
@@ -147,6 +152,38 @@ class MonetizationPipeline(BasePipeline):
             self.storage.persist_json(job.job_id, "publish_metadata_overrides.json", self._serialize_for_json(metadata_repair["overrides"]))
             self.storage.persist_json(job.job_id, "growth_metadata_repair.json", self._serialize_for_json(metadata_repair))
         metadata_ctr_metrics = dict(metadata_ctr.metrics)
+        if not metadata_ctr.passed and self.llm_judge.may_consider_override(metadata_ctr.reasons):
+            metadata_judge = self.llm_judge.judge_metadata_ctr(
+                build_metadata_judge_payload(
+                    topic_plan=topic_plan,
+                    script=script,
+                    hashtags=tags,
+                    local_reasons=metadata_ctr.reasons,
+                    local_metrics=metadata_ctr_metrics,
+                )
+            )
+            if self.llm_judge.should_override(local_passed=False, local_reasons=metadata_ctr.reasons, judge=metadata_judge):
+                metadata_ctr_metrics["metadata_ctr_gate_pass"] = True
+                metadata_ctr_metrics["metadata_ctr_llm_judge_override"] = True
+                metadata_ctr_metrics["metadata_ctr_score"] = max(
+                    float(metadata_ctr_metrics.get("metadata_ctr_score") or 0.0),
+                    float(metadata_judge.scores.get("metadata_ctr") or metadata_judge.confidence),
+                )
+                self._persist_llm_judge_artifact(
+                    job.job_id,
+                    "metadata_ctr",
+                    local_reasons=metadata_ctr.reasons,
+                    judge_result=metadata_judge,
+                    overridden=True,
+                )
+            else:
+                self._persist_llm_judge_artifact(
+                    job.job_id,
+                    "metadata_ctr",
+                    local_reasons=metadata_ctr.reasons,
+                    judge_result=metadata_judge,
+                    overridden=False,
+                )
         if (
             ready_script_fact_check_confirmed
             or ready_script_bank_human_validated
@@ -221,20 +258,60 @@ class MonetizationPipeline(BasePipeline):
         manual_required = list(dict.fromkeys(manual_required))
         warnings = list(dict.fromkeys(warnings))
         growth_report = self.growth_score_gate.evaluate(job.quality_summary or {}, {"hard_blockers": hard_blockers, "manual_required": manual_required})
+        growth_metrics = dict(growth_report.metrics)
+        growth_reasons = list(growth_report.reasons)
+        growth_decision = growth_report.decision
+        growth_passed = growth_report.passed
+        growth_score_value = float(growth_metrics.get("growth_score") or 0.0)
+        if (
+            self.llm_judge.enabled
+            and (not growth_passed or self.llm_judge.in_growth_gray_zone(growth_score_value))
+            and self.llm_judge.may_consider_override(growth_reasons)
+        ):
+            growth_judge = self.llm_judge.judge_growth_score(
+                build_growth_judge_payload(
+                    quality_summary=job.quality_summary or {},
+                    local_reasons=growth_reasons,
+                    local_metrics=growth_metrics,
+                    monetization_context={"hard_blockers": hard_blockers, "manual_required": manual_required},
+                )
+            )
+            if self.llm_judge.should_override(local_passed=growth_passed, local_reasons=growth_reasons, judge=growth_judge):
+                growth_passed = True
+                growth_decision = "ready_for_growth_review"
+                growth_reasons = []
+                growth_metrics["growth_score_gate_pass"] = True
+                growth_metrics["growth_score_llm_judge_override"] = True
+                growth_metrics["growth_score"] = max(growth_score_value, float(growth_judge.scores.get("growth_readiness") or growth_judge.confidence))
+                self._persist_llm_judge_artifact(
+                    job.job_id,
+                    "growth_score",
+                    local_reasons=growth_report.reasons,
+                    judge_result=growth_judge,
+                    overridden=True,
+                )
+            else:
+                self._persist_llm_judge_artifact(
+                    job.job_id,
+                    "growth_score",
+                    local_reasons=growth_report.reasons,
+                    judge_result=growth_judge,
+                    overridden=False,
+                )
         self.storage.persist_json(
             job.job_id,
             "growth_score_report.json",
-            self._serialize_for_json({"decision": growth_report.decision, "reasons": growth_report.reasons, "metrics": growth_report.metrics}),
+            self._serialize_for_json({"decision": growth_decision, "reasons": growth_reasons, "metrics": growth_metrics}),
         )
         quality_summary = dict(job.quality_summary or {})
-        quality_summary["growth_score"] = {"decision": growth_report.decision, "reasons": growth_report.reasons, **growth_report.metrics}
+        quality_summary["growth_score"] = {"decision": growth_decision, "reasons": growth_reasons, **growth_metrics}
         job.quality_summary = quality_summary
-        if not growth_report.passed and growth_report.decision == "repair_required":
+        if not growth_passed and growth_decision == "repair_required":
             if ready_script_bank_human_validated:
-                warnings.extend(growth_report.reasons)
+                warnings.extend(growth_reasons)
             else:
                 hard_blockers.append("growth_score_gate_not_passed")
-                warnings.extend(growth_report.reasons)
+                warnings.extend(growth_reasons)
                 hard_blockers = list(dict.fromkeys(hard_blockers))
                 warnings = list(dict.fromkeys(warnings))
         human_review_checklist = self.build_human_review_checklist(
@@ -267,7 +344,7 @@ class MonetizationPipeline(BasePipeline):
             "channel_repetition_report": channel_repetition_report,
             "metadata_review": metadata_review,
             "metadata_ctr": {"reasons": metadata_ctr.reasons, "metrics": metadata_ctr_metrics},
-            "growth_score": {"decision": growth_report.decision, "reasons": growth_report.reasons, "metrics": growth_report.metrics},
+            "growth_score": {"decision": growth_decision, "reasons": growth_reasons, "metrics": growth_metrics},
             "publish_readiness": publish_readiness,
             "ready_script_publish_policy": (
                 "human_validated_bank_script_editorial_warnings_only"
@@ -1150,8 +1227,22 @@ class MonetizationPipeline(BasePipeline):
         ending = str(script_dict.get("ending") or "").strip()
         narration = str(script_dict.get("full_narration") or "").strip()
         last_sentence = re.split(r"(?<=[.!?])\s+", narration)[-1] if narration else ""
-        if len(word_tokens(ending or last_sentence)) < 6 or re.search(r"\b(?:que|de|da|do|para|com|e)$", (ending or last_sentence).lower().strip(" .!?")):
-            reasons.append("weak_ending")
+        weak_ending_heuristic = len(word_tokens(ending or last_sentence)) < 6 or bool(
+            re.search(r"\b(?:que|de|da|do|para|com|e)$", (ending or last_sentence).lower().strip(" .!?"))
+        )
+        if weak_ending_heuristic:
+            if self.llm_judge.may_consider_override(["weak_ending"]):
+                judge_payload = build_editorial_judge_payload(
+                    script=script_dict,
+                    local_reasons=["weak_ending"],
+                    local_metrics={},
+                    gate_name="publish_readiness_ending",
+                )
+                ending_judge = self.llm_judge.judge_editorial(judge_payload)
+                if not self.llm_judge.should_override(local_passed=False, local_reasons=["weak_ending"], judge=ending_judge):
+                    reasons.append("weak_ending")
+            else:
+                reasons.append("weak_ending")
         if minimax_audit and minimax_audit.get("passed") is False:
             reasons.extend(str(reason) for reason in minimax_audit.get("reasons") or ["minimax_audit_failed"])
         if fact_pack.get("status") != "verified" and not low_risk_common_auto_allowed:

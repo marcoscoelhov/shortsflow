@@ -5,6 +5,7 @@ from typing import Any
 
 from app.editorial.retention import attach_retention_metadata, build_retention_map
 from app.pipelines.base import BasePipeline
+from app.quality.llm_judge import build_editorial_judge_payload
 from app.pipelines.common import RecoverableStepError
 from app.pipelines.script_metrics import normalize_script_metrics
 from app.quality.script_gate import REWATCH_LOOP_PATTERN, ScriptGateResult
@@ -724,8 +725,33 @@ class ScriptRepairDomain(BasePipeline):
             }
             return script, script["qa_metrics"]
 
+        combined_reasons = [*gate_result.reasons, *consistency_reasons]
+        if job_id and self.llm_judge.may_consider_override(combined_reasons):
+            judge = self.llm_judge.judge_editorial(
+                build_editorial_judge_payload(
+                    script=script,
+                    local_reasons=combined_reasons,
+                    local_metrics=gate_result.metrics,
+                    gate_name="script_quality",
+                )
+            )
+            if self.llm_judge.should_override(local_passed=False, local_reasons=combined_reasons, judge=judge):
+                metrics = self.llm_judge.merge_editorial_metrics(gate_result.metrics, judge, local_reasons=combined_reasons)
+                metrics.update(
+                    {
+                        "fact_pack_consistency_pass": not consistency_reasons,
+                        "script_repair_attempts_log": attempts_log,
+                        "script_quality_gate_pass": True,
+                        **self._claim_trace_metrics(script),
+                    }
+                )
+                script["qa_metrics"] = metrics
+                self._persist_llm_judge_artifact(job_id, "editorial", local_reasons=combined_reasons, judge_result=judge, overridden=True)
+                return script, metrics
+            self._persist_llm_judge_artifact(job_id, "editorial", local_reasons=combined_reasons, judge_result=judge, overridden=False)
+
         repair_attempts = max(0, self.settings.llm_script_repair_attempts)
-        last_reasons = [*gate_result.reasons, *consistency_reasons]
+        last_reasons = combined_reasons
         self._persist_script_rejection(job_id, script, gate_result.metrics, consistency_reasons)
         for repair_attempt in range(1, repair_attempts + 1):
             try:

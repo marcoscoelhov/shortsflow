@@ -16,6 +16,7 @@ from app.pipelines.script_audit import ScriptAuditDomain
 from app.pipelines.script_fact_pack import ScriptFactPackDomain
 from app.pipelines.script_metrics import normalize_script_metrics
 from app.pipelines.script_repair import ScriptRepairDomain
+from app.quality.llm_judge import build_editorial_judge_payload
 from app.utils import new_id, stable_hash, utcnow
 
 
@@ -284,6 +285,23 @@ class ScriptPipeline(BasePipeline):
         result = self.viral_intensity_gate.validate(script)
         if result.passed:
             return script, self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode), None
+        repair_reasons = [str(reason) for reason in result.reasons]
+        if self.llm_judge.may_consider_override(repair_reasons):
+            judge = self.llm_judge.judge_editorial(
+                build_editorial_judge_payload(
+                    script=script,
+                    local_reasons=repair_reasons,
+                    local_metrics=result.metrics,
+                    gate_name="viral_intensity",
+                )
+            )
+            if self.llm_judge.should_override(local_passed=False, local_reasons=repair_reasons, judge=judge):
+                metrics = self.llm_judge.merge_editorial_metrics(result.metrics, judge, local_reasons=repair_reasons)
+                metrics["viral_intensity_gate_pass"] = True
+                metrics["viral_intensity_reasons"] = repair_reasons
+                self._persist_llm_judge_artifact(job_id, "editorial", local_reasons=repair_reasons, judge_result=judge, overridden=True)
+                return script, metrics, None
+            self._persist_llm_judge_artifact(job_id, "editorial", local_reasons=repair_reasons, judge_result=judge, overridden=False)
         if ready_script_bank_mode:
             metrics = self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode, raise_on_fail=False)
             metrics["ready_script_bank_policy"] = "viral_intensity_diagnostic_only"
@@ -292,7 +310,6 @@ class ScriptPipeline(BasePipeline):
             metrics = self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode, raise_on_fail=False)
             self._persist_script_rejection(job_id, script, {"viral_intensity": metrics}, ["script_viral_intensity_low"])
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(result.reasons[:6])}")
-        repair_reasons = [str(reason) for reason in result.reasons]
         original_metrics = self._viral_intensity_metrics(result, ready_script_mode=False, raise_on_fail=False)
         try:
             candidate = self.providers.creative.repair_script(script, repair_reasons, plan_dict)

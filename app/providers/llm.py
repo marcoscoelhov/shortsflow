@@ -271,6 +271,20 @@ class MockCreativeProvider:
     def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {"passed": True, "reasons": [], "retention_score": 0.85, "metadata_score": 0.85, "factual_score": 0.85, "provider": "mock"}
 
+    def judge_quality_gate(self, gate_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        local_reasons = [str(item) for item in (payload.get("local_reasons") or [])]
+        editorial_pass = gate_kind == "editorial" and (
+            not local_reasons or local_reasons == ["weak_ending"] or "weak_ending" in local_reasons
+        )
+        return {
+            "passed": editorial_pass or gate_kind != "editorial",
+            "confidence": 0.88 if editorial_pass or gate_kind != "editorial" else 0.4,
+            "reasons": [] if editorial_pass or gate_kind != "editorial" else local_reasons[:3],
+            "scores": {"growth_readiness": 0.86, "visual_impact": 0.86, "metadata_ctr": 0.86},
+            "provider": "mock",
+            "gate_kind": gate_kind,
+        }
+
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         words = word_tokens(script["full_narration"])
         total_words = len(words)
@@ -701,6 +715,59 @@ Sem markdown.
         audit = self._json_completion(prompt)
         audit["provider"] = self.provider_name
         return audit
+
+    def judge_quality_gate(self, gate_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        compact = json.dumps(payload, ensure_ascii=False)
+        prompts = {
+            "editorial": f"""
+Você é juiz editorial de YouTube Shorts em pt-BR. Avalie se o roteiro é publicável apesar dos alertas locais heurísticos.
+Entrada JSON: {compact}
+
+Responda JSON estrito com: passed, confidence (0 a 1), reasons (slugs curtos em inglês), scores (viral_intensity, ending_strength, loop_closure de 0 a 1), notes (pt-BR curto).
+Regras:
+- passed=true só se hook parar scroll, loop abrir tensão, payoff no último terço e ending fechar o começo sem truncar.
+- não reprove metáfora, ritmo curto ou estilo oral só por preferência; reprove truncamento real, ending genérico ou hook didático.
+- reasons deve usar slugs como weak_ending, low_retention, hook_not_scroll_stopping quando reprovar.
+Sem markdown.
+""",
+            "metadata_ctr": f"""
+Você é juiz de metadata para YouTube Shorts em pt-BR.
+Entrada JSON: {compact}
+
+Responda JSON estrito com: passed, confidence, reasons, scores (metadata_ctr, title_click_tension, hashtag_fit de 0 a 1), notes.
+Regras:
+- passed=true se título gera curiosidade concreta sem clickbait falso e hashtags ajudam descoberta.
+- reprove título puramente explicativo ("Por que...", "Como funciona...") sem tensão.
+Sem markdown.
+""",
+            "visual_assets": f"""
+Você é juiz visual de Shorts verticais. Use prompts, scores e papéis de retenção; não vê pixels.
+Entrada JSON: {compact}
+
+Responda JSON estrito com: passed, confidence, reasons, scores (visual_impact, first_frame_scroll_stop, asset_semantic_fit de 0 a 1), notes.
+Regras:
+- passed=true se cena 1 parece scroll-stopping, progressão visual coerente e assets alinhados à narração.
+- reprove abertura genérica stock, hook ilegível ou payoff visual cedo demais.
+Sem markdown.
+""",
+            "growth_score": f"""
+Você é comitê de growth para Short pronto para revisão humana.
+Entrada JSON: {compact}
+
+Responda JSON estrito com: passed, confidence, reasons, scores (growth_readiness de 0 a 1), notes.
+Regras:
+- passed=true se o pacote merece revisão humana agora, mesmo com alertas locais não críticos.
+- reprove apenas bloqueios editoriais graves (factualidade, visual inutilizável, metadata impossível).
+Sem markdown.
+""",
+        }
+        prompt = prompts.get(gate_kind)
+        if not prompt:
+            return {"passed": False, "reasons": ["unknown_gate_kind"], "confidence": 0.0, "provider": self.provider_name, "gate_kind": gate_kind}
+        result = self._json_completion(prompt)
+        result["provider"] = self.provider_name
+        result["gate_kind"] = gate_kind
+        return result
 
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         prompt = f"""
@@ -1173,6 +1240,47 @@ class ResilientCreativeProvider:
         if not self.fallback:
             raise ProviderFailure("llm_registry", "no publish audit llm provider is available")
         return self.fallback.audit_publish_package(payload)
+
+    def judge_quality_gate(self, gate_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        candidates = self._quality_judge_candidates()
+        if not candidates:
+            return {"passed": False, "reasons": ["llm_judge_unavailable"], "confidence": 0.0, "provider": "none", "gate_kind": gate_kind}
+        failures: list[str] = []
+        timeout_sec = float(getattr(self.settings, "llm_gate_judge_timeout_sec", 45.0))
+        for role, provider in candidates:
+            try:
+                result = self._run_primary_with_timeout(
+                    lambda provider=provider: provider.judge_quality_gate(gate_kind, payload),
+                    timeout_sec=timeout_sec,
+                )
+                result["judge_provider_role"] = role
+                return result
+            except concurrent.futures.TimeoutError:
+                failures.append(f"{role} timed out after {timeout_sec}s")
+            except ProviderFailure as exc:
+                failures.append(str(exc))
+        return {
+            "passed": False,
+            "reasons": ["llm_judge_failed", *failures[:2]],
+            "confidence": 0.0,
+            "provider": "llm_registry",
+            "gate_kind": gate_kind,
+        }
+
+    def _quality_judge_candidates(self) -> list[tuple[str, Any]]:
+        candidates: list[tuple[str, Any]] = []
+        seen: set[int] = set()
+        for role, provider in (
+            ("repair", self.repair_provider),
+            ("script_draft", self.script_draft_provider),
+            ("primary", self.primary),
+            ("fallback", self.fallback),
+        ):
+            if provider is None or id(provider) in seen or not hasattr(provider, "judge_quality_gate"):
+                continue
+            seen.add(id(provider))
+            candidates.append((role, provider))
+        return candidates
 
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         if self.primary:
