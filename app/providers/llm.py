@@ -1107,6 +1107,7 @@ class ResilientCreativeProvider:
         self.script_draft_provider = self.registry.script_draft_provider()
         self.repair_provider = self.registry.repair_provider()
         self.scene_provider = self.registry.scene_provider()
+        self.gate_judge_provider = self.registry.gate_judge_provider()
         self.strict_minimax_validation = self.settings.strict_minimax_validation
 
     def plan_topic(
@@ -1271,10 +1272,9 @@ class ResilientCreativeProvider:
         candidates: list[tuple[str, Any]] = []
         seen: set[int] = set()
         for role, provider in (
-            ("repair", self.repair_provider),
-            ("script_draft", self.script_draft_provider),
-            ("primary", self.primary),
+            ("gate_judge", self.gate_judge_provider),
             ("fallback", self.fallback),
+            ("repair", self.repair_provider),
         ):
             if provider is None or id(provider) in seen or not hasattr(provider, "judge_quality_gate"):
                 continue
@@ -1476,6 +1476,17 @@ class LLMProviderRegistry:
         if self.settings.use_mock_providers:
             return MockCreativeProvider()
         return self._build_provider(self.settings.llm_scene_provider, required=False)
+
+    def gate_judge_provider(self) -> LLMProvider | None:
+        if self.settings.use_mock_providers:
+            return MockCreativeProvider()
+        provider = self._build_provider(self.settings.llm_gate_judge_provider, required=False)
+        if provider is None:
+            return None
+        judge_model = (self.settings.llm_gate_judge_model or "").strip()
+        if judge_model and hasattr(provider, "model_name"):
+            provider.model_name = judge_model
+        return provider
 
     def _build_provider(self, name: str, required: bool) -> LLMProvider | None:
         normalized = (name or "").strip().lower()

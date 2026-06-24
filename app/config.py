@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     minimax_script_timeout_sec: float = 150.0
     llm_publish_audit_timeout_sec: float = 75.0
     llm_gate_judge_enabled: bool = True
+    llm_gate_judge_provider: str = "openai"
+    llm_gate_judge_model: str | None = "gpt-5.4"
     llm_gate_judge_timeout_sec: float = 45.0
     llm_gate_gray_zone_low: float = 0.72
     llm_gate_gray_zone_high: float = 0.82

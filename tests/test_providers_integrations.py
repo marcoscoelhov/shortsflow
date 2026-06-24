@@ -211,6 +211,57 @@ def test_llm_registry_supports_openai_primary_provider(monkeypatch) -> None:
 
     assert registry.primary_provider().provider_name == "openai"
 
+
+def test_gate_judge_provider_uses_strong_openai_model(monkeypatch) -> None:
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = SimpleNamespace(create=lambda **_kwargs: None)
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            llm_gate_judge_provider="openai",
+            llm_gate_judge_model="gpt-5.4",
+            openai_api_key="openai-key",
+            openai_base_url="https://api.openai.com/v1",
+            openai_model="gpt-5.4-nano",
+            openai_timeout_sec=120,
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    provider = LLMProviderRegistry().gate_judge_provider()
+
+    assert provider is not None
+    assert provider.provider_name == "openai"
+    assert provider.model_name == "gpt-5.4"
+
+
+def test_quality_judge_candidates_prioritize_gate_judge_provider() -> None:
+    class Judge:
+        provider_name = "openai"
+
+        def judge_quality_gate(self, gate_kind: str, payload: dict) -> dict:
+            return {"passed": True, "confidence": 0.9, "reasons": [], "provider": "openai", "gate_kind": gate_kind}
+
+    class Repair:
+        provider_name = "deepseek"
+
+        def judge_quality_gate(self, gate_kind: str, payload: dict) -> dict:
+            return {"passed": False, "confidence": 0.0, "reasons": ["repair"], "provider": "deepseek", "gate_kind": gate_kind}
+
+    resilient = object.__new__(ResilientCreativeProvider)
+    resilient.settings = SimpleNamespace(llm_gate_judge_timeout_sec=30.0)
+    resilient.gate_judge_provider = Judge()
+    resilient.fallback = None
+    resilient.repair_provider = Repair()
+
+    roles = [role for role, _provider in resilient._quality_judge_candidates()]
+
+    assert roles == ["gate_judge", "repair"]
+
+
 def test_resilient_creative_provider_uses_minimax_before_deepseek_fallback() -> None:
     provider = object.__new__(ResilientCreativeProvider)
     provider.settings = SimpleNamespace(

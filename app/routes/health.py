@@ -23,6 +23,8 @@ def healthcheck() -> dict[str, Any]:
         "providers": {
             "mode": "mock" if settings.use_mock_providers else "production",
             "llm_primary": settings.llm_primary_provider,
+            "llm_gate_judge": settings.llm_gate_judge_provider,
+            "llm_gate_judge_model": settings.llm_gate_judge_model,
             "tts_primary": settings.tts_primary_provider,
             "render_backend": settings.render_primary_backend,
         },

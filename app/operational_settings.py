@@ -67,6 +67,21 @@ OPERATIONAL_SETTING_SPECS = (
         PROVIDER_OPTIONS,
         description="Cria o plano textual de cenas e prompts; nao gera imagens.",
     ),
+    OperationalSettingSpec(
+        "llm_gate_judge_provider",
+        "Juiz LLM dos gates",
+        "LLM",
+        "select",
+        PROVIDER_OPTIONS,
+        description="Provider forte para juiz editorial (viral, metadata, visual, growth). Recomendado: OpenAI.",
+    ),
+    OperationalSettingSpec(
+        "llm_gate_judge_model",
+        "Modelo do juiz LLM",
+        "LLM",
+        "text",
+        description="Override opcional do modelo do juiz. Ex: gpt-5.4. Vazio usa o modelo padrao do provider.",
+    ),
     OperationalSettingSpec("llm_enable_fallback", "Fallback ativo", "LLM", "checkbox"),
     OperationalSettingSpec(
         "background_music_provider",
@@ -411,6 +426,8 @@ def _coerce_value(spec: OperationalSettingSpec, value: Any) -> Any:
         return number
     cleaned = str(value).strip()
     if not cleaned:
+        if spec.key == "llm_gate_judge_model":
+            return None
         raise ValueError(f"{spec.label} nao pode ficar vazio")
     allowed_options = {option_value for option_value, _label in spec.options}
     if allowed_options and cleaned not in allowed_options:
