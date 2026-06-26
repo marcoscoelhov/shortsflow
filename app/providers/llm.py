@@ -940,6 +940,39 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
             timeout=self.timeout_sec,
         )
 
+    def _json_completion(self, prompt: str) -> Any:
+        settings = get_settings()
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": "Return valid JSON only. No markdown fences. The response must be a JSON object."},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.7,
+                max_tokens=int(getattr(settings, "llm_json_max_tokens", 4096) or 4096),
+                timeout=self.timeout_sec,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
+        raw = (response.choices[0].message.content or "").strip()
+        if not raw:
+            raise ProviderFailure(self.failure_provider_name, "empty text response")
+        raw = self._strip_think(raw)
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        try:
+            return json.loads(raw)
+        except Exception as exc:  # noqa: BLE001
+            extracted = self._extract_json(raw)
+            if extracted is not None:
+                try:
+                    return json.loads(extracted)
+                except Exception:
+                    pass
+            raise ProviderFailure(self.failure_provider_name, f"invalid json: {raw[:300]}") from exc
+
 
 class GeminiCreativeProvider(MinimaxCreativeProvider):
     provider_name = "gemini"
@@ -1509,6 +1542,8 @@ class LLMProviderRegistry:
                 return XAICreativeProvider()
             if normalized in {"deepseek", "deepseek_v4", "deepseek_v4_flash", "deepseek-v4-flash", "deepseek_v4_pro", "deepseek-v4-pro"}:
                 return DeepSeekCreativeProvider()
+            if normalized in {"qwen", "qwen_plus", "qwen-plus", "qwen3.7-plus", "qwen3_7_plus", "qwen3.6-max", "qwen3.6-max-preview"}:
+                return QwenCreativeProvider()
             if normalized in {"gemini", "gemini_flash", "gemini-flash", "gemini_3_5_flash", "gemini-3.5-flash"}:
                 return GeminiCreativeProvider()
         except ProviderFailure:

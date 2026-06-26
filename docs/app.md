@@ -314,7 +314,10 @@ Defaults importantes:
 - `language=pt-BR`
 - `target_duration_sec=50`
 - `llm_primary_provider=deepseek`
-- `llm_fallback_provider=deepseek`
+- `llm_fallback_provider=disabled`
+- `llm_gate_judge_provider=deepseek`
+- `llm_gate_judge_model=deepseek-v4-flash`
+- `llm_json_max_tokens=4096`
 - `youtube_publish_mode=manual`
 - `youtube_api_enabled=false`
 - `automation_enabled=false`

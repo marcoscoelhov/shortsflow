@@ -29,6 +29,7 @@ def test_deepseek_provider_uses_v4_flash_openai_compatible_client(monkeypatch) -
         deepseek_base_url="https://api.deepseek.com",
         deepseek_model="deepseek-v4-flash",
         deepseek_timeout_sec=90,
+        llm_json_max_tokens=4096,
     )
 
     class FakeCompletions:
@@ -76,7 +77,34 @@ def test_deepseek_provider_uses_v4_flash_openai_compatible_client(monkeypatch) -
     assert captured["client_kwargs"]["api_key"] == "deepseek-key"
     assert captured["client_kwargs"]["base_url"] == "https://api.deepseek.com"
     assert captured["model"] == "deepseek-v4-flash"
+    assert captured["response_format"] == {"type": "json_object"}
+    assert captured["max_tokens"] == 4096
     assert result["qa_metrics"]["repair_provider"] == "deepseek"
+
+def test_llm_registry_builds_qwen_optional_provider(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        use_mock_providers=False,
+        llm_scene_provider="qwen",
+        qwen_api_key="qwen-key",
+        qwen_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        qwen_model="qwen3.7-plus",
+        qwen_timeout_sec=90,
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+    monkeypatch.setattr("app.providers.llm.get_settings", lambda: settings)
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    provider = LLMProviderRegistry().scene_provider()
+
+    assert provider.provider_name == "qwen"
+    assert provider.model_name == "qwen3.7-plus"
+    assert captured["client_kwargs"]["base_url"] == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> None:
     captured: dict[str, object] = {}

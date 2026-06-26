@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
     llm_primary_provider: str = "deepseek"
-    llm_fallback_provider: str = "openai"
+    llm_fallback_provider: str = "disabled"
     llm_repair_provider: str = "deepseek"
     llm_scene_provider: str = "deepseek"
     llm_enable_fallback: bool = True
@@ -67,9 +67,10 @@ class Settings(BaseSettings):
     minimax_script_timeout_sec: float = 150.0
     llm_publish_audit_timeout_sec: float = 75.0
     llm_gate_judge_enabled: bool = True
-    llm_gate_judge_provider: str = "openai"
-    llm_gate_judge_model: str | None = "gpt-5.4"
+    llm_gate_judge_provider: str = "deepseek"
+    llm_gate_judge_model: str | None = "deepseek-v4-flash"
     llm_gate_judge_timeout_sec: float = 45.0
+    llm_json_max_tokens: int = 4096
     llm_gate_gray_zone_low: float = 0.72
     llm_gate_gray_zone_high: float = 0.82
     real_run_allow_mock_fallback: bool = False

@@ -35,8 +35,10 @@ class OperationalInfoSpec:
 
 
 PROVIDER_OPTIONS = (
+    ("disabled", "Desativado"),
     ("openai", "OpenAI"),
     ("deepseek", "DeepSeek"),
+    ("qwen", "Qwen"),
     ("minimax", "MiniMax"),
     ("xai", "XAI (Grok)"),
 )
@@ -73,7 +75,7 @@ OPERATIONAL_SETTING_SPECS = (
         "LLM",
         "select",
         PROVIDER_OPTIONS,
-        description="Provider forte para juiz editorial (viral, metadata, visual, growth). Recomendado: OpenAI.",
+        description="Provider para juiz editorial (viral, metadata, visual, growth). Recomendado: DeepSeek v4 Flash; use modelos premium só por exceção.",
     ),
     OperationalSettingSpec(
         "llm_gate_judge_model",
