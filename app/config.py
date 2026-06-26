@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     llm_gate_judge_provider: str = "deepseek"
     llm_gate_judge_model: str | None = "deepseek-v4-flash"
     llm_gate_judge_timeout_sec: float = 45.0
+    llm_premium_review_enabled: bool = True
+    llm_premium_review_provider: str = "deepseek"
+    llm_premium_review_model: str | None = "deepseek-v4-pro"
     llm_json_max_tokens: int = 4096
     llm_gate_gray_zone_low: float = 0.72
     llm_gate_gray_zone_high: float = 0.82

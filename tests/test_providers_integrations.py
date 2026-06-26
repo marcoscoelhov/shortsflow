@@ -290,6 +290,57 @@ def test_quality_judge_candidates_prioritize_gate_judge_provider() -> None:
     assert roles == ["gate_judge", "repair"]
 
 
+def test_premium_review_provider_uses_deepseek_pro_model_for_exceptions(monkeypatch) -> None:
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: None))
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            llm_premium_review_enabled=True,
+            llm_premium_review_provider="deepseek",
+            llm_premium_review_model="deepseek-v4-pro",
+            deepseek_api_key="deepseek-key",
+            deepseek_base_url="https://api.deepseek.com",
+            deepseek_model="deepseek-v4-flash",
+            deepseek_timeout_sec=90,
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    provider = LLMProviderRegistry().premium_review_provider()
+
+    assert provider is not None
+    assert provider.provider_name == "deepseek"
+    assert provider.model_name == "deepseek-v4-pro"
+
+
+def test_premium_review_candidate_only_for_explicit_exception() -> None:
+    class Judge:
+        provider_name = "deepseek"
+
+        def judge_quality_gate(self, gate_kind: str, payload: dict) -> dict:
+            return {"passed": True, "confidence": 0.9, "reasons": [], "provider": "deepseek", "gate_kind": gate_kind}
+
+    class Premium(Judge):
+        provider_name = "deepseek-pro"
+
+    resilient = object.__new__(ResilientCreativeProvider)
+    resilient.settings = SimpleNamespace(llm_gate_judge_timeout_sec=30.0, llm_premium_review_enabled=True)
+    resilient.gate_judge_provider = Judge()
+    resilient.premium_review_provider = Premium()
+    resilient.fallback = None
+    resilient.repair_provider = None
+
+    normal_roles = [role for role, _provider in resilient._quality_judge_candidates("editorial", {"local_reasons": ["weak_ending"]})]
+    premium_roles = [role for role, _provider in resilient._quality_judge_candidates("growth_score", {"review_tier": "premium"})]
+
+    assert normal_roles == ["gate_judge"]
+    assert premium_roles == ["premium_review", "gate_judge"]
+
+
 def test_resilient_creative_provider_uses_minimax_before_deepseek_fallback() -> None:
     provider = object.__new__(ResilientCreativeProvider)
     provider.settings = SimpleNamespace(

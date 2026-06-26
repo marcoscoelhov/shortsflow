@@ -317,6 +317,9 @@ Defaults importantes:
 - `llm_fallback_provider=disabled`
 - `llm_gate_judge_provider=deepseek`
 - `llm_gate_judge_model=deepseek-v4-flash`
+- `llm_premium_review_enabled=true`
+- `llm_premium_review_provider=deepseek`
+- `llm_premium_review_model=deepseek-v4-pro` apenas para exceções: revisão premium/final, tema complexo ou sinal explícito de escalonamento.
 - `llm_json_max_tokens=4096`
 - `youtube_publish_mode=manual`
 - `youtube_api_enabled=false`

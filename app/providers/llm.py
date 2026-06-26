@@ -1141,6 +1141,7 @@ class ResilientCreativeProvider:
         self.repair_provider = self.registry.repair_provider()
         self.scene_provider = self.registry.scene_provider()
         self.gate_judge_provider = self.registry.gate_judge_provider()
+        self.premium_review_provider = self.registry.premium_review_provider()
         self.strict_minimax_validation = self.settings.strict_minimax_validation
 
     def plan_topic(
@@ -1276,7 +1277,7 @@ class ResilientCreativeProvider:
         return self.fallback.audit_publish_package(payload)
 
     def judge_quality_gate(self, gate_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-        candidates = self._quality_judge_candidates()
+        candidates = self._quality_judge_candidates(gate_kind, payload)
         if not candidates:
             return {"passed": False, "reasons": ["llm_judge_unavailable"], "confidence": 0.0, "provider": "none", "gate_kind": gate_kind}
         failures: list[str] = []
@@ -1301,19 +1302,42 @@ class ResilientCreativeProvider:
             "gate_kind": gate_kind,
         }
 
-    def _quality_judge_candidates(self) -> list[tuple[str, Any]]:
+    def _quality_judge_candidates(self, gate_kind: str | None = None, payload: dict[str, Any] | None = None) -> list[tuple[str, Any]]:
         candidates: list[tuple[str, Any]] = []
         seen: set[int] = set()
-        for role, provider in (
-            ("gate_judge", self.gate_judge_provider),
-            ("fallback", self.fallback),
-            ("repair", self.repair_provider),
-        ):
+        ordered: list[tuple[str, Any]] = []
+        if self._should_use_premium_review(gate_kind or "", payload or {}):
+            ordered.append(("premium_review", getattr(self, "premium_review_provider", None)))
+        ordered.extend(
+            [
+                ("gate_judge", self.gate_judge_provider),
+                ("fallback", self.fallback),
+                ("repair", self.repair_provider),
+            ]
+        )
+        for role, provider in ordered:
             if provider is None or id(provider) in seen or not hasattr(provider, "judge_quality_gate"):
                 continue
             seen.add(id(provider))
             candidates.append((role, provider))
         return candidates
+
+    def _should_use_premium_review(self, gate_kind: str, payload: dict[str, Any]) -> bool:
+        if not bool(getattr(self.settings, "llm_premium_review_enabled", True)):
+            return False
+        if getattr(self, "premium_review_provider", None) is None:
+            return False
+        explicit = str(payload.get("review_tier") or payload.get("llm_review_tier") or "").strip().lower()
+        if explicit in {"premium", "pro", "final", "complex"} or bool(payload.get("escalate_to_premium_llm")):
+            return True
+        compact = json.dumps(payload, ensure_ascii=False).lower()
+        if any(marker in compact for marker in ("premium_review", "premium_publish", "premium_version_selected", "final_review", "promising_final_review")):
+            return True
+        if gate_kind == "growth_score" and any(marker in compact for marker in ("promising", "premium", "publish_score_below_threshold")):
+            return True
+        if any(marker in compact for marker in ("complex_theme", "factual_strict", "high_risk_claim", "medical_claim", "engineering_claim")):
+            return True
+        return False
 
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         if self.primary:
@@ -1519,6 +1543,19 @@ class LLMProviderRegistry:
         judge_model = (self.settings.llm_gate_judge_model or "").strip()
         if judge_model and hasattr(provider, "model_name"):
             provider.model_name = judge_model
+        return provider
+
+    def premium_review_provider(self) -> LLMProvider | None:
+        if self.settings.use_mock_providers:
+            return MockCreativeProvider()
+        if not bool(getattr(self.settings, "llm_premium_review_enabled", True)):
+            return None
+        provider = self._build_provider(getattr(self.settings, "llm_premium_review_provider", ""), required=False)
+        if provider is None:
+            return None
+        review_model = (getattr(self.settings, "llm_premium_review_model", None) or "").strip()
+        if review_model and hasattr(provider, "model_name"):
+            provider.model_name = review_model
         return provider
 
     def _build_provider(self, name: str, required: bool) -> LLMProvider | None:

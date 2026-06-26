@@ -82,8 +82,17 @@ OPERATIONAL_SETTING_SPECS = (
         "Modelo do juiz LLM",
         "LLM",
         "text",
-        description="Override opcional do modelo do juiz. Ex: gpt-5.4. Vazio usa o modelo padrao do provider.",
+        description="Override opcional do modelo do juiz editorial.",
     ),
+    OperationalSettingSpec(
+        "llm_premium_review_enabled",
+        "Usar LLM Pro em exceções",
+        "LLM",
+        "checkbox",
+        description="Permite DeepSeek V4 Pro apenas em revisão premium/final, temas complexos ou escalonamento explícito.",
+    ),
+    OperationalSettingSpec("llm_premium_review_provider", "LLM Pro excepcional", "LLM", "select", PROVIDER_OPTIONS),
+    OperationalSettingSpec("llm_premium_review_model", "Modelo Pro excepcional", "LLM", "text"),
     OperationalSettingSpec("llm_enable_fallback", "Fallback ativo", "LLM", "checkbox"),
     OperationalSettingSpec(
         "background_music_provider",
