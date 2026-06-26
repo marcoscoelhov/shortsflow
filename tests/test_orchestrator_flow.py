@@ -395,6 +395,62 @@ def test_autoapproval_blocks_when_asset_semantic_score_is_missing() -> None:
     assert report["components"]["asset_semantic_score"] == 0.0
 
 
+def test_automation_keeps_auto_topic_lane_separate_from_ready_script_bank() -> None:
+    from app.automation import AUTOMATION_SOURCE_READY_SCRIPT, PublishPlan
+
+    service = AutomationService(orchestrator)
+    assert service._automation_fallback_source_for_time("18:00") is None
+    plan = PublishPlan(
+        slot=PublishSlot(local_date=datetime(2026, 6, 22).date(), local_time="18:00", timezone="UTC"),
+        source=service._automation_publish_source_for_time("18:00"),
+        fallback_source=service._automation_fallback_source_for_time("18:00"),
+    )
+
+    assert plan.source == "automatic_topic"
+    assert AUTOMATION_SOURCE_READY_SCRIPT not in plan.sources
+
+
+def test_daily_cycle_uses_generation_attempts_per_slot_not_per_day(monkeypatch) -> None:
+    from app.automation import AUTOMATION_SOURCE_AUTO_TOPIC, AUTOMATION_SOURCE_READY_SCRIPT, PublishPlan
+
+    service = AutomationService(orchestrator)
+    monkeypatch.setattr(service.settings, "automation_max_generation_attempts", 2)
+    monkeypatch.setattr(service, "automation_enabled", lambda _session: True)
+    monkeypatch.setattr(service, "_run_competitive_scout_automation", lambda: {"status": "skipped_for_test"})
+    monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
+    monkeypatch.setattr(service, "_run_publishable_backlog", lambda _run_id, _plan: [])
+    slots = [
+        PublishSlot(local_date=datetime(2099, 12, 31).date(), local_time="11:00", timezone="UTC"),
+        PublishSlot(local_date=datetime(2099, 12, 31).date(), local_time="18:00", timezone="UTC"),
+    ]
+    monkeypatch.setattr(
+        service,
+        "_vacant_publish_plan",
+        lambda: [
+            PublishPlan(slot=slots[0], source=AUTOMATION_SOURCE_READY_SCRIPT),
+            PublishPlan(slot=slots[1], source=AUTOMATION_SOURCE_AUTO_TOPIC),
+        ],
+    )
+    calls: list[str] = []
+
+    def fake_generation_attempt(_run_id, _attempt_number, _slot, *, source=None, finish_run=True):
+        calls.append(str(source))
+        if source == AUTOMATION_SOURCE_READY_SCRIPT:
+            return {"scheduled": True, "job_id": "ready-job", "schedule_id": "ready-schedule"}
+        if calls.count(AUTOMATION_SOURCE_AUTO_TOPIC) == 1:
+            return {"scheduled": False, "error": "first auto topic candidate failed viral gate"}
+        return {"scheduled": True, "job_id": "auto-job", "schedule_id": "auto-schedule"}
+
+    monkeypatch.setattr(service, "_run_generation_attempt", fake_generation_attempt)
+
+    result = service.run_daily_cycle(force=True)
+
+    assert result["status"] == "succeeded"
+    assert calls == [AUTOMATION_SOURCE_READY_SCRIPT, AUTOMATION_SOURCE_AUTO_TOPIC, AUTOMATION_SOURCE_AUTO_TOPIC]
+    assert result["metadata"]["scheduled_count"] == 2
+    assert result["metadata"]["schedule_complete"] is True
+
+
 def test_generation_attempt_returns_provider_limit_error_from_exception(monkeypatch) -> None:
     service = AutomationService(orchestrator)
     run_id = "automation-provider-limit-return"

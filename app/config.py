@@ -136,6 +136,17 @@ class Settings(BaseSettings):
     automation_max_generation_attempts: int = 3
     automation_max_publish_attempts_per_job: int = 3
     automation_score_threshold: float = 0.82
+    watchdog_enabled: bool = True
+    watchdog_daily_check_time: str = "04:00"
+    watchdog_min_future_coverage_days: int = 3
+    watchdog_max_automation_runtime_minutes: int = 90
+    watchdog_queued_stuck_minutes: int = 30
+    watchdog_running_stuck_minutes: int = 90
+    watchdog_publishing_stuck_minutes: int = 30
+    watchdog_recurring_error_threshold: int = 2
+    watchdog_alert_delivery: str = "record_only"
+    watchdog_telegram_bot_token: str | None = None
+    watchdog_telegram_chat_id: str | None = None
     premium_publish_min_score: float = 9.2
     performance_collection_enabled: bool = True
     performance_sync_active_window_days: int = 45

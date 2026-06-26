@@ -223,10 +223,16 @@ class AutomationService:
 
             generation_attempts = 0
             current_slot_attempts = 0
-            while generation_attempts < self.settings.automation_max_generation_attempts:
+            max_attempts_per_slot = max(1, int(self.settings.automation_max_generation_attempts or 1))
+            max_total_attempts = max_attempts_per_slot * max(1, len(remaining_plan))
+            while generation_attempts < max_total_attempts:
                 if not remaining_plan:
                     break
                 plan_item = remaining_plan[0]
+                if current_slot_attempts >= max_attempts_per_slot:
+                    remaining_plan = remaining_plan[1:]
+                    current_slot_attempts = 0
+                    continue
                 source = self._generation_source_for_attempt(plan_item, current_slot_attempts)
                 attempt_result = self._run_generation_attempt(
                     run.run_id,
@@ -428,8 +434,9 @@ class AutomationService:
         return AUTOMATION_SOURCE_AUTO_TOPIC
 
     def _automation_fallback_source_for_time(self, publish_time: str) -> str | None:
-        secondary_time = datetime.strptime(SECONDARY_AUTOMATION_PUBLISH_TIME, "%H:%M").strftime("%H:%M")
-        return AUTOMATION_SOURCE_READY_SCRIPT if publish_time == secondary_time else None
+        # Keep daily lanes honest: ready-script bank and automatic-topic failures
+        # should stay visible instead of silently filling both slots from the bank.
+        return None
 
     def _generation_source_for_attempt(
         self,

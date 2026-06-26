@@ -544,6 +544,23 @@ class AutomationAttempt(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class BacklogRecoveryAttempt(Base):
+    __tablename__ = "backlog_recovery_attempts"
+
+    recovery_attempt_id: Mapped[str] = mapped_column(String, primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.job_id"), index=True)
+    schema_version: Mapped[str] = mapped_column(String, default="1.0.0")
+    content_hash: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    status: Mapped[str] = mapped_column(String, index=True)
+    repair_kind: Mapped[str] = mapped_column(String)
+    before_status: Mapped[str] = mapped_column(String)
+    after_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    reasons: Mapped[list] = mapped_column(JSON)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class FallbackEvent(Base):
     __tablename__ = "fallback_events"
 

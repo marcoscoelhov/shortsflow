@@ -6,10 +6,12 @@ import sys
 from pathlib import Path
 
 from app.automation import AutomationService
+from app.backlog_recovery import BacklogRecoveryService
 from app.competitive_scout import CompetitiveScout
 from app.db import init_db
 from app.operational_settings import apply_operational_settings
 from app.orchestrator import orchestrator
+from app.watchdog import AutomationWatchdog
 
 
 def main() -> None:
@@ -18,6 +20,22 @@ def main() -> None:
 
     run_parser = subparsers.add_parser("automation-run", help="Executa um ciclo diario de automacao")
     run_parser.add_argument("--force", action="store_true", help="Reabre o ciclo da data local atual")
+
+    watchdog_parser = subparsers.add_parser("automation-watchdog", help="Avalia saúde da automação e agenda")
+    watchdog_parser.add_argument("--json", action="store_true", help="Imprime o relatório JSON completo")
+    watchdog_parser.add_argument("--emit-alert", action="store_true", help="Imprime brief de alerta ou [SILENT]")
+    watchdog_parser.add_argument("--deliver", action="store_true", help="Entrega alerta se configurado")
+
+    backlog_scan_parser = subparsers.add_parser("backlog-recovery-scan", help="Inventaria backlog recuperável sem mutações")
+    backlog_scan_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
+    backlog_scan_parser.add_argument("--limit", type=int, default=50, help="Limite de jobs avaliados")
+
+    backlog_run_parser = subparsers.add_parser("backlog-recovery-run", help="Executa recuperação segura de backlog")
+    backlog_run_parser.add_argument("--mode", choices=["reactive", "weekly", "manual"], default="reactive")
+    backlog_run_parser.add_argument("--dry-run", action="store_true", help="Classifica sem mutar estado")
+    backlog_run_parser.add_argument("--job-id", default=None, help="Job específico para recuperação manual")
+    backlog_run_parser.add_argument("--limit", type=int, default=50, help="Limite de jobs avaliados")
+    backlog_run_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
 
     analytics_parser = subparsers.add_parser("analytics-sync-run", help="Executa a coleta diaria de performance do YouTube")
     analytics_parser.add_argument("--days", type=int, default=28, help="Janela de Analytics por job, entre 1 e 90 dias")
@@ -68,8 +86,38 @@ def main() -> None:
     if args.command == "automation-run":
         result = service.run_daily_cycle(force=args.force)
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        watchdog = AutomationWatchdog(orchestrator.settings, orchestrator)
+        watchdog_report = watchdog.evaluate()
+        watchdog.persist_report(watchdog_report)
         if result.get("status") == "failed":
             sys.exit(1)
+        return
+
+    if args.command == "automation-watchdog":
+        watchdog = AutomationWatchdog(orchestrator.settings, orchestrator)
+        report = watchdog.evaluate()
+        if args.deliver:
+            report = watchdog.deliver_alert(report)
+        watchdog.persist_report(report)
+        if args.emit_alert:
+            print(watchdog.telegram_brief(report) if report.status == "alert" else "[SILENT]")
+        else:
+            print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "backlog-recovery-scan":
+        result = BacklogRecoveryService(orchestrator.settings, orchestrator).scan(limit=args.limit)
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "backlog-recovery-run":
+        result = BacklogRecoveryService(orchestrator.settings, orchestrator).run(
+            mode=args.mode,
+            dry_run=args.dry_run,
+            job_id=args.job_id,
+            limit=args.limit,
+        )
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         return
 
     if args.command == "analytics-sync-run":

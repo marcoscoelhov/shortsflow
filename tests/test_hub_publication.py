@@ -668,7 +668,7 @@ Hashtags: #curiosidades #shorts""",
     assert [item["source"] for item in run_result["metadata"]["scheduled_jobs"]] == ["ready_script_bank", "automatic_topic"]
 
 
-def test_automation_falls_back_to_ready_script_for_evening_slot(monkeypatch) -> None:
+def test_automation_keeps_evening_auto_topic_failure_visible(monkeypatch) -> None:
     service = AutomationService(orchestrator)
     service.set_automation_enabled(True)
     target_day = datetime(2099, 6, 10).date()
@@ -677,9 +677,7 @@ def test_automation_falls_back_to_ready_script_for_evening_slot(monkeypatch) -> 
     def fake_generation_attempt(_run_id, _attempt_number, _slot, *, source, finish_run):
         assert finish_run is False
         attempted_sources.append(source)
-        if source == "automatic_topic":
-            return {"scheduled": False, "provider_limit": True, "error": "automatic topic provider quota exceeded"}
-        return {"scheduled": True, "job_id": "fallback-ready-job", "schedule_id": "fallback-ready-schedule"}
+        return {"scheduled": False, "provider_limit": True, "error": "automatic topic provider quota exceeded"}
 
     monkeypatch.setattr(orchestrator.settings, "automation_max_generation_attempts", 2)
     monkeypatch.setattr(service, "_run_competitive_scout_automation", lambda: {"status": "skipped", "reason": "test"})
@@ -690,11 +688,9 @@ def test_automation_falls_back_to_ready_script_for_evening_slot(monkeypatch) -> 
 
     run_result = service.run_daily_cycle(force=True)
 
-    assert run_result["status"] == "succeeded"
-    assert attempted_sources == ["automatic_topic", "ready_script_bank"]
-    assert run_result["metadata"]["scheduled_jobs"][0]["source"] == "ready_script_bank"
-    assert run_result["metadata"]["schedule_complete"] is True
-    assert run_result["metadata"]["unfilled_slots"] == []
+    assert run_result["status"] == "failed"
+    assert attempted_sources == ["automatic_topic"]
+    assert run_result["error"] == "automatic topic provider quota exceeded"
 
 def test_automation_schedules_visual_review_only_backlog_job(monkeypatch) -> None:
     service = AutomationService(orchestrator)
