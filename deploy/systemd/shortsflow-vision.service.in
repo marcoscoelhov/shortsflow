@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=__REPO_ROOT__
 Environment=SHORTSFLOW_REPO_ROOT=__REPO_ROOT__
+Environment=LD_LIBRARY_PATH=__REPO_ROOT__/data/vendor/llama.cpp/build/bin
 ExecStart=__REPO_ROOT__/data/vendor/llama.cpp/build/bin/llama-server \
   -m __REPO_ROOT__/data/models/minicpm-v-4.6/MiniCPM-V-4_6-Q4_K_M.gguf \
   --mmproj __REPO_ROOT__/data/models/minicpm-v-4.6/mmproj-model-f16.gguf \
