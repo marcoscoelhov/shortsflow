@@ -1,0 +1,10 @@
+[Unit]
+Description=ShortsFlow daily automation cycle
+After=network-online.target tailscaled.service shortsflow-hub.service shortsflow-vision.service
+Wants=network-online.target tailscaled.service shortsflow-vision.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+Environment=SHORTSFLOW_REPO_ROOT=__REPO_ROOT__
+ExecStart=__REPO_ROOT__/.venv/bin/python -m app.cli automation-run

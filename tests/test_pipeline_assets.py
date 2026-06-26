@@ -2003,7 +2003,7 @@ def test_scene_pipeline_passes_visual_contract_to_planner(monkeypatch) -> None:
         "loop_policy": {"forbidden_early_reveal": ["cidade inteira cabe numa mesa"]},
         "payoff_frame": {"recommended_visual_intent": "loop_close_reframe"},
     }
-    artifact_dir = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id
+    artifact_dir = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     (artifact_dir / "script.json").write_text(json.dumps(script_payload), encoding="utf-8")
     (artifact_dir / "visual_contract.json").write_text(json.dumps(visual_contract), encoding="utf-8")
@@ -2170,7 +2170,7 @@ def test_rights_registry_auto_confirms_ai_generated_assets(monkeypatch) -> None:
     assert report["all_commercial_rights_confirmed"] is True
     assert report["evidence_required_count"] == 0
     assert report["review_required_count"] == 0
-    assert {entry["license_source"] for entry in report["entries"]} == {"YTS_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED"}
+    assert {entry["license_source"] for entry in report["entries"]} == {"SHORTSFLOW_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED"}
 
 def test_narration_publishability_blocks_technical_tts_outside_mock(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator.settings, "use_mock_providers", False)
@@ -2192,7 +2192,7 @@ def test_narration_publishability_allows_gemini_tts(monkeypatch) -> None:
 
 def test_voice_direction_uses_script_hook_and_retention_artifact(tmp_path: Path) -> None:
     job_id = "voice-direction-job"
-    artifact_dir = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id
+    artifact_dir = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     (artifact_dir / "script.json").write_text(
         json.dumps(
@@ -2313,7 +2313,7 @@ def test_step_background_music_persists_debug_on_provider_failure(monkeypatch) -
             "requested_angle": None,
         }
     )
-    audio_dir = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "audio"
+    audio_dir = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     narration_path = audio_dir / "narration.wav"
     narration_path.write_bytes(b"RIFFtest")
@@ -2398,7 +2398,7 @@ def test_step_background_music_persists_debug_on_provider_failure(monkeypatch) -
         else:
             raise AssertionError("expected ProviderFailure")
 
-    debug_path = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "background_music_debug.json"
+    debug_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "background_music_debug.json"
     debug = json.loads(debug_path.read_text(encoding="utf-8"))
 
     assert debug["phase"] == "provider_failure"

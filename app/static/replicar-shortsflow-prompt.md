@@ -1,6 +1,6 @@
-# Prompt para replicar o YTS Render
+# Prompt para replicar o ShortsFlow
 
-Voce e um agente senior de engenharia de software. Construa um app chamado **YTS Render**, um sistema para gerar Shorts verticais em portugues do Brasil, revisar o resultado em um hub web e preparar publicacao no YouTube.
+Voce e um agente senior de engenharia de software. Construa um app chamado **ShortsFlow**, um sistema para gerar Shorts verticais em portugues do Brasil, revisar o resultado em um hub web e preparar publicacao no YouTube.
 
 O objetivo nao e criar uma landing page. O objetivo e criar o produto funcional: um hub operacional que recebe uma ideia, gera um video vertical, valida qualidade tecnica e editorial, deixa uma pessoa revisar, aprovar, agendar e publicar.
 
@@ -266,14 +266,14 @@ Implemente providers:
 Tenha registry configuravel por env:
 
 ```env
-YTS_LLM_PRIMARY_PROVIDER=deepseek
-YTS_LLM_FALLBACK_PROVIDER=deepseek
-YTS_LLM_REPAIR_PROVIDER=deepseek
-YTS_LLM_SCENE_PROVIDER=deepseek
-YTS_LLM_ENABLE_FALLBACK=true
+SHORTSFLOW_LLM_PRIMARY_PROVIDER=deepseek
+SHORTSFLOW_LLM_FALLBACK_PROVIDER=deepseek
+SHORTSFLOW_LLM_REPAIR_PROVIDER=deepseek
+SHORTSFLOW_LLM_SCENE_PROVIDER=deepseek
+SHORTSFLOW_LLM_ENABLE_FALLBACK=true
 ```
 
-O provider de cenas deve ser fallback especializado. O plano de cenas tenta primeiro o primary configurado; se ele falhar ou se o plano nao passar no gate, use `YTS_LLM_SCENE_PROVIDER`.
+O provider de cenas deve ser fallback especializado. O plano de cenas tenta primeiro o primary configurado; se ele falhar ou se o plano nao passar no gate, use `SHORTSFLOW_LLM_SCENE_PROVIDER`.
 
 ## Regras de roteiro
 
@@ -404,8 +404,8 @@ Regra de chaves:
 
 1. imagem tenta primeiro a chave resolvida de texto MiniMax
 2. se a chave de texto bater limite de provedor, marque como esgotada para o job atual
-3. use `YTS_MINIMAX_IMAGE_API_KEY`
-4. se nao houver chave de texto, use diretamente `YTS_MINIMAX_IMAGE_API_KEY`
+3. use `SHORTSFLOW_MINIMAX_IMAGE_API_KEY`
+4. se nao houver chave de texto, use diretamente `SHORTSFLOW_MINIMAX_IMAGE_API_KEY`
 5. se nenhuma chave existir, falhe
 
 Limite de provedor significa quota, saldo, credito ou rate limit. Timeout, 5xx, conexao e resposta invalida sao falhas transientes, nao motivo para trocar de chave.
@@ -435,16 +435,16 @@ Regras:
 
 ## Musica de fundo
 
-Use Banco de Trilhas Aprovadas como caminho primario para jobs reais. MiniMax Music so deve ser usado quando `YTS_BACKGROUND_MUSIC_PROVIDER=minimax` ou quando fallback por API estiver explicitamente habilitado.
+Use Banco de Trilhas Aprovadas como caminho primario para jobs reais. MiniMax Music so deve ser usado quando `SHORTSFLOW_BACKGROUND_MUSIC_PROVIDER=minimax` ou quando fallback por API estiver explicitamente habilitado.
 
 Regras obrigatorias:
 
-- `YTS_BACKGROUND_MUSIC_GAIN_DB=-17.0`
-- `YTS_BACKGROUND_MUSIC_PROVIDER=local_bank` por padrao
+- `SHORTSFLOW_BACKGROUND_MUSIC_GAIN_DB=-17.0`
+- `SHORTSFLOW_BACKGROUND_MUSIC_PROVIDER=local_bank` por padrao
 - o banco local deve usar apenas faixas com origem e licenca rastreaveis e `approved_for_youtube=true`
-- `YTS_MUSIC_BANK_AUTO_POPULATE=true` pode criar trilhas sinteticas locais, sem download externo, quando o banco estiver vazio
+- `SHORTSFLOW_MUSIC_BANK_AUTO_POPULATE=true` pode criar trilhas sinteticas locais, sem download externo, quando o banco estiver vazio
 - trilhas MiniMax antigas com quality gate aprovado podem ser importadas para o banco e devem ter prioridade sobre trilhas sinteticas locais
-- mock de musica so pode existir quando `YTS_USE_MOCK_PROVIDERS=true`
+- mock de musica so pode existir quando `SHORTSFLOW_USE_MOCK_PROVIDERS=true`
 - se a fonte de musica configurada falhar em job real, a etapa `background_music` deve falhar
 - nao caia para mock em job real
 - persista `background_music_debug.json` com erro, payload, `base_resp`, `trace_id`, `data_keys`, `extra_info`, `analysis_info`
@@ -574,8 +574,8 @@ Ele deve:
 Implemente dois modos:
 
 ```env
-YTS_YOUTUBE_PUBLISH_MODE=manual
-YTS_YOUTUBE_API_ENABLED=false
+SHORTSFLOW_YOUTUBE_PUBLISH_MODE=manual
+SHORTSFLOW_YOUTUBE_API_ENABLED=false
 ```
 
 Modo manual:
@@ -595,35 +595,35 @@ Modo API:
 Use `.env` com:
 
 ```env
-YTS_USE_MOCK_PROVIDERS=false
-YTS_DATABASE_URL=sqlite:///data/yts_render.db
-YTS_DATA_DIR=data
+SHORTSFLOW_USE_MOCK_PROVIDERS=false
+SHORTSFLOW_DATABASE_URL=sqlite:///data/shortsflow.db
+SHORTSFLOW_DATA_DIR=data
 
-YTS_LLM_PRIMARY_PROVIDER=deepseek
-YTS_LLM_FALLBACK_PROVIDER=deepseek
-YTS_LLM_REPAIR_PROVIDER=deepseek
-YTS_LLM_SCENE_PROVIDER=deepseek
+SHORTSFLOW_LLM_PRIMARY_PROVIDER=deepseek
+SHORTSFLOW_LLM_FALLBACK_PROVIDER=deepseek
+SHORTSFLOW_LLM_REPAIR_PROVIDER=deepseek
+SHORTSFLOW_LLM_SCENE_PROVIDER=deepseek
 
-YTS_MINIMAX_API_KEY=
-YTS_MINIMAX_TEXT_API_KEY=
-YTS_MINIMAX_IMAGE_API_KEY=
-YTS_MINIMAX_MUSIC_API_KEY=
-YTS_MINIMAX_TEXT_BASE_URL=https://api.minimax.io/v1
-YTS_MINIMAX_IMAGE_BASE_URL=https://api.minimax.io/v1/image_generation
-YTS_MINIMAX_MUSIC_BASE_URL=https://api.minimax.io/v1
-YTS_MINIMAX_TEXT_TIMEOUT_SEC=180
-YTS_MINIMAX_MUSIC_TIMEOUT_SEC=240
+SHORTSFLOW_MINIMAX_API_KEY=
+SHORTSFLOW_MINIMAX_TEXT_API_KEY=
+SHORTSFLOW_MINIMAX_IMAGE_API_KEY=
+SHORTSFLOW_MINIMAX_MUSIC_API_KEY=
+SHORTSFLOW_MINIMAX_TEXT_BASE_URL=https://api.minimax.io/v1
+SHORTSFLOW_MINIMAX_IMAGE_BASE_URL=https://api.minimax.io/v1/image_generation
+SHORTSFLOW_MINIMAX_MUSIC_BASE_URL=https://api.minimax.io/v1
+SHORTSFLOW_MINIMAX_TEXT_TIMEOUT_SEC=180
+SHORTSFLOW_MINIMAX_MUSIC_TIMEOUT_SEC=240
 
-YTS_DEEPSEEK_API_KEY=
-YTS_DEEPSEEK_BASE_URL=https://api.deepseek.com
-YTS_DEEPSEEK_MODEL=deepseek-v4-pro
-YTS_DEEPSEEK_TIMEOUT_SEC=180
+SHORTSFLOW_DEEPSEEK_API_KEY=
+SHORTSFLOW_DEEPSEEK_BASE_URL=https://api.deepseek.com
+SHORTSFLOW_DEEPSEEK_MODEL=deepseek-v4-pro
+SHORTSFLOW_DEEPSEEK_TIMEOUT_SEC=180
 
-YTS_BACKGROUND_MUSIC_ENABLED=true
-YTS_BACKGROUND_MUSIC_GAIN_DB=-17.0
+SHORTSFLOW_BACKGROUND_MUSIC_ENABLED=true
+SHORTSFLOW_BACKGROUND_MUSIC_GAIN_DB=-17.0
 
-YTS_YOUTUBE_PUBLISH_MODE=manual
-YTS_YOUTUBE_API_ENABLED=false
+SHORTSFLOW_YOUTUBE_PUBLISH_MODE=manual
+SHORTSFLOW_YOUTUBE_API_ENABLED=false
 ```
 
 ## Observabilidade
@@ -641,8 +641,8 @@ Implemente:
 Ao rodar pelo terminal, imprima algo como:
 
 ```text
-[yts HH:MM:SS] job=<id> stage=script started 3/11 attempt=1/3
-[yts HH:MM:SS] job=<id> stage=script done 3/11 16.3s
+[shortsflow HH:MM:SS] job=<id> stage=script started 3/11 attempt=1/3
+[shortsflow HH:MM:SS] job=<id> stage=script done 3/11 16.3s
 ```
 
 ## Testes

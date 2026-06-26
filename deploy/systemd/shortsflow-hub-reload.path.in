@@ -1,5 +1,5 @@
 [Unit]
-Description=Watch YTS Render repository changes and restart the review hub
+Description=Watch ShortsFlow repository changes and restart the review hub
 
 [Path]
 PathModified=__REPO_ROOT__/app
@@ -14,7 +14,7 @@ PathModified=__REPO_ROOT__/scripts
 PathModified=__REPO_ROOT__/deploy/systemd
 PathChanged=__REPO_ROOT__/pyproject.toml
 PathChanged=__REPO_ROOT__/.env
-Unit=yts-render-hub-reload.service
+Unit=shortsflow-hub-reload.service
 
 [Install]
 WantedBy=multi-user.target

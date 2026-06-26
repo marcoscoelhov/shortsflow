@@ -8,8 +8,8 @@ from app.editorial.retention import build_retention_map
 from app.utils import tokenize, word_tokens
 
 
-READY_SCRIPT_BEGIN = "[[YTS_READY_SCRIPT_BEGIN]]"
-READY_SCRIPT_END = "[[YTS_READY_SCRIPT_END]]"
+READY_SCRIPT_BEGIN = "[[SHORTSFLOW_READY_SCRIPT_BEGIN]]"
+READY_SCRIPT_END = "[[SHORTSFLOW_READY_SCRIPT_END]]"
 FACT_CHECK_CONFIRMED = "ready_script_fact_check_confirmed=true"
 
 _LABELS = {

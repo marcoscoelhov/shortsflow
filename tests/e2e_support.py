@@ -33,11 +33,11 @@ from pydantic import ValidationError
 
 from sqlalchemy import select
 
-os.environ.setdefault("YTS_DATA_DIR", str(Path("data-test").resolve()))
+os.environ.setdefault("SHORTSFLOW_DATA_DIR", str(Path("data-test").resolve()))
 
-os.environ.setdefault("YTS_DATABASE_URL", f"sqlite:///{Path('data-test/test.db').resolve()}")
+os.environ.setdefault("SHORTSFLOW_DATABASE_URL", f"sqlite:///{Path('data-test/test.db').resolve()}")
 
-os.environ.setdefault("YTS_USE_MOCK_PROVIDERS", "true")
+os.environ.setdefault("SHORTSFLOW_USE_MOCK_PROVIDERS", "true")
 
 import app.main as main_module  # noqa: E402
 
@@ -129,8 +129,8 @@ def wait_for_any_status(job_id: str, expected: set[str], timeout: float = 90.0) 
     raise AssertionError(f"job {job_id} did not reach any of {sorted(expected)}")
 
 def setup_module() -> None:
-    shutil.rmtree(Path(os.environ["YTS_DATA_DIR"]), ignore_errors=True)
-    Path(os.environ["YTS_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(Path(os.environ["SHORTSFLOW_DATA_DIR"]), ignore_errors=True)
+    Path(os.environ["SHORTSFLOW_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
     init_db()
     orchestrator.start_worker()
 
@@ -184,7 +184,7 @@ def _create_basic_job(
     return topic_request_id
 
 def _write_job_artifact(job_id: str, relative_path: str, content: str = "artifact") -> Path:
-    artifact_path = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / relative_path
+    artifact_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / relative_path
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(content, encoding="utf-8")
     return artifact_path

@@ -34,7 +34,7 @@ class YouTubePublicationOperations:
             item
             for item in status.missing_items
             if item
-            not in {"YTS_YOUTUBE_PUBLISH_MODE != api", "YTS_YOUTUBE_API_ENABLED=false"}
+            not in {"SHORTSFLOW_YOUTUBE_PUBLISH_MODE != api", "SHORTSFLOW_YOUTUBE_API_ENABLED=false"}
         ]
         if blockers:
             raise FatalStepError("integração YouTube indisponível: " + ", ".join(blockers))

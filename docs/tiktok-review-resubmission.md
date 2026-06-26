@@ -8,7 +8,7 @@ It was created on 2026-05-22, runs for 68.2 seconds, and is a 1280x720 MP4. The 
 
 The first demo showed:
 
-1. `YTS Render Content Posting API` as the product name.
+1. `ShortsFlow Content Posting API` as the product name.
 2. Requested scope `video.publish`.
 3. Sandbox privacy `SELF_ONLY`.
 4. Explicitly unused scopes: Share Kit, Display API, Login Kit.
@@ -32,7 +32,7 @@ Use the same ShortsFlow icon everywhere:
 - Public website visible logo: `docs/shortsflow-mark-1024.png`
 - Private Hub favicon and topbar logo: `app/static/shortsflow-mark-1024.png`
 
-Do not submit a different YTS Render icon in TikTok Developers. The reviewer explicitly checks that the Basic Info icon, website logo, and browser tab favicon match.
+Do not submit a different ShortsFlow icon in TikTok Developers. The reviewer explicitly checks that the Basic Info icon, website logo, and browser tab favicon match.
 
 ### Website URL
 
@@ -66,7 +66,7 @@ If the site is hosted under GitHub Pages, use the GitHub Pages host as the redir
 
 ### Demo video
 
-Do not reuse the old demo without context, because it says `YTS Render` and shows the old minimal website.
+Do not reuse the old demo without context, because it says `ShortsFlow` and shows the old minimal website.
 
 The resubmission should use one of these options:
 
@@ -87,7 +87,7 @@ The new or explained demo must show:
 
 ## Suggested Reviewer Note
 
-ShortsFlow is a private creator publishing workflow powered by YTS Render. We updated the public website to be fully developed and to use the same ShortsFlow icon consistently across the TikTok app icon, website logo, and favicon. The redirect domain now matches the public website domain, and the callback page is hosted on the same domain.
+ShortsFlow is a private creator publishing workflow powered by ShortsFlow. We updated the public website to be fully developed and to use the same ShortsFlow icon consistently across the TikTok app icon, website logo, and favicon. The redirect domain now matches the public website domain, and the callback page is hosted on the same domain.
 
 The demo video is a sandbox/mockup demonstration of the complete TikTok Content Posting API flow. It shows the authorized publishing context, approved video package, TikTok publication queue, upload request, status tracking, and final operational state. No production secrets, access tokens, or private credentials are displayed.
 

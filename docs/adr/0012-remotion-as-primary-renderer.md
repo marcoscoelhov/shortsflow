@@ -1,8 +1,8 @@
 # Remotion as Primary Renderer
 
-YTS Render will use Remotion as the primary renderer for new **Jobs de Video**. The render stage keeps the public media contract at `render/final.mp4` and `render/poster.jpg`, but its operational artifacts are now Remotion-first: `render/remotion.log`, `render/edit_plan.json` and `premium_finishing_report.json`.
+ShortsFlow will use Remotion as the primary renderer for new **Jobs de Video**. The render stage keeps the public media contract at `render/final.mp4` and `render/poster.jpg`, but its operational artifacts are now Remotion-first: `render/remotion.log`, `render/edit_plan.json` and `premium_finishing_report.json`.
 
-This supersedes the trial posture from ADR-0006 for the main render path. FFmpeg remains in the codebase as an explicit legacy maintenance backend through `YTS_RENDER_PRIMARY_BACKEND=ffmpeg`, but it is not the default operational path.
+This supersedes the trial posture from ADR-0006 for the main render path. FFmpeg remains in the codebase as an explicit legacy maintenance backend through `SHORTSFLOW_PRIMARY_BACKEND=ffmpeg`, but it is not the default operational path.
 
 **Consequences**
 

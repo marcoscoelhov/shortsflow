@@ -331,12 +331,12 @@ app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="stat
 def _authorized_request(request: Request) -> bool:
     if not settings.hub_auth_token:
         return True
-    supplied = request.headers.get("x-yts-hub-token")
+    supplied = request.headers.get("x-shortsflow-hub-token")
     authorization = request.headers.get("authorization") or ""
     if authorization.lower().startswith("bearer "):
         supplied = authorization.split(" ", 1)[1].strip()
     if not supplied and request.method in {"GET", "HEAD"}:
-        supplied = request.cookies.get("yts_hub_token")
+        supplied = request.cookies.get("shortsflow_hub_token")
     return supplied == settings.hub_auth_token
 
 

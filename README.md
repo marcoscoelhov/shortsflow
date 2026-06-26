@@ -42,9 +42,9 @@ cd ..
 Para rodar sem custo de API:
 
 ```env
-YTS_USE_MOCK_PROVIDERS=true
-YTS_DATABASE_URL=sqlite:///data/shortsflow.db
-YTS_DATA_DIR=data
+SHORTSFLOW_USE_MOCK_PROVIDERS=true
+SHORTSFLOW_DATABASE_URL=sqlite:///data/shortsflow.db
+SHORTSFLOW_DATA_DIR=data
 ```
 
 Para subir o app:
@@ -54,7 +54,7 @@ scripts/install_systemd_service.sh
 ```
 
 O servico systemd fixa o hub em `127.0.0.1:8080`, reinicia em falhas, roda um
-port guard antes do start e habilita `yts-render-hub-reload.path` para reiniciar
+port guard antes do start e habilita `shortsflow-hub-reload.path` para reiniciar
 o hub quando arquivos versionados do app mudarem. O instalador renderiza as
 units de `deploy/systemd/` com o caminho real do checkout. Para desenvolvimento
 manual sem systemd:
@@ -151,34 +151,34 @@ O Hub persiste esses valores como sobreposicoes operacionais no banco. Use `Rest
 
 O lease de jobs tem piso operacional longo para passos reais de midia, como imagem, TTS e render. Isso evita que o worker recupere o mesmo job enquanto uma etapa legitima esta demorando e o SQLite pulou heartbeats por lock local.
 
-Quando `YTS_HUB_AUTH_TOKEN` esta configurado, navegacao `GET`/`HEAD` pode usar o cookie `yts_hub_token`, mas mutacoes `POST` exigem `x-yts-hub-token` ou `Authorization: Bearer <token>`. O token do TikTok e manual: o Hub nao gerencia OAuth ou refresh. Metricas de origem de trafego, dispositivo, impressoes e CTR continuam pendentes ate existir adapter real da YouTube Reporting API.
+Quando `SHORTSFLOW_HUB_AUTH_TOKEN` esta configurado, navegacao `GET`/`HEAD` pode usar o cookie `shortsflow_hub_token`, mas mutacoes `POST` exigem `x-shortsflow-hub-token` ou `Authorization: Bearer <token>`. O token do TikTok e manual: o Hub nao gerencia OAuth ou refresh. Metricas de origem de trafego, dispositivo, impressoes e CTR continuam pendentes ate existir adapter real da YouTube Reporting API.
 
 ### MiniMax para imagens
 
 A geracao de imagens usa a mesma chave resolvida de texto MiniMax como credencial primaria:
 
 ```env
-YTS_MINIMAX_TEXT_API_KEY=...
-YTS_MINIMAX_IMAGE_API_KEY=...
-YTS_MINIMAX_IMAGE_ASPECT_RATIO=9:16
+SHORTSFLOW_MINIMAX_TEXT_API_KEY=...
+SHORTSFLOW_MINIMAX_IMAGE_API_KEY=...
+SHORTSFLOW_MINIMAX_IMAGE_ASPECT_RATIO=9:16
 ```
 
-`YTS_MINIMAX_IMAGE_API_KEY` e a **Chave Dedicada de Imagem**. Ela so e usada quando a chave de texto retorna limite de provedor, como quota, saldo, credito ou rate limit. Timeout, erro de conexao e `5xx` nao disparam troca de chave. Se nao houver chave de texto configurada, a chave dedicada de imagem e usada diretamente.
+`SHORTSFLOW_MINIMAX_IMAGE_API_KEY` e a **Chave Dedicada de Imagem**. Ela so e usada quando a chave de texto retorna limite de provedor, como quota, saldo, credito ou rate limit. Timeout, erro de conexao e `5xx` nao disparam troca de chave. Se nao houver chave de texto configurada, a chave dedicada de imagem e usada diretamente.
 
 ### TTS para narracao
 
 Em execucao real, o TTS primario padrao e Gemini TTS. O Hub permite trocar o TTS primario entre Gemini TTS, ElevenLabs e Edge TTS em emergencia; a saida continua sendo normalizada para WAV local e `raw.srt` para preservar o contrato das etapas de legendas, mixagem e render.
 
 ```env
-YTS_TTS_PRIMARY_PROVIDER=gemini_tts
-YTS_GEMINI_API_KEY=...
-YTS_GEMINI_TTS_MODEL=gemini-3.1-flash-tts-preview
-YTS_GEMINI_TTS_VOICE_NAME=Kore
-YTS_GEMINI_TTS_VOICE_ROTATION_ENABLED=true
-YTS_GEMINI_TTS_STYLE_PROMPT="Narre em portugues brasileiro natural, com ritmo humano de documentario curto, sem soar sintetico ou robotico."
+SHORTSFLOW_TTS_PRIMARY_PROVIDER=gemini_tts
+SHORTSFLOW_GEMINI_API_KEY=...
+SHORTSFLOW_GEMINI_TTS_MODEL=gemini-3.1-flash-tts-preview
+SHORTSFLOW_GEMINI_TTS_VOICE_NAME=Kore
+SHORTSFLOW_GEMINI_TTS_VOICE_ROTATION_ENABLED=true
+SHORTSFLOW_GEMINI_TTS_STYLE_PROMPT="Narre em portugues brasileiro natural, com ritmo humano de documentario curto, sem soar sintetico ou robotico."
 ```
 
-Se Gemini TTS falhar ou nao tiver chave, o pipeline tenta ElevenLabs; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados da narracao. Gemini TTS e ElevenLabs podem passar como narracao publicavel quando direitos comerciais estiverem confirmados; Edge TTS e emergencia e bloqueia elegibilidade automatizada. Quando a rotacao esta ativa, `YTS_GEMINI_TTS_VOICE_NAME` vira fallback e o provider escolhe uma voz Gemini pelo perfil de narrador do roteiro.
+Se Gemini TTS falhar ou nao tiver chave, o pipeline tenta ElevenLabs; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados da narracao. Gemini TTS e ElevenLabs podem passar como narracao publicavel quando direitos comerciais estiverem confirmados; Edge TTS e emergencia e bloqueia elegibilidade automatizada. Quando a rotacao esta ativa, `SHORTSFLOW_GEMINI_TTS_VOICE_NAME` vira fallback e o provider escolhe uma voz Gemini pelo perfil de narrador do roteiro.
 
 Valide chave e creditos do Gemini TTS com um smoke test isolado:
 
@@ -197,13 +197,13 @@ Para recuperar um job que ficou bloqueado porque caiu em `edge_tts`, use o repar
 Esse comando preserva roteiro e assets, gera nova narração e recalcula legendas, mixagem, render e monetização. No Hub, jobs com `technical_tts_provider_not_publishable` também mostram a ação **Reprocessar TTS e render**.
 
 ```env
-YTS_TTS_PRIMARY_PROVIDER=elevenlabs
-YTS_ELEVENLABS_API_KEY=...
-YTS_ELEVENLABS_VOICE_ID=...
-YTS_ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+SHORTSFLOW_TTS_PRIMARY_PROVIDER=elevenlabs
+SHORTSFLOW_ELEVENLABS_API_KEY=...
+SHORTSFLOW_ELEVENLABS_VOICE_ID=...
+SHORTSFLOW_ELEVENLABS_MODEL_ID=eleven_multilingual_v2
 ```
 
-Se `YTS_TTS_PRIMARY_PROVIDER=edge_tts`, o app ignora Gemini e ElevenLabs e usa Edge TTS diretamente.
+Se `SHORTSFLOW_TTS_PRIMARY_PROVIDER=edge_tts`, o app ignora Gemini e ElevenLabs e usa Edge TTS diretamente.
 
 ## Render principal
 
@@ -219,7 +219,7 @@ npm run typecheck
 Configuracao padrao:
 
 ```env
-YTS_RENDER_PRIMARY_BACKEND=remotion
+SHORTSFLOW_PRIMARY_BACKEND=remotion
 ```
 
 O caminho FFmpeg ainda existe para manutencao e diagnostico, mas nao deve ser tratado como default operacional.
@@ -231,10 +231,10 @@ No startup, o Hub registra aviso se o runtime Remotion estiver incompleto. `/hea
 Para upload real via API, coloque apenas credenciais no `.env`:
 
 ```env
-YTS_USE_MOCK_PROVIDERS=false
-YTS_YOUTUBE_CLIENT_ID=...
-YTS_YOUTUBE_CLIENT_SECRET=...
-YTS_YOUTUBE_CHANNEL_ID=...
+SHORTSFLOW_USE_MOCK_PROVIDERS=false
+SHORTSFLOW_YOUTUBE_CLIENT_ID=...
+SHORTSFLOW_YOUTUBE_CLIENT_SECRET=...
+SHORTSFLOW_YOUTUBE_CHANNEL_ID=...
 ```
 
 Depois de subir o app:
@@ -245,7 +245,7 @@ Depois de subir o app:
 4. no Hub, abra `Configurações` e ligue modo `API` e `API YouTube ativa`
 5. use o hub para aprovar, agendar ou publicar
 
-Quando `YTS_YOUTUBE_OAUTH_REDIRECT_URI` estiver vazio, o app usa a URL atual do hub como callback efetivo.
+Quando `SHORTSFLOW_YOUTUBE_OAUTH_REDIRECT_URI` estiver vazio, o app usa a URL atual do hub como callback efetivo.
 
 ## Artefatos e retencao
 

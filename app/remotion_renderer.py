@@ -8,7 +8,7 @@ from app.pipelines.common import FatalStepError
 from app.utils import ensure_dir, path_from_uri, read_json
 
 
-PREMIUM_COMPOSITION_ID = "YtsPremiumShort"
+PREMIUM_COMPOSITION_ID = "ShortsFlowPremiumShort"
 
 
 def _remotion_cli_bin(project_dir: Path) -> Path:

@@ -48,7 +48,7 @@ class HubPublicationContext:
         status = self.orchestrator.youtube.connection_status(redirect_uri)
         missing_items = list(status.missing_items)
         if not self.settings.youtube_channel_id:
-            missing_items.append("YTS_YOUTUBE_CHANNEL_ID ainda não está configurado.")
+            missing_items.append("SHORTSFLOW_YOUTUBE_CHANNEL_ID ainda não está configurado.")
         if self.settings.youtube_publish_mode == "manual":
             stage = "manual_only"
             headline = "Agenda local ativa. A publicação continua manual no YouTube Studio."

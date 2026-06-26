@@ -412,7 +412,7 @@ def audit(root: Path) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Audit YTS Render job quality scores from persisted artifacts.")
+    parser = argparse.ArgumentParser(description="Audit ShortsFlow job quality scores from persisted artifacts.")
     parser.add_argument("job_id")
     parser.add_argument("--artifacts-dir", default="data/artifacts")
     parser.add_argument("--json", action="store_true")

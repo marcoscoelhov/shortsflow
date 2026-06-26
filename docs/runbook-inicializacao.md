@@ -7,7 +7,7 @@ Para uma visao nao tecnica do produto, leia tambem [explicacao-para-leigos.md](e
 ## 1. Entrar no projeto
 
 ```bash
-cd /root/yts-render
+cd /root/shortsflow
 git status --short --branch
 ```
 
@@ -39,28 +39,28 @@ cp .env.example .env
 ### Mock local
 
 ```env
-YTS_USE_MOCK_PROVIDERS=true
-YTS_DATABASE_URL=sqlite:///data/yts_render.db
-YTS_DATA_DIR=data
+SHORTSFLOW_USE_MOCK_PROVIDERS=true
+SHORTSFLOW_DATABASE_URL=sqlite:///data/shortsflow.db
+SHORTSFLOW_DATA_DIR=data
 ```
 
 ### Providers reais
 
 ```env
-YTS_USE_MOCK_PROVIDERS=false
-YTS_OPENAI_API_KEY=...
-YTS_MINIMAX_TEXT_API_KEY=...
-YTS_MINIMAX_IMAGE_API_KEY=...
+SHORTSFLOW_USE_MOCK_PROVIDERS=false
+SHORTSFLOW_OPENAI_API_KEY=...
+SHORTSFLOW_MINIMAX_TEXT_API_KEY=...
+SHORTSFLOW_MINIMAX_IMAGE_API_KEY=...
 ```
 
-Para imagem, a chave de texto MiniMax e usada primeiro. `YTS_MINIMAX_IMAGE_API_KEY` funciona como chave dedicada de imagem e entra apenas quando a chave de texto retorna quota, saldo, credito ou rate limit. Se a chave de texto estiver vazia, a dedicada de imagem e usada diretamente.
+Para imagem, a chave de texto MiniMax e usada primeiro. `SHORTSFLOW_MINIMAX_IMAGE_API_KEY` funciona como chave dedicada de imagem e entra apenas quando a chave de texto retorna quota, saldo, credito ou rate limit. Se a chave de texto estiver vazia, a dedicada de imagem e usada diretamente.
 
 ### Upload real no YouTube
 
 ```env
-YTS_YOUTUBE_CLIENT_ID=...
-YTS_YOUTUBE_CLIENT_SECRET=...
-YTS_YOUTUBE_CHANNEL_ID=...
+SHORTSFLOW_YOUTUBE_CLIENT_ID=...
+SHORTSFLOW_YOUTUBE_CLIENT_SECRET=...
+SHORTSFLOW_YOUTUBE_CHANNEL_ID=...
 ```
 
 Depois de subir o hub, ajuste LLM principal, musica, automacao, modo de publicacao e API do YouTube no modal `Configurações`. Mudancas no Hub nao exigem editar `.env`; mudancas de segredos ou URLs de boot ainda exigem reiniciar o `uvicorn`.
@@ -75,9 +75,9 @@ scripts/install_systemd_service.sh
 
 O servico fixa o hub em `127.0.0.1:8080` e executa um port guard antes do
 start. O guard libera a porta somente quando o processo ocupando `8080`
-parece ser uma instancia anterior do proprio YTS Render; processos de outro
+parece ser uma instancia anterior do proprio ShortsFlow; processos de outro
 app fazem o start falhar em vez de serem mortos silenciosamente. O instalador
-tambem habilita `yts-render-hub-reload.path`, que observa `app/`, `scripts/`,
+tambem habilita `shortsflow-hub-reload.path`, que observa `app/`, `scripts/`,
 `deploy/systemd/`, `.env` e `pyproject.toml` e reinicia o hub quando esses
 arquivos mudam. As units versionadas em `deploy/systemd/` sao renderizadas pelo
 instalador com o caminho real do checkout.
@@ -89,7 +89,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8080
 ```
 
 Nao use uma porta alternativa para o hub principal sem atualizar tambem
-Tailscale, `YTS_APP_URL` e os links operacionais. Se `8080` estiver ocupada,
+Tailscale, `SHORTSFLOW_APP_URL` e os links operacionais. Se `8080` estiver ocupada,
 identifique o dono da porta antes de subir outro hub:
 
 ```bash
@@ -101,7 +101,7 @@ ss -ltnp '( sport = :8080 )'
 Com systemd:
 
 ```bash
-systemctl status yts-render-hub.service --no-pager
+systemctl status shortsflow-hub.service --no-pager
 ```
 
 ```bash
@@ -111,7 +111,7 @@ curl http://127.0.0.1:8080/healthz
 Resposta esperada:
 
 ```json
-{"status":"ok","app":"YTS Render","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
+{"status":"ok","app":"ShortsFlow","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
 ```
 
 Se estiver usando outra porta, ajuste a URL do `curl`.
@@ -186,9 +186,9 @@ Se o objetivo for upload real via API:
 3. confirme que surgiu `data/youtube_oauth_token.json`
 4. volte ao hub e confira o bloco de integracao
 
-Se `YTS_YOUTUBE_OAUTH_REDIRECT_URI` estiver vazio, o app usa a URL atual do hub como callback.
+Se `SHORTSFLOW_YOUTUBE_OAUTH_REDIRECT_URI` estiver vazio, o app usa a URL atual do hub como callback.
 
-Importante: o token OAuth fica dentro de `YTS_DATA_DIR`. Se voce subir uma validacao isolada com outro diretorio, por exemplo `YTS_DATA_DIR=data-real-validation`, esse ambiente nao vai enxergar `data/youtube_oauth_token.json` e o hub vai reportar "Canal ainda nao conectado por OAuth". Isso nao significa que o token principal foi perdido.
+Importante: o token OAuth fica dentro de `SHORTSFLOW_DATA_DIR`. Se voce subir uma validacao isolada com outro diretorio, por exemplo `SHORTSFLOW_DATA_DIR=data-real-validation`, esse ambiente nao vai enxergar `data/youtube_oauth_token.json` e o hub vai reportar "Canal ainda nao conectado por OAuth". Isso nao significa que o token principal foi perdido.
 
 Validacao segura do token principal, sem publicar video:
 
@@ -312,7 +312,7 @@ curl https://<hostname>.<tailnet>/healthz
 Com systemd:
 
 ```bash
-systemctl stop yts-render-hub.service
+systemctl stop shortsflow-hub.service
 ```
 
 No terminal do `uvicorn` manual, use `Ctrl+C`.

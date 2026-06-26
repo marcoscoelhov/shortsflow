@@ -90,6 +90,6 @@ def migrate(sqlite_url: str, postgres_url: str) -> None:
 
 if __name__ == "__main__":
     migrate(
-        sqlite_url="sqlite:///data/yts_render.db",
-        postgres_url="postgresql+psycopg://yts_render:yts_render@127.0.0.1:5432/yts_render",
+        sqlite_url="sqlite:///data/shortsflow.db",
+        postgres_url="postgresql+psycopg://shortsflow:shortsflow@127.0.0.1:5432/shortsflow",
     )

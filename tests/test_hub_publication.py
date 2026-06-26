@@ -72,13 +72,13 @@ def test_ready_script_bank_premium_publish_gate_auto_confirms_editorial_score_an
 
 
 def test_artifact_url_maps_file_uri_to_static_route() -> None:
-    artifact_path = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / "job-1" / "render" / "final.mp4"
+    artifact_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]).resolve() / "artifacts" / "job-1" / "render" / "final.mp4"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_bytes(b"video")
     assert artifact_url(artifact_path.as_uri()) == "/artifacts/job-1/render/final.mp4"
 
 def test_artifact_url_escapes_reserved_path_characters() -> None:
-    artifact_path = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / "job 1" / "render" / "final #1.mp4"
+    artifact_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]).resolve() / "artifacts" / "job 1" / "render" / "final #1.mp4"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_bytes(b"video")
 
@@ -94,11 +94,11 @@ def test_hub_auth_token_protects_pages_and_artifacts(monkeypatch) -> None:
     monkeypatch.setattr(main_module.settings, "hub_auth_token", "secret-token")
     client = TestClient(app)
     authed_client = TestClient(app)
-    authed_client.cookies.set("yts_hub_token", "secret-token")
+    authed_client.cookies.set("shortsflow_hub_token", "secret-token")
     main_module.settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     assert client.get("/").status_code == 401
-    assert client.get("/", headers={"x-yts-hub-token": "secret-token"}).status_code == 200
+    assert client.get("/", headers={"x-shortsflow-hub-token": "secret-token"}).status_code == 200
     assert authed_client.get("/").status_code == 200
     assert client.get("/artifacts/missing.mp4").status_code == 401
     assert authed_client.get("/artifacts/missing.mp4").status_code == 404
@@ -108,7 +108,7 @@ def test_hub_auth_token_protects_pages_and_artifacts(monkeypatch) -> None:
         client.post(
             "/operations/settings",
             data={"action": "reset"},
-            headers={"x-yts-hub-token": "secret-token"},
+            headers={"x-shortsflow-hub-token": "secret-token"},
             follow_redirects=False,
         ).status_code
         == 303
@@ -128,7 +128,7 @@ def test_hub_auth_precedes_ready_script_import_body_limit(monkeypatch) -> None:
     monkeypatch.setattr(main_module.settings, "hub_auth_token", "secret-token")
     client = TestClient(app)
     oversized_headers = {"content-length": str(main_module.MAX_READY_SCRIPT_IMPORT_BODY_BYTES + 1)}
-    authed_oversized_headers = {**oversized_headers, "x-yts-hub-token": "secret-token"}
+    authed_oversized_headers = {**oversized_headers, "x-shortsflow-hub-token": "secret-token"}
 
     assert client.post("/automation/ready-scripts/import", content=b"", headers=oversized_headers).status_code == 401
     assert client.post("/automation/ready-scripts/import", content=b"", headers=authed_oversized_headers).status_code == 413
@@ -136,7 +136,7 @@ def test_hub_auth_precedes_ready_script_import_body_limit(monkeypatch) -> None:
 
 def test_artifact_url_does_not_embed_hub_auth_token(monkeypatch) -> None:
     monkeypatch.setattr(main_module.settings, "hub_auth_token", "secret-token")
-    artifact_path = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / "job-1" / "render" / "final.mp4"
+    artifact_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]).resolve() / "artifacts" / "job-1" / "render" / "final.mp4"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_bytes(b"video")
 
@@ -1523,7 +1523,7 @@ Hashtags: #curiosidades #shorts""",
     def fake_create_job(payload):
         assert payload["job_origin"] == "ready_script_bank"
         assert payload["creation_via"] == "daily_cycle"
-        assert "[[YTS_READY_SCRIPT_BEGIN]]" in str(payload["notes"])
+        assert "[[SHORTSFLOW_READY_SCRIPT_BEGIN]]" in str(payload["notes"])
         with SessionLocal() as session:
             _create_basic_job(session, job_id=job_id, status="queued", seed_theme="Roteiro do banco")
             session.flush()
@@ -2120,7 +2120,7 @@ def test_create_job_persists_origin_and_audit_artifact() -> None:
         assert job.creation_via == "api"
         assert (job.artifact_index or {}).get("job_origin") == "job_origin.json"
 
-    artifact = json.loads((Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "job_origin.json").read_text(encoding="utf-8"))
+    artifact = json.loads((Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "job_origin.json").read_text(encoding="utf-8"))
     assert artifact["job_origin_label"] == "Título manual"
     assert artifact["creation_via_label"] == "API"
     assert artifact["inferred"] is False
@@ -2361,7 +2361,7 @@ def test_schedule_publication_persists_row_and_appears_in_calendar(monkeypatch) 
     assert schedule.timezone == "America/Sao_Paulo"
     assert schedule.youtube_visibility == "private"
     assert job and job.artifact_index["publication_schedule"] == "publication_schedule.json"
-    artifact = json.loads((Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "publication_schedule.json").read_text(encoding="utf-8"))
+    artifact = json.loads((Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "publication_schedule.json").read_text(encoding="utf-8"))
     assert artifact["local_date"] == "2099-06-10"
 
     calendar_page = client.get("/calendar?month=2099-06")
@@ -2519,7 +2519,7 @@ def test_calendar_quick_add_schedules_job_on_selected_day(monkeypatch) -> None:
     assert schedule.timezone == "America/Sao_Paulo"
     assert schedule.youtube_visibility == "private"
     assert job and job.artifact_index["publication_schedule"] == "publication_schedule.json"
-    artifact = json.loads((Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "publication_schedule.json").read_text(encoding="utf-8"))
+    artifact = json.loads((Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "publication_schedule.json").read_text(encoding="utf-8"))
     assert artifact["local_date"] == "2099-08-15"
     assert artifact["local_time"] == "16:45"
 
@@ -3003,7 +3003,7 @@ def test_retention_sweep_keeps_publishable_jobs_longer_and_job_detail_handles_cl
     assert "Os arquivos de mídia deste job já foram removidos." in response.text
     assert "Meta Danakil" in response.text
 
-    cleanup_path = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / expired_job_id / "retention_cleanup.json"
+    cleanup_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / expired_job_id / "retention_cleanup.json"
     assert cleanup_path.exists()
     with SessionLocal() as session:
         job = session.get(Job, expired_job_id)
@@ -3033,7 +3033,7 @@ def test_retention_sweep_skips_published_jobs() -> None:
 
     assert cleaned == 0
     assert artifact_path.exists()
-    assert not (Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "retention_cleanup.json").exists()
+    assert not (Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "retention_cleanup.json").exists()
     with SessionLocal() as session:
         job = session.get(Job, job_id)
 
@@ -3271,8 +3271,8 @@ def test_publish_metadata_form_persists_overrides_into_publish_package() -> None
     )
 
     assert response.status_code == 303
-    overrides = json.loads((Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "publish_metadata_overrides.json").read_text(encoding="utf-8"))
-    package = json.loads((Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "publish_package.json").read_text(encoding="utf-8"))
+    overrides = json.loads((Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "publish_metadata_overrides.json").read_text(encoding="utf-8"))
+    package = json.loads((Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "publish_package.json").read_text(encoding="utf-8"))
 
     assert overrides["title"] == "Danakil: o lugar mais extremo da Terra onde pessoas ainda vivem"
     assert package["title"] == overrides["title"]
@@ -4328,11 +4328,11 @@ def test_record_performance_metrics_persists_artifact_and_learning_brief() -> No
     assert metric.retention_percent == 82.0
     assert job and job.artifact_index["performance_metrics"] == "performance_metrics.json"
     assert job.quality_summary["performance"]["retention_percent"] == 82.0
-    report = json.loads((Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "performance_metrics.json").read_text(encoding="utf-8"))
+    report = json.loads((Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "performance_metrics.json").read_text(encoding="utf-8"))
     assert report["latest"]["retention_percent"] == 82.0
     assert brief["sample_count"] >= 1
     assert brief["strong_patterns"]
-    assert (Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "performance_metrics.json").exists()
+    assert (Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "performance_metrics.json").exists()
 
 def test_sync_youtube_analytics_snapshot_persists_snapshot_and_updates_growth_center(monkeypatch) -> None:
     job_id = "analytics-snapshot-job"
@@ -4431,7 +4431,7 @@ def test_sync_youtube_analytics_snapshot_persists_snapshot_and_updates_growth_ce
     assert metric.retention_percent == 86.5
     assert job and job.quality_summary["youtube_analytics"]["summary_metrics"]["views"] == 240
     assert job.quality_summary["youtube_analytics"]["breakdowns"]["traffic_sources"][0]["insightTrafficSourceType"] == "SHORTS"
-    assert (Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "youtube_analytics_snapshot.json").exists()
+    assert (Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "youtube_analytics_snapshot.json").exists()
     dashboard = client.get("/publication-hub")
     assert "Linhas editoriais por retenção" in dashboard.text
     assert "86.5%" in dashboard.text

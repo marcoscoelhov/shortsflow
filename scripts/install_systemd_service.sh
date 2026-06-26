@@ -2,11 +2,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVICE_NAME="yts-render-hub.service"
+SERVICE_NAME="shortsflow-hub.service"
 SERVICE_TEMPLATE="${REPO_ROOT}/deploy/systemd/${SERVICE_NAME}.in"
 SERVICE_DST="/etc/systemd/system/${SERVICE_NAME}"
-RELOAD_SERVICE_NAME="yts-render-hub-reload.service"
-RELOAD_PATH_NAME="yts-render-hub-reload.path"
+RELOAD_SERVICE_NAME="shortsflow-hub-reload.service"
+RELOAD_PATH_NAME="shortsflow-hub-reload.path"
 RELOAD_SERVICE_TEMPLATE="${REPO_ROOT}/deploy/systemd/${RELOAD_SERVICE_NAME}.in"
 RELOAD_PATH_TEMPLATE="${REPO_ROOT}/deploy/systemd/${RELOAD_PATH_NAME}.in"
 RELOAD_SERVICE_DST="/etc/systemd/system/${RELOAD_SERVICE_NAME}"

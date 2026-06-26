@@ -1,10 +1,10 @@
 [Unit]
-Description=Run YTS Render automation daily
+Description=Run ShortsFlow automation daily
 
 [Timer]
 OnCalendar=*-*-* 02:00:00 America/Sao_Paulo
 Persistent=true
-Unit=yts-render-automation.service
+Unit=shortsflow-automation.service
 
 [Install]
 WantedBy=timers.target

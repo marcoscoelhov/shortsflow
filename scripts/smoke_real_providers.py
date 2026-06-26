@@ -32,10 +32,10 @@ TERMINAL_STATUSES = {
 
 def _configure_environment(data_dir: Path) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
-    os.environ["YTS_DATA_DIR"] = str(data_dir)
-    os.environ["YTS_DATABASE_URL"] = f"sqlite:///{data_dir / 'yts_render.db'}"
-    os.environ["YTS_USE_MOCK_PROVIDERS"] = "false"
-    os.environ.setdefault("YTS_STRICT_MINIMAX_VALIDATION", "false")
+    os.environ["SHORTSFLOW_DATA_DIR"] = str(data_dir)
+    os.environ["SHORTSFLOW_DATABASE_URL"] = f"sqlite:///{data_dir / 'shortsflow.db'}"
+    os.environ["SHORTSFLOW_USE_MOCK_PROVIDERS"] = "false"
+    os.environ.setdefault("SHORTSFLOW_STRICT_MINIMAX_VALIDATION", "false")
 
 
 def _job_row(db_path: Path, job_id: str) -> tuple[str, str | None, dict[str, Any] | None] | None:
@@ -89,7 +89,7 @@ def main() -> int:
     status = orchestrator.process_job(job_id)
     print(json.dumps({"event": "process_job_returned", "job_id": job_id, "status": status}, ensure_ascii=False), flush=True)
 
-    db_path = data_dir / "yts_render.db"
+    db_path = data_dir / "shortsflow.db"
     started_at = time.monotonic()
     row = _job_row(db_path, job_id)
     while time.monotonic() - started_at < args.timeout_sec:

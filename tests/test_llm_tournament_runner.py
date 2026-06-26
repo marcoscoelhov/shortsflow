@@ -174,7 +174,7 @@ def test_textual_round_plan_counts_tasks_without_provider_calls(tmp_path, monkey
                         "candidate_id": "configured",
                         "provider": "openai_compatible",
                         "model": "configured",
-                        "api_key_env": "YTS_TEST_CANDIDATE_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_CANDIDATE_KEY",
                         "roles": ["script", "repair", "audit"],
                         "enabled": True,
                     },
@@ -182,7 +182,7 @@ def test_textual_round_plan_counts_tasks_without_provider_calls(tmp_path, monkey
                         "candidate_id": "missing-key",
                         "provider": "openai_compatible",
                         "model": "missing-key",
-                        "api_key_env": "YTS_MISSING_CANDIDATE_KEY",
+                        "api_key_env": "SHORTSFLOW_MISSING_CANDIDATE_KEY",
                         "roles": ["script", "repair", "audit"],
                         "enabled": True,
                     },
@@ -195,8 +195,8 @@ def test_textual_round_plan_counts_tasks_without_provider_calls(tmp_path, monkey
     source = load_editorial_benchmark()
     source["cases"] = source["cases"][:1]
     benchmark.write_text(json.dumps(source), encoding="utf-8")
-    monkeypatch.setenv("YTS_TEST_CANDIDATE_KEY", "candidate-key")
-    monkeypatch.delenv("YTS_MISSING_CANDIDATE_KEY", raising=False)
+    monkeypatch.setenv("SHORTSFLOW_TEST_CANDIDATE_KEY", "candidate-key")
+    monkeypatch.delenv("SHORTSFLOW_MISSING_CANDIDATE_KEY", raising=False)
     monkeypatch.setattr(
         "app.llm_tournament._candidate_json_completion",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("plan must not call providers")),
@@ -223,7 +223,7 @@ def test_textual_stage_tasks_interleave_candidates_for_parallel_provider_calls()
             candidate_id="candidate-a",
             provider="provider-a",
             model="model-a",
-            api_key_env="YTS_TEST_CANDIDATE_A_KEY",
+            api_key_env="SHORTSFLOW_TEST_CANDIDATE_A_KEY",
             roles=("script",),
             enabled=True,
         ),
@@ -231,7 +231,7 @@ def test_textual_stage_tasks_interleave_candidates_for_parallel_provider_calls()
             candidate_id="candidate-b",
             provider="provider-b",
             model="model-b",
-            api_key_env="YTS_TEST_CANDIDATE_B_KEY",
+            api_key_env="SHORTSFLOW_TEST_CANDIDATE_B_KEY",
             roles=("script",),
             enabled=True,
         ),
@@ -260,7 +260,7 @@ def test_run_script_stage_persists_outputs_and_ranking(tmp_path, monkeypatch) ->
                         "candidate_id": "candidate-a",
                         "provider": "openai_compatible",
                         "model": "candidate-a",
-                        "api_key_env": "YTS_TEST_CANDIDATE_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_CANDIDATE_KEY",
                         "roles": ["script"],
                         "enabled": True,
                     },
@@ -268,7 +268,7 @@ def test_run_script_stage_persists_outputs_and_ranking(tmp_path, monkeypatch) ->
                         "candidate_id": "judge",
                         "provider": "openai",
                         "model": "judge",
-                        "api_key_env": "YTS_TEST_JUDGE_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_JUDGE_KEY",
                         "roles": ["audit"],
                         "enabled": True,
                     },
@@ -281,8 +281,8 @@ def test_run_script_stage_persists_outputs_and_ranking(tmp_path, monkeypatch) ->
     source = load_editorial_benchmark()
     source["cases"] = source["cases"][:1]
     benchmark.write_text(json.dumps(source), encoding="utf-8")
-    monkeypatch.setenv("YTS_TEST_CANDIDATE_KEY", "candidate-key")
-    monkeypatch.setenv("YTS_TEST_JUDGE_KEY", "judge-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_CANDIDATE_KEY", "candidate-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_JUDGE_KEY", "judge-key")
 
     def fake_completion(candidate, prompt, *, timeout_sec):
         if candidate.candidate_id == "judge":
@@ -332,7 +332,7 @@ def test_run_script_stage_can_skip_judge_by_default(tmp_path, monkeypatch) -> No
                         "candidate_id": "candidate-a",
                         "provider": "openai_compatible",
                         "model": "candidate-a",
-                        "api_key_env": "YTS_TEST_CANDIDATE_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_CANDIDATE_KEY",
                         "roles": ["script"],
                         "enabled": True,
                     }
@@ -345,7 +345,7 @@ def test_run_script_stage_can_skip_judge_by_default(tmp_path, monkeypatch) -> No
     source = load_editorial_benchmark()
     source["cases"] = source["cases"][:1]
     benchmark.write_text(json.dumps(source), encoding="utf-8")
-    monkeypatch.setenv("YTS_TEST_CANDIDATE_KEY", "candidate-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_CANDIDATE_KEY", "candidate-key")
     monkeypatch.setattr(
         "app.llm_tournament._candidate_json_completion",
         lambda *_args, **_kwargs: (json.dumps(_valid_script()), {"input_tokens": 20, "output_tokens": 30, "total_tokens": 50}),
@@ -375,7 +375,7 @@ def test_judge_existing_script_run_updates_results_without_regeneration(tmp_path
                         "candidate_id": "candidate-a",
                         "provider": "openai_compatible",
                         "model": "candidate-a",
-                        "api_key_env": "YTS_TEST_CANDIDATE_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_CANDIDATE_KEY",
                         "roles": ["script"],
                         "enabled": True,
                     },
@@ -383,7 +383,7 @@ def test_judge_existing_script_run_updates_results_without_regeneration(tmp_path
                         "candidate_id": "candidate-b",
                         "provider": "openai_compatible",
                         "model": "candidate-b",
-                        "api_key_env": "YTS_TEST_CANDIDATE_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_CANDIDATE_KEY",
                         "roles": ["script"],
                         "enabled": True,
                     },
@@ -391,7 +391,7 @@ def test_judge_existing_script_run_updates_results_without_regeneration(tmp_path
                         "candidate_id": "judge",
                         "provider": "openai",
                         "model": "judge",
-                        "api_key_env": "YTS_TEST_JUDGE_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_JUDGE_KEY",
                         "roles": ["audit"],
                         "enabled": True,
                     },
@@ -404,8 +404,8 @@ def test_judge_existing_script_run_updates_results_without_regeneration(tmp_path
     source = load_editorial_benchmark()
     source["cases"] = source["cases"][:1]
     benchmark.write_text(json.dumps(source), encoding="utf-8")
-    monkeypatch.setenv("YTS_TEST_CANDIDATE_KEY", "candidate-key")
-    monkeypatch.setenv("YTS_TEST_JUDGE_KEY", "judge-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_CANDIDATE_KEY", "candidate-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_JUDGE_KEY", "judge-key")
 
     run_dir = tmp_path / "runs" / "existing"
     outputs_dir = run_dir / "outputs" / "script"
@@ -505,7 +505,7 @@ def test_textual_round_runs_triage_and_full_stages(tmp_path, monkeypatch) -> Non
                         "candidate_id": "candidate-a",
                         "provider": "openai_compatible",
                         "model": "candidate-a",
-                        "api_key_env": "YTS_TEST_CANDIDATE_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_CANDIDATE_KEY",
                         "roles": ["script", "repair", "audit"],
                         "enabled": True,
                     }
@@ -518,7 +518,7 @@ def test_textual_round_runs_triage_and_full_stages(tmp_path, monkeypatch) -> Non
     source = load_editorial_benchmark()
     source["cases"] = source["cases"][:1]
     benchmark.write_text(json.dumps(source), encoding="utf-8")
-    monkeypatch.setenv("YTS_TEST_CANDIDATE_KEY", "candidate-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_CANDIDATE_KEY", "candidate-key")
 
     def fake_completion(candidate, prompt, *, timeout_sec):
         if "repaired_script, fixed_issue_slugs" in prompt:
@@ -674,7 +674,7 @@ def test_textual_round_can_stop_after_triage(tmp_path, monkeypatch) -> None:
                         "candidate_id": "candidate-a",
                         "provider": "openai_compatible",
                         "model": "candidate-a",
-                        "api_key_env": "YTS_TEST_CANDIDATE_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_CANDIDATE_KEY",
                         "roles": ["script", "repair", "audit"],
                         "enabled": True,
                     }
@@ -683,7 +683,7 @@ def test_textual_round_can_stop_after_triage(tmp_path, monkeypatch) -> None:
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("YTS_TEST_CANDIDATE_KEY", "candidate-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_CANDIDATE_KEY", "candidate-key")
     calls: list[tuple[str, str]] = []
 
     def fake_phase(**kwargs):

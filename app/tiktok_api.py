@@ -35,9 +35,9 @@ class TikTokPublisher:
     def connection_status(self) -> TikTokConnectionStatus:
         missing_items: list[str] = []
         if not self.settings.tiktok_auto_publish_enabled:
-            missing_items.append("YTS_TIKTOK_AUTO_PUBLISH_ENABLED=false")
+            missing_items.append("SHORTSFLOW_TIKTOK_AUTO_PUBLISH_ENABLED=false")
         if not self.settings.tiktok_access_token:
-            missing_items.append("YTS_TIKTOK_ACCESS_TOKEN ausente")
+            missing_items.append("SHORTSFLOW_TIKTOK_ACCESS_TOKEN ausente")
         return TikTokConnectionStatus(
             enabled=bool(self.settings.tiktok_auto_publish_enabled),
             token_configured=bool(self.settings.tiktok_access_token),

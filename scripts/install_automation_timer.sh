@@ -2,8 +2,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVICE_NAME="yts-render-automation.service"
-TIMER_NAME="yts-render-automation.timer"
+SERVICE_NAME="shortsflow-automation.service"
+TIMER_NAME="shortsflow-automation.timer"
 SERVICE_TEMPLATE="${REPO_ROOT}/deploy/systemd/${SERVICE_NAME}.in"
 TIMER_TEMPLATE="${REPO_ROOT}/deploy/systemd/${TIMER_NAME}.in"
 SERVICE_DST="/etc/systemd/system/${SERVICE_NAME}"

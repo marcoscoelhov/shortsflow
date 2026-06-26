@@ -26,7 +26,7 @@ def main() -> int:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         return _run_smoke(args.text, args.output_dir, keep_files=True, as_json=args.json)
 
-    with TemporaryDirectory(prefix="yts-gemini-tts-") as tmp:
+    with TemporaryDirectory(prefix="shortsflow-gemini-tts-") as tmp:
         return _run_smoke(args.text, Path(tmp), keep_files=False, as_json=args.json)
 
 

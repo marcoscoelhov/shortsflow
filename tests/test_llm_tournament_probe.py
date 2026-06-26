@@ -7,12 +7,12 @@ from app.llm_tournament import LlmTournamentCandidate, probe_llm_tournament_cand
 
 
 def test_llm_tournament_probe_dry_run_marks_configured_candidate_ready(monkeypatch) -> None:
-    monkeypatch.setenv("YTS_TEST_LLM_KEY", "test-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_LLM_KEY", "test-key")
     candidate = LlmTournamentCandidate(
         candidate_id="provider-model",
         provider="openai_compatible",
         model="provider-model",
-        api_key_env="YTS_TEST_LLM_KEY",
+        api_key_env="SHORTSFLOW_TEST_LLM_KEY",
         roles=("script",),
         enabled=True,
         base_url="https://provider.example/v1",
@@ -26,12 +26,12 @@ def test_llm_tournament_probe_dry_run_marks_configured_candidate_ready(monkeypat
 
 
 def test_llm_tournament_probe_skips_missing_key(monkeypatch) -> None:
-    monkeypatch.delenv("YTS_MISSING_LLM_KEY", raising=False)
+    monkeypatch.delenv("SHORTSFLOW_MISSING_LLM_KEY", raising=False)
     candidate = LlmTournamentCandidate(
         candidate_id="provider-model",
         provider="openai_compatible",
         model="provider-model",
-        api_key_env="YTS_MISSING_LLM_KEY",
+        api_key_env="SHORTSFLOW_MISSING_LLM_KEY",
         roles=("script",),
         enabled=True,
         base_url="https://provider.example/v1",
@@ -45,7 +45,7 @@ def test_llm_tournament_probe_skips_missing_key(monkeypatch) -> None:
 
 def test_llm_tournament_probe_openai_compatible_json_contract(monkeypatch) -> None:
     captured: dict[str, object] = {}
-    monkeypatch.setenv("YTS_TEST_LLM_KEY", "test-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_LLM_KEY", "test-key")
 
     class FakeCompletions:
         def create(self, **kwargs):
@@ -73,7 +73,7 @@ def test_llm_tournament_probe_openai_compatible_json_contract(monkeypatch) -> No
         candidate_id="provider-model",
         provider="openai_compatible",
         model="provider-model",
-        api_key_env="YTS_TEST_LLM_KEY",
+        api_key_env="SHORTSFLOW_TEST_LLM_KEY",
         roles=("script",),
         enabled=True,
         base_url="https://provider.example/v1",
@@ -96,7 +96,7 @@ def test_llm_tournament_probe_openai_compatible_json_contract(monkeypatch) -> No
 
 
 def test_llm_tournament_probe_report_summarizes_dry_run_manifest(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("YTS_TEST_LLM_KEY", "test-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_LLM_KEY", "test-key")
     manifest = tmp_path / "candidates.json"
     manifest.write_text(
         json.dumps(
@@ -106,7 +106,7 @@ def test_llm_tournament_probe_report_summarizes_dry_run_manifest(tmp_path, monke
                         "candidate_id": "ready-model",
                         "provider": "openai_compatible",
                         "model": "ready-model",
-                        "api_key_env": "YTS_TEST_LLM_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_LLM_KEY",
                         "roles": ["script"],
                         "enabled": True,
                     },
@@ -114,7 +114,7 @@ def test_llm_tournament_probe_report_summarizes_dry_run_manifest(tmp_path, monke
                         "candidate_id": "disabled-model",
                         "provider": "openai_compatible",
                         "model": "disabled-model",
-                        "api_key_env": "YTS_TEST_LLM_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_LLM_KEY",
                         "roles": ["script"],
                         "enabled": False,
                     },

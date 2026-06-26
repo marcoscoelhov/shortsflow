@@ -32,7 +32,7 @@ def test_llm_tournament_candidates_manifest_loads() -> None:
 
 
 def test_llm_tournament_candidate_configuration_uses_env(monkeypatch, tmp_path) -> None:
-    monkeypatch.delenv("YTS_TEST_TOURNAMENT_API_KEY", raising=False)
+    monkeypatch.delenv("SHORTSFLOW_TEST_TOURNAMENT_API_KEY", raising=False)
     manifest = tmp_path / "candidates.json"
     manifest.write_text(
         json.dumps(
@@ -42,7 +42,7 @@ def test_llm_tournament_candidate_configuration_uses_env(monkeypatch, tmp_path) 
                         "candidate_id": "test-provider-model",
                         "provider": "openai_compatible",
                         "model": "test-provider-model",
-                        "api_key_env": "YTS_TEST_TOURNAMENT_API_KEY",
+                        "api_key_env": "SHORTSFLOW_TEST_TOURNAMENT_API_KEY",
                         "roles": ["script"],
                         "enabled": True,
                     }
@@ -55,7 +55,7 @@ def test_llm_tournament_candidate_configuration_uses_env(monkeypatch, tmp_path) 
 
     assert candidates["test-provider-model"].configured is False
 
-    monkeypatch.setenv("YTS_TEST_TOURNAMENT_API_KEY", "test-key")
+    monkeypatch.setenv("SHORTSFLOW_TEST_TOURNAMENT_API_KEY", "test-key")
 
     candidates = {candidate.candidate_id: candidate for candidate in load_llm_tournament_candidates(manifest)}
 

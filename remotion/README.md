@@ -1,8 +1,8 @@
-# YTS Render Remotion
+# ShortsFlow Remotion
 
 Subprojeto isolado para gerar o render principal Remotion e a **Versao Premium Paralela** da prova de **Acabamento Editorial Premium**.
 
-O render principal operacional do YTS Render usa `YTS_RENDER_PRIMARY_BACKEND=remotion` por padrao. O Hub chama o binario local em `remotion/node_modules/.bin/remotion`; ele nao baixa dependencias durante a execucao do worker.
+O render principal operacional do ShortsFlow usa `SHORTSFLOW_PRIMARY_BACKEND=remotion` por padrao. O Hub chama o binario local em `remotion/node_modules/.bin/remotion`; ele nao baixa dependencias durante a execucao do worker.
 
 Uso local:
 

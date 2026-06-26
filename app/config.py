@@ -1,14 +1,38 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import os
 from pathlib import Path
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _load_legacy_yts_env_aliases() -> None:
+    """Keep existing deployments working while ShortsFlow env vars replace YTS_* names."""
+    env_path = Path(".env")
+    legacy_items: dict[str, str] = {}
+    if env_path.exists():
+        for raw_line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key.startswith("YTS_"):
+                legacy_items[key] = value.strip().strip('"').strip("'")
+    for key, value in os.environ.items():
+        if key.startswith("YTS_"):
+            legacy_items[key] = value
+    for key, value in legacy_items.items():
+        os.environ.setdefault("SHORTSFLOW_" + key.removeprefix("YTS_"), value)
+
+
+_load_legacy_yts_env_aliases()
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="YTS_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="SHORTSFLOW_", env_file=".env", extra="ignore")
 
     app_name: str = "ShortsFlow"
     app_url: str = "http://127.0.0.1:8080"

@@ -27,10 +27,10 @@ class _FakeResponse:
 
 
 def test_local_openai_vision_verifier_scores_image(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("YTS_USE_MOCK_PROVIDERS", "false")
-    monkeypatch.setenv("YTS_VISION_VERIFIER_PROVIDER", "local_openai")
-    monkeypatch.setenv("YTS_LOCAL_VISION_BASE_URL", "http://127.0.0.1:8081/v1")
-    monkeypatch.setenv("YTS_LOCAL_VISION_MODEL", "gemma-4-e2b-it")
+    monkeypatch.setenv("SHORTSFLOW_USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", "local_openai")
+    monkeypatch.setenv("SHORTSFLOW_LOCAL_VISION_BASE_URL", "http://127.0.0.1:8081/v1")
+    monkeypatch.setenv("SHORTSFLOW_LOCAL_VISION_MODEL", "gemma-4-e2b-it")
     get_settings.cache_clear()
 
     image_path = tmp_path / "scene.png"

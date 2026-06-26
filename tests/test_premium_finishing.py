@@ -230,7 +230,7 @@ def test_premium_finishing_generates_parallel_artifacts(monkeypatch) -> None:
     report = orchestrator.generate_premium_finishing(job_id)
 
     assert report["passed"] is True
-    edit_plan_path = Path(__import__("os").environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "render" / "edit_plan.json"
+    edit_plan_path = Path(__import__("os").environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "render" / "edit_plan.json"
     premium_path = edit_plan_path.parent / "premium.mp4"
     plan_text = edit_plan_path.read_text(encoding="utf-8")
     plan = json.loads(plan_text)
@@ -239,7 +239,7 @@ def test_premium_finishing_generates_parallel_artifacts(monkeypatch) -> None:
     assert plan["style"]["component_policy"] == "free_only"
     assert plan["caption_track"]["max_lines"] == 1
     assert "file://" not in plan_text
-    assert str(Path(__import__("os").environ["YTS_DATA_DIR"]).resolve()) not in plan_text
+    assert str(Path(__import__("os").environ["SHORTSFLOW_DATA_DIR"]).resolve()) not in plan_text
     assert "asset_path" not in plan["scenes"][0]
     assert "path" not in plan["audio"]
     assert report["command"] == ["remotion", "render", "render/premium.mp4"]
@@ -313,7 +313,7 @@ def test_promote_as_primary_render_uses_premium_file_hash() -> None:
         assert render.video_uri == premium_path.as_uri()
         assert render.content_hash == file_sha256(premium_path)
 
-    render_payload = json.loads((Path(__import__("os").environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "render_output.json").read_text(encoding="utf-8"))
+    render_payload = json.loads((Path(__import__("os").environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "render_output.json").read_text(encoding="utf-8"))
     assert render_payload["content_hash"] == file_sha256(premium_path)
     assert render_payload["selected_render"] == "remotion"
 
@@ -673,10 +673,10 @@ def test_premium_runtime_plan_stages_local_media_for_remotion_public(tmp_path: P
     finally:
         service.renderer = original_renderer
 
-    assert staged["scenes"][0]["asset_src"] == "yts-runtime/stage-job/scene-1.jpg"
-    assert staged["audio"]["src"] == "yts-runtime/stage-job/audio.wav"
-    assert (project_dir / "public" / "yts-runtime" / "stage-job" / "scene-1.jpg").exists()
-    assert (project_dir / "public" / "yts-runtime" / "stage-job" / "audio.wav").exists()
+    assert staged["scenes"][0]["asset_src"] == "shortsflow-runtime/stage-job/scene-1.jpg"
+    assert staged["audio"]["src"] == "shortsflow-runtime/stage-job/audio.wav"
+    assert (project_dir / "public" / "shortsflow-runtime" / "stage-job" / "scene-1.jpg").exists()
+    assert (project_dir / "public" / "shortsflow-runtime" / "stage-job" / "audio.wav").exists()
 
 
 def test_job_detail_hides_manual_premium_action() -> None:
@@ -793,7 +793,7 @@ def test_premium_approval_promotes_premium_video_to_publish_package(monkeypatch)
         assert render.content_hash == file_sha256(premium_path)
         assert job.artifact_index["render"] == "render/premium.mp4"
         assert job.artifact_index["standard_render"] == "render/final.mp4"
-    package_path = Path(__import__("os").environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "publish_package.json"
+    package_path = Path(__import__("os").environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "publish_package.json"
     package = json.loads(package_path.read_text(encoding="utf-8"))
     assert package["video_uri"] == premium_path.as_uri()
     assert package["selected_render"] == "premium"

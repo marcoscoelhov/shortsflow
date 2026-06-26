@@ -29,7 +29,7 @@ class OrchestratorWorkerOperations:
         if self.owner.worker_thread and self.owner.worker_thread.is_alive():
             return
         self.owner.stop_event = threading.Event()
-        self.owner.worker_thread = threading.Thread(target=self.owner._worker_loop, name="yts-worker", daemon=True)
+        self.owner.worker_thread = threading.Thread(target=self.owner._worker_loop, name="shortsflow-worker", daemon=True)
         self.owner.worker_thread.start()
 
     def stop_worker(self) -> None:
@@ -68,7 +68,7 @@ class OrchestratorWorkerOperations:
                 except OperationalError:
                     logger.warning("lease heartbeat skipped after repeated database lock for job %s", job_id, exc_info=True)
 
-        threading.Thread(target=heartbeat, name=f"yts-lease-{job_id[:8]}", daemon=True).start()
+        threading.Thread(target=heartbeat, name=f"shortsflow-lease-{job_id[:8]}", daemon=True).start()
         return stop_heartbeat
 
     def worker_loop(self) -> None:

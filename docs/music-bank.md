@@ -54,7 +54,7 @@ data/music_bank/
 
 ## Popular automaticamente
 
-O app popula automaticamente o banco quando `YTS_MUSIC_BANK_AUTO_POPULATE=true` e `manifest.json` ainda nao existe ou nao tem faixas utilizaveis.
+O app popula automaticamente o banco quando `SHORTSFLOW_MUSIC_BANK_AUTO_POPULATE=true` e `manifest.json` ainda nao existe ou nao tem faixas utilizaveis.
 
 Tambem da para rodar manualmente:
 
@@ -91,4 +91,4 @@ O importador:
 
 O Hub de Revisao controla a fonte de musica, autopopulacao do banco local e fallback para API no modal `Configurações`.
 
-Use `Banco local` para manter o fluxo sem custo de API, `MiniMax` para forcar geracao por API, ou `Auto` para tentar banco local e depois MiniMax quando houver chave. `YTS_MUSIC_BANK_DIR` continua sendo configuracao de ambiente porque define onde os arquivos locais vivem.
+Use `Banco local` para manter o fluxo sem custo de API, `MiniMax` para forcar geracao por API, ou `Auto` para tentar banco local e depois MiniMax quando houver chave. `SHORTSFLOW_MUSIC_BANK_DIR` continua sendo configuracao de ambiente porque define onde os arquivos locais vivem.

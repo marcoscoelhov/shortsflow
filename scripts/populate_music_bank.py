@@ -16,7 +16,7 @@ from app.music_bank import populate_builtin_music_bank
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Populate the local approved music bank with built-in synthetic tracks.")
-    parser.add_argument("--bank-dir", type=Path, default=None, help="Music bank directory. Defaults to YTS_MUSIC_BANK_DIR.")
+    parser.add_argument("--bank-dir", type=Path, default=None, help="Music bank directory. Defaults to SHORTSFLOW_MUSIC_BANK_DIR.")
     parser.add_argument("--force", action="store_true", help="Regenerate built-in tracks and overwrite their manifest entries.")
     parser.add_argument("--duration-seconds", type=int, default=75, help="Duration for each generated track.")
     args = parser.parse_args()

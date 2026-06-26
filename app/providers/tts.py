@@ -445,7 +445,7 @@ class ElevenLabsTTSProvider(EdgeTTSProvider):
             metadata["fallback_used"] = True
             metadata["fallback_from_provider"] = "elevenlabs"
             metadata["fallback_provider"] = fallback.get("provider")
-            metadata["fallback_reason"] = "missing YTS_ELEVENLABS_API_KEY"
+            metadata["fallback_reason"] = "missing SHORTSFLOW_ELEVENLABS_API_KEY"
             return fallback
         last_error: Exception | None = None
         for attempt in range(1, 3):
@@ -552,7 +552,7 @@ class GeminiTTSProvider(ElevenLabsTTSProvider):
         api_key = settings.gemini_tts_api_key or settings.gemini_api_key
         if not api_key:
             fallback = super().synthesize(text, audio_path, srt_path, context)
-            self._mark_gemini_fallback(fallback, "missing YTS_GEMINI_TTS_API_KEY or YTS_GEMINI_API_KEY")
+            self._mark_gemini_fallback(fallback, "missing SHORTSFLOW_GEMINI_TTS_API_KEY or SHORTSFLOW_GEMINI_API_KEY")
             return fallback
         last_error: Exception | None = None
         for attempt in range(1, 3):

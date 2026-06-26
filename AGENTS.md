@@ -35,7 +35,7 @@ Follow existing Python style: 4-space indentation, type hints where practical, a
 For coding tasks, prefer using Codex CLI or a Codex agent as the implementation executor. Hermes keeps ownership of scope, reviews Codex diffs as untrusted patches, runs the canonical tests, verifies behavior, and commits only after independent validation. Small emergency edits may be done directly only when spawning Codex would be slower than the change itself.
 
 ## Testing Guidelines
-Add or update `pytest` coverage for behavioral changes, especially pipeline states, quality gates, and review hub flows. Name tests `test_<behavior>()`. Tests default to mock providers via `YTS_USE_MOCK_PROVIDERS=true`; preserve that pattern so the suite stays deterministic and cheap to run.
+Add or update `pytest` coverage for behavioral changes, especially pipeline states, quality gates, and review hub flows. Name tests `test_<behavior>()`. Tests default to mock providers via `SHORTSFLOW_USE_MOCK_PROVIDERS=true`; preserve that pattern so the suite stays deterministic and cheap to run.
 
 ## Commit & Pull Request Guidelines
 Recent history follows Conventional Commit style such as `feat: gate publish readiness` and `fix: harden shorts quality gates`; keep using `feat:`, `fix:`, and similarly clear prefixes. PRs should describe the user-visible or pipeline-visible change, note config or data impacts, link related issues, and include screenshots when updating hub templates or styles.

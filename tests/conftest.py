@@ -9,8 +9,8 @@ from tests import e2e_support as support
 
 @pytest.fixture(scope="session", autouse=True)
 def e2e_environment():
-    support.shutil.rmtree(Path(support.os.environ["YTS_DATA_DIR"]), ignore_errors=True)
-    Path(support.os.environ["YTS_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
+    support.shutil.rmtree(Path(support.os.environ["SHORTSFLOW_DATA_DIR"]), ignore_errors=True)
+    Path(support.os.environ["SHORTSFLOW_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
     support.init_db()
     support.orchestrator.start_worker()
     yield

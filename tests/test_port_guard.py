@@ -3,7 +3,7 @@ from __future__ import annotations
 import socket
 from pathlib import Path
 
-from scripts.yts_port_guard import release_port
+from scripts.shortsflow_port_guard import release_port
 
 
 def _free_port() -> int:
@@ -18,7 +18,7 @@ def test_port_guard_accepts_free_port() -> None:
     result = release_port(
         host="127.0.0.1",
         port=port,
-        repo_root=Path("/tmp/definitely-not-yts-render"),
+        repo_root=Path("/tmp/definitely-not-shortsflow"),
         timeout_sec=0.1,
         force=False,
     )
@@ -35,7 +35,7 @@ def test_port_guard_refuses_foreign_listener_without_force() -> None:
         result = release_port(
             host="127.0.0.1",
             port=port,
-            repo_root=Path("/tmp/definitely-not-yts-render"),
+            repo_root=Path("/tmp/definitely-not-shortsflow"),
             timeout_sec=0.1,
             force=False,
         )

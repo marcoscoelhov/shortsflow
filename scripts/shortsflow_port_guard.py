@@ -63,7 +63,7 @@ def _cwd(pid: int) -> Path | None:
         return None
 
 
-def _is_yts_render_process(pid: int, repo_root: Path) -> bool:
+def _is_shortsflow_process(pid: int, repo_root: Path) -> bool:
     cmdline = _cmdline(pid)
     cwd = _cwd(pid)
     if cwd is None:
@@ -101,7 +101,7 @@ def release_port(host: str, port: int, repo_root: Path, timeout_sec: float, forc
     foreign: list[int] = []
     owned: list[int] = []
     for pid in sorted(pids):
-        if _is_yts_render_process(pid, repo_root):
+        if _is_shortsflow_process(pid, repo_root):
             owned.append(pid)
         else:
             foreign.append(pid)
@@ -136,16 +136,16 @@ def release_port(host: str, port: int, repo_root: Path, timeout_sec: float, forc
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Release the YTS Render hub port before systemd starts uvicorn.")
-    parser.add_argument("--host", default=os.environ.get("YTS_APP_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("YTS_APP_PORT", "8080")))
-    parser.add_argument("--repo-root", default=os.environ.get("YTS_REPO_ROOT", os.getcwd()))
+    parser = argparse.ArgumentParser(description="Release the ShortsFlow hub port before systemd starts uvicorn.")
+    parser.add_argument("--host", default=os.environ.get("SHORTSFLOW_APP_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("SHORTSFLOW_APP_PORT", "8080")))
+    parser.add_argument("--repo-root", default=os.environ.get("SHORTSFLOW_REPO_ROOT", os.getcwd()))
     parser.add_argument("--timeout-sec", type=float, default=15.0)
     parser.add_argument(
         "--force",
         action="store_true",
-        default=os.environ.get("YTS_PORT_GUARD_FORCE", "").lower() in {"1", "true", "yes"},
-        help="Allow killing non-YTS processes on the target port.",
+        default=os.environ.get("SHORTSFLOW_PORT_GUARD_FORCE", "").lower() in {"1", "true", "yes"},
+        help="Allow killing non-ShortsFlow processes on the target port.",
     )
     args = parser.parse_args()
     return release_port(

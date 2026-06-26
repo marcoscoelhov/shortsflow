@@ -287,7 +287,7 @@ class JobOrchestrator:
         notes = str(payload.get("notes") or "").strip()
         lower_notes = notes.lower()
         ready_script_origin = job_origin in {JOB_ORIGIN_MANUAL_READY_SCRIPT, JOB_ORIGIN_READY_SCRIPT_BANK}
-        ready_script_notes = "input_mode=script" in lower_notes or "[[yts_ready_script_begin]]" in lower_notes
+        ready_script_notes = "input_mode=script" in lower_notes or "[[shortsflow_ready_script_begin]]" in lower_notes
         if ready_script_origin or ready_script_notes:
             return payload
         if "prompt viral customizado do hub" in lower_notes:
@@ -978,7 +978,7 @@ class JobOrchestrator:
     def _cli_progress(self, job_id: str, stage: str, state: str, detail: str = "") -> None:
         timestamp = utcnow().strftime("%H:%M:%S")
         suffix = f" {detail}" if detail else ""
-        print(f"[yts {timestamp}] job={job_id[:8]} stage={stage} {state}{suffix}", flush=True)
+        print(f"[shortsflow {timestamp}] job={job_id[:8]} stage={stage} {state}{suffix}", flush=True)
 
     def _record_step_failure(self, job_id: str, step_name: str, attempt: int, message: str, recoverable: bool) -> None:
         with session_scope() as session:

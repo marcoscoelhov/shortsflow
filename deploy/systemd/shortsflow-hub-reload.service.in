@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart ShortsFlow review hub after repository changes
+After=shortsflow-hub.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl try-restart shortsflow-hub.service

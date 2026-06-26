@@ -92,11 +92,11 @@ class YouTubePublisher:
         client_configured = bool(self.settings.youtube_client_id and self.settings.youtube_client_secret)
         dependencies_available = self._google_dependencies_available()
         if not self.settings.youtube_api_enabled:
-            missing_items.append("YTS_YOUTUBE_API_ENABLED=false")
+            missing_items.append("SHORTSFLOW_YOUTUBE_API_ENABLED=false")
         if self.settings.youtube_publish_mode != "api":
-            missing_items.append("YTS_YOUTUBE_PUBLISH_MODE != api")
+            missing_items.append("SHORTSFLOW_YOUTUBE_PUBLISH_MODE != api")
         if not client_configured:
-            missing_items.append("YTS_YOUTUBE_CLIENT_ID/SECRET ausentes")
+            missing_items.append("SHORTSFLOW_YOUTUBE_CLIENT_ID/SECRET ausentes")
         if not dependencies_available:
             missing_items.append("Dependências Google OAuth/API ainda não instaladas no ambiente")
         if not payload:

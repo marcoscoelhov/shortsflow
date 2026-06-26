@@ -1,6 +1,6 @@
 # Explicacao para leigos
 
-O YTS Render e uma pequena fabrica automatizada de videos curtos para YouTube Shorts.
+O ShortsFlow e uma pequena fabrica automatizada de videos curtos para YouTube Shorts.
 
 Em vez de uma pessoa fazer tudo manualmente, o operador entrega uma ideia, um titulo ou um roteiro pronto. O app transforma isso em um video vertical completo, mostra o resultado em uma pagina de revisao e ajuda a agendar ou publicar no canal.
 

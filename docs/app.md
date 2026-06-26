@@ -1,6 +1,6 @@
 # Documentacao do App
 
-YTS Render e um app FastAPI para gerar Shorts verticais em pt-BR, revisar o resultado em um hub web e publicar no YouTube em fluxo manual ou via API.
+ShortsFlow e um app FastAPI para gerar Shorts verticais em pt-BR, revisar o resultado em um hub web e publicar no YouTube em fluxo manual ou via API.
 
 Em linguagem simples, ele funciona como uma linha de producao local: recebe uma ideia, titulo ou roteiro, cria o pacote completo de um Short, aplica gates de qualidade e deixa uma pessoa decidir quando aprovar, agendar e publicar. A explicacao para pessoas nao tecnicas fica em [docs/explicacao-para-leigos.md](explicacao-para-leigos.md).
 
@@ -46,7 +46,7 @@ Testes novos devem preferir a suite de dominio correspondente: `test_pipeline_sc
 
 Persistencia local padrao:
 
-- banco: `data/yts_render.db`
+- banco: `data/shortsflow.db`
 - artefatos: `data/artifacts/<job_id>/`
 - token OAuth do YouTube: `data/youtube_oauth_token.json`
 - state temporario do OAuth: `data/youtube_oauth_state.json`
@@ -250,9 +250,9 @@ python -m app.cli competitive-scout-auto-cycle
 
 ## Publicacao cruzada no TikTok
 
-Quando `YTS_TIKTOK_AUTO_PUBLISH_ENABLED=true`, jobs que ja entraram na agenda ou publicacao do YouTube ganham um registro em `ChannelPublication` para o canal `tiktok`. Jobs com agenda futura seguem o mesmo horario planejado; jobs ja publicados entram em retropostagem controlada, limitada por `YTS_TIKTOK_RETROPOST_DAILY_LIMIT` (padrao 1 por dia).
+Quando `SHORTSFLOW_TIKTOK_AUTO_PUBLISH_ENABLED=true`, jobs que ja entraram na agenda ou publicacao do YouTube ganham um registro em `ChannelPublication` para o canal `tiktok`. Jobs com agenda futura seguem o mesmo horario planejado; jobs ja publicados entram em retropostagem controlada, limitada por `SHORTSFLOW_TIKTOK_RETROPOST_DAILY_LIMIT` (padrao 1 por dia).
 
-O envio usa a Content Posting API oficial do TikTok com `YTS_TIKTOK_ACCESS_TOKEN` e escopo `video.publish`. Esse token e configurado manualmente no ambiente; o Hub nao gerencia OAuth, refresh token nem ciclo de renovacao do TikTok. A API exige consulta de creator info, privacidade compativel com a conta e pode restringir clientes nao auditados a publicacoes privadas; essas recusas ficam registradas como `publish_failed` no canal TikTok.
+O envio usa a Content Posting API oficial do TikTok com `SHORTSFLOW_TIKTOK_ACCESS_TOKEN` e escopo `video.publish`. Esse token e configurado manualmente no ambiente; o Hub nao gerencia OAuth, refresh token nem ciclo de renovacao do TikTok. A API exige consulta de creator info, privacidade compativel com a conta e pode restringir clientes nao auditados a publicacoes privadas; essas recusas ficam registradas como `publish_failed` no canal TikTok.
 
 O contexto de integracao exposto no hub usa:
 
@@ -329,13 +329,13 @@ Defaults importantes:
 
 Camadas de configuracao:
 
-- `.env`: boot, infraestrutura e segredos. Inclui `YTS_APP_URL`, `YTS_HUB_AUTH_TOKEN`, `YTS_DATABASE_URL`, chaves de provedores, OAuth do YouTube, token manual do TikTok e exposicao Tailnet.
+- `.env`: boot, infraestrutura e segredos. Inclui `SHORTSFLOW_APP_URL`, `SHORTSFLOW_HUB_AUTH_TOKEN`, `SHORTSFLOW_DATABASE_URL`, chaves de provedores, OAuth do YouTube, token manual do TikTok e exposicao Tailnet.
 - Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, planejador de cenas, fonte de musica, autopopulacao do banco local, TTS primario, modo de publicacao, API do YouTube, publicacao cruzada no TikTok, horario do ciclo diario, horario padrao de publicacao, janela da agenda, score minimo e coleta de performance. O gerador de imagens aparece como informacao operacional; hoje, em execucao real, ele e MiniMax.
 - defaults do codigo: valores seguros usados quando nem `.env` nem Hub definem uma sobreposicao.
 
-Quando `YTS_HUB_AUTH_TOKEN` esta configurado, requisicoes `GET` e `HEAD` aceitam o cookie `yts_hub_token` para navegacao. Requisicoes `POST` exigem `x-yts-hub-token` ou `Authorization: Bearer <token>`; cookie nao autentica mutacoes por desenho.
+Quando `SHORTSFLOW_HUB_AUTH_TOKEN` esta configurado, requisicoes `GET` e `HEAD` aceitam o cookie `shortsflow_hub_token` para navegacao. Requisicoes `POST` exigem `x-shortsflow-hub-token` ou `Authorization: Bearer <token>`; cookie nao autentica mutacoes por desenho.
 
-As sobreposicoes do Hub ficam na tabela `operational_settings`. Elas sao aplicadas no startup do FastAPI e nos comandos `yts-render automation-run` e `yts-render analytics-sync-run`. Segredos nunca devem ser adicionados a essa tabela; novos campos editaveis precisam entrar pela allowlist em `app/operational_settings.py`.
+As sobreposicoes do Hub ficam na tabela `operational_settings`. Elas sao aplicadas no startup do FastAPI e nos comandos `shortsflow automation-run` e `shortsflow analytics-sync-run`. Segredos nunca devem ser adicionados a essa tabela; novos campos editaveis precisam entrar pela allowlist em `app/operational_settings.py`.
 
 Terminologia do painel:
 
@@ -356,7 +356,7 @@ Fact pack e politica factual:
 Musica de fundo:
 
 - o padrao e banco local, alteravel no Hub de Revisao
-- `local_bank` le `YTS_MUSIC_BANK_DIR/manifest.json` e usa apenas faixas aprovadas para YouTube, com licenca ou origem rastreavel
+- `local_bank` le `SHORTSFLOW_MUSIC_BANK_DIR/manifest.json` e usa apenas faixas aprovadas para YouTube, com licenca ou origem rastreavel
 - a autopopulacao do banco local pode ser ligada ou desligada no Hub
 - trilhas MiniMax antigas podem ser importadas com `scripts/import_minimax_music_artifacts.py` e recebem prioridade sobre as sinteticas locais
 - o fallback para API fica desligado por padrao para impedir custo silencioso quando o banco local falha
@@ -367,13 +367,13 @@ Musica de fundo:
 
 Credenciais MiniMax por midia:
 
-- texto usa `YTS_MINIMAX_TEXT_API_KEY` ou `YTS_MINIMAX_API_KEY`
+- texto usa `SHORTSFLOW_MINIMAX_TEXT_API_KEY` ou `SHORTSFLOW_MINIMAX_API_KEY`
 - imagem tenta primeiro a chave resolvida de texto
-- imagem usa `YTS_MINIMAX_IMAGE_API_KEY` so depois de limite ou quota na chave de texto, e marca essa chave como esgotada para o job atual
-- se nao houver chave de texto, imagem usa diretamente `YTS_MINIMAX_IMAGE_API_KEY`
-- musica usa `YTS_MINIMAX_MUSIC_API_KEY` ou a chave resolvida de texto apenas quando MiniMax Music esta configurado como provider ou fallback
-- narracao usa Gemini TTS quando `YTS_TTS_PRIMARY_PROVIDER=gemini_tts` ou a sobreposicao do Hub escolhe `gemini_tts`, e `YTS_GEMINI_TTS_API_KEY` ou `YTS_GEMINI_API_KEY` esta configurada; por padrao, escolhe uma voz Gemini pelo perfil de narrador do roteiro e registra a decisao em `narration_asset.json`; se Gemini falhar, tenta ElevenLabs
-- narracao usa ElevenLabs quando `YTS_TTS_PRIMARY_PROVIDER=elevenlabs` ou a sobreposicao do Hub escolhe `elevenlabs`, e `YTS_ELEVENLABS_API_KEY` esta configurada; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados
+- imagem usa `SHORTSFLOW_MINIMAX_IMAGE_API_KEY` so depois de limite ou quota na chave de texto, e marca essa chave como esgotada para o job atual
+- se nao houver chave de texto, imagem usa diretamente `SHORTSFLOW_MINIMAX_IMAGE_API_KEY`
+- musica usa `SHORTSFLOW_MINIMAX_MUSIC_API_KEY` ou a chave resolvida de texto apenas quando MiniMax Music esta configurado como provider ou fallback
+- narracao usa Gemini TTS quando `SHORTSFLOW_TTS_PRIMARY_PROVIDER=gemini_tts` ou a sobreposicao do Hub escolhe `gemini_tts`, e `SHORTSFLOW_GEMINI_TTS_API_KEY` ou `SHORTSFLOW_GEMINI_API_KEY` esta configurada; por padrao, escolhe uma voz Gemini pelo perfil de narrador do roteiro e registra a decisao em `narration_asset.json`; se Gemini falhar, tenta ElevenLabs
+- narracao usa ElevenLabs quando `SHORTSFLOW_TTS_PRIMARY_PROVIDER=elevenlabs` ou a sobreposicao do Hub escolhe `elevenlabs`, e `SHORTSFLOW_ELEVENLABS_API_KEY` esta configurada; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados
 - `edge_tts` pode ser selecionado como emergencia, mas e tratado como provider tecnico e bloqueia elegibilidade automatizada
 
 Limite de provedor para troca de chave de imagem significa quota, saldo, credito ou rate limit. Timeout, erro de conexao, resposta invalida e `5xx` continuam sendo falhas transientes da chamada atual.
@@ -424,7 +424,7 @@ render/edit_plan.json
 premium_finishing_report.json
 ```
 
-Como Remotion e o backend padrao por ADR-0012, o ambiente operacional precisa ter `npm install` executado dentro de `remotion/`. Quando `YTS_RENDER_PRIMARY_BACKEND=ffmpeg` for usado para manutencao legado, os artefatos voltam a incluir `render/ffmpeg.log` e `render_motion_plan.json`.
+Como Remotion e o backend padrao por ADR-0012, o ambiente operacional precisa ter `npm install` executado dentro de `remotion/`. Quando `SHORTSFLOW_PRIMARY_BACKEND=ffmpeg` for usado para manutencao legado, os artefatos voltam a incluir `render/ffmpeg.log` e `render_motion_plan.json`.
 
 O boot do Hub roda um preflight do Remotion antes de iniciar o worker e registra aviso claro se `remotion/node_modules/.bin/remotion`, `remotion/src/index.ts` ou `remotion/package-lock.json` estiverem ausentes. `/healthz` tambem expõe `render.primary_backend`, `render.remotion_ready` e `render.remotion_missing_items`.
 

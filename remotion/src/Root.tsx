@@ -34,7 +34,7 @@ const defaultPlan: FinishPlan = {
 export const Root: React.FC = () => {
   return (
     <Composition
-      id="YtsPremiumShort"
+      id="ShortsFlowPremiumShort"
       component={PremiumShort}
       defaultProps={defaultPlan}
       width={1080}

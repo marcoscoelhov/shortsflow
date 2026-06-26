@@ -399,11 +399,11 @@ class AutomationService:
     def _youtube_preflight(self) -> dict[str, Any]:
         missing_items: list[str] = []
         if not self.settings.youtube_api_enabled:
-            missing_items.append("YTS_YOUTUBE_API_ENABLED=false")
+            missing_items.append("SHORTSFLOW_YOUTUBE_API_ENABLED=false")
         if self.settings.youtube_publish_mode != "api":
-            missing_items.append("YTS_YOUTUBE_PUBLISH_MODE != api")
+            missing_items.append("SHORTSFLOW_YOUTUBE_PUBLISH_MODE != api")
         if not self.settings.youtube_channel_id:
-            missing_items.append("YTS_YOUTUBE_CHANNEL_ID ausente")
+            missing_items.append("SHORTSFLOW_YOUTUBE_CHANNEL_ID ausente")
         redirect_uri = self.settings.youtube_oauth_redirect_uri or f"{self.settings.app_url.rstrip('/')}/youtube/oauth/callback"
         status = self.orchestrator.youtube.connection_status(redirect_uri)
         missing_items.extend(item for item in status.missing_items if item not in missing_items)

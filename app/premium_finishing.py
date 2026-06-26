@@ -425,7 +425,7 @@ class PremiumFinishingService:
         project_dir = getattr(self.renderer, "project_dir", None)
         if not project_dir:
             return plan
-        public_dir = Path(project_dir) / "public" / "yts-runtime" / job_id
+        public_dir = Path(project_dir) / "public" / "shortsflow-runtime" / job_id
         shutil.rmtree(public_dir, ignore_errors=True)
         ensure_dir(public_dir)
         staged = json.loads(json.dumps(self.owner._serialize_for_json(plan), ensure_ascii=False))
@@ -437,13 +437,13 @@ class PremiumFinishingService:
                 continue
             target = public_dir / f"{scene.get('scene_id') or source.stem}{source.suffix or '.jpg'}"
             shutil.copy2(source, target)
-            scene["asset_src"] = f"yts-runtime/{job_id}/{target.name}"
+            scene["asset_src"] = f"shortsflow-runtime/{job_id}/{target.name}"
         audio = staged.get("audio") if isinstance(staged.get("audio"), dict) else {}
         source = self._local_media_path(audio.get("uri") or audio.get("path"))
         if source is not None and source.exists():
             target = public_dir / f"audio{source.suffix or '.wav'}"
             shutil.copy2(source, target)
-            audio["src"] = f"yts-runtime/{job_id}/{target.name}"
+            audio["src"] = f"shortsflow-runtime/{job_id}/{target.name}"
         return staged
 
     def _local_media_path(self, value: Any) -> Path | None:

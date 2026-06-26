@@ -37,7 +37,7 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
     assert captured["job_origin"] == "manual_ready_script"
     assert captured["creation_via"] == "hub"
     assert "input_mode=script" in str(captured["notes"])
-    assert "[[YTS_READY_SCRIPT_BEGIN]]" in str(captured["notes"])
+    assert "[[SHORTSFLOW_READY_SCRIPT_BEGIN]]" in str(captured["notes"])
     assert "ready_script_fact_check_confirmed=true" in str(captured["notes"])
 
 def test_hub_create_job_normalizes_markdown_ready_script(monkeypatch) -> None:
@@ -373,7 +373,7 @@ Hashtags: #curiosidades #shorts""",
     run_result = service.run_daily_cycle(force=True)
 
     assert run_result["status"] == "failed"
-    assert "YTS_YOUTUBE_API_ENABLED=false" in str(run_result["error"])
+    assert "SHORTSFLOW_YOUTUBE_API_ENABLED=false" in str(run_result["error"])
     with SessionLocal() as session:
         item = session.scalar(select(ReadyScriptItem).where(ReadyScriptItem.title == "Preflight YouTube roteiro unico"))
         run = session.scalar(select(AutomationRun).where(AutomationRun.run_id == run_result["run_id"]))
@@ -1376,9 +1376,9 @@ def test_step_script_uses_strict_prompt_rules_when_fact_pack_is_required(monkeyp
     assert contract["fields"]["hook"]["internal_target"] == "hook"
     assert contract["fields"]["loop"]["internal_target"] == "retention_map.proof_or_tension"
     assert contract["fields"]["payoff"]["source_label"] == "Payoff"
-    artifact = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "structured_viral_contract.json"
+    artifact = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "structured_viral_contract.json"
     assert artifact.exists()
-    visual_contract = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "visual_contract.json"
+    visual_contract = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "visual_contract.json"
     assert visual_contract.exists()
     contract_payload = json.loads(visual_contract.read_text(encoding="utf-8"))
     assert contract_payload["contract_name"] == "Contrato Visual do Roteiro"
@@ -1451,7 +1451,7 @@ Fechamento: Da próxima vez, lembra: você está vendo um planeta impossível on
     assert "ready_script_input.json" in artifacts
     assert "visual_contract.json" in artifacts
     assert "structured_viral_contract.json" not in artifacts
-    visual_contract = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "visual_contract.json"
+    visual_contract = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "visual_contract.json"
     assert visual_contract.exists()
 
 def test_visual_contract_gate_blocks_incomplete_hook_contract() -> None:
@@ -1535,7 +1535,7 @@ def test_step_script_fails_closed_when_visual_contract_invalid(monkeypatch) -> N
         else:
             raise AssertionError("expected visual contract gate failure")
 
-    gate_path = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "visual_contract_gate.json"
+    gate_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "visual_contract_gate.json"
     assert gate_path.exists()
     gate_payload = json.loads(gate_path.read_text(encoding="utf-8"))
     assert "hook_frame_missing_must_show" in gate_payload["reasons"]
@@ -2250,7 +2250,7 @@ def test_build_monetization_report_keeps_fact_review_with_verified_fact_pack(mon
         }
         session.commit()
 
-    fact_pack_path = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / job_id / "fact_pack.json"
+    fact_pack_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]).resolve() / "artifacts" / job_id / "fact_pack.json"
     fact_pack_path.parent.mkdir(parents=True, exist_ok=True)
     fact_pack_path.write_text(
         json.dumps(
@@ -2370,7 +2370,7 @@ Hashtags: #curiosidades #deepsea #biologia #shorts""",
         }
         session.commit()
 
-    artifact_dir = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / job_id
+    artifact_dir = Path(os.environ["SHORTSFLOW_DATA_DIR"]).resolve() / "artifacts" / job_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     (artifact_dir / "fact_pack.json").write_text(json.dumps(ready.fact_pack), encoding="utf-8")
     (artifact_dir / "script.json").write_text(json.dumps(ready.script), encoding="utf-8")
@@ -3177,7 +3177,7 @@ def test_step_script_persists_generation_debug_on_provider_failure(monkeypatch) 
         else:
             raise AssertionError("expected ProviderFailure")
 
-    debug_path = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "script_generation_debug.json"
+    debug_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "script_generation_debug.json"
     debug = json.loads(debug_path.read_text(encoding="utf-8"))
 
     assert debug["phase"] == "generation"

@@ -98,7 +98,7 @@ def test_full_pipeline_reaches_monetization_review() -> None:
         assert job.artifact_index["mixed_audio"] == "audio/mixed.wav"
         assert job.artifact_index["performance_timeline"] == "performance_timeline.json"
         assert job.artifact_index["subtitle_timing"] == "subtitle_timing_report.json"
-        timeline_path = Path(os.environ["YTS_DATA_DIR"]).resolve() / "artifacts" / job_id / "performance_timeline.json"
+        timeline_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]).resolve() / "artifacts" / job_id / "performance_timeline.json"
         timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
         assert any(step["step_name"] == "render" and step["duration_ms"] is not None for step in timeline["steps"])
         final_status = job.quality_summary["monetization"]["final_status"]
@@ -1306,7 +1306,7 @@ def test_retention_sweep_cleans_expired_hard_failure_artifacts() -> None:
 
     assert cleaned >= 1
     assert not artifact_path.exists()
-    cleanup_path = Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "retention_cleanup.json"
+    cleanup_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "retention_cleanup.json"
     assert cleanup_path.exists()
     cleanup = json.loads(cleanup_path.read_text(encoding="utf-8"))
     assert cleanup["classification"] == "hard_failure"
@@ -1972,7 +1972,7 @@ def test_gemini_tts_falls_back_to_elevenlabs_when_primary_is_not_configured(tmp_
         {
             "from_provider": "gemini_tts",
             "to_provider": "elevenlabs",
-            "reason": "missing YTS_GEMINI_TTS_API_KEY or YTS_GEMINI_API_KEY",
+            "reason": "missing SHORTSFLOW_GEMINI_TTS_API_KEY or SHORTSFLOW_GEMINI_API_KEY",
         }
     ]
 
@@ -2197,7 +2197,7 @@ def test_full_pipeline_with_sound_design_persists_rights_and_artifacts(monkeypat
         assert Path(background_music.provider_metadata["sound_design"]["audio_uri"].removeprefix("file://")).exists()
         job = session.get(Job, job_id)
         assert job.artifact_index["sound_design"] == "audio/sound_design.wav"
-    rights_registry = json.loads((Path(os.environ["YTS_DATA_DIR"]) / "artifacts" / job_id / "rights_registry.json").read_text(encoding="utf-8"))
+    rights_registry = json.loads((Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "rights_registry.json").read_text(encoding="utf-8"))
     assert any(entry["asset_type"] == "sound_design" for entry in rights_registry["entries"])
 
 def test_fact_result_relevance_rejects_fuzzy_wrong_search_hit() -> None:

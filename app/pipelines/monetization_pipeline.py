@@ -461,8 +461,8 @@ class MonetizationPipeline(BasePipeline):
             evidence_url = self.settings.minimax_rights_evidence_url if provider == "minimax" else asset.license_note
             license_source = (
                 asset.license_note
-                or ("YTS_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else None)
-                or ("YTS_MINIMAX_COMMERCIAL_RIGHTS_CONFIRMED" if provider == "minimax" else None)
+                or ("SHORTSFLOW_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else None)
+                or ("SHORTSFLOW_MINIMAX_COMMERCIAL_RIGHTS_CONFIRMED" if provider == "minimax" else None)
             )
             evidence_required = bool(confirmed and provider == "minimax" and not bool(evidence_url) and not ai_generated_confirmed)
             entries.append(
@@ -487,7 +487,7 @@ class MonetizationPipeline(BasePipeline):
             if provider == "edge_tts":
                 confirmed = bool(self.settings.edge_tts_commercial_rights_confirmed) or ai_generated_confirmed
                 evidence_url = self.settings.edge_tts_rights_evidence_url
-                license_source = "YTS_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else "YTS_EDGE_TTS_COMMERCIAL_RIGHTS_CONFIRMED"
+                license_source = "SHORTSFLOW_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else "SHORTSFLOW_EDGE_TTS_COMMERCIAL_RIGHTS_CONFIRMED"
             elif provider == "synthetic_wav":
                 confirmed = True
                 evidence_url = "local_synthetic_test_audio"
@@ -495,7 +495,7 @@ class MonetizationPipeline(BasePipeline):
             else:
                 confirmed = ai_generated_confirmed
                 evidence_url = None
-                license_source = "YTS_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else None
+                license_source = "SHORTSFLOW_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else None
             evidence_required = bool(confirmed and provider == "edge_tts" and not bool(evidence_url) and not ai_generated_confirmed)
             entries.append(
                 {
@@ -515,7 +515,7 @@ class MonetizationPipeline(BasePipeline):
         if background_music:
             provider = background_music.provider.lower()
             ai_generated_confirmed = self._ai_generated_rights_confirmed(provider)
-            license_source = background_music.license_note or ("YTS_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else None) or ("local_mock_background_music" if provider == "mock_music" else None)
+            license_source = background_music.license_note or ("SHORTSFLOW_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED" if ai_generated_confirmed else None) or ("local_mock_background_music" if provider == "mock_music" else None)
             entries.append(
                 {
                     "asset_type": "music",

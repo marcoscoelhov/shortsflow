@@ -17,7 +17,7 @@
 ## Sprint 6: Pluggable Fallback By Stage
 
 - [x] Keep MiniMax as primary LLM provider.
-- [x] Keep provider registry configurable through `YTS_LLM_*`.
+- [x] Keep provider registry configurable through `SHORTSFLOW_LLM_*`.
 - [x] Repair scripts with the primary provider first.
 - [x] Use fallback provider for script repair when enabled.
 - [x] Use scene fallback planner when generated scenes fail coverage or quality.

@@ -99,7 +99,7 @@ OPERATIONAL_SETTING_SPECS = (
         "Visao local",
         "select",
         VISION_VERIFIER_OPTIONS,
-        description="Use local_openai com o servico yts-render-vision para liberar revisao visual automatica.",
+        description="Use local_openai com o servico shortsflow-vision para liberar revisao visual automatica.",
     ),
     OperationalSettingSpec("local_vision_base_url", "URL da visao local", "Visao local", "text"),
     OperationalSettingSpec("local_vision_model", "Modelo da visao local", "Visao local", "text"),

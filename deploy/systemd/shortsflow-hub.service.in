@@ -1,15 +1,15 @@
 [Unit]
-Description=YTS Render review hub
+Description=ShortsFlow review hub
 After=network-online.target tailscaled.service
 Wants=network-online.target tailscaled.service
 
 [Service]
 Type=simple
 WorkingDirectory=__REPO_ROOT__
-Environment=YTS_APP_HOST=127.0.0.1
-Environment=YTS_APP_PORT=8080
-Environment=YTS_REPO_ROOT=__REPO_ROOT__
-ExecStartPre=__REPO_ROOT__/.venv/bin/python __REPO_ROOT__/scripts/yts_port_guard.py --host 127.0.0.1 --port 8080 --repo-root __REPO_ROOT__ --timeout-sec 20
+Environment=SHORTSFLOW_APP_HOST=127.0.0.1
+Environment=SHORTSFLOW_APP_PORT=8080
+Environment=SHORTSFLOW_REPO_ROOT=__REPO_ROOT__
+ExecStartPre=__REPO_ROOT__/.venv/bin/python __REPO_ROOT__/scripts/shortsflow_port_guard.py --host 127.0.0.1 --port 8080 --repo-root __REPO_ROOT__ --timeout-sec 20
 ExecStart=__REPO_ROOT__/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8080
 Restart=always
 RestartSec=5
