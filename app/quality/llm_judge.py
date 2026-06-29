@@ -168,11 +168,13 @@ def build_editorial_judge_payload(
     local_reasons: list[str],
     local_metrics: dict[str, Any] | None = None,
     gate_name: str,
+    structured_viral_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "gate_name": gate_name,
         "local_reasons": local_reasons,
         "local_metrics": local_metrics or {},
+        "structured_viral_contract": structured_viral_contract or {},
         "script": {
             "title": script.get("title"),
             "hook": script.get("hook"),

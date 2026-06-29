@@ -20,7 +20,7 @@ def test_operational_settings_context_separates_scene_planner_from_image_generat
     assert fields["tts_primary_provider"]["options"] == [
         {"value": "gemini_tts", "label": "Gemini TTS"},
         {"value": "elevenlabs", "label": "ElevenLabs"},
-        {"value": "edge_tts", "label": "Edge TTS (emergencia)"},
+        {"value": "edge_tts", "label": "Edge TTS"},
     ]
 
 def test_llm_registry_uses_deepseek_for_repair_and_scene_defaults(monkeypatch) -> None:
@@ -2172,11 +2172,21 @@ def test_rights_registry_auto_confirms_ai_generated_assets(monkeypatch) -> None:
     assert report["review_required_count"] == 0
     assert {entry["license_source"] for entry in report["entries"]} == {"SHORTSFLOW_AI_GENERATED_COMMERCIAL_RIGHTS_CONFIRMED"}
 
-def test_narration_publishability_blocks_technical_tts_outside_mock(monkeypatch) -> None:
+def test_narration_publishability_allows_edge_tts_primary_outside_mock(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator.settings, "use_mock_providers", False)
 
     blockers = orchestrator.monetization_pipeline.narration_publishability_blockers(
-        SimpleNamespace(provider="edge_tts", provider_metadata={"fallback_used": True})
+        SimpleNamespace(provider="edge_tts", provider_metadata={"fallback_used": False})
+    )
+
+    assert blockers == []
+
+
+def test_narration_publishability_blocks_synthetic_technical_tts_outside_mock(monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator.settings, "use_mock_providers", False)
+
+    blockers = orchestrator.monetization_pipeline.narration_publishability_blockers(
+        SimpleNamespace(provider="synthetic_wav", provider_metadata={"fallback_used": True})
     )
 
     assert blockers == ["technical_tts_provider_not_publishable"]

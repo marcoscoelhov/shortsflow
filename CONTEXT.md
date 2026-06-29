@@ -525,8 +525,8 @@ A superficie dedicada do **Hub de Revisao** para importar, consultar e acompanha
 _Avoid_: modal como destino principal, textarea escondido na sidebar, painel principal de publicacao, configuracao escondida
 
 **Configuracao Global de Prompt Viral**:
-A configuracao recorrente do **Hub de Revisao** que orienta copywriting e retencao sem substituir o formato interno dos **Jobs de Video**.
-_Avoid_: acao da fila, roteiro pronto, instrucao por job
+A configuracao recorrente do **Hub de Revisao** que orienta copywriting, retencao, hook, beats, payoff, tom e formato semantico do roteiro sem substituir o JSON interno dos **Jobs de Video**. Para **Tema Automatico**, funciona como contrato editorial auditavel dentro do recorte permitido de astronomia/universo/planetas.
+_Avoid_: acao da fila, roteiro pronto, instrucao por job, credencial, seletor de source, fallback entre lanes, permissao de nicho, bypass de gate, publish automatico
 
 **Roteiro Viral Estruturado**:
 Um roteiro gerado pelo sistema que deve seguir a estrutura editorial canonica de Titulo, Hook, Loop, Beats, Payoff, Fechamento e Hashtags, com hook forte, loop mental, escalada, payoff tardio e fechamento de replay.
@@ -560,9 +560,9 @@ _Avoid_: ordem de importacao obrigatoria, prioridade manual inicial, fallback po
 Um conceito historico que nao deve impedir um item disponivel do **Banco de Roteiros Prontos** de gerar **Job de Video**.
 _Avoid_: criterio ativo de fallback, consumido sem tentativa, rejeitado por similaridade
 
-**Fallback para Tema Automatico**:
-A escolha de usar **Tema Automatico** apenas quando o **Banco de Roteiros Prontos** nao tem nenhum item disponivel para tentativa.
-_Avoid_: fallback por similaridade, ignorar roteiro pronto disponivel, gerar roteiro antes de consumir o banco
+**Lacuna de Lane Automatizada**:
+A sinalizacao de que uma lane diaria, como **Banco de Roteiros Prontos** ou **Tema Automatico**, nao conseguiu preencher seu proprio **Horario de Publicacao** sem recorrer silenciosamente a outra origem editorial.
+_Avoid_: fallback silencioso entre lanes, mascarar origem do conteudo, trocar **Tema Automatico** por banco sem alerta
 
 **Texto Rotulado**:
 Um texto dividido por rotulos editoriais reconheciveis, como titulo, hook, beats, payoff e fechamento.
@@ -918,12 +918,12 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Um **Lote de Roteiros Prontos** pode alimentar o **Banco de Roteiros Prontos** por arquivo ou por texto colado, usando somente **Texto Rotulado** na versao inicial.
 - Um **Lote de Roteiros Prontos** pode ser enviado pela **Barra Lateral Global do Hub**.
 - Um item do **Banco de Roteiros Prontos** deve preservar a intencao autoral do **Roteiro Pronto** consumido.
-- **Ciclo Diario de Automacao** deve priorizar o **Banco de Roteiros Prontos** antes de usar **Tema Automatico**.
-- O horario das 18h deve tentar **Tema Automatico** primeiro e usar o **Banco de Roteiros Prontos** como fallback quando a geracao automatica nao atingir **Elegibilidade Automatizada** dentro do limite do ciclo.
+- **Ciclo Diario de Automacao** deve tratar 11h/**Banco de Roteiros Prontos** e 18h/**Tema Automatico** como lanes separadas.
+- O horario das 18h deve tentar **Tema Automatico** e, se a geracao automatica nao atingir **Elegibilidade Automatizada** dentro do limite do ciclo, registrar uma **Lacuna de Lane Automatizada** em vez de usar o **Banco de Roteiros Prontos** como fallback silencioso.
 - O **Ciclo Diario de Automacao** deve completar o primeiro dia incompleto antes de preencher horarios de datas posteriores.
 - O **Banco de Roteiros Prontos** deve usar **Selecao Aleatoria de Roteiro** entre itens disponiveis.
 - **Similaridade Narrativa** em item do **Banco de Roteiros Prontos** deve virar warning, nao fallback.
-- **Fallback para Tema Automatico** deve ocorrer somente quando nao houver **Roteiro Pronto** disponivel no ciclo atual.
+- A falta de **Roteiro Pronto** disponivel no slot de **Banco de Roteiros Prontos** deve virar **Lacuna de Lane Automatizada**, nao promocao silenciosa de **Tema Automatico** para outro horario.
 - Um item do **Banco de Roteiros Prontos** que gerar uma tentativa deve virar **Roteiro Pronto Consumido**, mesmo quando o **Job de Video** nao for publicado automaticamente.
 - Um **Job de Video** criado a partir de **Roteiro Pronto Consumido** que falha em etapa tecnica deve usar **Recuperacao Dirigida do Job**, nao retorno automatico ao banco.
 - Um **Roteiro Pronto** deve ser enviado como **Texto Rotulado**.
@@ -1009,8 +1009,8 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 > **Domain expert:** "Nao. Use Selecao Aleatoria de Roteiro, mas filtre Similaridade Narrativa para nao repetir historia ou roteiro."
 > **Dev:** "Se um roteiro foi pulado por estar parecido com a agenda atual, ele foi consumido?"
 > **Domain expert:** "Nao. Ele vira Roteiro Pulado por Similaridade naquela execucao e pode ser usado no futuro."
-> **Dev:** "Se todos os roteiros disponiveis estiverem parecidos demais, paro o ciclo?"
-> **Domain expert:** "Nao. Use Fallback para Tema Automatico para tentar preencher o dia vago."
+> **Dev:** "Se todos os roteiros disponiveis falharem no slot do banco, preencho com Tema Automatico?"
+> **Domain expert:** "Nao silenciosamente. Banco e Tema Automatico sao lanes separadas; registre a lacuna operacional desse slot."
 > **Dev:** "Como voce vai enviar varios roteiros?"
 > **Domain expert:** "Como Lote de Roteiros Prontos, por arquivo ou copiar/colar, mantendo os rotulos Titulo, Hook, Loop, Beats, Payoff, Fechamento e Hashtags, sem CSV ou JSON inicialmente."
 > **Dev:** "Se um roteiro pronto falha no score, tento o mesmo roteiro amanha?"
@@ -1107,12 +1107,12 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - "hub" foi usado para falar tanto da superficie de revisao quanto de portas locais; resolvido: use **Hub de Revisao** para a superficie, e mantenha uma unica porta operacional.
 - "amigavel" nao significa apenas visual bonito; resolvido: o **Hub de Revisao** deve seguir um **Fluxo de Decisao**.
 - "dark mode" nao significa tema alternavel por usuario neste momento; resolvido: e o padrao visual do **Console Operacional**.
-- "tema automatico" nao significa escolha aleatoria; resolvido: o sistema deve preferir tendencia real e expor quando caiu em fallback.
+- "tema automatico" nao significa escolha aleatoria; resolvido: o sistema deve preferir tendencia real e expor falha como lacuna operacional quando nao houver candidato publicavel.
 - "roteiro pronto" nao significa prompt livre; resolvido: e conteudo editorial estruturado fornecido por uma pessoa e tratado como fonte de verdade.
 - "banco de roteiros" nao significa backlog de temas; resolvido: use **Banco de Roteiros Prontos** para armazenar textos autorais prontos para consumo pela automacao.
 - "aleatorio" nao significa que o sistema pode ignorar o banco; resolvido: use **Selecao Aleatoria de Roteiro** entre itens disponiveis do **Banco de Roteiros Prontos**.
 - "pulado por similaridade" nao deve ser comportamento ativo do banco; resolvido: **Similaridade Narrativa** em roteiro do banco vira warning.
-- "banco saturado" nao significa fallback automatico; resolvido: use **Fallback para Tema Automatico** somente quando nao houver item disponivel no banco.
+- "banco saturado" nao significa fallback automatico; resolvido: 11h/**Banco de Roteiros Prontos** e 18h/**Tema Automatico** sao lanes separadas, e falhas viram **Lacuna de Lane Automatizada**.
 - "colar em lote" nao significa texto livre sem contrato; resolvido: use **Lote de Roteiros Prontos** com os mesmos rotulos canonicos de **Texto Rotulado**.
 - "consumir roteiro" nao significa publicar obrigatoriamente; resolvido: um **Roteiro Pronto Consumido** pode virar tentativa sem publicacao e deve ser recuperado pelo **Job de Video**, nao retentado automaticamente pelo banco.
 - "loop" em **Roteiro Pronto** nao significa claim factual; resolvido: use **Loop Editorial** como tensao de retencao entre hook e beats.

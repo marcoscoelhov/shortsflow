@@ -11,11 +11,17 @@ import httpx
 from sqlalchemy import func, select
 
 from app.db import session_scope
+from app.domain_contracts import (
+    ACTIVE_SCHEDULE_STATUSES,
+    JOB_STATUS_QUEUED,
+    JOB_STATUS_RUNNING,
+    PUBLICATION_STATUS_PUBLISHING,
+    PUBLICATION_STATUS_SCHEDULED,
+)
 from app.models import AutomationAttempt, AutomationRun, Job, PublicationSchedule
 from app.utils import utcnow
 
-ACTIVE_SCHEDULE_STATUSES = {"scheduled", "publishing", "published"}
-STUCK_JOB_STATUSES = {"queued", "running", "publishing"}
+STUCK_JOB_STATUSES = {JOB_STATUS_QUEUED, JOB_STATUS_RUNNING, PUBLICATION_STATUS_PUBLISHING}
 
 
 @dataclass(frozen=True)
@@ -142,9 +148,9 @@ class AutomationWatchdog:
 
     def _stuck_job_findings(self, now: datetime) -> list[WatchdogFinding]:
         thresholds = {
-            "queued": int(self.settings.watchdog_queued_stuck_minutes),
-            "running": int(self.settings.watchdog_running_stuck_minutes),
-            "publishing": int(self.settings.watchdog_publishing_stuck_minutes),
+            JOB_STATUS_QUEUED: int(self.settings.watchdog_queued_stuck_minutes),
+            JOB_STATUS_RUNNING: int(self.settings.watchdog_running_stuck_minutes),
+            PUBLICATION_STATUS_PUBLISHING: int(self.settings.watchdog_publishing_stuck_minutes),
         }
         findings: list[WatchdogFinding] = []
         with session_scope() as session:
@@ -224,7 +230,7 @@ class AutomationWatchdog:
                 session.scalar(
                     select(func.count())
                     .select_from(PublicationSchedule)
-                    .where(PublicationSchedule.status.in_({"scheduled", "publishing"}))
+                    .where(PublicationSchedule.status.in_({PUBLICATION_STATUS_SCHEDULED, PUBLICATION_STATUS_PUBLISHING}))
                     .where(PublicationSchedule.scheduled_for_utc > now)
                 )
                 or 0

@@ -4,12 +4,12 @@ import json
 import logging
 import random
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -19,8 +19,9 @@ from app.automation import AutomationService
 from app.competitive_scout import CompetitiveScout, HeuristicScoutAnalyzer
 from app.config import get_settings
 from app.db import SessionLocal, init_db
+from app.domain_contracts import ARTIFACT_TREND_RESEARCH
 from app.http_limits import content_length_exceeds, read_request_body_limited, replay_request_body
-from app.hub_forms import build_performance_metric_payload, build_review_action_payload
+from app.hub_forms import build_review_action_payload
 from app.hub_job_request import HubTrendSeed, build_hub_job_request
 from app.hub_prompt import (
     DEFAULT_VIRAL_PROMPT_TEMPLATE,
@@ -41,14 +42,13 @@ from app.operational_settings import (
 from app.orchestrator import FatalStepError, RecoverableStepError, orchestrator
 from app.ready_script_import import MAX_READY_SCRIPT_IMPORT_BODY_BYTES, MAX_READY_SCRIPT_IMPORT_CHARS, ready_script_import_text
 from app.hub_context import COMMON_SCHEDULE_TIMEZONES, HubContext
+from app.publication_routes import create_publication_router
 from app.routes.health import router as health_router
 from pydantic import ValidationError
 
-from app.schemas import PublicationSchedulePayload
 from app.topic_scout import TopicScout
 from app.utils import new_id, path_from_uri, stable_hash, utcnow
 from app.web_redirects import redirect_back as _redirect_back
-from app.youtube_api import YouTubeIntegrationError
 
 
 settings = get_settings()
@@ -446,6 +446,59 @@ def _trend_seed_theme(niche_id: str) -> tuple[str, str | None, str | None, dict[
     return trend.topic, trend.requested_angle, trend.as_notes(), report
 
 
+class _PublicationRouteDeps:
+    @property
+    def settings(self):
+        return settings
+
+    @property
+    def templates(self):
+        return templates
+
+    @property
+    def orchestrator(self):
+        return orchestrator
+
+    @property
+    def automation_service(self):
+        return automation_service
+
+    @staticmethod
+    def redirect_back(return_to, params=None, *, default="/"):
+        return _redirect_back(return_to, params=params, default=default)
+
+    @staticmethod
+    async def ready_script_import_text(ready_script_batch, ready_script_file):
+        return await ready_script_import_text(ready_script_batch, ready_script_file)
+
+    @staticmethod
+    def effective_youtube_redirect_uri(request: Request) -> str:
+        return _effective_youtube_redirect_uri(request)
+
+    @staticmethod
+    def calendar_context(month: str | None):
+        return _calendar_context(month)
+
+
+publication_router, _publication_route_handlers = create_publication_router(_PublicationRouteDeps())
+app.include_router(publication_router)
+toggle_automation = _publication_route_handlers.toggle_automation
+run_automation_now = _publication_route_handlers.run_automation_now
+import_ready_scripts = _publication_route_handlers.import_ready_scripts
+connect_youtube = _publication_route_handlers.connect_youtube
+youtube_oauth_callback = _publication_route_handlers.youtube_oauth_callback
+disconnect_youtube = _publication_route_handlers.disconnect_youtube
+publication_calendar = _publication_route_handlers.publication_calendar
+schedule_publication_from_calendar = _publication_route_handlers.schedule_publication_from_calendar
+update_publish_metadata = _publication_route_handlers.update_publish_metadata
+publish_job = _publication_route_handlers.publish_job
+schedule_job_publication = _publication_route_handlers.schedule_job_publication
+reopen_job_publication = _publication_route_handlers.reopen_job_publication
+record_performance = _publication_route_handlers.record_performance
+sync_job_youtube_analytics = _publication_route_handlers.sync_job_youtube_analytics
+sync_due_youtube_analytics = _publication_route_handlers.sync_due_youtube_analytics
+
+
 @app.get("/", response_class=HTMLResponse)
 def jobs_page(
     request: Request,
@@ -749,110 +802,6 @@ def llm_tournament_file(path: str | None = Query(default=None)):
     return PlainTextResponse(artifact_path.read_text(encoding="utf-8"))
 
 
-@app.post("/automation/toggle")
-def toggle_automation(enabled: bool = Form(default=False), return_to: str | None = Form(default=None)):
-    automation_service.set_automation_enabled(enabled)
-    return _redirect_back(return_to, default="/publication-hub")
-
-
-@app.post("/automation/run")
-def run_automation_now(force: bool = Form(default=False), return_to: str | None = Form(default=None)):
-    result = automation_service.run_daily_cycle(force=force)
-    if result and result.get("status") == "failed":
-        return _redirect_back(return_to, {"automation_error": result.get("error") or "failed"}, default="/publication-hub")
-    return _redirect_back(return_to, default="/publication-hub")
-
-
-@app.post("/automation/ready-scripts/import")
-async def import_ready_scripts(
-    ready_script_batch: str = Form(default=""),
-    ready_script_file: UploadFile | None = File(default=None),
-    fact_check_confirmed: bool = Form(default=False),
-    return_to: str | None = Form(default=None),
-):
-    if not fact_check_confirmed:
-        raise HTTPException(status_code=422, detail="fact_check_confirmed is required for automation-ready script batches")
-    raw_text = await ready_script_import_text(ready_script_batch, ready_script_file)
-    result = automation_service.import_ready_script_batch(raw_text, fact_check_confirmed=fact_check_confirmed)
-    params = {"imported": str(result.imported)}
-    if result.errors:
-        params["errors"] = str(len(result.errors))
-    return _redirect_back(return_to, params=params)
-
-
-@app.get("/youtube/connect")
-def connect_youtube(request: Request):
-    try:
-        authorization_url = orchestrator.youtube.authorization_url(_effective_youtube_redirect_uri(request))
-    except FatalStepError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return RedirectResponse(url=authorization_url, status_code=303)
-
-
-@app.get("/youtube/oauth/callback")
-def youtube_oauth_callback(request: Request, code: str | None = Query(default=None), state: str | None = Query(default=None), error: str | None = Query(default=None)):
-    if error:
-        raise HTTPException(status_code=400, detail=f"youtube oauth error: {error}")
-    if not code or not state:
-        raise HTTPException(status_code=400, detail="youtube oauth callback missing code/state")
-    try:
-        orchestrator.youtube.exchange_code(code=code, state=state)
-    except Exception as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return RedirectResponse(url="/", status_code=303)
-
-
-@app.post("/youtube/disconnect")
-def disconnect_youtube():
-    orchestrator.youtube.disconnect()
-    return RedirectResponse(url="/", status_code=303)
-
-
-@app.get("/calendar", response_class=HTMLResponse)
-def publication_calendar(request: Request, month: str | None = Query(default=None)):
-    return templates.TemplateResponse(
-        request,
-        "calendar.html",
-        {
-            **_calendar_context(month),
-            "settings": settings,
-        },
-    )
-
-
-@app.post("/calendar/schedule")
-def schedule_publication_from_calendar(
-    job_id: str = Form(...),
-    scheduled_date: str = Form(...),
-    scheduled_time: str = Form(default="15:00"),
-    timezone: str = Form(default="America/Sao_Paulo"),
-    youtube_visibility: str = Form(default="private"),
-    notes: str | None = Form(default=None),
-    month: str | None = Form(default=None),
-):
-    try:
-        scheduled_day = date.fromisoformat(scheduled_date)
-        payload = PublicationSchedulePayload(
-            scheduled_for_local=f"{scheduled_day.isoformat()}T{scheduled_time}",
-            timezone=timezone,
-            youtube_visibility=youtube_visibility,
-            notes=notes,
-        )
-        orchestrator.schedule_publication(job_id, payload.model_dump())
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="scheduled_date must use YYYY-MM-DD") from exc
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
-    except FatalStepError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    target_month = month or scheduled_day.strftime("%Y-%m")
-    return RedirectResponse(url=f"/calendar?{urlencode({'month': target_month})}", status_code=303)
-
-
 @app.post("/jobs")
 def create_job(
     seed_theme: str = Form(default=""),
@@ -904,7 +853,7 @@ def create_job(
         if active_retention_guidance and active_retention_guidance.get("source_kind") == "experiment":
             scout_service.attach_job_to_experiment(str(active_retention_guidance["experiment_id"]), job_id)
         if result.trend_report is not None:
-            orchestrator.storage.persist_json(job_id, "trend_research.json", result.trend_report)
+            orchestrator.storage.persist_json(job_id, ARTIFACT_TREND_RESEARCH, result.trend_report)
     except ValidationError as exc:
         raise HTTPException(
             status_code=422,
@@ -1079,147 +1028,3 @@ def approve_premium_for_publish(job_id: str, reviewer_identity: str = Form(defau
         redirect_to = f"/jobs/{job_id}?{urlencode({'review_error': str(exc)})}"
         return RedirectResponse(url=redirect_to, status_code=303)
     return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
-
-
-@app.post("/jobs/{job_id}/publish-metadata")
-def update_publish_metadata(
-    job_id: str,
-    title: str = Form(default=""),
-    description: str = Form(default=""),
-    hashtags: str = Form(default=""),
-):
-    try:
-        orchestrator.update_publish_metadata(
-            job_id,
-            {
-                "title": title,
-                "description": description,
-                "hashtags": hashtags,
-            },
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
-    except FatalStepError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
-
-
-@app.post("/jobs/{job_id}/publish")
-def publish_job(
-    request: Request,
-    job_id: str,
-    youtube_video_id: str | None = Form(default=None),
-    youtube_url: str | None = Form(default=None),
-):
-    try:
-        orchestrator.publish_job(job_id, youtube_video_id=youtube_video_id, youtube_url=youtube_url)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
-    except FatalStepError as exc:
-        redirect_to = f"/jobs/{job_id}?{urlencode({'publish_error': str(exc)})}"
-        return RedirectResponse(url=redirect_to, status_code=303)
-    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
-
-
-@app.post("/jobs/{job_id}/schedule")
-def schedule_job_publication(
-    job_id: str,
-    action: str = Form(default="schedule"),
-    scheduled_for_local: str | None = Form(default=None),
-    timezone: str = Form(default="UTC"),
-    youtube_visibility: str = Form(default="private"),
-    notes: str | None = Form(default=None),
-):
-    try:
-        if action == "clear":
-            orchestrator.clear_publication_schedule(job_id)
-        else:
-            payload = PublicationSchedulePayload(
-                scheduled_for_local=scheduled_for_local or "",
-                timezone=timezone,
-                youtube_visibility=youtube_visibility,
-                notes=notes,
-            )
-            orchestrator.schedule_publication(job_id, payload.model_dump())
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
-    except FatalStepError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
-
-
-@app.post("/jobs/{job_id}/reopen-publication")
-def reopen_job_publication(job_id: str):
-    try:
-        orchestrator.reopen_publication_for_republish(job_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
-    except FatalStepError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
-
-
-@app.post("/jobs/{job_id}/performance")
-def record_performance(
-    job_id: str,
-    source: str = Form(default="youtube_studio_manual"),
-    retention_percent: str | None = Form(default=None),
-    viewed_vs_swiped_away_percent: str | None = Form(default=None),
-    rewatch_rate: str | None = Form(default=None),
-    likes: str | None = Form(default=None),
-    shares: str | None = Form(default=None),
-    comments: str | None = Form(default=None),
-    rpm_usd: str | None = Form(default=None),
-    monetization_status: str | None = Form(default=None),
-    notes: str | None = Form(default=None),
-):
-    try:
-        payload = build_performance_metric_payload(
-            source=source,
-            retention_percent=retention_percent,
-            viewed_vs_swiped_away_percent=viewed_vs_swiped_away_percent,
-            rewatch_rate=rewatch_rate,
-            likes=likes,
-            shares=shares,
-            comments=comments,
-            rpm_usd=rpm_usd,
-            monetization_status=monetization_status,
-            notes=notes,
-        )
-        orchestrator.record_performance_metrics(job_id, payload.model_dump())
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
-    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
-
-
-@app.post("/jobs/{job_id}/youtube-analytics/sync")
-def sync_job_youtube_analytics(
-    job_id: str,
-    days: int = Form(default=28),
-    return_to: str | None = Form(default=None),
-):
-    try:
-        orchestrator.sync_youtube_analytics_snapshot(job_id, days=days)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
-    except YouTubeIntegrationError as exc:
-        return _redirect_back(return_to, {"analytics_error": str(exc)}, default=f"/jobs/{job_id}")
-    return _redirect_back(return_to, {"analytics_synced": "1"}, default=f"/jobs/{job_id}")
-
-
-@app.post("/youtube-analytics/sync-due")
-def sync_due_youtube_analytics(
-    days: int = Form(default=28),
-    limit: int | None = Form(default=None),
-    return_to: str | None = Form(default=None),
-):
-    result = orchestrator.sync_due_youtube_analytics_snapshots(days=days, limit=limit)
-    if result.get("status") == "skipped":
-        return _redirect_back(return_to, {"analytics_error": result.get("reason") or "sync_skipped"}, default="/publication-hub")
-    return _redirect_back(return_to, {"analytics_synced": str(len(result.get("synced") or []))}, default="/publication-hub")

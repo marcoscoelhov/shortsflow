@@ -8,23 +8,36 @@ from typing import Any
 from sqlalchemy import func, select
 
 from app.db import session_scope
+from app.domain_contracts import (
+    ACTIVE_SCHEDULE_STATUSES,
+    ARTIFACT_PUBLISH_PACKAGE,
+    JOB_STATUS_APPROVED_FOR_PUBLISH,
+    JOB_STATUS_BLOCKED_FOR_MONETIZATION,
+    JOB_STATUS_MONETIZATION_REVIEW,
+    JOB_STATUS_READY_FOR_UPLOAD,
+    JOB_STATUS_SCRIPT_QUALITY_FAILED,
+    JOB_STATUS_SUBTITLE_QUALITY_FAILED,
+    REASON_ASSET_VISUAL_REVIEW_REQUIRED,
+    REASON_INVENTED_SOURCE_FACT_IDS,
+    REASON_UNSUPPORTED_CLAIM,
+    REASON_VISUAL_REVIEW_REQUIRED,
+)
 from app.models import BacklogRecoveryAttempt, Job, PublicationSchedule, RenderOutput, SceneAsset, NarrationAsset
 from app.utils import new_id, path_from_uri, stable_hash, utcnow
 
 CANDIDATE_STATUSES = {
-    "monetization_review",
-    "ready_for_upload",
-    "approved_for_publish",
-    "blocked_for_monetization",
-    "script_quality_failed",
+    JOB_STATUS_MONETIZATION_REVIEW,
+    JOB_STATUS_READY_FOR_UPLOAD,
+    JOB_STATUS_APPROVED_FOR_PUBLISH,
+    JOB_STATUS_BLOCKED_FOR_MONETIZATION,
+    JOB_STATUS_SCRIPT_QUALITY_FAILED,
     "render_quality_failed",
     "asset_quality_failed",
-    "subtitle_quality_failed",
+    JOB_STATUS_SUBTITLE_QUALITY_FAILED,
 }
-ACTIVE_SCHEDULE_STATUSES = {"scheduled", "publishing", "published"}
 FACTUAL_OR_RIGHTS_MARKERS = {
-    "unsupported_claim",
-    "invented_source_fact_ids",
+    REASON_UNSUPPORTED_CLAIM,
+    REASON_INVENTED_SOURCE_FACT_IDS,
     "rights",
     "copyright",
     "youtube_policy",
@@ -32,8 +45,8 @@ FACTUAL_OR_RIGHTS_MARKERS = {
     "factual",
 }
 CORRECTABLE_MARKERS = {
-    "visual_review_required",
-    "asset_visual_review_required",
+    REASON_VISUAL_REVIEW_REQUIRED,
+    REASON_ASSET_VISUAL_REVIEW_REQUIRED,
     "metadata",
     "text publish audit missing",
     "image_semantics_score_below_threshold",
@@ -139,14 +152,14 @@ class BacklogRecoveryService:
         has_assets = bool(evidence["asset_count"])
         has_audio = bool(evidence["audio_count"])
 
-        if job.status in {"approved_for_publish", "ready_for_upload"} and (has_render or has_publish_package):
+        if job.status in {JOB_STATUS_APPROVED_FOR_PUBLISH, JOB_STATUS_READY_FOR_UPLOAD} and (has_render or has_publish_package):
             return BacklogCandidate(job.job_id, job.status, "near_publishable", ["already_publishable_path"], ["monetization_readiness_gate"], "low", job.job_origin)
 
-        if job.status == "monetization_review" and has_render:
+        if job.status == JOB_STATUS_MONETIZATION_REVIEW and has_render:
             allowed_repairs.extend(["monetization_readiness_gate", "derived_audits"])
             reasons.append("rendered_but_waiting_final_gate")
 
-        if job.status == "blocked_for_monetization" and has_render and any(marker in evidence["text"] for marker in CORRECTABLE_MARKERS):
+        if job.status == JOB_STATUS_BLOCKED_FOR_MONETIZATION and has_render and any(marker in evidence["text"] for marker in CORRECTABLE_MARKERS):
             allowed_repairs.extend(["metadata", "monetization_readiness_gate", "derived_audits"])
             reasons.append("correctable_gate_or_score_blocker")
             risk = "medium"
@@ -160,11 +173,11 @@ class BacklogRecoveryService:
             reasons.append("asset_problem_with_audio_present")
             risk = "medium"
 
-        if job.status == "subtitle_quality_failed" and has_audio:
+        if job.status == JOB_STATUS_SUBTITLE_QUALITY_FAILED and has_audio:
             allowed_repairs.append("subtitle_alignment")
             reasons.append("subtitle_problem_with_audio_present")
 
-        if job.status == "script_quality_failed" and any(marker in evidence["text"] for marker in ["word_count_too_low", "narration_pace", "weak_ending"]):
+        if job.status == JOB_STATUS_SCRIPT_QUALITY_FAILED and any(marker in evidence["text"] for marker in ["word_count_too_low", "narration_pace", "weak_ending"]):
             allowed_repairs.append("tts" if has_audio else "script")
             reasons.append("localized_script_or_pacing_issue")
             risk = "medium"
@@ -185,7 +198,7 @@ class BacklogRecoveryService:
         render_exists = _uri_exists(render_uri)
         asset_count = session.scalar(select(func.count()).select_from(SceneAsset).where(SceneAsset.job_id == job.job_id)) or 0
         audio_count = session.scalar(select(func.count()).select_from(NarrationAsset).where(NarrationAsset.job_id == job.job_id)) or 0
-        package_path = self.orchestrator.storage.job_dir(job.job_id, create=False) / "publish_package.json"
+        package_path = self.orchestrator.storage.job_dir(job.job_id, create=False) / ARTIFACT_PUBLISH_PACKAGE
         publish_package = bool((job.artifact_index or {}).get("publish_package")) or package_path.exists()
         text = " ".join(
             [
@@ -225,7 +238,7 @@ class BacklogRecoveryService:
                 after_status = self.orchestrator.reprocess_job_from_step(candidate.job_id, "monetization_readiness_gate")
             else:
                 after_status = before_status
-            status = "recovered" if after_status in {"ready_for_upload", "approved_for_publish", "monetization_review"} else "attempted"
+            status = "recovered" if after_status in {JOB_STATUS_READY_FOR_UPLOAD, JOB_STATUS_APPROVED_FOR_PUBLISH, JOB_STATUS_MONETIZATION_REVIEW} else "attempted"
             result = {"after_status": after_status}
             error = None
         except Exception as exc:  # noqa: BLE001

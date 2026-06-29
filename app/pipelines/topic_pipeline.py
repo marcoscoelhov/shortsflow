@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.editorial.research_brief import build_research_brief
 from app.editorial.topic_mode import resolve_editorial_mode
 from app.models import Job, PerformanceMetric, Script, TopicPlan, TopicRegistry, TopicRequest
+from app.niche_classification import classify_niche_contract
 from app.pipelines.base import BasePipeline
 from app.pipelines.common import RecoverableStepError, model_payload
 from app.utils import cosineish_similarity, jaccard_bigrams, new_id, stable_hash, utcnow
@@ -243,6 +244,18 @@ class TopicPipeline(BasePipeline):
                 **quality_metrics,
                 "topic_repair_used": any(key not in plan or plan.get(key) in (None, "", []) for key in required),
             }
+        request_notes = str(getattr(request, "notes", "") or "")
+        fallback_niche = str(getattr(request, "niche_id", "general") or "general")
+        niche_contract = classify_niche_contract(
+            request.seed_theme,
+            request.requested_angle,
+            request_notes,
+            canonical_topic,
+            angle,
+            hook_promise,
+            " ".join(str(entity) for entity in entities if str(entity).strip()),
+            fallback_niche=fallback_niche,
+        )
         quality_metrics = {
             **quality_metrics,
             "editorial_mode": resolve_editorial_mode(
@@ -254,6 +267,7 @@ class TopicPipeline(BasePipeline):
                 },
                 request,
             ),
+            **niche_contract.as_quality_metrics(),
         }
 
         normalized_plan = {
@@ -265,6 +279,7 @@ class TopicPipeline(BasePipeline):
             "entities": [str(entity).strip() for entity in entities if str(entity).strip()],
             "search_terms": [str(term).strip() for term in search_terms if str(term).strip()],
             "quality_metrics": quality_metrics,
+            "niche_contract": niche_contract.as_contract(),
         }
         return {
             **normalized_plan,

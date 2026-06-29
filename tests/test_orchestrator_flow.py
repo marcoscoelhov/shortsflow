@@ -11,7 +11,7 @@ def _create_direct_pipeline_job(seed_theme: str = "polvos") -> str:
         _create_basic_job(session, job_id=job_id, status="test_processing", seed_theme=seed_theme)
         session.commit()
     status = orchestrator.process_job(job_id)
-    assert status in {"monetization_review", "blocked_for_monetization"}
+    assert status in {"ready_for_upload", "monetization_review", "blocked_for_monetization"}
     return job_id
 
 
@@ -89,7 +89,7 @@ def test_full_pipeline_reaches_monetization_review() -> None:
         assert job and job.quality_summary["render"]["render_gate_pass"] is True
         assert job.quality_summary["background_music"]["enabled"] is True
         assert job.quality_summary["background_music"]["background_music_gate_pass"] is True
-        assert job.quality_summary["monetization"]["final_status"] in {"monetization_review", "blocked_for_monetization"}
+        assert job.quality_summary["monetization"]["final_status"] in {"ready_for_upload", "monetization_review", "blocked_for_monetization"}
         assert job.artifact_index["input_gate"] == "input_gate.json"
         assert job.artifact_index["publish_package"] == "publish_package.json"
         assert job.artifact_index["monetization_report"] == "monetization_report.json"
@@ -482,13 +482,13 @@ def test_generation_attempt_returns_provider_limit_error_from_exception(monkeypa
         PublishSlot(local_date=datetime(2026, 6, 22).date(), local_time="12:00", timezone="UTC"),
     )
 
-    assert result == {"scheduled": False, "provider_limit": True, "error": "provider limit: quota exceeded"}
+    assert result == {"scheduled": False, "provider_limit": True, "error": "reason_code=generation_failed; provider limit: quota exceeded"}
     with SessionLocal() as session:
         attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.run_id == run_id))
 
     assert attempt is not None
     assert attempt.status == "failed"
-    assert attempt.error == "provider limit: quota exceeded"
+    assert attempt.error == "reason_code=generation_failed; provider limit: quota exceeded"
 
 def test_autoapproval_score_accepts_high_repetition_with_manual_originality_confirmation() -> None:
     service = AutomationService(orchestrator)

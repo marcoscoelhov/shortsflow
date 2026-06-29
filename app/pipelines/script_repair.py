@@ -873,10 +873,15 @@ class ScriptRepairDomain(BasePipeline):
         gate_result = self.script_gate.validate(preserved, target_duration_sec)
         fact_pack = plan_dict.get("fact_pack") if isinstance(plan_dict.get("fact_pack"), dict) else {}
         consistency_reasons = self._fact_pack_consistency_reasons(preserved, fact_pack)
+        ready_script_gate_reasons = [
+            reason
+            for reason in gate_result.reasons
+            if reason not in {"word_count_too_low_for_natural_pace", "word_count_too_high_for_natural_pace"}
+        ]
         attempts_log: list[dict[str, Any]] = [
             {
                 "repair_attempt": 0,
-                "reason_codes": [*gate_result.reasons, *consistency_reasons],
+                "reason_codes": [*ready_script_gate_reasons, *consistency_reasons],
                 "passed": not consistency_reasons,
                 "used_fallback": False,
                 "repair_strategy": "ready_script_preserve",
@@ -889,7 +894,7 @@ class ScriptRepairDomain(BasePipeline):
             **gate_result.metrics,
             "script_quality_gate_pass": True,
             "script_quality_gate_blocking": False,
-            "script_quality_gate_warnings": list(gate_result.reasons),
+            "script_quality_gate_warnings": ready_script_gate_reasons,
             "fact_pack_consistency_pass": True,
             "ready_script_declared_fact_check_accepted": bool(plan_dict.get("ready_script_fact_check_confirmed")),
             "ready_script_preserved": True,

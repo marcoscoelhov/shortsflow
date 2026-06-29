@@ -51,7 +51,7 @@ from app.job_origin import (
     resolve_creation_via,
     resolve_job_origin,
 )
-from app.hub_prompt import hub_settings_path, load_viral_prompt_template
+from app.hub_prompt import build_viral_prompt_note, hub_settings_path, load_viral_prompt_template
 from app.models import (
     AutomationAttempt,
     AutomationRun,
@@ -292,15 +292,7 @@ class JobOrchestrator:
             return payload
         if "prompt viral customizado do hub" in lower_notes:
             return payload
-        viral_prompt = load_viral_prompt_template(hub_settings_path(self.settings.data_dir)).strip()
-        if not viral_prompt:
-            return payload
-        viral_note = (
-            "Prompt viral padrão obrigatório para jobs com roteiro gerado. "
-            "Use como diretriz editorial em todas as etapas de pauta, roteiro, cenas, metadados e revisão; "
-            "se pedir formato de saida diferente, ignore o formato e mantenha o JSON interno obrigatorio do app.\n"
-            f"{viral_prompt}"
-        )
+        viral_note = build_viral_prompt_note(load_viral_prompt_template(hub_settings_path(self.settings.data_dir)))
         payload = dict(payload)
         payload["notes"] = "\n".join(part for part in [notes, viral_note] if part)
         return payload

@@ -4,6 +4,20 @@ from typing import Any
 
 from app.utils import cosineish_similarity, jaccard_bigrams, word_tokens
 
+ASTRO_SYNONYM_GROUPS = {
+    "venus": {"venus", "vênus"},
+    "mercurio": {"mercurio", "mercúrio"},
+    "lua": {"lua", "lunar"},
+    "saturno": {"saturno", "aneis", "anéis"},
+    "marte": {"marte", "vermelho", "ferrugem"},
+    "buraco_negro": {"buraco", "negro", "buracos", "negros"},
+    "estrela": {"estrela", "estrelas", "cintila", "piscam", "pisca"},
+    "jupiter": {"jupiter", "júpiter", "mancha", "tempestade"},
+    "netuno": {"netuno", "azul"},
+    "meteoro": {"meteoro", "meteoros", "meteorito", "rastro"},
+    "eclipse": {"eclipse", "eclipses"},
+}
+
 
 def build_channel_repetition_report(
     current: dict[str, Any],
@@ -26,7 +40,11 @@ def build_channel_repetition_report(
     exact_beat_count_matches = 0
     for row in recent_rows:
         surface = f"{row.get('topic_summary') or ''} {row.get('title') or ''} {row.get('hook') or ''} {row.get('ending') or ''}"
-        similarity = max(cosineish_similarity(current_surface, surface), jaccard_bigrams(current_surface, surface))
+        similarity = max(
+            cosineish_similarity(current_surface, surface),
+            jaccard_bigrams(current_surface, surface),
+            _astro_semantic_similarity(current_surface, surface),
+        )
         hook_opening = " ".join(word_tokens(row.get("hook") or "")[:5])
         title_opening = " ".join(word_tokens(row.get("title") or "")[:5])
         ending_pattern = " ".join(word_tokens(row.get("ending") or "")[:6])
@@ -112,3 +130,21 @@ def build_channel_repetition_report(
             "visual_style": "ai_science_short",
         },
     }
+
+
+def _astro_semantic_similarity(left: str, right: str) -> float:
+    left_tokens = _canonical_astro_tokens(left)
+    right_tokens = _canonical_astro_tokens(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def _canonical_astro_tokens(text: str) -> set[str]:
+    raw = set(word_tokens(text or ""))
+    canonical = set(raw)
+    for group, synonyms in ASTRO_SYNONYM_GROUPS.items():
+        synonym_tokens = set(word_tokens(" ".join(synonyms)))
+        if raw & synonym_tokens:
+            canonical.add(group)
+    return canonical

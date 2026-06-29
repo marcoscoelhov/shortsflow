@@ -48,10 +48,26 @@ SHORTSFLOW_DATA_DIR=data
 
 ```env
 SHORTSFLOW_USE_MOCK_PROVIDERS=false
-SHORTSFLOW_OPENAI_API_KEY=...
-SHORTSFLOW_MINIMAX_TEXT_API_KEY=...
-SHORTSFLOW_MINIMAX_IMAGE_API_KEY=...
+SHORTSFLOW_LLM_PRIMARY_PROVIDER=deepseek
+SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=deepseek
+SHORTSFLOW_LLM_REPAIR_PROVIDER=deepseek
+SHORTSFLOW_LLM_SCENE_PROVIDER=deepseek
+SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=deepseek
+SHORTSFLOW_LLM_GATE_JUDGE_MODEL=deepseek-v4-flash
+SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled
+SHORTSFLOW_DEEPSEEK_API_KEY=<redigido>
+SHORTSFLOW_DEEPSEEK_MODEL=deepseek-v4-flash
+SHORTSFLOW_LLM_JSON_MAX_TOKENS=4096
+SHORTSFLOW_LLM_PREMIUM_REVIEW_ENABLED=true
+SHORTSFLOW_LLM_PREMIUM_REVIEW_PROVIDER=deepseek
+SHORTSFLOW_LLM_PREMIUM_REVIEW_MODEL=deepseek-v4-pro
+# Opcional: enriquecimento visual/referencias quando configurado.
+SHORTSFLOW_QWEN_API_KEY=<redigido-ou-vazio>
+SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>
+SHORTSFLOW_MINIMAX_IMAGE_API_KEY=<redigido>
 ```
+
+Politica LLM operacional: DeepSeek v4 Flash e o padrao barato para provider principal, rascunho de roteiro, reparo, planejamento de cenas e juiz comum dos gates. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e o padrao para evitar fallback caro e invisivel. Qwen e opcional para enriquecimento visual/referencias quando a chave estiver configurada. DeepSeek v4 Pro deve ficar restrito a excecoes premium/final/complexas via `SHORTSFLOW_LLM_PREMIUM_REVIEW_*`; nao configure Pro como fallback geral automatico.
 
 Para imagem, a chave de texto MiniMax e usada primeiro. `SHORTSFLOW_MINIMAX_IMAGE_API_KEY` funciona como chave dedicada de imagem e entra apenas quando a chave de texto retorna quota, saldo, credito ou rate limit. Se a chave de texto estiver vazia, a dedicada de imagem e usada diretamente.
 
@@ -111,7 +127,7 @@ curl http://127.0.0.1:8080/healthz
 Resposta esperada:
 
 ```json
-{"status":"ok","app":"ShortsFlow","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
+{"status":"ok","app":"ShortsFlow","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","providers":{"mode":"production","llm_primary":"deepseek","llm_gate_judge":"deepseek","llm_gate_judge_model":"deepseek-v4-flash","tts_primary":"gemini_tts","render_backend":"remotion"},"render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
 ```
 
 Se estiver usando outra porta, ajuste a URL do `curl`.
@@ -131,6 +147,8 @@ Modos disponiveis no hub:
 - `Tema`: preencha um assunto ou deixe vazio para o app buscar tendencia real automaticamente.
 - `Titulo completo`: use quando ja existe uma promessa editorial pronta, mas o app ainda deve gerar o roteiro.
 - `Roteiro pronto`: use texto rotulado e confirme que os fatos ja foram revisados antes do envio.
+
+Quando `Tema` vem vazio, o caminho de **Tema Automatico** e uma lane isolada. Ele nao deve substituir silenciosamente o slot por Banco de Roteiros Prontos nem por tema deterministico local; se nao houver pauta real aceitavel, o job/ciclo deve deixar a falha visivel para diagnostico.
 
 Formato de `Roteiro pronto`:
 

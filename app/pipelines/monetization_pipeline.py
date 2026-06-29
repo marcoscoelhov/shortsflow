@@ -10,6 +10,17 @@ from sqlalchemy.orm import Session
 
 from app.editorial.repetition import build_channel_repetition_report
 from app.compliance.review import build_human_review_checklist
+from app.domain_contracts import (
+    ARTIFACT_MONETIZATION_REPORT,
+    ARTIFACT_PUBLISH_PACKAGE,
+    JOB_STATUS_BLOCKED_FOR_MONETIZATION,
+    JOB_STATUS_MONETIZATION_REVIEW,
+    JOB_STATUS_READY_FOR_UPLOAD,
+    REASON_INVENTED_SOURCE_FACT_IDS,
+    REASON_UNSUPPORTED_CLAIM,
+    REASON_VISUAL_REVIEW_REQUIRED,
+    REPETITION_HISTORY_JOB_STATUSES,
+)
 from app.editorial.topic_mode import resolve_editorial_mode
 from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
 from app.models import BackgroundMusicAsset, Job, NarrationAsset, PerformanceMetric, PublicationSchedule, RenderOutput, ReviewRecord, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRequest
@@ -23,12 +34,12 @@ from app.quality.llm_judge import (
 from app.utils import iso_now, stable_hash, word_tokens
 
 
-REPETITION_HISTORY_STATUSES = {"ready_for_upload", "approved_for_publish", "published"}
+REPETITION_HISTORY_STATUSES = REPETITION_HISTORY_JOB_STATUSES
 
 
 class MonetizationPipeline(BasePipeline):
     AI_GENERATED_RIGHTS_PROVIDERS = {"minimax", "minimax_music", "elevenlabs", "gemini_tts", "edge_tts", "mock", "mock_music", "synthetic_wav"}
-    TECHNICAL_TTS_PROVIDERS = {"edge_tts", "espeak_ng", "synthetic_wav"}
+    TECHNICAL_TTS_PROVIDERS = {"espeak_ng", "synthetic_wav"}
 
     def _ready_script_fact_check_confirmed(self, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
         qa_metrics = dict((script_artifact or {}).get("qa_metrics") or {})
@@ -61,7 +72,7 @@ class MonetizationPipeline(BasePipeline):
     def step_monetization_readiness(self, session: Session, job: Job, attempt: int) -> list[str]:
         report = self.build_monetization_report(session, job)
         auto_visual_review_ran = False
-        if "visual_review_required" in report.get("manual_required", []):
+        if REASON_VISUAL_REVIEW_REQUIRED in report.get("manual_required", []):
             auto_visual_review_ran = True
             visual_result = AutoVisualReviewService(self.storage).review(session, job)
             if visual_result.get("passed") is True:
@@ -71,7 +82,7 @@ class MonetizationPipeline(BasePipeline):
         self.storage.persist_json(job.job_id, "fact_claims_report.json", self._serialize_for_json(report["fact_claims_report"]))
         self.storage.persist_json(job.job_id, "channel_repetition_report.json", self._serialize_for_json(report["channel_repetition_report"]))
         self.storage.persist_json(job.job_id, "metadata_review.json", self._serialize_for_json(report["metadata_review"]))
-        self.storage.persist_json(job.job_id, "monetization_report.json", self._serialize_for_json(report))
+        self.storage.persist_json(job.job_id, ARTIFACT_MONETIZATION_REPORT, self._serialize_for_json(report))
         quality_summary = dict(job.quality_summary or {})
         quality_summary["monetization"] = {
             "passed": report["passed"],
@@ -101,7 +112,7 @@ class MonetizationPipeline(BasePipeline):
             "metadata_review.json",
             "metadata_ctr_gate.json",
             "growth_score_report.json",
-            "monetization_report.json",
+            ARTIFACT_MONETIZATION_REPORT,
             *([AutoVisualReviewService.ARTIFACT_NAME] if auto_visual_review_ran else []),
         ]
 
@@ -238,13 +249,13 @@ class MonetizationPipeline(BasePipeline):
             manual_required.append("publish_audit_required")
         visual_review_required = self.visual_review_required_for_assets(job)
         if visual_review_required and "visual_review_confirmed" not in confirmations:
-            manual_required.append("visual_review_required")
+            manual_required.append(REASON_VISUAL_REVIEW_REQUIRED)
         if "rights_confirmed" in confirmations:
             manual_required = [item for item in manual_required if item != "rights_confirmation_required"]
         if "publish_audit_confirmed" in confirmations:
             manual_required = [item for item in manual_required if item != "publish_audit_required"]
         if "visual_review_confirmed" in confirmations:
-            manual_required = [item for item in manual_required if item != "visual_review_required"]
+            manual_required = [item for item in manual_required if item != REASON_VISUAL_REVIEW_REQUIRED]
         warnings.extend(publish_readiness["reasons"])
         if not self.settings.allow_synthetic_visuals_for_monetization and ai_disclosure["contains_synthetic_visuals"]:
             hard_blockers.append("synthetic_visuals_disabled_by_policy")
@@ -325,8 +336,10 @@ class MonetizationPipeline(BasePipeline):
             confirmations=confirmations,
             visual_review_required=visual_review_required,
         )
-        passed = not hard_blockers and not manual_required
-        final_status = "ready_for_upload" if passed else ("blocked_for_monetization" if hard_blockers else "monetization_review")
+        # Final human review happens in YouTube Studio. Internal manual_required
+        # entries remain as diagnostics, but they do not block ShortsFlow readiness.
+        passed = not hard_blockers
+        final_status = JOB_STATUS_READY_FOR_UPLOAD if passed else (JOB_STATUS_BLOCKED_FOR_MONETIZATION if hard_blockers else JOB_STATUS_MONETIZATION_REVIEW)
         return {
             "schema_version": self.settings.schema_version,
             "job_id": job.job_id,
@@ -357,7 +370,7 @@ class MonetizationPipeline(BasePipeline):
     def automatic_publish_blockers(self, publish_readiness: dict[str, Any], *, ready_script_bank_human_validated: bool = False) -> list[str]:
         automatic_reasons = {
             "source_fact_mismatch",
-            "unsupported_claim",
+            REASON_UNSUPPORTED_CLAIM,
             "weak_ending",
             "truncated_ending_logic",
             "low_retention_hook",
@@ -365,8 +378,7 @@ class MonetizationPipeline(BasePipeline):
             "minimax_audit_invalid",
             "text_publish_audit_timeout",
             "claim_trace_grounding_missing",
-            "invented_source_fact_ids",
-            "fact_pack_missing_for_factual_topic",
+            REASON_INVENTED_SOURCE_FACT_IDS,
             "quality_checklist_failed",
             "asset_visual_gate_not_passed",
             "metadata_ctr_gate_not_passed",
@@ -376,7 +388,7 @@ class MonetizationPipeline(BasePipeline):
         if ready_script_bank_human_validated:
             automatic_reasons -= {
                 "source_fact_mismatch",
-                "unsupported_claim",
+                REASON_UNSUPPORTED_CLAIM,
                 "weak_ending",
                 "truncated_ending_logic",
                 "low_retention_hook",
@@ -384,8 +396,7 @@ class MonetizationPipeline(BasePipeline):
                 "minimax_audit_invalid",
                 "text_publish_audit_timeout",
                 "claim_trace_grounding_missing",
-                "invented_source_fact_ids",
-                "fact_pack_missing_for_factual_topic",
+                REASON_INVENTED_SOURCE_FACT_IDS,
                 "growth_score_gate_not_passed",
             }
         return [reason for reason in publish_readiness.get("reasons") or [] if reason in automatic_reasons]
@@ -409,6 +420,10 @@ class MonetizationPipeline(BasePipeline):
         }
 
     def visual_review_required_for_assets(self, job: Job) -> bool:
+        if not bool(getattr(self.settings, "auto_visual_review_enabled", False)):
+            return False
+        if str(getattr(self.settings, "vision_verifier_provider", "disabled") or "disabled").lower() == "disabled":
+            return False
         quality_summary = job.quality_summary or {}
         asset_summary = quality_summary.get("assets", {}) if isinstance(quality_summary.get("assets"), dict) else {}
         if not asset_summary:
@@ -619,6 +634,21 @@ class MonetizationPipeline(BasePipeline):
     ) -> dict[str, Any]:
         script_dict = {**(self.script_to_dict(script) if script else {}), **(script_artifact or {})}
         fact_risk = self.script_gate._fact_risk_report(script_dict) if script_dict else {"claims": [], "claim_count": 0, "blocked": False}  # noqa: SLF001
+        if not self.settings.fact_pack_enabled or fact_pack.get("provider") == "disabled_by_policy":
+            return {
+                "fact_pack_status": fact_pack.get("status") or "disabled",
+                "requires_fact_review": False,
+                "source_fact_ids": [],
+                "grounded_source_fact_ids": [],
+                "claim_trace": script_dict.get("claim_trace") or [],
+                "grounded_claim_trace": script_dict.get("claim_trace") or [],
+                "ungrounded_claim_trace": [],
+                "claim_sources": [],
+                "risk_report": {**fact_risk, "fact_checker_disabled": True, "blocked": False},
+                "editorial_rule": fact_pack.get("editorial_rule") or "Fact checker disabled by policy.",
+                "viral_truth_policy": fact_pack.get("viral_truth_policy"),
+                "low_risk_common_knowledge_auto_allowed": True,
+            }
         source_ids = script_dict.get("source_fact_ids") or script_dict.get("qa_metrics", {}).get("source_fact_ids") or []
         if isinstance(source_ids, str):
             source_ids = [source_ids]
@@ -823,7 +853,7 @@ class MonetizationPipeline(BasePipeline):
 
     def step_publish(self, session: Session, job: Job, attempt: int) -> list[str]:
         publish_package = self.build_publish_package(session, job)
-        self.storage.persist_json(job.job_id, "publish_package.json", self._serialize_for_json(publish_package))
+        self.storage.persist_json(job.job_id, ARTIFACT_PUBLISH_PACKAGE, self._serialize_for_json(publish_package))
         artifact_index = {
             "job_origin": "job_origin.json",
             "request": "request.json",
@@ -843,9 +873,9 @@ class MonetizationPipeline(BasePipeline):
             "fact_claims_report": "fact_claims_report.json",
             "channel_repetition_report": "channel_repetition_report.json",
             "metadata_review": "metadata_review.json",
-            "monetization_report": "monetization_report.json",
+            "monetization_report": ARTIFACT_MONETIZATION_REPORT,
             "publish_audit": "publish_audit.json",
-            "publish_package": "publish_package.json",
+            "publish_package": ARTIFACT_PUBLISH_PACKAGE,
             "performance_timeline": "performance_timeline.json",
         }
         if (self.storage.job_dir(job.job_id) / "subtitle_timing_report.json").exists():
@@ -878,7 +908,7 @@ class MonetizationPipeline(BasePipeline):
                 "quality_summary": job.quality_summary or {},
             },
         )
-        return ["job_manifest.json", "publish_package.json"]
+        return ["job_manifest.json", ARTIFACT_PUBLISH_PACKAGE]
 
     def build_publish_package(self, session: Session, job: Job) -> dict[str, Any]:
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
@@ -891,7 +921,7 @@ class MonetizationPipeline(BasePipeline):
         title = self.build_publish_title(job, request, script)
         fact_pack = self.read_job_json(job.job_id, "fact_pack.json")
         script_artifact = self.read_job_json(job.job_id, "script.json")
-        monetization_report = self.read_job_json(job.job_id, "monetization_report.json")
+        monetization_report = self.read_job_json(job.job_id, ARTIFACT_MONETIZATION_REPORT)
         tags = self.build_publish_hashtags(topic_plan, script)
         declared_hashtags = dict(getattr(script, "qa_metrics", None) or {}).get("declared_hashtags") if script else None
         if not declared_hashtags and monetization_report.get("metadata_review", {}).get("suggested_hashtags"):
@@ -1212,7 +1242,6 @@ class MonetizationPipeline(BasePipeline):
             source_ids = [source_ids]
         fact_risk = self.script_gate._fact_risk_report(script_dict) if script_dict else {"blocked": False, "claim_count": 0}  # noqa: SLF001
         editorial_mode = resolve_editorial_mode(topic_plan, None) if topic_plan else "viral_curiosidades"
-        factual_topic = editorial_mode == "factual_strict"
         low_risk_common_auto_allowed = self._low_risk_common_knowledge_auto_allowed(fact_pack, fact_risk)
         reasons: list[str] = []
         failed_quality_items = [key for key, passed in checklist.items() if not passed]
@@ -1221,9 +1250,8 @@ class MonetizationPipeline(BasePipeline):
             if "asset_visual_gate_pass" in failed_quality_items:
                 reasons.append("asset_visual_gate_not_passed")
         if fact_pack.get("status") != "verified" and source_ids:
-            reasons.append("invented_source_fact_ids")
-        if factual_topic and fact_pack.get("status") != "verified" and (fact_risk.get("claim_count", 0) > 0 or len(word_tokens(script_dict.get("full_narration", ""))) >= 45):
-            reasons.append("fact_pack_missing_for_factual_topic")
+            reasons.append(REASON_INVENTED_SOURCE_FACT_IDS)
+
         weak_tags = self.weak_publish_hashtags(tags, script_dict)
         if weak_tags or len(tags) < 3:
             reasons.append("weak_hashtags")
@@ -1272,8 +1300,6 @@ class MonetizationPipeline(BasePipeline):
                     )
             reasons.extend(overrideable)
             reasons.extend(hard_audit_reasons)
-        if fact_pack.get("status") != "verified" and not low_risk_common_auto_allowed:
-            reasons.append("manual_review_required")
         return {
             "passed": not reasons,
             "reasons": list(dict.fromkeys(reasons)),

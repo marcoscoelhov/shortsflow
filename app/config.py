@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     llm_premium_review_provider: str = "deepseek"
     llm_premium_review_model: str | None = "deepseek-v4-pro"
     llm_json_max_tokens: int = 4096
+    fact_pack_enabled: bool = False
     llm_gate_gray_zone_low: float = 0.72
     llm_gate_gray_zone_high: float = 0.82
     real_run_allow_mock_fallback: bool = False
@@ -86,6 +87,7 @@ class Settings(BaseSettings):
     asset_generation_regeneration_rounds: int = 2
     asset_generation_parallelism: int = 4
     vision_verifier_provider: str = "local_openai"
+    auto_visual_review_enabled: bool = False
     local_vision_base_url: str = "http://127.0.0.1:8081/v1"
     local_vision_model: str = "minicpm-v-4.6-q4"
     vision_verifier_timeout_sec: float = 240.0
@@ -96,6 +98,8 @@ class Settings(BaseSettings):
     music_bank_auto_populate: bool = True
     allow_music_api_fallback: bool = False
     tts_primary_provider: str = "gemini_tts"
+    edge_tts_voice: str = "pt-BR-ThalitaNeural"
+    edge_tts_rate: str = "-4%"
     gemini_api_key: str | None = None
     gemini_text_model: str = "gemini-3.5-flash"
     gemini_text_timeout_sec: float = 180.0
@@ -151,7 +155,7 @@ class Settings(BaseSettings):
     watchdog_alert_delivery: str = "record_only"
     watchdog_telegram_bot_token: str | None = None
     watchdog_telegram_chat_id: str | None = None
-    premium_publish_min_score: float = 9.2
+    premium_publish_min_score: float = 9.4
     performance_collection_enabled: bool = True
     performance_sync_active_window_days: int = 45
     performance_sync_archive_window_days: int = 180

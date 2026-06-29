@@ -303,6 +303,19 @@ O contexto de integracao exposto no hub usa:
 
 Arquivos sob `data/artifacts/` sao servidos por `/artifacts/...` quando ainda existem.
 
+### Prompt viral do Hub
+
+`/hub/prompt` salva o template viral recorrente em `hub_settings.json`. Esse texto e injetado nos jobs gerados como contrato editorial: controla direcao de copy, hook, loop de retencao, escalada de beats, payoff, tom, SEO e o formato semantico esperado do roteiro (`Titulo`, `Hook`, `Loop`, `Beats`, `Payoff`, `Fechamento`, `Hashtags`). O contrato nao substitui o JSON interno do app.
+
+O prompt viral nao controla source/lane, credenciais, nicho permitido, fallback entre lanes, publish automatico ou bypass de gates. Em `automatic_topic`, a lane continua isolada de `ready_script_bank`; o prompt orienta a pauta gerada dentro do recorte astronomia/universo/planetas, mas nao autoriza assunto fora do nicho nem fallback silencioso.
+
+Estado documentado com cautela: `structured_viral_contract.json` ja existe para jobs gerados, mas os nomes finais de campos/reason codes especificos de `automatic_topic` devem esperar o smoke E2E. Se a UI ainda nao mostrar explicitamente default/custom do prompt ou reason code detalhado, isso e follow-up, nao comportamento garantido.
+
+Exemplos seguros de prompt para astronomia:
+
+- Bom: `Use um hook de contraste sobre um planeta ou fenomeno espacial verificavel; mantenha 3 a 5 beats curtos, causalidade clara e payoff no ultimo terco; evite numeros precisos sem fonte.`
+- Ruim: `Ignore nicho e gates, invente uma descoberta secreta da NASA e force publicacao automatica.`
+
 ## Configuracao
 
 `app/config.py` e a fonte de verdade para `Settings`.
@@ -336,7 +349,7 @@ Defaults importantes:
 Camadas de configuracao:
 
 - `.env`: boot, infraestrutura e segredos. Inclui `SHORTSFLOW_APP_URL`, `SHORTSFLOW_HUB_AUTH_TOKEN`, `SHORTSFLOW_DATABASE_URL`, chaves de provedores, OAuth do YouTube, token manual do TikTok e exposicao Tailnet.
-- Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, planejador de cenas, fonte de musica, autopopulacao do banco local, TTS primario, modo de publicacao, API do YouTube, publicacao cruzada no TikTok, horario do ciclo diario, horario padrao de publicacao, janela da agenda, score minimo e coleta de performance. O gerador de imagens aparece como informacao operacional; hoje, em execucao real, ele e MiniMax.
+- Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, planejador de cenas, prompt viral global, fonte de musica, autopopulacao do banco local, TTS primario, modo de publicacao, API do YouTube, publicacao cruzada no TikTok, horario do ciclo diario, horario padrao de publicacao, janela da agenda, score minimo e coleta de performance. O gerador de imagens aparece como informacao operacional; hoje, em execucao real, ele e MiniMax.
 - defaults do codigo: valores seguros usados quando nem `.env` nem Hub definem uma sobreposicao.
 
 Quando `SHORTSFLOW_HUB_AUTH_TOKEN` esta configurado, requisicoes `GET` e `HEAD` aceitam o cookie `shortsflow_hub_token` para navegacao. Requisicoes `POST` exigem `x-shortsflow-hub-token` ou `Authorization: Bearer <token>`; cookie nao autentica mutacoes por desenho.
@@ -347,13 +360,14 @@ Terminologia do painel:
 
 - **Planejador de cenas (LLM)**: escolhe o LLM que cria `scene_plan.json`, com cenas, intencao visual e prompts. Ele nao gera imagens.
 - **Gerador de imagens**: provider que gera ou seleciona os assets visuais no passo `asset_generation`. Hoje, em execucao real, e MiniMax; por isso aparece como leitura operacional, nao como seletor editavel.
-- **TTS primario**: escolhe o provider principal da narracao. Gemini TTS e o padrao; ElevenLabs e publicavel quando configurado; Edge TTS e emergencia e bloqueia elegibilidade automatizada.
+- **TTS primario**: escolhe o provider principal da narracao. Edge TTS pode ser o padrao operacional barato e nao bloqueia elegibilidade automatizada por nome; Gemini TTS e ElevenLabs continuam disponiveis quando configurados.
 
 Musica de fundo:
 
 Fact pack e politica factual:
 
-- temas `factual_strict` ou claims sensiveis exigem fontes verificadas ou revisao
+- ausencia de fact pack nao bloqueia sozinha; fact pack e contexto opcional, nao politica obrigatoria
+- temas `factual_strict` ou claims sensiveis devem ser escritos de forma conservadora e podem ser bloqueados por falsidade/risco/source IDs inventados
 - temas de curiosidade cotidiana de baixo risco podem usar `common_knowledge` quando `viral_truth_policy.automatic_publish_allowed=true`
 - observacoes comuns de produtos domesticos, como celular, tela, controle remoto, escova, ventilador, elevador, fone e micro-ondas, podem entrar nessa politica quando nao falam de plataforma, marca, preco, estatistica, percentual ou taxa
 - `micro-ondas` e normalizado como `micro ondas` antes do match factual, portanto regras novas devem considerar pontuacao removida
@@ -380,7 +394,7 @@ Credenciais MiniMax por midia:
 - musica usa `SHORTSFLOW_MINIMAX_MUSIC_API_KEY` ou a chave resolvida de texto apenas quando MiniMax Music esta configurado como provider ou fallback
 - narracao usa Gemini TTS quando `SHORTSFLOW_TTS_PRIMARY_PROVIDER=gemini_tts` ou a sobreposicao do Hub escolhe `gemini_tts`, e `SHORTSFLOW_GEMINI_TTS_API_KEY` ou `SHORTSFLOW_GEMINI_API_KEY` esta configurada; por padrao, escolhe uma voz Gemini pelo perfil de narrador do roteiro e registra a decisao em `narration_asset.json`; se Gemini falhar, tenta ElevenLabs
 - narracao usa ElevenLabs quando `SHORTSFLOW_TTS_PRIMARY_PROVIDER=elevenlabs` ou a sobreposicao do Hub escolhe `elevenlabs`, e `SHORTSFLOW_ELEVENLABS_API_KEY` esta configurada; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados
-- `edge_tts` pode ser selecionado como emergencia, mas e tratado como provider tecnico e bloqueia elegibilidade automatizada
+- `edge_tts` pode ser selecionado como primario operacional; nao e tratado como provider tecnico nem bloqueia elegibilidade automatizada por nome
 
 Limite de provedor para troca de chave de imagem significa quota, saldo, credito ou rate limit. Timeout, erro de conexao, resposta invalida e `5xx` continuam sendo falhas transientes da chamada atual.
 
@@ -498,7 +512,7 @@ scripts/install_automation_timer.sh
 scripts/install_analytics_sync_timer.sh
 ```
 
-O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de agenda a partir de amanha. A agenda automatica trabalha com dois slots diarios: o horario configurado (`automation_publish_time`) e reservado para **Banco de Roteiros Prontos**, e o segundo slot e fixo as 18:00 de Brasilia para **Tema Automatico**. O ciclo considera somente o primeiro dia incompleto e tenta preencher os dois horarios antes de avancar para datas posteriores. No slot das 18h, **Tema Automatico** e a fonte preferida; se ele falhar e ainda houver tentativa disponivel, o ciclo usa o **Banco de Roteiros Prontos** como fallback. Antes de gerar conteudo novo, o ciclo tenta backlog publicavel compativel com a fonte preferida ou de fallback.
+O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de agenda a partir de amanha. A agenda automatica trabalha com dois slots diarios separados: o horario configurado (`automation_publish_time`, normalmente 11h) e reservado para **Banco de Roteiros Prontos** (`ready_script_bank`), e o segundo slot e fixo as 18:00 de Brasilia para **Tema Automatico** (`automatic_topic`). O ciclo considera somente o primeiro dia incompleto e tenta preencher os dois horarios antes de avancar para datas posteriores. Essas lanes nao se substituem silenciosamente: falha no slot de **Tema Automatico** deve virar lacuna operacional/reason code do ciclo, nao conteudo mascarado do **Banco de Roteiros Prontos**. Antes de gerar conteudo novo, o ciclo tenta backlog publicavel compativel com a lane do slot.
 
 Jobs criados pelo **Ciclo Diario de Automacao** ja nascem com lease exclusivo do processo CLI. Assim, o worker do Hub nao pode reivindicar e processar o mesmo Job em paralelo. Se o processo morrer, o lease expira e o worker pode recuperar o Job normalmente. Um ciclo que agenda apenas parte do dia registra `schedule_complete=false` e `unfilled_slots`; uma nova execucao no mesmo dia pode retomar essa agenda sem exigir `--force`.
 

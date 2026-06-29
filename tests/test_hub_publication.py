@@ -1,5 +1,5 @@
 from tests.e2e_support import *  # noqa: F403
-from app.automation import PublishPlan
+from app.automation import PublishPlan, SAFE_AUTOMATION_TOPIC_POOL
 from app.growth_metrics import build_channel_growth_report, build_growth_score
 from app.models import LearnedRetentionProfile, RetentionExperiment, RetentionExperimentJob
 from app.quality.premium_publish_gate import PremiumPublishGateResult
@@ -7,16 +7,16 @@ from app.quality.premium_publish_gate import PremiumPublishGateResult
 
 def _premium_publish_audit_result(score: float = 9.5) -> dict:
     return {
-        "target_score": 9.2,
+        "target_score": 9.4,
         "overall_min_score": score,
-        "passed_target": score >= 9.2,
+        "passed_target": score >= 9.4,
         "stages": [
             {
                 "stage": "publish_readiness",
                 "score": score,
-                "target_pass": score >= 9.2,
+                "target_pass": score >= 9.4,
                 "evidence": ["test premium publish audit"],
-                "gaps": [] if score >= 9.2 else ["score below target"],
+                "gaps": [] if score >= 9.4 else ["score below target"],
             }
         ],
     }
@@ -28,10 +28,10 @@ def _allow_premium_publish_gate(monkeypatch, score: float = 9.5) -> None:
         orchestrator.publication_ops.premium_publish_gate,
         "evaluate",
         lambda *args, **kwargs: PremiumPublishGateResult(
-            passed=score >= 9.2,
+            passed=score >= 9.4,
             score=score,
-            target_score=9.2,
-            reasons=[] if score >= 9.2 else ["premium_publish_score_below_threshold"],
+            target_score=9.4,
+            reasons=[] if score >= 9.4 else ["premium_publish_score_below_threshold"],
             audit=audit_payload,
             visual_review_required=False,
             visual_review_confirmed=True,
@@ -49,7 +49,7 @@ def test_ready_script_bank_premium_publish_gate_auto_confirms_editorial_score_an
         return PremiumPublishGateResult(
             passed=True,
             score=7.3,
-            target_score=9.2,
+            target_score=9.4,
             reasons=[],
             audit=_premium_publish_audit_result(7.3),
             visual_review_required=visual_review_required,
@@ -461,14 +461,14 @@ def test_automation_auto_topic_attaches_job_to_running_retention_experiment(monk
         session.commit()
 
     def fake_create_job(payload):
-        assert payload["job_origin"] == "auto"
+        assert payload["job_origin"] == "automatic_topic"
         assert payload["creation_via"] == "daily_cycle"
         with SessionLocal() as session:
             _create_basic_job(session, job_id=job_id, status="queued", seed_theme="Automacao com experimento")
             session.flush()
             job = session.get(Job, job_id)
             assert job is not None
-            job.job_origin = "auto"
+            job.job_origin = "automatic_topic"
             job.creation_via = "daily_cycle"
             session.commit()
         return job_id
@@ -668,7 +668,35 @@ Hashtags: #curiosidades #shorts""",
     assert [item["source"] for item in run_result["metadata"]["scheduled_jobs"]] == ["ready_script_bank", "automatic_topic"]
 
 
-def test_automation_keeps_evening_auto_topic_failure_visible(monkeypatch) -> None:
+def test_automatic_topic_discards_factual_strict_scout_candidate(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+
+    class FakeTrend:
+        topic = "Por que o cérebro sente vibração fantasma do celular?"
+        requested_angle = "Explicar mecanismo cerebral e expectativa sensorial."
+
+        def as_notes(self) -> str:
+            return "trend_source=test"
+
+    class FakeScoutResult:
+        candidate = FakeTrend()
+        considered_count = 1
+        rejected_recent_count = 0
+
+    class FakeTopicScout:
+        def find_topic(self, *_args, **_kwargs):
+            return FakeScoutResult()
+
+    monkeypatch.setattr("app.automation.TopicScout", FakeTopicScout)
+
+    payload = service._automatic_topic_payload()
+
+    assert payload["seed_theme"] in SAFE_AUTOMATION_TOPIC_POOL
+    assert "trend_research=discarded" in payload["notes"]
+    assert "factual_strict_requires_sources_for_autopublish" in payload["notes"]
+
+
+def test_automation_does_not_fall_back_after_evening_auto_topic_exhaustion(monkeypatch) -> None:
     service = AutomationService(orchestrator)
     service.set_automation_enabled(True)
     target_day = datetime(2099, 6, 10).date()
@@ -677,7 +705,9 @@ def test_automation_keeps_evening_auto_topic_failure_visible(monkeypatch) -> Non
     def fake_generation_attempt(_run_id, _attempt_number, _slot, *, source, finish_run):
         assert finish_run is False
         attempted_sources.append(source)
-        return {"scheduled": False, "provider_limit": True, "error": "automatic topic provider quota exceeded"}
+        if source == "automatic_topic":
+            return {"scheduled": False, "error": "automatic topic provider returned empty text"}
+        return {"scheduled": True, "job_id": "ready-fallback-job", "schedule_id": "ready-fallback-schedule"}
 
     monkeypatch.setattr(orchestrator.settings, "automation_max_generation_attempts", 2)
     monkeypatch.setattr(service, "_run_competitive_scout_automation", lambda: {"status": "skipped", "reason": "test"})
@@ -689,8 +719,108 @@ def test_automation_keeps_evening_auto_topic_failure_visible(monkeypatch) -> Non
     run_result = service.run_daily_cycle(force=True)
 
     assert run_result["status"] == "failed"
-    assert attempted_sources == ["automatic_topic"]
-    assert run_result["error"] == "automatic topic provider quota exceeded"
+    assert attempted_sources == ["automatic_topic", "automatic_topic"]
+    assert run_result["error"] == "max_generation_attempts_exhausted"
+
+
+def test_automatic_topic_attempt_rejects_ready_script_origin_fallback(monkeypatch) -> None:
+    service = AutomationService(orchestrator)
+    run_id = "auto-topic-source-guard-run"
+    job_id = "auto-topic-source-guard-job"
+    with SessionLocal() as session:
+        session.query(AutomationAttempt).filter_by(run_id=run_id).delete()
+        session.query(AutomationRun).filter_by(run_id=run_id).delete()
+        session.query(Job).filter_by(job_id=job_id).delete()
+        session.add(
+            AutomationRun(
+                run_id=run_id,
+                schema_version="1.0.0",
+                content_hash=f"{run_id}-hash",
+                local_date="2099-06-10",
+                timezone="America/Sao_Paulo",
+                status="running",
+            )
+        )
+        session.commit()
+
+    def fake_create_job(payload: dict) -> str:
+        with SessionLocal() as session:
+            _create_basic_job(session, job_id=job_id, status="queued", seed_theme=str(payload["seed_theme"]))
+            session.flush()
+            job = session.get(Job, job_id)
+            assert job is not None
+            job.job_origin = "ready_script_bank"
+            job.creation_via = "daily_cycle"
+            session.commit()
+        return job_id
+
+    process_calls = {"count": 0}
+
+    def fake_process_job(_job_id: str) -> str:
+        process_calls["count"] += 1
+        return "ready_for_upload"
+
+    monkeypatch.setattr(
+        service,
+        "_automatic_topic_payload",
+        lambda: {
+            "seed_theme": "Tema automático diário",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 35,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "automation_source=automatic_topic\nautomatic_topic_policy=cosmos_astronomia_universo_first",
+            "requested_angle": None,
+            "job_origin": "automatic_topic",
+            "creation_via": "daily_cycle",
+        },
+    )
+    monkeypatch.setattr(orchestrator, "create_job", fake_create_job)
+    monkeypatch.setattr(orchestrator, "process_job", fake_process_job)
+
+    result = service._run_generation_attempt(
+        run_id,
+        1,
+        PublishSlot(datetime(2099, 6, 10).date(), "18:00", "America/Sao_Paulo"),
+        source="automatic_topic",
+        finish_run=False,
+    )
+
+    assert result["scheduled"] is False
+    assert result["skip_slot"] is True
+    assert "reason_code=fallback_prevented" in result["error"]
+    assert process_calls["count"] == 0
+    with SessionLocal() as session:
+        attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.run_id == run_id))
+    assert attempt is not None
+    assert attempt.source == "automatic_topic"
+    assert attempt.status == "not_eligible"
+    assert attempt.score_report["reason_code"] == "fallback_prevented"
+    assert attempt.job_id == job_id
+
+
+def test_automatic_topic_payload_rejection_reason_codes() -> None:
+    service = AutomationService(orchestrator)
+
+    assert service._automatic_topic_payload_rejection_reason({"seed_theme": ""}) == "no_topic"
+    assert (
+        service._automatic_topic_payload_rejection_reason(
+            {
+                "seed_theme": "Vênus",
+                "job_origin": "automatic_topic",
+                "notes": "input_mode=script\n[[SHORTSFLOW_READY_SCRIPT_BEGIN]]",
+            }
+        )
+        == "fallback_prevented"
+    )
+    assert (
+        service._automatic_topic_payload_rejection_reason(
+            {"seed_theme": "Café", "job_origin": "automatic_topic", "notes": "automatic_topic_policy=cotidiano"}
+        )
+        == "niche_rejected"
+    )
+
 
 def test_automation_schedules_visual_review_only_backlog_job(monkeypatch) -> None:
     service = AutomationService(orchestrator)
@@ -1860,7 +1990,7 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     assert 'name="niche_id" value="curiosidades"' in page.text
     assert 'name="seed_theme" value=""' in page.text
     assert "Vazio = pesquisar tendências reais" in page.text
-    assert 'name="target_duration_sec" type="number" min="35" max="55" value="50"' in page.text
+    assert 'name="target_duration_sec" type="number" min="35" max="55" value="45"' in page.text
 
     response = client.post("/jobs", data={"seed_theme": "", "input_mode": "theme"}, follow_redirects=False)
     assert response.status_code == 303
@@ -1871,7 +2001,7 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     assert captured["creation_via"] == "hub"
     assert "trend_research=real_source" in str(captured["notes"])
     assert captured["niche_id"] == "curiosidades"
-    assert captured["target_duration_sec"] == 50
+    assert captured["target_duration_sec"] == 45
 
     response = client.post("/jobs", data={"seed_theme": "", "input_mode": "title"}, follow_redirects=False)
     assert response.status_code == 303
@@ -4093,7 +4223,7 @@ def test_home_growth_menu_links_to_separate_growth_center() -> None:
     assert response.status_code == 200
     assert 'href="/publication-hub"' in response.text
     assert 'id="publication-hub" class="publication-shell"' not in response.text
-    assert "Fila de vídeos" in response.text
+    assert "Automação" in response.text
     assert "Linhas editoriais por retenção" not in response.text
 
     growth_response = client.get("/publication-hub")

@@ -8,6 +8,27 @@ from fastapi import HTTPException, Request
 from sqlalchemy import or_, select
 
 from app.db import SessionLocal
+from app.domain_contracts import (
+    JOB_STATUS_APPROVED_FOR_PUBLISH,
+    JOB_STATUS_BLOCKED_FOR_MONETIZATION,
+    JOB_STATUS_FAILED,
+    JOB_STATUS_MONETIZATION_REVIEW,
+    JOB_STATUS_PUBLISHED,
+    JOB_STATUS_QUEUED,
+    JOB_STATUS_READY_FOR_UPLOAD,
+    JOB_STATUS_REJECTED,
+    JOB_STATUS_RUNNING,
+    JOB_STATUS_SCHEDULED_PUBLICATION,
+    JOB_STATUS_UNSCHEDULED_APPROVED,
+    PUBLICATION_STATUS_AWAITING_CONFIRMATION,
+    PUBLICATION_STATUS_PUBLISH_FAILED,
+    PUBLICATION_STATUS_PUBLISHED,
+    PUBLICATION_STATUS_PUBLISHING,
+    PUBLICATION_STATUS_SCHEDULED,
+    REASON_INVENTED_SOURCE_FACT_IDS,
+    REASON_UNSUPPORTED_CLAIM,
+    REASON_VISUAL_REVIEW_REQUIRED,
+)
 from app.hub_calendar_context import COMMON_SCHEDULE_TIMEZONES, HubCalendarContext
 from app.hub_jobs_context import HubJobsContext
 from app.hub_publication_context import HubPublicationContext
@@ -24,9 +45,9 @@ from app.models import Job, PublicationSchedule, Script, TopicRequest
 
 FAILURE_REASON_GUIDES = {
     "fact_pack_missing_for_factual_topic": {
-        "title": "Faltou base factual para tema factual",
-        "cause": "O roteiro entrou no caminho factual, mas o job não tinha pacote de fatos confirmado o bastante para publicação automática.",
-        "action": "Use Roteiro Pronto com confirmação factual ou regenere o roteiro com fontes confiáveis antes de publicar.",
+        "title": "Código legado de fact pack ausente",
+        "cause": "Este código é legado: ausência de fact pack não deve bloquear sozinha na política atual.",
+        "action": "Se aparecer em job novo, trate como bug de regressão. Revise apenas claims falsos, unsafe ou source IDs inventados.",
     },
     "source_fact_mismatch": {
         "title": "Roteiro não bate com as fontes",
@@ -153,12 +174,12 @@ FAILURE_REASON_GUIDES = {
         "cause": "O job tem risco de repetição com conteúdo recente do canal.",
         "action": "Compare com os vídeos recentes e confirme originalidade ou refaça o ângulo.",
     },
-    "unsupported_claim": {
+    REASON_UNSUPPORTED_CLAIM: {
         "title": "Afirmação sem suporte suficiente",
         "cause": "A auditoria textual encontrou uma afirmação factual que não estava sustentada pelo pacote de fatos.",
         "action": "Revise a afirmação, adicione fonte confiável ou reescreva o trecho de forma mais conservadora.",
     },
-    "invented_source_fact_ids": {
+    REASON_INVENTED_SOURCE_FACT_IDS: {
         "title": "Roteiro referenciou fonte inexistente",
         "cause": "O texto ou a auditoria encontrou IDs de fatos que não existem no pacote factual do job.",
         "action": "Regere o roteiro/fact pack ou use um Roteiro Pronto com fatos confirmados manualmente.",
@@ -204,11 +225,11 @@ FAILURE_REASON_GUIDES = {
         "action": "Revise artefatos de mídia, áudio e logs técnicos antes de tentar renderizar de novo.",
     },
     "technical_tts_provider_not_publishable": {
-        "title": "TTS final não é publicável automaticamente",
-        "cause": "O provider primário de voz não entregou áudio publicável e o job caiu para um TTS técnico de emergência.",
-        "action": "Corrija o provider primário ou o fallback comercial antes de regenerar; se quiser usar esse áudio, aprove apenas após confirmar direitos e qualidade manualmente.",
+        "title": "TTS técnico não é publicável automaticamente",
+        "cause": "O job usou um provider técnico real, como áudio sintético de emergência. Edge TTS primário não entra nessa categoria.",
+        "action": "Reprocesse TTS/render com um provider publicável ou confirme direitos e qualidade no fluxo externo antes de publicar.",
     },
-    "visual_review_required": {
+    REASON_VISUAL_REVIEW_REQUIRED: {
         "title": "Revisão visual necessária",
         "cause": "O job terminou, mas os sinais visuais não foram fortes o bastante para autopublicação.",
         "action": "Assista ao vídeo no Hub de Revisao e aprove manualmente ou refaça assets/cenas.",
@@ -239,45 +260,45 @@ class HubContext:
 
     def _job_flow_stage(self, job_status: str | None, schedule_status: str | None = None) -> str:
         normalized = str(job_status or "")
-        if schedule_status == "published" or normalized == "published":
+        if schedule_status == PUBLICATION_STATUS_PUBLISHED or normalized == JOB_STATUS_PUBLISHED:
             return "Publicado"
-        if schedule_status == "awaiting_confirmation":
+        if schedule_status == PUBLICATION_STATUS_AWAITING_CONFIRMATION:
             return "Confirmação"
-        if schedule_status in {"scheduled", "publishing", "publish_failed"} or normalized == "approved_for_publish":
+        if schedule_status in {PUBLICATION_STATUS_SCHEDULED, PUBLICATION_STATUS_PUBLISHING, PUBLICATION_STATUS_PUBLISH_FAILED} or normalized == JOB_STATUS_APPROVED_FOR_PUBLISH:
             return "Programação"
-        if normalized in {"monetization_review", "ready_for_upload"}:
+        if normalized in {JOB_STATUS_MONETIZATION_REVIEW, JOB_STATUS_READY_FOR_UPLOAD}:
             return "Aprovação"
-        if normalized in {"queued", "running"}:
+        if normalized in {JOB_STATUS_QUEUED, JOB_STATUS_RUNNING}:
             return "Geração"
-        if normalized in {"blocked_for_monetization", "rejected"}:
+        if normalized in {JOB_STATUS_BLOCKED_FOR_MONETIZATION, JOB_STATUS_REJECTED}:
             return "Bloqueado"
-        if normalized.endswith("_failed") or normalized == "failed":
+        if normalized.endswith("_failed") or normalized == JOB_STATUS_FAILED:
             return "Falhou"
         return "Geração"
 
     def _job_next_action(self, job_status: str | None, schedule_status: str | None = None) -> str:
         normalized = str(job_status or "")
-        if schedule_status == "published" or normalized == "published":
+        if schedule_status == PUBLICATION_STATUS_PUBLISHED or normalized == JOB_STATUS_PUBLISHED:
             return "Registrar métricas do vídeo e seguir para o próximo."
-        if schedule_status == "awaiting_confirmation":
+        if schedule_status == PUBLICATION_STATUS_AWAITING_CONFIRMATION:
             return "Aguardar confirmação real do YouTube antes de marcar como publicado."
-        if schedule_status == "publish_failed":
+        if schedule_status == PUBLICATION_STATUS_PUBLISH_FAILED:
             return "Abrir o job, revisar o erro e repetir a publicação."
-        if schedule_status == "publishing":
+        if schedule_status == PUBLICATION_STATUS_PUBLISHING:
             return "Aguardar o upload terminar e conferir o resultado."
-        if schedule_status == "scheduled":
+        if schedule_status == PUBLICATION_STATUS_SCHEDULED:
             return "Conferir data e hora; o worker publica quando o horário vencer."
-        if normalized in {"monetization_review", "ready_for_upload"}:
+        if normalized in {JOB_STATUS_MONETIZATION_REVIEW, JOB_STATUS_READY_FOR_UPLOAD}:
             return "Abrir o job, revisar checklist e clicar em Aprovar."
-        if normalized == "approved_for_publish":
+        if normalized == JOB_STATUS_APPROVED_FOR_PUBLISH:
             return "Definir data no bloco Agenda ou clicar em Publicar agora."
-        if normalized == "blocked_for_monetization":
+        if normalized == JOB_STATUS_BLOCKED_FOR_MONETIZATION:
             return "Rejeitar ou recriar o job após corrigir os bloqueios."
-        if normalized == "rejected":
+        if normalized == JOB_STATUS_REJECTED:
             return "Criar novo job completo ou ajustar o tema."
-        if normalized.endswith("_failed") or normalized == "failed":
+        if normalized.endswith("_failed") or normalized == JOB_STATUS_FAILED:
             return "Abrir o job, ler o erro e tentar novamente."
-        if normalized == "running":
+        if normalized == JOB_STATUS_RUNNING:
             return "Aguardar a geração terminar."
         return "Aguardar a próxima etapa automática."
 
@@ -286,23 +307,23 @@ class HubContext:
         scheduled_for_utc = None
         if schedule and schedule.scheduled_for_utc:
             scheduled_for_utc = schedule.scheduled_for_utc if schedule.scheduled_for_utc.tzinfo else schedule.scheduled_for_utc.replace(tzinfo=UTC)
-        if schedule_status == "published" or job.status == "published":
-            status = "published"
-        elif schedule_status == "publish_failed":
-            status = "publish_failed"
-        elif schedule_status == "publishing":
-            status = "publishing"
-        elif schedule_status == "scheduled" and scheduled_for_utc and scheduled_for_utc <= datetime.now(UTC) and schedule.youtube_video_id:
-            status = "awaiting_confirmation"
-        elif schedule_status == "scheduled":
-            status = "scheduled_publication"
-        elif job.status == "approved_for_publish":
-            status = "unscheduled_approved"
+        if schedule_status == PUBLICATION_STATUS_PUBLISHED or job.status == JOB_STATUS_PUBLISHED:
+            status = JOB_STATUS_PUBLISHED
+        elif schedule_status == PUBLICATION_STATUS_PUBLISH_FAILED:
+            status = PUBLICATION_STATUS_PUBLISH_FAILED
+        elif schedule_status == PUBLICATION_STATUS_PUBLISHING:
+            status = PUBLICATION_STATUS_PUBLISHING
+        elif schedule_status == PUBLICATION_STATUS_SCHEDULED and scheduled_for_utc and scheduled_for_utc <= datetime.now(UTC) and schedule.youtube_video_id:
+            status = PUBLICATION_STATUS_AWAITING_CONFIRMATION
+        elif schedule_status == PUBLICATION_STATUS_SCHEDULED:
+            status = JOB_STATUS_SCHEDULED_PUBLICATION
+        elif job.status == JOB_STATUS_APPROVED_FOR_PUBLISH:
+            status = JOB_STATUS_UNSCHEDULED_APPROVED
         else:
             status = str(job.status or "")
-        schedule_for_helper = status if status in {"published", "publish_failed", "publishing", "scheduled", "awaiting_confirmation"} else None
-        if status == "scheduled_publication":
-            schedule_for_helper = "scheduled"
+        schedule_for_helper = status if status in {JOB_STATUS_PUBLISHED, PUBLICATION_STATUS_PUBLISH_FAILED, PUBLICATION_STATUS_PUBLISHING, PUBLICATION_STATUS_SCHEDULED, PUBLICATION_STATUS_AWAITING_CONFIRMATION} else None
+        if status == JOB_STATUS_SCHEDULED_PUBLICATION:
+            schedule_for_helper = PUBLICATION_STATUS_SCHEDULED
         return {
             "status": status,
             "class_name": status,
@@ -356,7 +377,7 @@ class HubContext:
             }
         if "technical_tts_provider_not_publishable" in evidence or any("tts" in item.lower() for item in evidence):
             evidence.extend(self._tts_fallback_evidence(narration))
-        if not evidence and status not in {"failed", "blocked_for_monetization", "rejected"} and not status.endswith("_failed"):
+        if not evidence and status not in {JOB_STATUS_FAILED, JOB_STATUS_BLOCKED_FOR_MONETIZATION, JOB_STATUS_REJECTED} and not status.endswith("_failed"):
             return {"visible": False, "title": "", "cause": "", "action": "", "evidence": [], "problem_items": []}
 
         for evidence_code in evidence:
@@ -369,28 +390,28 @@ class HubContext:
             if code in normalized_text:
                 return {"visible": True, "code": code, "evidence": evidence, "problem_items": problem_items, **guide}
 
-        if status == "blocked_for_monetization":
+        if status == JOB_STATUS_BLOCKED_FOR_MONETIZATION:
             first_problem = problem_items[0] if problem_items else {}
             return {
                 "visible": True,
-                "code": str(first_problem.get("code") or "blocked_for_monetization"),
+                "code": str(first_problem.get("code") or JOB_STATUS_BLOCKED_FOR_MONETIZATION),
                 "title": str(first_problem.get("title") or "Bloqueado por critério de publicação"),
                 "cause": str(first_problem.get("cause") or "O job terminou, mas um ou mais gates impediram publicação automática."),
                 "action": str(first_problem.get("action") or "Abra Qualidade e monetização, confira os bloqueios e decida entre corrigir, aprovar manualmente ou refazer."),
                 "evidence": evidence,
                 "problem_items": problem_items,
             }
-        if status == "rejected":
+        if status == JOB_STATUS_REJECTED:
             return {
                 "visible": True,
-                "code": "rejected",
+                "code": JOB_STATUS_REJECTED,
                 "title": "Rejeitado na revisão",
                 "cause": "Uma revisão humana reprovou o job ou marcou motivo de refação.",
                 "action": "Use os motivos da revisão para criar um novo job ou ajustar o roteiro antes de tentar de novo.",
                 "evidence": evidence,
                 "problem_items": problem_items,
             }
-        if status.endswith("_failed") or status == "failed":
+        if status.endswith("_failed") or status == JOB_STATUS_FAILED:
             failed_step = raw_reason.split(":", 1)[0].strip() if ":" in raw_reason else (job.current_step or "pipeline")
             readable_step = self._job_status_label(status)
             return {
@@ -463,28 +484,28 @@ class HubContext:
         manual_required = [str(item) for item in monetization_report.get("manual_required") or []]
         diagnosis = self._failure_diagnosis(job, monetization_report)
 
-        if schedule_status == "published" or status == "published":
+        if schedule_status == PUBLICATION_STATUS_PUBLISHED or status == JOB_STATUS_PUBLISHED:
             return {
                 "kind": "done",
                 "label": "Concluído",
                 "missing": "Nada para publicar; falta só registrar performance quando houver dados.",
                 "recommendation": "Acompanhe métricas e use como referência para os próximos Jobs.",
             }
-        if schedule_status in {"scheduled", "publishing"}:
+        if schedule_status in {PUBLICATION_STATUS_SCHEDULED, PUBLICATION_STATUS_PUBLISHING}:
             return {
                 "kind": "scheduled",
                 "label": "Aproveitar",
                 "missing": "Nada até a última etapa; o worker precisa chegar ao horário salvo.",
                 "recommendation": "Mantenha na agenda e confira a confirmação depois da janela de publicação.",
             }
-        if schedule_status == "publish_failed":
+        if schedule_status == PUBLICATION_STATUS_PUBLISH_FAILED:
             return {
                 "kind": "regenerate",
                 "label": "Regenerar",
                 "missing": "Falhou na publicação; falta revisar a tentativa e repetir o upload.",
                 "recommendation": "Abra o Job, leia a falha de publicação e tente publicar novamente.",
             }
-        if status == "approved_for_publish":
+        if status == JOB_STATUS_APPROVED_FOR_PUBLISH:
             return {
                 "kind": "schedule",
                 "label": "Aproveitar",
@@ -513,28 +534,28 @@ class HubContext:
                 "missing": "Falta aprovação humana para liberar agenda e publicação.",
                 "recommendation": "Revise rápido o conteúdo e clique em Aprovar.",
             }
-        if status == "blocked_for_monetization":
+        if status == JOB_STATUS_BLOCKED_FOR_MONETIZATION:
             return {
                 "kind": "regenerate",
                 "label": "Regenerar",
                 "missing": diagnosis.get("title") or "Faltam correções antes de publicar.",
                 "recommendation": diagnosis.get("action") or "Corrija os bloqueios ou refaça o Job.",
             }
-        if status == "rejected":
+        if status == JOB_STATUS_REJECTED:
             return {
                 "kind": "delete",
                 "label": "Excluir",
                 "missing": "Este Job saiu do fluxo de publicação e não chega à última etapa.",
                 "recommendation": "Use os motivos como referência e deixe a retenção limpar os artefatos.",
             }
-        if status.endswith("_failed") or status == "failed":
+        if status.endswith("_failed") or status == JOB_STATUS_FAILED:
             return {
                 "kind": "regenerate",
                 "label": "Regenerar",
                 "missing": diagnosis.get("title") or "A geração falhou antes da revisão.",
                 "recommendation": diagnosis.get("action") or "Abra o Job, corrija a causa e gere novamente.",
             }
-        if status in {"queued", "running"}:
+        if status in {JOB_STATUS_QUEUED, JOB_STATUS_RUNNING}:
             return {
                 "kind": "wait",
                 "label": "Aguardar",
@@ -580,25 +601,25 @@ class HubContext:
     ) -> dict[str, str]:
         job_status = str(job.status or "")
         schedule_status = str((schedule_display or {}).get("status") or "")
-        if schedule_status == "published" or job_status == "published":
+        if schedule_status == PUBLICATION_STATUS_PUBLISHED or job_status == JOB_STATUS_PUBLISHED:
             return {
                 "step": "4. Publicado",
                 "title": "Upload concluído",
                 "body": "O vídeo já foi publicado. Use a seção de performance para registrar os números do YouTube Studio.",
             }
-        if schedule_status == "publish_failed":
+        if schedule_status == PUBLICATION_STATUS_PUBLISH_FAILED:
             return {
                 "step": "4. Repetir publicação",
                 "title": "Upload falhou",
                 "body": "Revise a tentativa de publicação logo abaixo e dispare um novo upload quando o erro estiver claro.",
             }
-        if schedule_status == "scheduled":
+        if schedule_status == PUBLICATION_STATUS_SCHEDULED:
             return {
                 "step": "3. Programado",
                 "title": "O vídeo já está na agenda",
                 "body": "Confira data, hora e visibilidade. Se quiser postar imediatamente, use o botão de publicar agora.",
             }
-        if job_status == "approved_for_publish":
+        if job_status == JOB_STATUS_APPROVED_FOR_PUBLISH:
             publish_mode = str(youtube_integration.get("publish_mode") or "manual")
             helper = "No modo api, o worker publica no horário salvo." if publish_mode == "api" else "No modo manual, o hub só registra o que você publicou no Studio."
             return {
@@ -606,7 +627,7 @@ class HubContext:
                 "title": "A aprovação terminou",
                 "body": f"Agora o vídeo já pode entrar na agenda. Preencha data, hora e visibilidade no bloco Agenda. {helper}",
             }
-        if job_status in {"monetization_review", "ready_for_upload"}:
+        if job_status in {JOB_STATUS_MONETIZATION_REVIEW, JOB_STATUS_READY_FOR_UPLOAD}:
             hard_blockers = list((monetization_report or {}).get("hard_blockers") or [])
             manual_required = list((monetization_report or {}).get("manual_required") or [])
             if hard_blockers:
@@ -618,21 +639,21 @@ class HubContext:
             if manual_required:
                 return {
                     "step": "2. Aprovar vídeo",
-                    "title": "Falta revisão humana",
-                    "body": "Marque as confirmações exigidas na seção Review e clique em Aprovar. A agenda só libera depois disso.",
+                    "title": "Há diagnósticos para conferir",
+                    "body": "O Hub mostra confirmações pendentes como diagnóstico. Se não houver hard blockers, a revisão final fica no YouTube Studio.",
                 }
             return {
                 "step": "2. Aprovar vídeo",
                 "title": "Pronto para aprovação",
                 "body": "O vídeo já passou nos gates automáticos. Revise rápido o conteúdo e clique em Aprovar para liberar a agenda.",
             }
-        if job_status in {"queued", "running"}:
+        if job_status in {JOB_STATUS_QUEUED, JOB_STATUS_RUNNING}:
             return {
                 "step": "1. Gerando vídeo",
                 "title": "A geração ainda está em andamento",
                 "body": "Espere o pipeline terminar. Quando o status virar revisão, a ação principal passa a ser aprovar o vídeo.",
             }
-        if job_status in {"blocked_for_monetization", "rejected"} or job_status.endswith("_failed") or job_status == "failed":
+        if job_status in {JOB_STATUS_BLOCKED_FOR_MONETIZATION, JOB_STATUS_REJECTED} or job_status.endswith("_failed") or job_status == JOB_STATUS_FAILED:
             return {
                 "step": "1. Corrigir",
                 "title": "Este job não chegou à publicação",
@@ -737,7 +758,7 @@ class HubContext:
             .join(TopicRequest, TopicRequest.job_id == Job.job_id)
             .join(Script, Script.job_id == Job.job_id, isouter=True)
             .join(PublicationSchedule, PublicationSchedule.job_id == Job.job_id, isouter=True)
-            .where(Job.status == "approved_for_publish")
+            .where(Job.status == JOB_STATUS_APPROVED_FOR_PUBLISH)
             .where(or_(PublicationSchedule.schedule_id.is_(None), PublicationSchedule.status == "cancelled"))
             .order_by(Job.created_at.asc())
         )

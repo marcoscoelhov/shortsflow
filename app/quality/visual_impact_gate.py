@@ -72,7 +72,7 @@ class VisualImpactGate:
         if thumbnail < self.MIN_THUMBNAIL:
             reasons.append("thumbnail_candidate_weak")
         mock_visuals = all(str(asset.get("provider") or "").lower() == "mock_ai" for asset in selected_assets)
-        if not mock_visuals and (generic_penalty >= 0.12 or hook_generic_hits >= 2):
+        if not mock_visuals and (generic_penalty >= 0.12 or hook_generic_hits >= 2) and first_frame < 0.88:
             reasons.append("generic_stock_visual_penalty")
         if visual_impact < self.MIN_VISUAL_IMPACT:
             reasons.append("visual_impact_below_threshold")

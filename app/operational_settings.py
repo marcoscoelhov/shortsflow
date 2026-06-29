@@ -46,7 +46,7 @@ PROVIDER_OPTIONS = (
 TTS_PROVIDER_OPTIONS = (
     ("gemini_tts", "Gemini TTS"),
     ("elevenlabs", "ElevenLabs"),
-    ("edge_tts", "Edge TTS (emergencia)"),
+    ("edge_tts", "Edge TTS"),
 )
 
 VISION_VERIFIER_OPTIONS = (
@@ -112,6 +112,13 @@ OPERATIONAL_SETTING_SPECS = (
         VISION_VERIFIER_OPTIONS,
         description="Use local_openai com o servico shortsflow-vision para liberar revisao visual automatica.",
     ),
+    OperationalSettingSpec(
+        "auto_visual_review_enabled",
+        "Revisao visual IA automatica",
+        "Visao local",
+        "checkbox",
+        description="Quando desligado, a IA visual nao bloqueia autopublicacao nem roda dentro do ciclo automatico.",
+    ),
     OperationalSettingSpec("local_vision_base_url", "URL da visao local", "Visao local", "text"),
     OperationalSettingSpec("local_vision_model", "Modelo da visao local", "Visao local", "text"),
     OperationalSettingSpec(
@@ -129,7 +136,16 @@ OPERATIONAL_SETTING_SPECS = (
         "Narracao",
         "select",
         TTS_PROVIDER_OPTIONS,
-        description="Gemini TTS e o padrao; ElevenLabs e equivalente. Edge TTS e emergencia e bloqueia elegibilidade automatizada.",
+        description="Edge TTS e o padrao operacional barato; nao bloqueia elegibilidade automatizada.",
+    ),
+    OperationalSettingSpec("edge_tts_voice", "Voz Edge TTS", "Narracao", "text"),
+    OperationalSettingSpec("edge_tts_commercial_rights_confirmed", "Direitos Edge TTS confirmados", "Narracao", "checkbox"),
+    OperationalSettingSpec(
+        "fact_pack_enabled",
+        "Fact pack / checador de fatos",
+        "Automacao",
+        "checkbox",
+        description="Desligado: nao busca fontes nem bloqueia automatic_topic por fact_pack_missing.",
     ),
     OperationalSettingSpec("youtube_publish_mode", "Modo YouTube", "Publicacao", "select", (("manual", "Manual"), ("api", "API"))),
     OperationalSettingSpec("youtube_api_enabled", "API YouTube ativa", "Publicacao", "checkbox"),

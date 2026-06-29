@@ -152,6 +152,8 @@ O hub deve aceitar tres modos:
 2. `title`: titulo completo fornecido pelo usuario. Preserve a promessa central, mas permita otimizar pauta e roteiro.
 3. `script`: roteiro pronto em texto rotulado. Preserve o texto como fonte editorial e nao gere outro roteiro.
 
+Regra critica para `theme` vazio: o modo **Tema Automatico** deve ser uma lane isolada. Ele nao pode cair silenciosamente para Banco de Roteiros Prontos, pauta deterministica local ou mock; se nao houver tendencia/pauta real aceitavel, falhe de forma observavel.
+
 Formato de roteiro pronto:
 
 ```text
@@ -260,20 +262,26 @@ Implemente providers:
 
 - MiniMax text
 - DeepSeek V4 Flash via API OpenAI-compatible
-- OpenAI via Responses ou Chat Completions, conforme SDK disponivel
+- Qwen opcional para enriquecimento visual/referencias quando configurado
+- OpenAI via Responses ou Chat Completions apenas como adaptador opcional, nao como provider real principal do caminho operacional
 - Mock apenas para testes
 
 Tenha registry configuravel por env:
 
 ```env
 SHORTSFLOW_LLM_PRIMARY_PROVIDER=deepseek
-SHORTSFLOW_LLM_FALLBACK_PROVIDER=deepseek
+SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=deepseek
 SHORTSFLOW_LLM_REPAIR_PROVIDER=deepseek
 SHORTSFLOW_LLM_SCENE_PROVIDER=deepseek
-SHORTSFLOW_LLM_ENABLE_FALLBACK=true
+SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=deepseek
+SHORTSFLOW_LLM_GATE_JUDGE_MODEL=deepseek-v4-flash
+SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled
+SHORTSFLOW_LLM_PREMIUM_REVIEW_ENABLED=true
+SHORTSFLOW_LLM_PREMIUM_REVIEW_PROVIDER=deepseek
+SHORTSFLOW_LLM_PREMIUM_REVIEW_MODEL=deepseek-v4-pro
 ```
 
-O provider de cenas deve ser fallback especializado. O plano de cenas tenta primeiro o primary configurado; se ele falhar ou se o plano nao passar no gate, use `SHORTSFLOW_LLM_SCENE_PROVIDER`.
+Use DeepSeek v4 Flash como padrao barato para provider principal, rascunho, reparo, planejamento de cenas e juiz comum dos gates. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` deve ser o padrao operacional: nao crie fallback geral caro e invisivel. `SHORTSFLOW_LLM_SCENE_PROVIDER` e uma rota especializada de cenas, nao autorizacao para substituir silenciosamente o fluxo principal. Qwen pode existir como provider opcional para enriquecimento visual/referencias quando configurado. DeepSeek v4 Pro fica restrito a sinais explicitos de excecao premium/final/complexa via `SHORTSFLOW_LLM_PREMIUM_REVIEW_*`; nunca como fallback geral automatico.
 
 ## Regras de roteiro
 
@@ -600,24 +608,34 @@ SHORTSFLOW_DATABASE_URL=sqlite:///data/shortsflow.db
 SHORTSFLOW_DATA_DIR=data
 
 SHORTSFLOW_LLM_PRIMARY_PROVIDER=deepseek
-SHORTSFLOW_LLM_FALLBACK_PROVIDER=deepseek
+SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=deepseek
 SHORTSFLOW_LLM_REPAIR_PROVIDER=deepseek
 SHORTSFLOW_LLM_SCENE_PROVIDER=deepseek
+SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=deepseek
+SHORTSFLOW_LLM_GATE_JUDGE_MODEL=deepseek-v4-flash
+SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled
+SHORTSFLOW_LLM_JSON_MAX_TOKENS=4096
+SHORTSFLOW_LLM_PREMIUM_REVIEW_ENABLED=true
+SHORTSFLOW_LLM_PREMIUM_REVIEW_PROVIDER=deepseek
+SHORTSFLOW_LLM_PREMIUM_REVIEW_MODEL=deepseek-v4-pro
 
-SHORTSFLOW_MINIMAX_API_KEY=
-SHORTSFLOW_MINIMAX_TEXT_API_KEY=
-SHORTSFLOW_MINIMAX_IMAGE_API_KEY=
-SHORTSFLOW_MINIMAX_MUSIC_API_KEY=
+SHORTSFLOW_MINIMAX_API_KEY=<redigido-ou-vazio>
+SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>
+SHORTSFLOW_MINIMAX_IMAGE_API_KEY=<redigido>
+SHORTSFLOW_MINIMAX_MUSIC_API_KEY=<redigido-ou-vazio>
 SHORTSFLOW_MINIMAX_TEXT_BASE_URL=https://api.minimax.io/v1
 SHORTSFLOW_MINIMAX_IMAGE_BASE_URL=https://api.minimax.io/v1/image_generation
 SHORTSFLOW_MINIMAX_MUSIC_BASE_URL=https://api.minimax.io/v1
 SHORTSFLOW_MINIMAX_TEXT_TIMEOUT_SEC=180
 SHORTSFLOW_MINIMAX_MUSIC_TIMEOUT_SEC=240
 
-SHORTSFLOW_DEEPSEEK_API_KEY=
+SHORTSFLOW_DEEPSEEK_API_KEY=<redigido>
 SHORTSFLOW_DEEPSEEK_BASE_URL=https://api.deepseek.com
-SHORTSFLOW_DEEPSEEK_MODEL=deepseek-v4-pro
+SHORTSFLOW_DEEPSEEK_MODEL=deepseek-v4-flash
 SHORTSFLOW_DEEPSEEK_TIMEOUT_SEC=180
+SHORTSFLOW_QWEN_API_KEY=<redigido-ou-vazio>
+SHORTSFLOW_QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+SHORTSFLOW_QWEN_MODEL=qwen3.7-plus
 
 SHORTSFLOW_BACKGROUND_MUSIC_ENABLED=true
 SHORTSFLOW_BACKGROUND_MUSIC_GAIN_DB=-17.0
@@ -652,7 +670,7 @@ Crie testes para:
 - pipeline completo com mock providers
 - `ScriptQualityGate`
 - DeepSeek V4 Flash provider OpenAI-compatible
-- fallback de LLM
+- fallback de LLM desabilitado por padrao em run real e sem troca silenciosa para provider caro
 - imagem MiniMax usando chave de texto antes da chave dedicada
 - troca para chave dedicada apenas por limite/quota
 - timeout de imagem nao troca chave

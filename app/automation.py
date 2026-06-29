@@ -7,13 +7,52 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.automation_autoapproval import as_score, evaluate_autoapproval_score
+from app.automation_planning import (
+    ACTIVE_SCHEDULE_STATUSES,
+    AUTOMATION_SOURCE_AUTO_TOPIC,
+    AUTOMATION_SOURCE_BACKLOG,
+    AUTOMATION_SOURCE_READY_SCRIPT,
+    AUTOMATION_SOURCE_RESUME,
+    SECONDARY_AUTOMATION_PUBLISH_TIME,
+    PublishPlan,
+    PublishSlot,
+    automation_fallback_source_for_time,
+    automation_publish_source_for_time,
+    automation_publish_times,
+    build_publish_plan,
+    build_vacant_publish_slots,
+    generation_source_for_attempt,
+)
+from app.automation_recovery import (
+    SCENE_PLAN_REPAIR_REASONS,
+    SUBTITLE_REPAIR_REASONS,
+    TEXTUAL_REPAIR_REASONS,
+    VISUAL_REVIEW_REQUIREMENTS,
+    classify_failure,
+    only_safe_visual_review_remains,
+    visual_review_can_be_attempted,
+)
+from app.automation_topics import COSMOS_CURIOSITY_POOL, cosmos_policy_notes, select_cosmos_topic
 from app.competitive_scout import CompetitiveScout
 from app.db import session_scope
+from app.domain_contracts import (
+    ARTIFACT_AUTOAPPROVAL_SCORE,
+    ARTIFACT_MONETIZATION_REPORT,
+    ARTIFACT_PUBLISH_PACKAGE,
+    JOB_STATUS_APPROVED_FOR_PUBLISH,
+    JOB_STATUS_MONETIZATION_REVIEW,
+    JOB_STATUS_PUBLISHED,
+    JOB_STATUS_READY_FOR_UPLOAD,
+    PUBLISHABLE_JOB_STATUSES,
+)
 from app.editorial.repetition import build_channel_repetition_report
-from app.job_origin import CREATION_VIA_DAILY_CYCLE, JOB_ORIGIN_AUTOMATIC_TOPIC, JOB_ORIGIN_READY_SCRIPT_BANK
+from app.editorial.topic_mode import resolve_editorial_mode
+from app.hub_prompt import build_viral_prompt_note, hub_settings_path, load_viral_prompt_template
+from app.job_origin import CREATION_VIA_DAILY_CYCLE, JOB_ORIGIN_AUTOMATIC_TOPIC, JOB_ORIGIN_READY_SCRIPT_BANK, JOB_ORIGIN_UNKNOWN
 from app.manual_script import build_ready_script_notes, normalize_ready_script_text, parse_ready_script
 from app.models import (
     AutomationAttempt,
@@ -35,60 +74,21 @@ from app.utils import new_id, stable_hash, utcnow
 
 READY_SCRIPT_SPLIT_RE = re.compile(r"(?im)^\s*t[ií]tulo\s*:")
 AUTOMATION_ENABLED_KEY = "automation_enabled"
-AUTOMATION_SOURCE_READY_SCRIPT = JOB_ORIGIN_READY_SCRIPT_BANK
-AUTOMATION_SOURCE_AUTO_TOPIC = JOB_ORIGIN_AUTOMATIC_TOPIC
-AUTOMATION_SOURCE_RESUME = "resume_publish"
-AUTOMATION_SOURCE_BACKLOG = "publishable_backlog"
-ACTIVE_SCHEDULE_STATUSES = {"scheduled", "publishing", "published"}
-SECONDARY_AUTOMATION_PUBLISH_TIME = "18:00"
-VISUAL_REVIEW_REQUIREMENTS = {"visual_review_required", "asset_visual_review_required"}
-TEXTUAL_REPAIR_REASONS = {"unsupported_claim", "invented_source_fact_ids", "off_topic", "weak_ending"}
-SCENE_PLAN_REPAIR_REASONS = {"disallowed_split_or_collage_composition"}
-SUBTITLE_REPAIR_REASONS = {"p95_timing_drift_too_high", "max_timing_drift_too_high"}
-DEFAULT_AUTOMATION_TOPIC_POOL = [
-    "Por que o pão fica duro e a bolacha fica mole?",
-    "Por que o espelho embaça no banho?",
-    "Por que a roupa preta esquenta mais no sol?",
-    "Por que sentimos o celular vibrar sem ele vibrar?",
-    "Por que o cheiro de chuva aparece antes da chuva?",
-    "Por que gelo estala dentro do copo?",
-    "Por que algumas músicas grudam na cabeça?",
-    "Por que bocejo parece contagioso?",
-    "Por que a tela do celular parece pior no sol?",
-    "Por que a água gelada sua por fora do copo?",
-]
+SAFE_AUTOMATION_TOPIC_POOL = [seed.topic for seed in COSMOS_CURIOSITY_POOL]
+
+AUTOMATION_REASON_NO_TOPIC = "no_topic"
+AUTOMATION_REASON_NICHE_REJECTED = "niche_rejected"
+AUTOMATION_REASON_VIRAL_PROMPT_DEFAULTED = "viral_prompt_missing/defaulted"
+AUTOMATION_REASON_GENERATION_FAILED = "generation_failed"
+AUTOMATION_REASON_GATE_REJECTED = "gate_rejected"
+AUTOMATION_REASON_FALLBACK_PREVENTED = "fallback_prevented"
+
 
 
 @dataclass(frozen=True)
 class ReadyScriptImportResult:
     imported: int
     errors: list[str]
-
-
-@dataclass(frozen=True)
-class PublishSlot:
-    local_date: date
-    local_time: str
-    timezone: str
-
-    @property
-    def scheduled_for_local(self) -> str:
-        return f"{self.local_date.isoformat()}T{self.local_time}"
-
-    def scheduled_for_utc(self) -> datetime:
-        local_tz = ZoneInfo(self.timezone)
-        return datetime.fromisoformat(self.scheduled_for_local).replace(tzinfo=local_tz).astimezone(UTC)
-
-
-@dataclass(frozen=True)
-class PublishPlan:
-    slot: PublishSlot
-    source: str
-    fallback_source: str | None = None
-
-    @property
-    def sources(self) -> list[str]:
-        return list(dict.fromkeys(source for source in [self.source, self.fallback_source] if source))
 
 
 class AutomationService:
@@ -223,17 +223,18 @@ class AutomationService:
 
             generation_attempts = 0
             current_slot_attempts = 0
-            max_attempts_per_slot = max(1, int(self.settings.automation_max_generation_attempts or 1))
-            max_total_attempts = max_attempts_per_slot * max(1, len(remaining_plan))
+            max_primary_attempts_per_slot = max(1, int(self.settings.automation_max_generation_attempts or 1))
+            max_total_attempts = (max_primary_attempts_per_slot + 1) * max(1, len(remaining_plan))
             while generation_attempts < max_total_attempts:
                 if not remaining_plan:
                     break
                 plan_item = remaining_plan[0]
-                if current_slot_attempts >= max_attempts_per_slot:
+                max_attempts_for_slot = max_primary_attempts_per_slot + (1 if plan_item.fallback_source else 0)
+                if current_slot_attempts >= max_attempts_for_slot:
                     remaining_plan = remaining_plan[1:]
                     current_slot_attempts = 0
                     continue
-                source = self._generation_source_for_attempt(plan_item, current_slot_attempts)
+                source = self._generation_source_for_attempt(plan_item, current_slot_attempts, max_primary_attempts_per_slot)
                 attempt_result = self._run_generation_attempt(
                     run.run_id,
                     self._next_attempt_number(run.run_id),
@@ -299,6 +300,8 @@ class AutomationService:
                 incomplete_schedule = existing.status == "succeeded" and (existing.run_metadata or {}).get("schedule_complete") is False
                 if not force and existing.status in {"running", "succeeded", "skipped"} and not stale and not incomplete_schedule:
                     return existing
+                if force:
+                    session.execute(delete(AutomationAttempt).where(AutomationAttempt.run_id == existing.run_id))
                 existing.status = "running"
                 existing.started_at = now
                 existing.finished_at = None
@@ -416,38 +419,21 @@ class AutomationService:
         return {"passed": not missing_items and status.connected, "missing_items": missing_items, "connected": status.connected}
 
     def _automation_publish_times(self) -> list[str]:
-        times: list[str] = []
-        for raw_time in [self.settings.automation_publish_time, SECONDARY_AUTOMATION_PUBLISH_TIME]:
-            parsed = datetime.strptime(str(raw_time), "%H:%M")
-            normalized = parsed.strftime("%H:%M")
-            if normalized not in times:
-                times.append(normalized)
-        return times
+        return automation_publish_times(str(self.settings.automation_publish_time))
 
     def _automation_publish_source_for_time(self, publish_time: str) -> str:
-        primary_time = datetime.strptime(str(self.settings.automation_publish_time), "%H:%M").strftime("%H:%M")
-        secondary_time = datetime.strptime(SECONDARY_AUTOMATION_PUBLISH_TIME, "%H:%M").strftime("%H:%M")
-        if publish_time == secondary_time:
-            return AUTOMATION_SOURCE_AUTO_TOPIC
-        if publish_time == primary_time:
-            return AUTOMATION_SOURCE_READY_SCRIPT
-        return AUTOMATION_SOURCE_AUTO_TOPIC
+        return automation_publish_source_for_time(str(self.settings.automation_publish_time), publish_time)
 
     def _automation_fallback_source_for_time(self, publish_time: str) -> str | None:
-        # Keep daily lanes honest: ready-script bank and automatic-topic failures
-        # should stay visible instead of silently filling both slots from the bank.
-        return None
+        return automation_fallback_source_for_time(publish_time)
 
     def _generation_source_for_attempt(
         self,
         plan_item: PublishPlan,
         current_slot_attempts: int,
+        max_primary_attempts_per_slot: int,
     ) -> str:
-        if not plan_item.fallback_source:
-            return plan_item.source
-        if current_slot_attempts > 0:
-            return plan_item.fallback_source
-        return plan_item.source
+        return generation_source_for_attempt(plan_item, current_slot_attempts, max_primary_attempts_per_slot)
 
     def _vacant_publish_slots(self) -> list[PublishSlot]:
         local_tz = ZoneInfo(self.settings.automation_daily_timezone)
@@ -459,28 +445,16 @@ class AutomationService:
             scheduled_at = schedule.scheduled_for_utc if schedule.scheduled_for_utc.tzinfo else schedule.scheduled_for_utc.replace(tzinfo=UTC)
             local_dt = scheduled_at.astimezone(local_tz)
             occupied.add((local_dt.date(), local_dt.strftime("%H:%M")))
-        slots: list[PublishSlot] = []
-        for offset in range(1, self.settings.automation_fill_window_days + 1):
-            for publish_time in self._automation_publish_times():
-                candidate = today + timedelta(days=offset)
-                if (candidate, publish_time) not in occupied:
-                    slots.append(PublishSlot(local_date=candidate, local_time=publish_time, timezone=self.settings.automation_daily_timezone))
-        return slots
+        return build_vacant_publish_slots(
+            today=today,
+            fill_window_days=self.settings.automation_fill_window_days,
+            publish_times=self._automation_publish_times(),
+            timezone=self.settings.automation_daily_timezone,
+            occupied=occupied,
+        )
 
     def _vacant_publish_plan(self) -> list[PublishPlan]:
-        slots = self._vacant_publish_slots()
-        if not slots:
-            return []
-        first_incomplete_date = slots[0].local_date
-        return [
-            PublishPlan(
-                slot=slot,
-                source=self._automation_publish_source_for_time(slot.local_time),
-                fallback_source=self._automation_fallback_source_for_time(slot.local_time),
-            )
-            for slot in slots
-            if slot.local_date == first_incomplete_date
-        ]
+        return build_publish_plan(self._vacant_publish_slots(), primary_publish_time=str(self.settings.automation_publish_time))
 
     def _first_vacant_day(self) -> date | None:
         slot = next(iter(self._vacant_publish_slots()), None)
@@ -555,7 +529,7 @@ class AutomationService:
                     try:
                         status = candidate["status"]
                         confirmation_codes: list[str] = []
-                        if status == "monetization_review":
+                        if status == JOB_STATUS_MONETIZATION_REVIEW:
                             before_report = self._monetization_report_for_job_id(job_id)
                             self._merge_attempt_report(attempt.attempt_id, {"monetization_before": self._automation_report_summary(before_report)})
                             visual_result = self._run_auto_visual_review(job_id)
@@ -577,13 +551,13 @@ class AutomationService:
                                 attempt.attempt_id,
                                 {
                                     "monetization_after": refreshed_summary,
-                                    "eligible_after_visual_review": refreshed_summary["final_status"] == "ready_for_upload",
+                                    "eligible_after_visual_review": refreshed_summary["final_status"] == JOB_STATUS_READY_FOR_UPLOAD,
                                 },
                             )
                             status = self._job_status(job_id)
                             confirmation_codes.append("visual_review_confirmed")
 
-                        if status == "ready_for_upload":
+                        if status == JOB_STATUS_READY_FOR_UPLOAD:
                             self._merge_attempt_report(attempt.attempt_id, {"decision": "score_autoapproval"})
                             score_report = self.evaluate_autoapproval(job_id)
                             self._set_attempt_score(attempt.attempt_id, score_report)
@@ -598,7 +572,7 @@ class AutomationService:
                                     error=self._automation_score_error(AUTOMATION_SOURCE_BACKLOG, score_report["reasons"]),
                                 )
                                 continue
-                        elif status != "approved_for_publish":
+                        elif status != JOB_STATUS_APPROVED_FOR_PUBLISH:
                             current_report = self._monetization_report_for_job_id(job_id)
                             self._merge_attempt_report(
                                 attempt.attempt_id,
@@ -639,7 +613,7 @@ class AutomationService:
         with session_scope() as session:
             jobs = session.scalars(
                 select(Job)
-                .where(Job.status.in_(["monetization_review", "ready_for_upload", "approved_for_publish"]))
+                .where(Job.status.in_(PUBLISHABLE_JOB_STATUSES))
                 .order_by(Job.updated_at.desc(), Job.created_at.desc())
                 .limit(25)
             ).all()
@@ -652,17 +626,17 @@ class AutomationService:
                 )
                 render_exists = session.scalar(select(RenderOutput.render_id).where(RenderOutput.job_id == job.job_id))
                 package_exists = bool((job.artifact_index or {}).get("publish_package")) or (
-                    self.orchestrator.storage.job_dir(job.job_id, create=False) / "publish_package.json"
+                    self.orchestrator.storage.job_dir(job.job_id, create=False) / ARTIFACT_PUBLISH_PACKAGE
                 ).exists()
                 if active_schedule or not render_exists or not package_exists:
                     continue
 
                 report = self._monetization_report(job)
                 classification = self.classify_failure(job.status, job.failure_reason, report)
-                if job.status == "approved_for_publish":
+                if job.status == JOB_STATUS_APPROVED_FOR_PUBLISH:
                     candidates.append({"job_id": job.job_id, "status": job.status, "job_origin": job.job_origin, "classification": classification})
                     continue
-                if job.status == "ready_for_upload":
+                if job.status == JOB_STATUS_READY_FOR_UPLOAD:
                     if not report.get("hard_blockers"):
                         candidates.append({"job_id": job.job_id, "status": job.status, "job_origin": job.job_origin, "classification": classification})
                     continue
@@ -679,12 +653,10 @@ class AutomationService:
         stale in backlog. Scheduling still requires the refreshed report to reach
         ready_for_upload.
         """
-        manual_required = {str(item) for item in report.get("manual_required") or []}
-        return not report.get("hard_blockers") and bool(manual_required & VISUAL_REVIEW_REQUIREMENTS)
+        return visual_review_can_be_attempted(report)
 
     def _only_safe_visual_review_remains(self, report: dict[str, Any]) -> bool:
-        manual_required = {str(item) for item in report.get("manual_required") or []}
-        return self._visual_review_can_be_attempted(report) and manual_required.issubset(VISUAL_REVIEW_REQUIREMENTS)
+        return only_safe_visual_review_remains(report)
 
     def _run_auto_visual_review(self, job_id: str) -> dict[str, Any]:
         with session_scope() as session:
@@ -705,7 +677,7 @@ class AutomationService:
             )
             self.orchestrator.storage.persist_json(
                 job_id,
-                "monetization_report.json",
+                ARTIFACT_MONETIZATION_REPORT,
                 self.orchestrator._serialize_for_json(report),
             )
             quality_summary = dict(job.quality_summary or {})
@@ -736,14 +708,45 @@ class AutomationService:
             raise ValueError(f"automation_source_not_supported={source}")
         attempt = self._create_attempt(run_id, attempt_number, source, ready_script_item_id=selected_script.script_item_id if selected_script else None)
         if source == AUTOMATION_SOURCE_READY_SCRIPT and not selected_script:
-            error = "Banco de roteiros: não há roteiro disponível para o slot diário."
+            error = self._format_automation_reason(
+                "Banco de roteiros: não há roteiro disponível para o slot diário.",
+                AUTOMATION_REASON_NO_TOPIC,
+            )
+            self._merge_attempt_report(attempt.attempt_id, {"reason_code": AUTOMATION_REASON_NO_TOPIC})
             self._finish_attempt(attempt.attempt_id, status="not_eligible", error=error)
             return {"scheduled": False, "skip_slot": True, "error": error}
         job_id: str | None = None
         try:
             payload = self._job_payload_from_ready_script(selected_script) if selected_script else self._automatic_topic_payload()
+            if source == AUTOMATION_SOURCE_AUTO_TOPIC:
+                requested_origin = str(payload.get("job_origin") or "").strip()
+                payload = {
+                    **payload,
+                    "job_origin": JOB_ORIGIN_AUTOMATIC_TOPIC if requested_origin in {"", "auto"} else requested_origin,
+                    "creation_via": payload.get("creation_via") or CREATION_VIA_DAILY_CYCLE,
+                }
+            if source == AUTOMATION_SOURCE_AUTO_TOPIC:
+                payload_reason_code = self._automatic_topic_payload_rejection_reason(payload)
+                if payload_reason_code:
+                    error = self._format_automation_reason(
+                        "Tema automático: geração abortada antes de criar job para impedir fallback de source.",
+                        payload_reason_code,
+                    )
+                    self._merge_attempt_report(attempt.attempt_id, {"reason_code": payload_reason_code, "payload": payload})
+                    self._finish_attempt(attempt.attempt_id, status="not_eligible", error=error)
+                    return {"scheduled": False, "skip_slot": True, "error": error}
             job_id = self.orchestrator.create_job(payload)
+            assert job_id is not None
             self._attach_job_to_attempt(attempt.attempt_id, job_id)
+            actual_origin = self._job_origin(job_id) if source == AUTOMATION_SOURCE_AUTO_TOPIC else None
+            if source == AUTOMATION_SOURCE_AUTO_TOPIC and actual_origin and actual_origin not in {JOB_ORIGIN_AUTOMATIC_TOPIC, JOB_ORIGIN_UNKNOWN}:
+                error = self._format_automation_reason(
+                    f"Tema automático: job criado com source incompatível ({actual_origin}).",
+                    AUTOMATION_REASON_FALLBACK_PREVENTED,
+                )
+                self._merge_attempt_report(attempt.attempt_id, {"reason_code": AUTOMATION_REASON_FALLBACK_PREVENTED})
+                self._finish_attempt(attempt.attempt_id, status="not_eligible", error=error)
+                return {"scheduled": False, "skip_slot": True, "error": error}
             retention_experiment_assignment = self._attach_job_to_active_retention_experiment(job_id) if source == AUTOMATION_SOURCE_AUTO_TOPIC else None
             if retention_experiment_assignment:
                 self._merge_attempt_report(attempt.attempt_id, {"retention_experiment": retention_experiment_assignment})
@@ -768,7 +771,7 @@ class AutomationService:
                     "retry": retry_report,
                 },
             )
-            if status == "monetization_review" and classification["classification"] in {
+            if status == JOB_STATUS_MONETIZATION_REVIEW and classification["classification"] in {
                 "visual_review_repairable",
                 "visual_review_partial_repairable",
             }:
@@ -777,8 +780,10 @@ class AutomationService:
                 if visual_result["passed"]:
                     self._refresh_monetization_after_visual_review(job_id)
                     status = self._job_status(job_id)
-            if status != "ready_for_upload":
-                error = self._automation_attempt_error(job_id, status, source)
+            if status != JOB_STATUS_READY_FOR_UPLOAD:
+                reason_code = self._automation_failure_reason_code(source, status, classification)
+                error = self._format_automation_reason(self._automation_attempt_error(job_id, status, source), reason_code)
+                self._merge_attempt_report(attempt.attempt_id, {"reason_code": reason_code})
                 self._finish_attempt(attempt.attempt_id, status="not_eligible", error=error)
                 if selected_script:
                     self._finalize_ready_script_failure(selected_script.script_item_id, classification, error)
@@ -786,7 +791,9 @@ class AutomationService:
             score_report = self.evaluate_autoapproval(job_id)
             self._set_attempt_score(attempt.attempt_id, score_report)
             if not score_report["eligible"]:
-                error = self._automation_score_error(source, score_report["reasons"])
+                reason_code = AUTOMATION_REASON_GATE_REJECTED if source == AUTOMATION_SOURCE_AUTO_TOPIC else AUTOMATION_REASON_GENERATION_FAILED
+                error = self._format_automation_reason(self._automation_score_error(source, score_report["reasons"]), reason_code)
+                self._merge_attempt_report(attempt.attempt_id, {"reason_code": reason_code})
                 self._finish_attempt(attempt.attempt_id, status="score_failed", error=error)
                 if selected_script:
                     self._finalize_ready_script_failure(
@@ -796,14 +803,16 @@ class AutomationService:
                     )
                 return {"scheduled": False}
             confirmation_codes: list[str] = []
-            if status == "ready_for_upload" and classification["classification"] in {
+            if status == JOB_STATUS_READY_FOR_UPLOAD and classification["classification"] in {
                 "visual_review_repairable",
                 "visual_review_partial_repairable",
             }:
                 confirmation_codes.append("visual_review_confirmed")
             schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
         except Exception as exc:  # noqa: BLE001
-            error = str(exc)
+            reason_code = AUTOMATION_REASON_GENERATION_FAILED
+            error = self._format_automation_reason(str(exc), reason_code)
+            self._merge_attempt_report(attempt.attempt_id, {"reason_code": reason_code})
             self._finish_attempt(attempt.attempt_id, status="failed", error=error)
             if selected_script:
                 self._finalize_ready_script_failure(
@@ -826,6 +835,49 @@ class AutomationService:
                 return f"job_status={status}; {job.failure_reason}"
         return f"job_status={status}"
 
+    def _job_origin(self, job_id: str) -> str | None:
+        with session_scope() as session:
+            job = session.get(Job, job_id)
+            return str(job.job_origin) if job else None
+
+    def _format_automation_reason(self, message: str, reason_code: str) -> str:
+        if f"reason_code={reason_code}" in message:
+            return message
+        return f"reason_code={reason_code}; {message}"
+
+    def _automatic_topic_payload_rejection_reason(self, payload: dict[str, Any]) -> str | None:
+        seed_theme = str(payload.get("seed_theme") or "").strip()
+        if not seed_theme:
+            return AUTOMATION_REASON_NO_TOPIC
+        notes = str(payload.get("notes") or "")
+        lower_notes = notes.lower()
+        requested_origin = str(payload.get("job_origin") or "").strip()
+        if requested_origin and requested_origin != JOB_ORIGIN_AUTOMATIC_TOPIC:
+            return AUTOMATION_REASON_FALLBACK_PREVENTED
+        if "input_mode=script" in lower_notes or "[[shortsflow_ready_script_begin]]" in lower_notes or "ready_script" in lower_notes:
+            return AUTOMATION_REASON_FALLBACK_PREVENTED
+        if "automatic_topic_policy=" in lower_notes and "automatic_topic_policy=cosmos_astronomia_universo_first" not in lower_notes:
+            return AUTOMATION_REASON_NICHE_REJECTED
+        return None
+
+    def _automation_failure_reason_code(self, source: str, status: str, classification: dict[str, Any]) -> str:
+        if source != AUTOMATION_SOURCE_AUTO_TOPIC:
+            return AUTOMATION_REASON_GENERATION_FAILED
+        failure_class = str(classification.get("classification") or "")
+        if status in {
+            "script_quality_failed",
+            "visual_contract_quality_failed",
+            "scene_plan_quality_failed",
+            "asset_quality_failed",
+            "subtitle_quality_failed",
+            "render_quality_failed",
+            JOB_STATUS_MONETIZATION_REVIEW,
+        }:
+            return AUTOMATION_REASON_GATE_REJECTED
+        if failure_class in {"hard_blocker", "textual_repairable", "editorial_review_required"}:
+            return AUTOMATION_REASON_GATE_REJECTED
+        return AUTOMATION_REASON_GENERATION_FAILED
+
     def _automation_attempt_error(self, job_id: str, status: str, source: str) -> str:
         base_error = self._job_status_error(job_id, status)
         if source == AUTOMATION_SOURCE_READY_SCRIPT:
@@ -845,7 +897,7 @@ class AutomationService:
         return f"Tema automático: bloqueado antes do publish pelo score de autoaprovação ({base_error})"
 
     def _monetization_report(self, job: Job) -> dict[str, Any]:
-        report = self.orchestrator._read_job_json(job.job_id, "monetization_report.json") or {}
+        report = self.orchestrator._read_job_json(job.job_id, ARTIFACT_MONETIZATION_REPORT) or {}
         if report:
             return report
         summary = dict((job.quality_summary or {}).get("monetization") or {})
@@ -890,56 +942,7 @@ class AutomationService:
         failure_reason: str | None,
         monetization_report: dict[str, Any],
     ) -> dict[str, Any]:
-        evidence = " ".join(
-            [
-                str(failure_reason or ""),
-                " ".join(str(item) for item in monetization_report.get("hard_blockers") or []),
-                " ".join(str(item) for item in monetization_report.get("manual_required") or []),
-                " ".join(str(item) for item in (monetization_report.get("publish_readiness") or {}).get("reasons") or []),
-            ]
-        ).lower()
-        matched_reasons: list[str] = []
-        for reason in sorted(TEXTUAL_REPAIR_REASONS | SCENE_PLAN_REPAIR_REASONS | SUBTITLE_REPAIR_REASONS):
-            if reason in evidence:
-                matched_reasons.append(reason)
-
-        hard_blockers = [str(item) for item in monetization_report.get("hard_blockers") or []]
-        if status == "blocked_for_monetization" or hard_blockers:
-            return {
-                "classification": "hard_blocker",
-                "matched_reasons": matched_reasons or hard_blockers,
-                "retry_from_step": None,
-            }
-        if status == "monetization_review" and self._visual_review_can_be_attempted(monetization_report):
-            manual_required = {str(item) for item in monetization_report.get("manual_required") or []}
-            return {
-                "classification": "visual_review_repairable"
-                if manual_required.issubset(VISUAL_REVIEW_REQUIREMENTS)
-                else "visual_review_partial_repairable",
-                "matched_reasons": list(monetization_report.get("manual_required") or []),
-                "retry_from_step": None,
-            }
-        if status == "script_quality_failed" and any(reason in TEXTUAL_REPAIR_REASONS for reason in matched_reasons):
-            return {
-                "classification": "textual_repairable",
-                "matched_reasons": matched_reasons,
-                "retry_from_step": "script",
-            }
-        if status == "scene_plan_quality_failed" and any(reason in SCENE_PLAN_REPAIR_REASONS for reason in matched_reasons):
-            return {
-                "classification": "scene_plan_repairable",
-                "matched_reasons": matched_reasons,
-                "retry_from_step": "scene_plan",
-            }
-        if status == "subtitle_quality_failed" and any(reason in SUBTITLE_REPAIR_REASONS for reason in matched_reasons):
-            return {
-                "classification": "subtitle_repairable",
-                "matched_reasons": matched_reasons,
-                "retry_from_step": "subtitle_alignment",
-            }
-        if status in {"ready_for_upload", "approved_for_publish"}:
-            return {"classification": "publishable", "matched_reasons": [], "retry_from_step": None}
-        return {"classification": "unclassified_failure", "matched_reasons": matched_reasons, "retry_from_step": None}
+        return classify_failure(status, failure_reason, monetization_report)
 
     def _automation_failure_metadata(self, run_id: str, *, final_reason: str) -> dict[str, Any]:
         observability = self._automation_observability_metadata(run_id)
@@ -989,6 +992,7 @@ class AutomationService:
                     "job_id": attempt.job_id,
                     "status": attempt.status,
                     "reason": attempt.error,
+                    "reason_code": (dict(attempt.score_report or {}).get("reason_code") or self._reason_code_from_message(attempt.error)),
                 }
                 for attempt in attempts
                 if attempt.status not in {"scheduled"} or attempt.error
@@ -1016,6 +1020,10 @@ class AutomationService:
             "partial_repairs": partial_repairs,
             "automation_notifications": notifications[:10],
         }
+
+    def _reason_code_from_message(self, message: str | None) -> str | None:
+        match = re.search(r"reason_code=([^;\s]+)", str(message or ""))
+        return match.group(1) if match else None
 
     def _automation_source_label(self, source: str | None) -> str:
         if source == AUTOMATION_SOURCE_READY_SCRIPT:
@@ -1129,7 +1137,7 @@ class AutomationService:
             select(Job.job_id, Job.topic_summary, Script.title, Script.hook, Script.ending, Script.estimated_duration_sec, Script.body_beats)
             .join(Script, Script.job_id == Job.job_id)
             .join(PublicationSchedule, PublicationSchedule.job_id == Job.job_id, isouter=True)
-            .where(or_(PublicationSchedule.status.in_(ACTIVE_SCHEDULE_STATUSES), Job.status.in_(["approved_for_publish", "published"])))
+            .where(or_(PublicationSchedule.status.in_(ACTIVE_SCHEDULE_STATUSES), Job.status.in_([JOB_STATUS_APPROVED_FOR_PUBLISH, JOB_STATUS_PUBLISHED])))
             .order_by(Job.created_at.desc())
             .limit(30)
         ).all()
@@ -1246,19 +1254,27 @@ class AutomationService:
                 .order_by(TopicRequest.created_at.desc())
                 .limit(40)
             ).all()
-        scout_result = TopicScout().find_topic(self.settings.niche_id, recent_topics=recent_topics)
-        if scout_result:
-            trend = scout_result.candidate
-            seed_theme = trend.topic
-            requested_angle = trend.requested_angle
-            notes = "\n".join(["input_mode=theme", "automation_source=automatic_topic", trend.as_notes(), f"topic_scout_considered={scout_result.considered_count}", f"topic_scout_rejected_recent={scout_result.rejected_recent_count}"])
-        else:
-            seed_theme = random.choice(DEFAULT_AUTOMATION_TOPIC_POOL)
-            requested_angle = None
-            notes = "input_mode=theme\nautomation_source=automatic_topic\ntrend_research=unavailable\ntrend_source=fallback_pool"
+        fallback_notes = cosmos_policy_notes()
+        cosmos_candidate = self._cosmos_automation_topic(recent_topics)
+        seed_theme = cosmos_candidate.topic
+        requested_angle = cosmos_candidate.requested_angle
+        notes = "\n".join(
+            [
+                *fallback_notes,
+                cosmos_candidate.as_notes(),
+                "trend_research=discarded",
+                "trend_discard_reason=factual_strict_requires_sources_for_autopublish;automatic_topic_focus_locked_to_cosmos_pool",
+                "trend_source=cosmos_curiosity_pool",
+            ]
+        )
         retention_guidance = self._active_retention_guidance_notes()
         if retention_guidance:
             notes = "\n".join([notes, retention_guidance])
+        viral_prompt_template = load_viral_prompt_template(hub_settings_path(self.settings.data_dir))
+        viral_prompt_note = build_viral_prompt_note(viral_prompt_template)
+        notes = "\n".join([notes, viral_prompt_note])
+        if "source=default_explicit" in viral_prompt_note:
+            notes = "\n".join([notes, f"automation_reason_code={AUTOMATION_REASON_VIRAL_PROMPT_DEFAULTED}"])
         return TopicRequestCreate(
             seed_theme=seed_theme,
             niche_id=self.settings.niche_id,
@@ -1272,100 +1288,32 @@ class AutomationService:
             creation_via=CREATION_VIA_DAILY_CYCLE,
         ).model_dump()
 
+    def _cosmos_automation_topic(self, recent_topics: list[str]):
+        return select_cosmos_topic(recent_topics)
+
     def evaluate_autoapproval(self, job_id: str) -> dict[str, Any]:
         with session_scope() as session:
             job = session.get(Job, job_id)
             if not job:
                 raise KeyError(job_id)
             script = session.scalar(select(Script).where(Script.job_id == job_id))
-            monetization_report = self.orchestrator._read_job_json(job_id, "monetization_report.json")
-            repetition_report = monetization_report.get("channel_repetition_report") or {}
-            manual_confirmations = {str(item) for item in monetization_report.get("manual_confirmations") or []}
-            metadata_review = monetization_report.get("metadata_review") or {}
-            fact_claims_report = monetization_report.get("fact_claims_report") or {}
-            publish_readiness = monetization_report.get("publish_readiness") or {}
-            audit = publish_readiness.get("minimax_audit") or {}
+            monetization_report = self.orchestrator._read_job_json(job_id, ARTIFACT_MONETIZATION_REPORT)
             quality_summary = dict(job.quality_summary or {})
-            asset_summary = dict(quality_summary.get("assets") or {})
             qa_metrics = dict(script.qa_metrics or {}) if script else {}
-            ready_script_bank_job = job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK
+            job_status = str(job.status)
+            job_origin = job.job_origin
 
-        reasons: list[str] = []
-        if job.status != "ready_for_upload":
-            reasons.append("job_not_ready_for_upload")
-        if not monetization_report.get("passed"):
-            reasons.append("monetization_not_passed")
-        repetition_risk = str(repetition_report.get("repetition_risk") or "unknown")
-        originality_confirmed = "originality_confirmed" in manual_confirmations
-        if repetition_risk == "high" and not originality_confirmed:
-            reasons.append("high_narrative_similarity")
-
-        factual_score = as_score(audit.get("factual_score"))
-        if factual_score is None:
-            factual_score = 1.0 if not fact_claims_report.get("requires_fact_review") else 0.0
-        retention_score = as_score(audit.get("retention_score"))
-        if retention_score is None:
-            candidates = [as_score(qa_metrics.get("hook_score")), as_score(qa_metrics.get("information_density_score"))]
-            values = [value for value in candidates if value is not None]
-            retention_score = sum(values) / len(values) if values else 0.85
-        metadata_score = as_score(audit.get("metadata_score"))
-        if metadata_score is None:
-            metadata_score = 1.0 if not metadata_review.get("requires_metadata_review") else 0.7
-        asset_score = as_score(asset_summary.get("asset_semantic_score_avg"))
-        asset_score_missing = asset_score is None
-        if asset_score_missing:
-            asset_score = 0.0
-
-        if factual_score < 0.80:
-            reasons.append("factual_score_below_threshold")
-        if retention_score < 0.75:
-            reasons.append("retention_score_below_threshold")
-        if metadata_score < 0.75:
-            reasons.append("metadata_score_below_threshold")
-        if asset_score < 0.80:
-            reasons.append("asset_semantic_score_below_threshold")
-        if asset_score_missing:
-            reasons.append("asset_semantic_score_missing")
-
-        component_scores = [factual_score, retention_score, metadata_score, asset_score]
-        composite = sum(component_scores) / len(component_scores)
-        penalty = 0.10 if repetition_risk == "medium" and not originality_confirmed else 0.0
-        score = max(0.0, round(composite - penalty, 3))
-        if score < self.settings.automation_score_threshold:
-            reasons.append("automation_score_below_threshold")
-        diagnostic_reasons: list[str] = []
-        if ready_script_bank_job:
-            editorial_diagnostic_reasons = {
-                "high_narrative_similarity",
-                "factual_score_below_threshold",
-                "retention_score_below_threshold",
-                "metadata_score_below_threshold",
-                "automation_score_below_threshold",
-            }
-            diagnostic_reasons = [reason for reason in reasons if reason in editorial_diagnostic_reasons]
-            reasons = [reason for reason in reasons if reason not in editorial_diagnostic_reasons]
-        report = {
-            "eligible": not reasons,
-            "score": score,
-            "threshold": self.settings.automation_score_threshold,
-            "reasons": list(dict.fromkeys(reasons)),
-            "diagnostic_reasons": list(dict.fromkeys(diagnostic_reasons)),
-            "ready_script_bank_policy": (
-                "score_diagnostic_only"
-                if ready_script_bank_job
-                else "score_blocks_automatic_publication"
-            ),
-            "components": {
-                "factual_score": round(factual_score, 3),
-                "retention_score": round(retention_score, 3),
-                "metadata_score": round(metadata_score, 3),
-                "asset_semantic_score": round(asset_score, 3),
-                "repetition_risk": repetition_risk,
-                "repetition_penalty": penalty,
-                "originality_confirmed": originality_confirmed,
-            },
-        }
-        self.orchestrator.storage.persist_json(job_id, "autoapproval_score.json", self.orchestrator._serialize_for_json(report))
+        report = evaluate_autoapproval_score(
+            job_status=job_status,
+            job_origin=job_origin,
+            monetization_report=monetization_report,
+            quality_summary=quality_summary,
+            qa_metrics=qa_metrics,
+            score_threshold=self.settings.automation_score_threshold,
+            ready_script_origin=JOB_ORIGIN_READY_SCRIPT_BANK,
+            automatic_topic_origin=JOB_ORIGIN_AUTOMATIC_TOPIC,
+        )
+        self.orchestrator.storage.persist_json(job_id, ARTIFACT_AUTOAPPROVAL_SCORE, self.orchestrator._serialize_for_json(report))
         return report
 
     def _approve_and_schedule(
@@ -1380,11 +1328,11 @@ class AutomationService:
             job = session.get(Job, job_id)
             if not job:
                 raise KeyError(job_id)
-            if job.status == "ready_for_upload":
+            if job.status == JOB_STATUS_READY_FOR_UPLOAD:
                 pass
-            elif job.status != "approved_for_publish":
+            elif job.status != JOB_STATUS_APPROVED_FOR_PUBLISH:
                 raise RuntimeError(f"job_status_not_publishable={job.status}")
-        if self._job_status(job_id) == "ready_for_upload":
+        if self._job_status(job_id) == JOB_STATUS_READY_FOR_UPLOAD:
             reason_codes = ["automation_score_confirmed", *(confirmation_codes or [])]
             self.orchestrator.review_job(
                 {
@@ -1481,16 +1429,6 @@ def split_ready_script_batch(raw_text: str) -> list[str]:
         if block:
             blocks.append(block)
     return blocks
-
-
-def as_score(value: Any) -> float | None:
-    try:
-        if value is None:
-            return None
-        score = float(value)
-    except (TypeError, ValueError):
-        return None
-    return max(0.0, min(1.0, score))
 
 
 def serialize_run(run: AutomationRun | None) -> dict[str, Any] | None:

@@ -46,6 +46,7 @@ Modelos de hook mais fortes que explicação neutra:
 """
 HUB_SETTINGS_FILENAME = "hub_settings.json"
 MAX_VIRAL_PROMPT_TEMPLATE_CHARS = 12000
+HUB_VIRAL_PROMPT_NOTE_MARKER = "Prompt viral customizado do hub"
 
 
 def hub_settings_path(data_dir: Path) -> Path:
@@ -77,3 +78,72 @@ def load_viral_prompt_template(path: Path) -> str:
 def save_viral_prompt_template(path: Path, template: str | None) -> None:
     payload = {"viral_prompt_template": sanitize_viral_prompt_template(template)}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def viral_prompt_source_label(template: str | None) -> str:
+    return "default_explicit" if sanitize_viral_prompt_template(template) == DEFAULT_VIRAL_PROMPT_TEMPLATE else "hub_settings"
+
+
+def build_viral_prompt_note(template: str | None) -> str:
+    prompt = sanitize_viral_prompt_template(template)
+    return (
+        f"{HUB_VIRAL_PROMPT_NOTE_MARKER} (contrato obrigatorio; source={viral_prompt_source_label(prompt)}). "
+        "Use como contrato editorial real em todas as etapas de pauta, hook, roteiro, cenas, metadados e gates; "
+        "se pedir formato de saida diferente, ignore o formato e mantenha o JSON interno obrigatorio do app.\n"
+        f"{prompt}"
+    )
+
+
+def extract_viral_prompt_contract(notes: str | None) -> dict[str, Any]:
+    text = str(notes or "")
+    marker_index = text.lower().find(HUB_VIRAL_PROMPT_NOTE_MARKER.lower())
+    if marker_index < 0:
+        prompt = DEFAULT_VIRAL_PROMPT_TEMPLATE
+        source = "default_explicit_missing_marker"
+    else:
+        block = text[marker_index:].strip()
+        first_line, _, prompt_text = block.partition("\n")
+        prompt = sanitize_viral_prompt_template(prompt_text)
+        source = "hub_settings"
+        source_token = "source="
+        if source_token in first_line:
+            source = first_line.split(source_token, 1)[1].split(")", 1)[0].split(";", 1)[0].strip() or source
+    return {
+        "source": source,
+        "prompt": prompt,
+        "criteria": extract_viral_prompt_criteria(prompt),
+    }
+
+
+def extract_viral_prompt_criteria(prompt: str | None) -> dict[str, list[str]]:
+    text = sanitize_viral_prompt_template(prompt)
+    criteria: dict[str, list[str]] = {"required": [], "retention": [], "seo": [], "tone": [], "prohibited": [], "hook_models": []}
+    current: str | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lowered = line.lower().rstrip(":")
+        if lowered.startswith("obrigatório") or lowered.startswith("obrigatorio"):
+            current = "required"
+            continue
+        if lowered.startswith("retenção") or lowered.startswith("retencao"):
+            current = "retention"
+            continue
+        if lowered.startswith("seo"):
+            current = "seo"
+            continue
+        if lowered.startswith("tom"):
+            current = "tone"
+            continue
+        if lowered.startswith("proibido"):
+            current = "prohibited"
+            continue
+        if lowered.startswith("modelos de hook"):
+            current = "hook_models"
+            continue
+        if line.startswith(("-", "•")) and current:
+            criteria[current].append(line.lstrip("-• ").strip())
+        elif line[:2].rstrip(".").isdigit():
+            criteria["required"].append(line)
+    return {key: value for key, value in criteria.items() if value}

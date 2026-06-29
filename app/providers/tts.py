@@ -352,7 +352,13 @@ class LocalSpeechFallbackProvider:
 
 
 class EdgeTTSProvider(LocalSpeechFallbackProvider):
-    rate = "+12%"
+    @property
+    def rate(self) -> str:
+        return str(getattr(get_settings(), "edge_tts_rate", "-4%") or "-4%")
+
+    @property
+    def voice(self) -> str:
+        return str(getattr(get_settings(), "edge_tts_voice", "pt-BR-ThalitaNeural") or "pt-BR-ThalitaNeural")
 
     async def _run(self, text: str, audio_path: Path, srt_path: Path) -> dict[str, Any]:
         import edge_tts

@@ -15,7 +15,7 @@ HIGH_RISK_TOPIC_PATTERN = re.compile(
     r"medicamentos|suplemento|suplementos|dosagem|gravidez|gesta[cç][aã]o|c[aâ]ncer|diabetes|ansiedade|depress[aã]o|"
     r"cirurgia|sintoma|sintomas|anatomia\s+humana|corpo\s+humano|investimento|investimentos|a[cç][oõ]es|cripto|"
     r"criptomoeda|criptomoedas|imposto|impostos|lei|leis|legal|jur[ií]dico|crime|crimes|pol[ií]tica|elei[cç][aã]o|"
-    r"elei[cç][oõ]es|seguran[cç]a|risco|perigo)\b",
+    r"elei[cç][oõ]es|seguran[cç]a|risco|perigo|morte|mortes|morto|mortos|acidente|acidentes|queda|ferido|feridos)\b",
     re.IGNORECASE,
 )
 

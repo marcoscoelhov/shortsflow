@@ -1296,9 +1296,16 @@ def test_script_pipeline_does_not_use_deterministic_fact_pack_fallback(monkeypat
     assert "script_repair_fallback_failed:TimeoutError" in str(exc.value)
 
 def test_step_script_uses_strict_prompt_rules_when_fact_pack_is_required(monkeypatch) -> None:
+    from app.hub_prompt import build_viral_prompt_note
+
     pipeline = orchestrator.script_pipeline
     monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
-    captured: dict[str, object] = {}
+    captured = {}
+    custom_viral_prompt = """Obrigatório para passar no gate:
+- hook precisa abrir com uma ameaça cósmica concreta
+- payoff deve revelar uma virada menos óbvia que o hook
+Proibido:
+- não usar aula morna"""
     job_id = orchestrator.create_job(
         {
             "seed_theme": "por que cafe tira o sono",
@@ -1307,7 +1314,7 @@ def test_step_script_uses_strict_prompt_rules_when_fact_pack_is_required(monkeyp
             "target_duration_sec": 45,
             "tone": "intrigante_direto",
             "cta_style": "none",
-            "notes": "[factual_strict] teste",
+            "notes": "\n".join(["[factual_strict] teste", build_viral_prompt_note(custom_viral_prompt)]),
             "requested_angle": None,
         }
     )
@@ -1370,14 +1377,18 @@ def test_step_script_uses_strict_prompt_rules_when_fact_pack_is_required(monkeyp
         pipeline.step_script(session, job, 1)
 
     assert captured["editorial_mode"] == "factual_strict"
-    contract = captured["structured_viral_contract"]
+    contract = dict(captured["structured_viral_contract"])
     assert contract["contract_name"] == "Pauta Viral Estruturada"
     assert contract["fields"]["title"]["source_label"] == "Título"
     assert contract["fields"]["hook"]["internal_target"] == "hook"
     assert contract["fields"]["loop"]["internal_target"] == "retention_map.proof_or_tension"
     assert contract["fields"]["payoff"]["source_label"] == "Payoff"
+    assert contract["viral_prompt"]["prompt"] == custom_viral_prompt
+    assert "hook precisa abrir com uma ameaça cósmica concreta" in contract["viral_prompt"]["criteria"]["required"]
     artifact = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "structured_viral_contract.json"
     assert artifact.exists()
+    artifact_contract = json.loads(artifact.read_text(encoding="utf-8"))
+    assert artifact_contract["gate_decisions"]["viral_intensity"]["passed"] is True
     visual_contract = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "visual_contract.json"
     assert visual_contract.exists()
     contract_payload = json.loads(visual_contract.read_text(encoding="utf-8"))
@@ -1946,12 +1957,12 @@ def test_text_publish_audit_runs_for_verified_fact_pack(monkeypatch) -> None:
     assert audit["provider"] == "test"
     assert captured["audit_phase"] == "text_before_assets"
 
-def test_publish_readiness_blocks_limited_fact_pack_without_manual_review() -> None:
+def test_publish_readiness_does_not_block_limited_fact_pack_without_internal_review() -> None:
     readiness = orchestrator.monetization_pipeline.publish_readiness_report(
         None,
         SimpleNamespace(canonical_topic="paisagens extremas", angle="curiosidades visuais"),
         {"status": "limited", "facts": []},
-        ["#shorts", "#curiosidades", "#paisagens"],
+        ["#shorts", "#paisagens", "#naturezaextrema"],
         {
             "script_gate_pass": True,
             "scene_plan_gate_pass": True,
@@ -1966,8 +1977,8 @@ def test_publish_readiness_blocks_limited_fact_pack_without_manual_review() -> N
         {"passed": True, "reasons": [], "provider": "test"},
     )
 
-    assert readiness["passed"] is False
-    assert "manual_review_required" in readiness["reasons"]
+    assert readiness["passed"] is True
+    assert "manual_review_required" not in readiness["reasons"]
 
 def test_publish_readiness_blocks_asset_visual_gate_failure() -> None:
     readiness = orchestrator.monetization_pipeline.publish_readiness_report(
@@ -2011,7 +2022,7 @@ def test_quality_checklist_requires_executed_asset_visual_gate_to_pass() -> None
     assert checklist["asset_gate_pass"] is True
     assert checklist["asset_visual_gate_pass"] is False
 
-def test_visual_review_required_when_assets_only_used_prompt_heuristic() -> None:
+def test_visual_review_not_required_when_final_review_is_youtube_studio() -> None:
     job = SimpleNamespace(
         quality_summary={
             "assets": {
@@ -2023,7 +2034,7 @@ def test_visual_review_required_when_assets_only_used_prompt_heuristic() -> None
         }
     )
 
-    assert orchestrator.monetization_pipeline.visual_review_required_for_assets(job) is True
+    assert orchestrator.monetization_pipeline.visual_review_required_for_assets(job) is False
 
 def test_visual_review_not_required_after_real_vision_check() -> None:
     job = SimpleNamespace(
@@ -2040,7 +2051,7 @@ def test_visual_review_not_required_after_real_vision_check() -> None:
 
     assert orchestrator.monetization_pipeline.visual_review_required_for_assets(job) is False
 
-def test_publish_readiness_blocks_factual_topic_without_fact_pack() -> None:
+def test_publish_readiness_does_not_block_factual_topic_without_fact_pack_policy() -> None:
     readiness = orchestrator.monetization_pipeline.publish_readiness_report(
         None,
         SimpleNamespace(canonical_topic="Suplemento para ansiedade funciona mesmo", angle="saude", quality_metrics={"editorial_mode": "factual_strict"}),
@@ -2073,16 +2084,16 @@ def test_publish_readiness_blocks_factual_topic_without_fact_pack() -> None:
         {"passed": True, "reasons": [], "provider": "test"},
     )
 
-    assert readiness["passed"] is False
-    assert "fact_pack_missing_for_factual_topic" in readiness["reasons"]
-    assert "manual_review_required" in readiness["reasons"]
+    assert readiness["passed"] is True
+    assert "fact_pack_missing_for_factual_topic" not in readiness["reasons"]
+    assert "manual_review_required" not in readiness["reasons"]
 
-def test_publish_readiness_requires_verified_fact_pack_for_viral_curiosidades() -> None:
+def test_publish_readiness_does_not_require_verified_fact_pack_for_viral_curiosidades() -> None:
     readiness = orchestrator.monetization_pipeline.publish_readiness_report(
         None,
         SimpleNamespace(canonical_topic="Por que os flamingos ficam rosa", angle="curiosidade visual", quality_metrics={"editorial_mode": "viral_curiosidades"}),
         {"status": "limited", "facts": []},
-        ["#shorts", "#curiosidades", "#flamingos"],
+        ["#shorts", "#flamingos", "#avesaquaticas"],
         {
             "script_gate_pass": True,
             "scene_plan_gate_pass": True,
@@ -2098,8 +2109,8 @@ def test_publish_readiness_requires_verified_fact_pack_for_viral_curiosidades() 
         {"passed": True, "reasons": [], "provider": "test"},
     )
 
-    assert readiness["passed"] is False
-    assert "manual_review_required" in readiness["reasons"]
+    assert readiness["passed"] is True
+    assert "manual_review_required" not in readiness["reasons"]
 
 def test_publish_readiness_allows_low_risk_common_knowledge_policy() -> None:
     fact_pack = {
@@ -2289,8 +2300,8 @@ def test_build_monetization_report_keeps_fact_review_with_verified_fact_pack(mon
         assert job is not None
         report = orchestrator.monetization_pipeline.build_monetization_report(session, job)
 
-    assert report["final_status"] == "monetization_review"
-    assert report["passed"] is False
+    assert report["final_status"] == "ready_for_upload"
+    assert report["passed"] is True
     assert "metadata_ctr_gate_not_passed" not in report["hard_blockers"]
     assert report["metadata_review"].get("auto_repair_applied") is True
     assert "fact_review_required" in report["manual_required"]
@@ -3184,7 +3195,7 @@ def test_step_script_persists_generation_debug_on_provider_failure(monkeypatch) 
     assert debug["error_type"] == "ProviderFailure"
     assert debug["error_message"] == "script generation timed out after 90.0s"
     assert debug["canonical_topic"] == "polvos"
-    assert debug["fact_pack_status"] in {"limited", "verified", "skipped"}
+    assert debug["fact_pack_status"] in {"disabled", "limited", "verified", "skipped"}
 
 def test_fact_pack_query_generation_extracts_entity_and_concepts() -> None:
     request = SimpleNamespace(seed_theme="Por que flamingos ficam cor-de-rosa?")
@@ -3701,4 +3712,87 @@ def test_publish_readiness_blocks_limited_fact_pack_with_invented_source_ids(mon
 
     assert readiness["passed"] is False
     assert "invented_source_fact_ids" in readiness["reasons"]
-    assert "manual_review_required" in readiness["reasons"]
+    assert "manual_review_required" not in readiness["reasons"]
+
+def test_script_gate_rejects_100_words_for_45s_natural_pace() -> None:
+    words = ["Marte"] + ["poeira"] * 99
+    narration = " ".join(words) + "."
+    script = {
+        "title": "Marte parece vermelho por causa da poeira",
+        "hook": "Marte parece enferrujado visto de longe.",
+        "loop": "Mas por que essa cor domina o planeta?",
+        "body_beats": [
+            "A poeira fina cobre partes enormes da paisagem.",
+            "Essa poeira muda a forma como a luz volta para nossos olhos.",
+            "O planeta inteiro ganha uma assinatura visual vermelha.",
+        ],
+        "payoff": "A cor não é tinta: é poeira contando a história do solo.",
+        "ending": "Marte parece vermelho porque a poeira vira o rosto do planeta.",
+        "cta": None,
+        "full_narration": narration,
+        "estimated_duration_sec": 45,
+        "key_facts": ["Marte tem aparência avermelhada associada à poeira rica em óxidos de ferro."],
+        "token_count": len(words),
+        "language": "pt-BR",
+        "retention_map": {
+            "visual_hook": "Marte parece enferrujado visto de longe.",
+            "proof_or_tension": "Mas por que essa cor domina o planeta?",
+            "escalation": "A poeira fina cobre partes enormes da paisagem.",
+            "turn_or_payoff": "A cor não é tinta: é poeira contando a história do solo.",
+            "loop_close": "Marte parece vermelho porque a poeira vira o rosto do planeta.",
+        },
+        "qa_metrics": {
+            "hook_score": 0.95,
+            "clarity_score": 0.95,
+            "information_density_score": 0.9,
+            "repetition_score": 0.1,
+            "ending_strength_score": 0.9,
+        },
+    }
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=45)
+
+    assert not result.passed
+    assert "word_count_too_low_for_natural_pace" in result.reasons
+    assert result.metrics["natural_min_words"] >= 115
+
+
+def test_automatic_topic_payload_uses_cosmos_focus() -> None:
+    from app.hub_prompt import hub_settings_path, save_viral_prompt_template
+
+    service = AutomationService(orchestrator)
+    custom_prompt = "Obrigatório para passar no gate:\n- abrir com paradoxo espacial customizado"
+    save_viral_prompt_template(hub_settings_path(orchestrator.settings.data_dir), custom_prompt)
+
+    payload = service._automatic_topic_payload()
+
+    notes = str(payload["notes"])
+    assert payload["job_origin"] == "automatic_topic"
+    assert "automatic_topic_policy=cosmos_astronomia_universo_first" in notes
+    assert "trend_source=cosmos_curiosity_pool" in notes
+    assert "Prompt viral customizado do hub" in notes
+    assert "source=hub_settings" in notes
+    assert custom_prompt in notes
+    assert any(term in payload["seed_theme"].lower() for term in ["vênus", "venus", "lua", "saturno", "marte", "buraco", "estrela", "júpiter", "jupiter", "netuno", "meteoro", "eclipse"])
+
+
+def test_resilient_script_generation_does_not_use_deterministic_safety_net() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(minimax_script_timeout_sec=0.01)
+    provider.strict_minimax_validation = False
+
+    class FailingProvider:
+        provider_name = "failing"
+        failure_provider_name = "failing_text"
+        def generate_script(self, topic_plan):
+            raise ProviderFailure("failing_text", "boom")
+
+    failing = FailingProvider()
+    provider._script_generation_candidates = lambda: [("primary", failing, 1.0)]
+    provider._run_primary_with_timeout = lambda fn, timeout_sec: fn()
+
+    with pytest.raises(ProviderFailure) as exc:
+        provider.generate_script({"canonical_topic": "Marte"})
+
+    assert "script generation failed across llm providers" in str(exc.value)
+    assert "local_deterministic" not in str(exc.value)

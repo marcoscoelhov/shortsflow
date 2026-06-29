@@ -86,17 +86,31 @@ class SubtitleGate:
                 item_reasons.append("invalid_timing")
             item_results.append({"idx": idx, "passed": not item_reasons, "reasons": item_reasons})
             reasons.extend(f"{idx}:{reason}" for reason in item_reasons)
+        blocking_reasons = self._blocking_reasons(reasons, coverage_ratio, p95_drift_ms, max_drift_ms)
         return SubtitleGateResult(
-            passed=not reasons,
-            reasons=reasons,
+            passed=not blocking_reasons,
+            reasons=blocking_reasons,
             metrics={
                 "coverage_ratio": coverage_ratio,
                 "item_count": len(items),
                 "p95_drift_ms": int(p95_drift_ms),
                 "max_drift_ms": int(max_drift_ms),
                 "items": item_results,
+                "warnings": [reason for reason in reasons if reason not in blocking_reasons],
             },
         )
+
+    def _blocking_reasons(self, reasons: list[str], coverage_ratio: float, p95_drift_ms: int, max_drift_ms: int) -> list[str]:
+        if coverage_ratio >= 0.99 and p95_drift_ms <= 100 and max_drift_ms <= 100:
+            soft_reasons = {"semantic_orphan_start", "weak_line_ending"}
+            filtered = []
+            for reason in reasons:
+                code = reason.split(":", 1)[-1]
+                if code in soft_reasons:
+                    continue
+                filtered.append(reason)
+            return filtered
+        return reasons
 
     def _has_semantic_orphan_start(self, words: list[str]) -> bool:
         normalized = [word.lower() for word in words]

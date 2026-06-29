@@ -1,6 +1,20 @@
 from tests.e2e_support import *  # noqa: F403
 
 
+def test_llm_facade_preserves_public_provider_imports() -> None:
+    from app.providers import llm
+    from app.providers import llm_clients, llm_routing
+
+    assert llm.DeepSeekCreativeProvider is llm_clients.DeepSeekCreativeProvider
+    assert llm.GeminiCreativeProvider is llm_clients.GeminiCreativeProvider
+    assert llm.LLMProviderRegistry is llm_routing.LLMProviderRegistry
+    assert llm.MinimaxCreativeProvider is MinimaxCreativeProvider
+    assert llm.MockCreativeProvider is MockCreativeProvider
+    assert llm.OpenAICreativeProvider is llm_clients.OpenAICreativeProvider
+    assert llm.QwenCreativeProvider is llm_clients.QwenCreativeProvider
+    assert llm.ResilientCreativeProvider is llm_routing.ResilientCreativeProvider
+
+
 def test_llm_registry_uses_mock_when_mock_providers_enabled() -> None:
     registry = LLMProviderRegistry()
     assert registry.primary_provider().provider_name == "mock"

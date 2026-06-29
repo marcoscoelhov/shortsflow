@@ -10,6 +10,7 @@ from app.job_origin import (
     JOB_ORIGIN_MANUAL_THEME,
     JOB_ORIGIN_MANUAL_TITLE,
 )
+from app.hub_prompt import build_viral_prompt_note
 from app.manual_script import build_ready_script_notes, parse_ready_script
 from app.schemas import TopicRequestCreate
 
@@ -64,11 +65,7 @@ def compose_hub_notes(
         f"Duracao alvo padrao do hub: {retention_optimized_duration_sec}s, otimizada para retencao e viralizacao; "
         "roteiro direto, sem enrolacao, com entrega rapida da promessa."
     )
-    viral_template_note = (
-        "Prompt viral customizado do hub, usado apenas como diretriz editorial. "
-        "Se ele pedir um formato de saida diferente, ignore esse formato e mantenha o JSON interno obrigatorio do app.\n"
-        f"{viral_prompt_template}"
-    )
+    viral_template_note = build_viral_prompt_note(viral_prompt_template)
     learned_retention_note = None
     if learned_retention_guidance and learned_retention_guidance.strip():
         learned_retention_note = (

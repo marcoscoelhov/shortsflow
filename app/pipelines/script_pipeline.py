@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.editorial.retention import enrich_plan_for_script_generation
 from app.editorial.visual_contract import normalize_visual_contract_payload
+from app.hub_prompt import extract_viral_prompt_contract
 from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
 from app.manual_script import extract_ready_script_from_notes
 from app.models import Job, Script, TopicPlan, TopicRequest
@@ -70,27 +71,36 @@ class ScriptPipeline(BasePipeline):
         fact_started = time.monotonic()
         if ready_script is not None:
             fact_pack = ready_script.fact_pack
+        elif not self.settings.fact_pack_enabled:
+            fact_pack = {
+                "status": "disabled",
+                "provider": "disabled_by_policy",
+                "query_used": request.seed_theme,
+                "facts": [],
+                "evidence_cards": [],
+                "sources": [],
+                "common_knowledge_allowed": True,
+                "factual_status": "not_required",
+                "viral_truth_policy": {
+                    "mode": "fact_pack_disabled",
+                    "factual_status": "not_required",
+                    "source_requirement": "disabled_by_policy",
+                    "automatic_publish_allowed": True,
+                    "copywriting_allowed": True,
+                    "allowed_framing": ["observable_common", "conservative_language", "viral_metaphor"],
+                    "must_repair_or_block": ["medical_or_safety_claims", "financial_claims", "invented_sources"],
+                },
+                "editorial_rule": "Fact pack/fact checker disabled by ShortsFlow policy. Use common-sense conservative wording; do not block automation for missing sources.",
+                "topic_alignment": {"passed": True, "reason": "fact_pack_disabled_by_policy"},
+            }
         else:
             fact_pack = self._build_fact_pack(topic_plan, request, research_brief)
         stage_timings_ms["fact_pack_ms"] = round((time.monotonic() - fact_started) * 1000, 1)
         plan_dict["fact_pack"] = fact_pack
         self.storage.persist_json(job.job_id, "fact_pack.json", self._serialize_for_json(fact_pack))
-        if self._requires_verified_fact_pack(topic_plan, request, fact_pack):
-            error = FatalStepError("script quality gate failed: fact_pack_missing_for_factual_topic")
-            self._persist_script_generation_debug(
-                job_id=job.job_id,
-                attempt=attempt,
-                plan_dict=plan_dict,
-                fact_pack=fact_pack,
-                phase="fact_pack_failed",
-                elapsed_ms=0.0,
-                stage_timings_ms={
-                    **stage_timings_ms,
-                    "total_step_ms": round((time.monotonic() - step_started) * 1000, 1),
-                },
-                error=error,
-            )
-            raise error
+        # Marcos policy: fact packs are optional context, not a required gate.
+        # Factual safety is still handled by script/publish quality checks, but
+        # missing fact_pack alone must not block the pipeline.
         structured_contract_file: str | None = None
         if ready_script is None:
             structured_contract = self._structured_viral_contract(plan_dict, job.target_duration_sec)
@@ -125,6 +135,18 @@ class ScriptPipeline(BasePipeline):
         validation_started = time.monotonic()
         try:
             script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec, request.cta_style or "none", job.job_id)
+            gate_decisions: dict[str, Any] = {}
+            if structured_contract_file is not None:
+                gate_decisions["script_quality"] = {
+                    "passed": bool(metrics.get("script_quality_gate_pass")),
+                    "fact_pack_consistency_pass": bool(metrics.get("fact_pack_consistency_pass")),
+                    "reasons": metrics.get("script_quality_reasons") or metrics.get("reasons") or [],
+                }
+                plan_dict["structured_viral_contract"] = self._structured_viral_contract(
+                    plan_dict,
+                    job.target_duration_sec,
+                    gate_decisions=gate_decisions,
+                )
             script, viral_metrics, viral_repair_file = self._validate_or_repair_viral_intensity(
                 script,
                 plan_dict=plan_dict,
@@ -133,6 +155,18 @@ class ScriptPipeline(BasePipeline):
                 job_id=job.job_id,
             )
             metrics = {**metrics, "viral_intensity": viral_metrics}
+            if structured_contract_file is not None:
+                gate_decisions["viral_intensity"] = {
+                    "passed": bool(viral_metrics.get("viral_intensity_gate_pass", not viral_metrics.get("viral_intensity_hard_block"))),
+                    "hard_block": bool(viral_metrics.get("viral_intensity_hard_block")),
+                    "reasons": viral_metrics.get("viral_intensity_reasons") or [],
+                }
+                plan_dict["structured_viral_contract"] = self._structured_viral_contract(
+                    plan_dict,
+                    job.target_duration_sec,
+                    gate_decisions=gate_decisions,
+                )
+                self.storage.persist_json(job.job_id, "structured_viral_contract.json", self._serialize_for_json(plan_dict["structured_viral_contract"]))
         except Exception as exc:  # noqa: BLE001
             self._persist_script_generation_debug(
                 job_id=job.job_id,
@@ -170,6 +204,18 @@ class ScriptPipeline(BasePipeline):
                 topic_context=audit_topic_context,
             )
         stage_timings_ms["text_publish_audit_ms"] = round((time.monotonic() - audit_started) * 1000, 1)
+        if structured_contract_file is not None:
+            gate_decisions["text_publish_audit"] = {
+                "passed": bool(text_audit.get("passed")),
+                "reasons": [str(reason) for reason in text_audit.get("reasons") or []],
+                "repair_file": audit_repair_file,
+            }
+            plan_dict["structured_viral_contract"] = self._structured_viral_contract(
+                plan_dict,
+                job.target_duration_sec,
+                gate_decisions=gate_decisions,
+            )
+            self.storage.persist_json(job.job_id, "structured_viral_contract.json", self._serialize_for_json(plan_dict["structured_viral_contract"]))
         if text_audit.get("passed") is False:
             audit_reasons = [str(reason) for reason in text_audit.get("reasons") or ["text_publish_audit_failed"]]
             self._persist_script_generation_debug(
@@ -293,6 +339,7 @@ class ScriptPipeline(BasePipeline):
                     local_reasons=repair_reasons,
                     local_metrics=result.metrics,
                     gate_name="viral_intensity",
+                    structured_viral_contract=plan_dict.get("structured_viral_contract"),
                 )
             )
             if self.llm_judge.should_override(local_passed=False, local_reasons=repair_reasons, judge=judge):
@@ -427,18 +474,39 @@ class ScriptPipeline(BasePipeline):
         self.audit_domain = ScriptAuditDomain(self)
         self.repair_domain = ScriptRepairDomain(self)
 
-    def _structured_viral_contract(self, plan_dict: dict[str, Any], target_duration_sec: int) -> dict[str, Any]:
+    def _structured_viral_contract(
+        self,
+        plan_dict: dict[str, Any],
+        target_duration_sec: int,
+        gate_decisions: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        raw_quality_metrics = plan_dict.get("quality_metrics")
+        quality_metrics: dict[str, Any] = raw_quality_metrics if isinstance(raw_quality_metrics, dict) else {}
+        niche_contract = plan_dict.get("niche_contract")
+        if not isinstance(niche_contract, dict):
+            niche_contract = {
+                "niche": quality_metrics.get("topic_niche"),
+                "subniche": quality_metrics.get("topic_subniche"),
+                "allowed_keywords": quality_metrics.get("allowed_keywords") or [],
+                "forbidden_keywords": quality_metrics.get("forbidden_keywords") or [],
+                "matched_terms": quality_metrics.get("niche_matched_terms") or [],
+                "source": quality_metrics.get("niche_source"),
+            }
+        viral_prompt_contract = extract_viral_prompt_contract(plan_dict.get("hub_notes"))
         return {
             "schema_version": self.settings.schema_version,
             "contract_name": "Pauta Viral Estruturada",
             "source": "hub_viral_prompt",
+            "viral_prompt": viral_prompt_contract,
+            "gate_decisions": gate_decisions or {},
             "topic": {
                 "canonical_topic": plan_dict.get("canonical_topic"),
                 "angle": plan_dict.get("angle"),
                 "hook_promise": plan_dict.get("hook_promise"),
                 "original_input": plan_dict.get("original_input"),
                 "requested_angle": plan_dict.get("requested_angle"),
-                "editorial_mode": plan_dict.get("editorial_mode"),
+                "editorial_mode": plan_dict.get("editorial_mode") or quality_metrics.get("editorial_mode"),
+                "niche_contract": niche_contract,
             },
             "target_duration_sec": target_duration_sec,
             "word_count_range": [80, 120],

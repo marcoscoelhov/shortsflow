@@ -73,10 +73,10 @@ curl http://127.0.0.1:8080/healthz
 
 1. `POST /jobs` cria um job.
 2. O worker processa `input_gate`, `topic_plan`, `script`, `scene_plan`, `asset_generation`, `tts`, `subtitle_alignment`, `background_music`, `render`, `monetization_readiness_gate` e `publish_to_review_hub`.
-3. Durante roteiro e fact pack, assuntos cotidianos de baixo risco podem usar conhecimento comum com linguagem conservadora; claims especificos ou sensiveis exigem fonte ou revisao.
+3. Durante roteiro e fact pack, assuntos cotidianos de baixo risco podem usar conhecimento comum com linguagem conservadora; ausencia de fact pack nao bloqueia sozinha, mas claims inventados, unsafe ou source IDs falsos continuam bloqueaveis.
 4. A primeira cena recebe tratamento de **hook visual**: precisa ser legivel em menos de um segundo, sem texto renderizado e sem entregar o payoff cedo demais.
 5. O job termina em `monetization_review`, `blocked_for_monetization` ou `ready_for_upload`.
-6. O revisor abre `/jobs/{job_id}`, assiste ao video, confere checklist e aprova ou rejeita.
+6. O Hub mostra diagnosticos e artefatos; a decisao humana final de publicacao/revisao acontece no YouTube Studio.
 7. Job aprovado vira `approved_for_publish`.
 8. O operador pode salvar metadados de upload, agendar data e hora, publicar imediatamente, ou reabrir para republicacao depois de um publish errado.
 9. O calendario tambem permite escolher um dia e agendar um job aprovado que ainda nao esteja publicado nem tenha agenda ativa.
@@ -107,6 +107,19 @@ Hashtags: #opcional #opcional
 
 Nesse modo, `Titulo` vira metadado, a narracao usa `Hook`, `Loop`, `Beats`, `Payoff` e `Fechamento`, e o app exige confirmacao humana de factualidade antes de aceitar o job. `Loop` e tensao narrativa, nao claim factual a ser mapeada como fonte.
 
+### Prompt viral do Hub
+
+O prompt viral salvo no Hub orienta a camada editorial dos jobs gerados: tipo de hook, ritmo de retencao, escalada dos beats, payoff tardio, tom, SEO e formato semantico do roteiro. Para a lane diaria de **Tema Automatico** (`automatic_topic`), ele deve ser tratado como contrato auditavel aplicado sobre o recorte operacional de astronomia/universo/planetas.
+
+Ele nao troca a origem do job, nao muda credenciais, nao amplia o nicho permitido, nao habilita fallback entre lanes, nao liga publicacao automatica e nao ignora gates de factualidade, direitos, qualidade, visual ou monetizacao. Se o prompt pedir formato externo diferente, o app continua usando o JSON interno obrigatorio.
+
+Detalhes finais de artifact, nomes de campos e reason codes para `automatic_topic` ainda dependem do smoke E2E. Enquanto isso, nao assuma que o frontend ja exibe origem default/custom do prompt ou reason code detalhado; trate isso como lacuna de acompanhamento.
+
+Exemplos curtos para astronomia:
+
+- Bom: `Abra com um paradoxo visual verificavel sobre planetas; crie 3 beats em escalada, sem numeros precisos se nao houver fonte; guarde a explicacao principal para o payoff final.`
+- Ruim: `Faca qualquer tema viral, use clickbait, diga que cientistas provaram algo chocante e publique mesmo se o gate reclamar.`
+
 ## Estados principais
 
 ### Jobs
@@ -115,10 +128,10 @@ Nesse modo, `Titulo` vira metadado, a narracao usa `Hook`, `Loop`, `Beats`, `Pay
 | --- | --- |
 | `queued` | Job criado e aguardando worker. |
 | `running` | Pipeline em execucao. |
-| `monetization_review` | Render pronto, mas ainda faltam confirmacoes humanas. |
+| `monetization_review` | Render pronto, mas ainda ha diagnosticos operacionais pendentes no Hub. |
 | `blocked_for_monetization` | Houve bloqueio de compliance, factualidade, direitos ou qualidade. |
-| `ready_for_upload` | Passou no gate final e esta pronto para aprovacao humana. |
-| `approved_for_publish` | Aprovado no hub e liberado para agenda/publicacao. |
+| `ready_for_upload` | Passou nos hard gates e esta pronto para upload/agendamento; revisao final fica no YouTube Studio. |
+| `approved_for_publish` | Marcado no Hub como liberado para agenda/publicacao. |
 | `published` | Publicado e registrado pelo hub. |
 | `rejected` | Reprovado na revisao humana. |
 | `failed` | Falha geral no pipeline. |
@@ -142,6 +155,7 @@ O `.env.example` e intencionalmente pequeno. Ele deve guardar boot, infraestrutu
 Ajustes operacionais nao secretos ficam no Hub de Revisao, em Configurações:
 
 - LLM principal, fallback, reparo, planejador de cenas e rascunho.
+- prompt viral global: contrato editorial para hook, retencao, payoff, tom, SEO e formato semantico dos roteiros gerados.
 - gerador de imagens visivel como leitura operacional; hoje, em execucao real, e MiniMax.
 - musica de fundo, banco local e fallback para API.
 - modo de publicacao, API do YouTube, notificacao de inscritos, publicacao cruzada no TikTok e limite diario de retropostagem.
@@ -167,10 +181,10 @@ SHORTSFLOW_MINIMAX_IMAGE_ASPECT_RATIO=9:16
 
 ### TTS para narracao
 
-Em execucao real, o TTS primario padrao e Gemini TTS. O Hub permite trocar o TTS primario entre Gemini TTS, ElevenLabs e Edge TTS em emergencia; a saida continua sendo normalizada para WAV local e `raw.srt` para preservar o contrato das etapas de legendas, mixagem e render.
+Em execucao real atual, o TTS primario operacional pode ser Edge TTS. O Hub permite trocar o TTS primario entre Gemini TTS, ElevenLabs e Edge TTS; a saida continua sendo normalizada para WAV local e `raw.srt` para preservar o contrato das etapas de legendas, mixagem e render.
 
 ```env
-SHORTSFLOW_TTS_PRIMARY_PROVIDER=gemini_tts
+SHORTSFLOW_TTS_PRIMARY_PROVIDER=edge_tts
 SHORTSFLOW_GEMINI_API_KEY=...
 SHORTSFLOW_GEMINI_TTS_MODEL=gemini-3.1-flash-tts-preview
 SHORTSFLOW_GEMINI_TTS_VOICE_NAME=Kore
@@ -178,7 +192,7 @@ SHORTSFLOW_GEMINI_TTS_VOICE_ROTATION_ENABLED=true
 SHORTSFLOW_GEMINI_TTS_STYLE_PROMPT="Narre em portugues brasileiro natural, com ritmo humano de documentario curto, sem soar sintetico ou robotico."
 ```
 
-Se Gemini TTS falhar ou nao tiver chave, o pipeline tenta ElevenLabs; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados da narracao. Gemini TTS e ElevenLabs podem passar como narracao publicavel quando direitos comerciais estiverem confirmados; Edge TTS e emergencia e bloqueia elegibilidade automatizada. Quando a rotacao esta ativa, `SHORTSFLOW_GEMINI_TTS_VOICE_NAME` vira fallback e o provider escolhe uma voz Gemini pelo perfil de narrador do roteiro.
+Se Gemini TTS falhar ou nao tiver chave, o pipeline tenta ElevenLabs; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados da narracao. Gemini TTS, ElevenLabs e Edge TTS podem passar como narracao publicavel quando direitos comerciais estiverem confirmados; Edge TTS configurado como primario nao bloqueia elegibilidade automatizada por nome. Quando a rotacao Gemini esta ativa, `SHORTSFLOW_GEMINI_TTS_VOICE_NAME` vira fallback e o provider escolhe uma voz Gemini pelo perfil de narrador do roteiro.
 
 Valide chave e creditos do Gemini TTS com um smoke test isolado:
 
@@ -188,13 +202,13 @@ Valide chave e creditos do Gemini TTS com um smoke test isolado:
 
 O teste so passa quando o provider final e `gemini_tts` e `fallback_used=False`; qualquer queda para ElevenLabs ou Edge retorna exit code diferente de zero e imprime o motivo do fallback sem expor a chave.
 
-Para recuperar um job que ficou bloqueado porque caiu em `edge_tts`, use o reparo dirigido a partir da etapa de TTS:
+Para recuperar um job que ficou bloqueado por TTS tecnico de baixa qualidade ou provider realmente nao publicavel, use o reparo dirigido a partir da etapa de TTS:
 
 ```bash
 .venv/bin/python scripts/reprocess_job_from_step.py <job_id> --from-step tts
 ```
 
-Esse comando preserva roteiro e assets, gera nova narração e recalcula legendas, mixagem, render e monetização. No Hub, jobs com `technical_tts_provider_not_publishable` também mostram a ação **Reprocessar TTS e render**.
+Esse comando preserva roteiro e assets, gera nova narração e recalcula legendas, mixagem, render e monetização. No Hub, jobs com `technical_tts_provider_not_publishable` também mostram a ação **Reprocessar TTS e render**; esse codigo nao deve ser emitido apenas porque o provider e `edge_tts` primario.
 
 ```env
 SHORTSFLOW_TTS_PRIMARY_PROVIDER=elevenlabs
@@ -203,7 +217,7 @@ SHORTSFLOW_ELEVENLABS_VOICE_ID=...
 SHORTSFLOW_ELEVENLABS_MODEL_ID=eleven_multilingual_v2
 ```
 
-Se `SHORTSFLOW_TTS_PRIMARY_PROVIDER=edge_tts`, o app ignora Gemini e ElevenLabs e usa Edge TTS diretamente.
+Se `SHORTSFLOW_TTS_PRIMARY_PROVIDER=edge_tts`, o app ignora Gemini e ElevenLabs e usa Edge TTS diretamente como voz primaria publicavel conforme configuracao de direitos.
 
 ## Render principal
 

@@ -57,16 +57,16 @@ class FakePremiumGate:
 def _audit_result(score: float) -> dict:
     return {
         "job_id": "test-job",
-        "target_score": 9.2,
+        "target_score": 9.4,
         "overall_min_score": score,
-        "passed_target": score >= 9.2,
+        "passed_target": score >= 9.4,
         "stages": [
             {
                 "stage": "publish_readiness",
                 "score": score,
-                "target_pass": score >= 9.2,
+                "target_pass": score >= 9.4,
                 "evidence": ["test double audit"],
-                "gaps": [] if score >= 9.2 else ["test score below target"],
+                "gaps": [] if score >= 9.4 else ["test score below target"],
             }
         ],
     }
@@ -846,7 +846,7 @@ def test_premium_publish_gate_allows_approval_and_schedule_with_visual_confirmat
         assert schedule.status == "scheduled"
 
 
-def test_premium_publish_gate_blocks_approval_when_visual_confirmation_is_missing(monkeypatch) -> None:
+def test_premium_publish_gate_allows_approval_without_internal_visual_confirmation(monkeypatch) -> None:
     job_id = "premium-publish-gate-visual-block"
     _create_rendered_job(job_id)
     _set_premium_publish_audit(monkeypatch, 9.8)
@@ -864,24 +864,25 @@ def test_premium_publish_gate_blocks_approval_when_visual_confirmation_is_missin
         }
         session.commit()
 
-    with pytest.raises(FatalStepError, match="visual_review_required"):
-        orchestrator.review_job(
-            {
-                "reviewer_identity": "test",
-                "action": "approve",
-                "reason_codes": [],
-                "notes": None,
-            },
-            job_id,
-        )
+    orchestrator.review_job(
+        {
+            "reviewer_identity": "test",
+            "action": "approve",
+            "reason_codes": [],
+            "notes": None,
+        },
+        job_id,
+    )
 
     with SessionLocal() as session:
         job = session.get(Job, job_id)
         assert job
-        assert job.status == "blocked_for_monetization"
-        assert job.review_state == "blocked"
+        assert job.status == "approved_for_publish"
+        assert job.review_state == "approved"
         assert job.quality_summary["premium_publish_gate"]["score"] == 9.8
-        assert "visual_review_required" in job.quality_summary["premium_publish_gate"]["reasons"]
+        assert job.quality_summary["premium_publish_gate"]["passed"] is True
+        assert job.quality_summary["premium_publish_gate"]["visual_review_required"] is False
+        assert "visual_review_required" not in job.quality_summary["premium_publish_gate"]["reasons"]
 
 
 def test_premium_publish_gate_blocks_schedule_when_score_is_below_threshold(monkeypatch) -> None:
