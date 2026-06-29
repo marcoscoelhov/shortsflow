@@ -450,6 +450,8 @@ def test_resilient_creative_provider_topic_uses_role_timeout() -> None:
     provider.strict_minimax_validation = False
 
     class SlowPrimary:
+        failure_provider_name = "deepseek_text"
+
         def plan_topic(self, *args, **kwargs):
             time.sleep(0.05)
             return {"quality_metrics": {}}
@@ -471,7 +473,7 @@ def test_resilient_creative_provider_topic_uses_role_timeout() -> None:
 
     assert plan["canonical_topic"] == "fallback"
     assert plan["quality_metrics"]["fallback_used"] is True
-    assert "timed out after 0.01s" in plan["quality_metrics"]["fallback_reason"]
+    assert "deepseek_text topic planner timed out after 0.01s" in plan["quality_metrics"]["fallback_reason"]
 
 def test_resilient_creative_provider_disables_repair_fallback_in_strict_minimax_mode() -> None:
     provider = object.__new__(ResilientCreativeProvider)

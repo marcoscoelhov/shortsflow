@@ -48,12 +48,12 @@ class ResilientCreativeProvider:
                 )
             except concurrent.futures.TimeoutError as exc:
                 if self.strict_minimax_validation:
-                    raise ProviderFailure("minimax_text", f"topic planner timed out after {timeout_sec}s") from exc
+                    raise ProviderFailure(self._provider_failure_name(self.primary), f"topic planner timed out after {timeout_sec}s") from exc
                 if not self.fallback:
                     raise ProviderFailure("llm_registry", f"topic planner timed out after {timeout_sec}s and no fallback provider is available") from exc
                 payload = self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
                 payload["quality_metrics"]["fallback_reason"] = (
-                    f"minimax_text topic planner timed out after {timeout_sec}s"
+                    f"{self._provider_failure_name(self.primary)} topic planner timed out after {timeout_sec}s"
                 )
                 payload["quality_metrics"]["fallback_used"] = True
                 payload["quality_metrics"]["fallback_stage"] = "topic_plan_timeout"
@@ -139,11 +139,11 @@ class ResilientCreativeProvider:
                 )
             except concurrent.futures.TimeoutError as exc:
                 if self.strict_minimax_validation:
-                    raise ProviderFailure("minimax_text", f"publish audit timed out after {timeout_sec}s") from exc
+                    raise ProviderFailure(self._provider_failure_name(self.primary), f"publish audit timed out after {timeout_sec}s") from exc
                 if not self.fallback:
                     raise ProviderFailure("llm_registry", f"publish audit timed out after {timeout_sec}s and no fallback provider is available") from exc
                 audit = self.fallback.audit_publish_package(payload)
-                audit["fallback_reason"] = f"minimax_text publish audit timed out after {timeout_sec}s"
+                audit["fallback_reason"] = f"{self._provider_failure_name(self.primary)} publish audit timed out after {timeout_sec}s"
                 audit["fallback_used"] = True
                 audit["fallback_stage"] = "publish_audit_timeout"
                 return audit
@@ -235,14 +235,14 @@ class ResilientCreativeProvider:
                 )
             except concurrent.futures.TimeoutError:
                 if self.strict_minimax_validation:
-                    raise ProviderFailure("minimax_text", f"scene planner timed out after {timeout_sec}s")
+                    raise ProviderFailure(self._provider_failure_name(self.primary), f"scene planner timed out after {timeout_sec}s")
                 provider = getattr(self, "scene_provider", None) or self.fallback
                 if not provider:
                     raise ProviderFailure("llm_registry", f"scene planner timed out after {timeout_sec}s and no fallback provider is available")
                 scenes = provider.plan_scenes(script, target_scene_count)
                 for scene in scenes:
                     scene["provider_fallback_reason"] = (
-                        f"minimax_text scene planner timed out after {timeout_sec}s"
+                        f"{self._provider_failure_name(self.primary)} scene planner timed out after {timeout_sec}s"
                     )
                 return scenes
             except ProviderFailure as exc:
@@ -329,6 +329,9 @@ class ResilientCreativeProvider:
 
     def _provider_timeout_sec(self, provider: llm_facade.LLMProvider, default_timeout_sec: float) -> float:
         return float(getattr(provider, "timeout_sec", default_timeout_sec) or default_timeout_sec)
+
+    def _provider_failure_name(self, provider: llm_facade.LLMProvider | None) -> str:
+        return str(getattr(provider, "failure_provider_name", None) or getattr(provider, "provider_name", None) or "llm_provider")
 
     def _script_generation_candidates(self) -> list[tuple[str, llm_facade.LLMProvider, float]]:
         primary_timeout = float(getattr(self.settings, "minimax_script_timeout_sec", 150.0))
