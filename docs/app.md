@@ -68,7 +68,7 @@ Persistencia local padrao:
 
 `POST /jobs` recebe tres modos operacionais pelo campo `input_mode`:
 
-- `theme`: assunto bruto. Quando `seed_theme` vem vazio, o hub tenta resolver um tema automatico por tendencias e registra fallback quando nao encontra candidato vivo. O roteiro e gerado por IA a partir da **Pauta Viral Estruturada** persistida em `structured_viral_contract.json`.
+- `theme`: assunto bruto. Quando `seed_theme` vem vazio, o hub tenta resolver uma pauta automatica observavel; se nao houver candidato aceitavel, registra falha/lacuna acionavel em vez de cair silenciosamente para Banco de Roteiros Prontos, pauta deterministica local ou mock. O roteiro e gerado por IA a partir da **Pauta Viral Estruturada** persistida em `structured_viral_contract.json`.
 - `title`: titulo completo fornecido pelo operador. O app preserva a promessa central, aplica a **Pauta Viral Estruturada** e ainda passa pelo fluxo normal de pauta, roteiro e gates.
 - `script`: **Roteiro Pronto** em texto rotulado. O app preserva o texto como fonte editorial e nao chama LLM para gerar outro roteiro.
 
