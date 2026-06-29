@@ -113,19 +113,27 @@ def _dedupe_preserve_order(values: Iterable[str]) -> tuple[str, ...]:
 def classify_niche_contract(*texts: object, fallback_niche: str = "curiosidades") -> NicheClassification:
     source_text = " ".join(str(text or "") for text in texts if text is not None)
     normalized = _normalize_text(source_text)
+    subniche_source_text = "\n".join(
+        line
+        for line in source_text.splitlines()
+        if "automatic_topic_focus=" not in _normalize_text(line)
+    )
+    normalized_subniche_source = _normalize_text(subniche_source_text)
     matched_subniches: list[str] = []
     matched_terms: list[str] = []
-    for subniche, pattern, label in _ASTRONOMY_PATTERNS:
-        if re.search(pattern, normalized, re.IGNORECASE):
+    match_positions: list[tuple[int, int, str]] = []
+    for pattern_index, (subniche, pattern, label) in enumerate(_ASTRONOMY_PATTERNS):
+        match = re.search(pattern, normalized_subniche_source, re.IGNORECASE)
+        if match:
             matched_subniches.append(subniche)
             matched_terms.append(label)
+            match_positions.append((match.start(), pattern_index, subniche))
 
     cosmos_policy = "cosmos_astronomia_universo_first" in normalized or "automatic_topic_focus=astronomia" in normalized
     if matched_subniches or cosmos_policy:
-        if "tecnologia_espacial" in matched_subniches:
-            subniche = "tecnologia_espacial"
-        elif matched_subniches:
-            subniche = matched_subniches[0]
+        if match_positions:
+            specific_positions = [item for item in match_positions if item[2] != "cosmologia"]
+            _start, _pattern_index, subniche = min(specific_positions or match_positions)
         else:
             subniche = "astronomia_geral"
         allowed = _dedupe_preserve_order([*ASTRONOMY_ALLOWED_KEYWORDS, *matched_terms])

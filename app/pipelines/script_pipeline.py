@@ -45,6 +45,7 @@ class ScriptPipeline(BasePipeline):
             "original_input": request.seed_theme,
             "editorial_mode": editorial_mode,
             "research_brief": research_brief,
+            "quality_metrics": topic_plan.quality_metrics or {},
         }
         plan_dict = enrich_plan_for_script_generation(
             plan_dict,

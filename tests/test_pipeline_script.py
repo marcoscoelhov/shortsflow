@@ -3776,6 +3776,36 @@ def test_automatic_topic_payload_uses_cosmos_focus() -> None:
     assert any(term in payload["seed_theme"].lower() for term in ["vênus", "venus", "lua", "saturno", "marte", "buraco", "estrela", "júpiter", "jupiter", "netuno", "meteoro", "eclipse"])
 
 
+def test_structured_viral_contract_preserves_topic_niche_quality_metrics() -> None:
+    from app.hub_prompt import build_viral_prompt_note
+
+    contract = orchestrator.script_pipeline._structured_viral_contract(
+        {
+            "canonical_topic": "Por que Vênus é mais quente que Mercúrio?",
+            "angle": "Planeta contraintuitivo",
+            "hook_promise": "O planeta mais quente não é o mais perto do Sol.",
+            "original_input": "Por que Vênus é mais quente que Mercúrio?",
+            "requested_angle": "Planeta contraintuitivo",
+            "hub_notes": build_viral_prompt_note("Obrigatório para passar no gate:\n- abrir com paradoxo espacial"),
+            "quality_metrics": {
+                "topic_niche": "astronomia",
+                "topic_subniche": "planetas",
+                "allowed_keywords": ["planeta", "universo"],
+                "forbidden_keywords": [],
+                "niche_matched_terms": ["planetas"],
+                "niche_source": "astronomy_keyword_contract",
+            },
+        },
+        45,
+    )
+
+    niche_contract = contract["topic"]["niche_contract"]
+    assert niche_contract["niche"] == "astronomia"
+    assert niche_contract["subniche"] == "planetas"
+    assert niche_contract["source"] == "astronomy_keyword_contract"
+    assert contract["viral_prompt"]["source"] == "hub_settings"
+
+
 def test_resilient_script_generation_does_not_use_deterministic_safety_net() -> None:
     provider = object.__new__(ResilientCreativeProvider)
     provider.settings = SimpleNamespace(minimax_script_timeout_sec=0.01)

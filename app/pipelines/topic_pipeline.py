@@ -246,14 +246,19 @@ class TopicPipeline(BasePipeline):
             }
         request_notes = str(getattr(request, "notes", "") or "")
         fallback_niche = str(getattr(request, "niche_id", "general") or "general")
+        niche_policy_notes = "\n".join(
+            line
+            for line in request_notes.splitlines()
+            if line.startswith("automatic_topic_policy=") or line.startswith("automation_source=")
+        )
         niche_contract = classify_niche_contract(
             request.seed_theme,
             request.requested_angle,
-            request_notes,
             canonical_topic,
             angle,
             hook_promise,
             " ".join(str(entity) for entity in entities if str(entity).strip()),
+            niche_policy_notes,
             fallback_niche=fallback_niche,
         )
         quality_metrics = {

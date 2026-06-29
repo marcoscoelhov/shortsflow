@@ -26,6 +26,21 @@ def _request(seed_theme: str) -> TopicRequest:
     ))
 
 
+def _request_with_broad_automatic_topic_focus(seed_theme: str) -> TopicRequest:
+    return cast(TopicRequest, SimpleNamespace(
+        seed_theme=seed_theme,
+        requested_angle="",
+        notes=(
+            "input_mode=theme\n"
+            "automation_source=automatic_topic\n"
+            "automatic_topic_policy=cosmos_astronomia_universo_first\n"
+            "automatic_topic_focus=astronomia, universo, planetas, luas, estrelas, "
+            "buracos negros, meteoros, eclipses e fenomenos espaciais visualmente fortes."
+        ),
+        niche_id="curiosidades",
+    ))
+
+
 def test_automatic_topic_astronomy_niche_contract_covers_core_subniches() -> None:
     for seed_theme, expected_subniche in ASTRO_CASES:
         plan = orchestrator.topic_pipeline.normalize_topic_plan_payload(
@@ -50,6 +65,24 @@ def test_automatic_topic_astronomy_niche_contract_covers_core_subniches() -> Non
         forbidden = {str(keyword).casefold() for keyword in contract["forbidden_keywords"]}
         for essential in ["planeta", "estrela", "galáxia", "buraco negro", "nasa", "telescópio"]:
             assert essential.casefold() not in forbidden
+
+
+def test_broad_automatic_topic_focus_does_not_override_seed_subniche() -> None:
+    plan = orchestrator.topic_pipeline.normalize_topic_plan_payload(
+        {
+            "canonical_topic": "Por que Vênus é mais quente que Mercúrio?",
+            "angle": "paradoxo de planetas com atmosfera espessa",
+            "hook_promise": "o planeta mais quente não é o mais perto do Sol",
+            "entities": ["Vênus", "Mercúrio"],
+            "search_terms": ["Vênus Mercúrio atmosfera"],
+            "quality_metrics": {},
+        },
+        _request_with_broad_automatic_topic_focus("Por que Vênus é mais quente que Mercúrio?"),
+    )
+
+    assert plan["niche_contract"]["niche"] == "astronomia"
+    assert plan["niche_contract"]["subniche"] == "planetas"
+    assert plan["quality_metrics"]["topic_subniche"] == "planetas"
 
 
 def test_structured_viral_contract_exposes_astronomy_niche_keywords() -> None:
