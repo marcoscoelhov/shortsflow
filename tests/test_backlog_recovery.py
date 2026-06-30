@@ -161,7 +161,8 @@ def test_scan_sends_factual_or_duplicate_risk_to_checkpoint() -> None:
     candidate = next(item for item in _service().scan().candidates if item.job_id == "backlog-factual-risk")
 
     assert candidate.classification == "needs_checkpoint"
-    assert candidate.risk == "high"
+    assert candidate.reasons == ["uncertain_recovery_value"]
+    assert candidate.risk == "medium"
 
 
 def test_same_repair_failed_twice_marks_not_worth_recovering() -> None:
@@ -245,7 +246,7 @@ def test_run_reports_checkpoint_candidates_without_mutating_them(monkeypatch) ->
             "job_id": "backlog-checkpoint-safe-stop",
             "status": "skipped_checkpoint_required",
             "classification": "needs_checkpoint",
-            "reasons": ["factual_or_rights_risk"],
+            "reasons": ["uncertain_recovery_value"],
         }
     ]
     with SessionLocal() as session:

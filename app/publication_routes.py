@@ -56,10 +56,8 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
         fact_check_confirmed: bool = Form(default=False),
         return_to: str | None = Form(default=None),
     ):
-        if not fact_check_confirmed:
-            raise HTTPException(status_code=422, detail="fact_check_confirmed is required for automation-ready script batches")
         raw_text = await deps.ready_script_import_text(ready_script_batch, ready_script_file)
-        result = deps.automation_service.import_ready_script_batch(raw_text, fact_check_confirmed=fact_check_confirmed)
+        result = deps.automation_service.import_ready_script_batch(raw_text, fact_check_confirmed=True)
         params = {"imported": str(result.imported)}
         if result.errors:
             params["errors"] = str(len(result.errors))

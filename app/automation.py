@@ -938,9 +938,9 @@ class AutomationService:
             "final_reason": final_reason,
             **observability,
             "ready_script_publish_policy": (
-                "Roteiros do banco preservam a aprovação humana do texto. Editorial, factualidade, metadados, "
-                "retenção narrativa, similaridade e score viram diagnóstico; publicação automática só pode parar "
-                "por bloqueios técnicos, visuais, direitos, disclosure, duração, áudio, render ou YouTube."
+                "Roteiros do banco preservam a aprovação humana do texto. Metadados, retenção narrativa, "
+                "similaridade e score viram diagnóstico; publicação automática só pode parar por bloqueios "
+                "técnicos, visuais, disclosure, duração, áudio, render ou YouTube."
             ),
         }
 
@@ -1223,7 +1223,7 @@ class AutomationService:
                 *fallback_notes,
                 cosmos_candidate.as_notes(),
                 "trend_research=discarded",
-                "trend_discard_reason=factual_strict_requires_sources_for_autopublish;automatic_topic_focus_locked_to_cosmos_pool",
+                "trend_discard_reason=automatic_topic_focus_locked_to_cosmos_pool",
                 "trend_source=cosmos_curiosity_pool",
             ]
         )

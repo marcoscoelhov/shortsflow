@@ -84,17 +84,27 @@ def test_hub_ready_script_mode_hides_tone_control() -> None:
     assert response.status_code == 200
     assert '<div class="field" data-mode-section="theme title">\n          <label for="tone">Tom</label>' in response.text
 
-def test_hub_create_job_rejects_ready_script_without_fact_confirmation(monkeypatch) -> None:
-    monkeypatch.setattr(main_module.orchestrator, "create_job", lambda _payload: "should-not-run")
+def test_hub_create_job_accepts_ready_script_without_fact_confirmation(monkeypatch) -> None:
+    monkeypatch.setattr(main_module.orchestrator, "create_job", lambda _payload: "job-ready-script-no-checkbox")
     client = TestClient(app)
     response = client.post(
         "/jobs",
-        data={"input_mode": "script", "ready_script_text": "Título: X"},
+        data={
+            "input_mode": "script",
+            "ready_script_text": """Título: Roteiro sem checkbox
+Hook: Um teste rápido começa agora.
+Loop: O que muda quando o checkbox sai?
+Beats: O fluxo aceita o roteiro pronto.
+A criação segue sem pergunta extra.
+Payoff: Menos fricção no hub.
+Fechamento: O teste terminou.
+Hashtags: #shorts""",
+        },
         follow_redirects=False,
     )
 
-    assert response.status_code == 422
-    assert "ready_script_fact_check_confirmed" in response.text
+    assert response.status_code == 303
+    assert response.headers["location"] == "/jobs/job-ready-script-no-checkbox"
 
 def test_ready_script_batch_import_persists_available_items() -> None:
     client = TestClient(app)

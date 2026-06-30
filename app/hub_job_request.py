@@ -107,11 +107,9 @@ def build_hub_job_request(
     trend_report: dict[str, object] | None = None
 
     if normalized_mode == "script":
-        if not ready_script_fact_check_confirmed:
-            raise ValueError("ready_script_fact_check_confirmed is required for Roteiro Pronto")
-        ready_script = parse_ready_script(ready_script_text or "", fact_check_confirmed=ready_script_fact_check_confirmed)
+        ready_script = parse_ready_script(ready_script_text or "", fact_check_confirmed=True)
         selected_seed_theme = str(ready_script.script["title"]).strip()
-        combined_notes = build_ready_script_notes(notes, ready_script.raw_text, ready_script_fact_check_confirmed)
+        combined_notes = build_ready_script_notes(notes, ready_script.raw_text, True)
         job_origin = JOB_ORIGIN_MANUAL_READY_SCRIPT
         notes_mode = "script"
     elif seed_theme.strip():

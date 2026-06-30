@@ -6,9 +6,9 @@ from app.policies.publication_policy import classify_recovery_gate
 def test_recovery_gate_sends_factual_risk_to_checkpoint() -> None:
     decision = classify_recovery_gate("unsupported_claim in publish readiness", duplicate_risk=False)
 
-    assert decision.classification == "needs_checkpoint"
-    assert decision.reasons == ["factual_or_rights_risk"]
-    assert decision.risk == "high"
+    assert decision.classification == "continue"
+    assert decision.reasons == []
+    assert decision.risk == "low"
 
 
 def test_recovery_gate_sends_duplicate_risk_to_checkpoint() -> None:

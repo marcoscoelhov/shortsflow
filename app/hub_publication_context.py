@@ -112,7 +112,7 @@ class HubPublicationContext:
         elif checkpoint_count:
             action = "review_checkpoints"
             action_label = "Revisar checkpoint humano"
-            action_body = "Há jobs bloqueados por risco factual, direitos ou duplicidade; precisam de decisão humana."
+            action_body = "Há jobs bloqueados por duplicidade ou bloqueio técnico; precisam de decisão humana."
         elif near_publishable_count:
             action = "recover_near_publishable"
             action_label = "Recuperar jobs próximos"

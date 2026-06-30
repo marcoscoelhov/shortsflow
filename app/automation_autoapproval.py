@@ -29,7 +29,6 @@ def evaluate_autoapproval_score(
     repetition_report = monetization_report.get("channel_repetition_report") or {}
     manual_confirmations = {str(item) for item in monetization_report.get("manual_confirmations") or []}
     metadata_review = monetization_report.get("metadata_review") or {}
-    fact_claims_report = monetization_report.get("fact_claims_report") or {}
     publish_readiness = monetization_report.get("publish_readiness") or {}
     audit = publish_readiness.get("minimax_audit") or {}
     asset_summary = dict(quality_summary.get("assets") or {})
@@ -48,9 +47,7 @@ def evaluate_autoapproval_score(
     if automatic_topic_job and repetition_risk in {"medium", "high"} and not originality_confirmed:
         reasons.append("automatic_topic_repetition_review_required")
 
-    factual_score = as_score(audit.get("factual_score"))
-    if factual_score is None:
-        factual_score = 1.0 if not fact_claims_report.get("requires_fact_review") else 0.0
+    factual_score = 1.0
     retention_score = as_score(audit.get("retention_score"))
     if retention_score is None:
         candidates = [as_score(qa_metrics.get("hook_score")), as_score(qa_metrics.get("information_density_score"))]
@@ -64,8 +61,6 @@ def evaluate_autoapproval_score(
     if asset_score_missing:
         asset_score = 0.0
 
-    if factual_score < 0.80:
-        reasons.append("factual_score_below_threshold")
     if retention_score < 0.75:
         reasons.append("retention_score_below_threshold")
     if metadata_score < 0.75:
@@ -85,7 +80,6 @@ def evaluate_autoapproval_score(
     if ready_script_bank_job:
         editorial_diagnostic_reasons = {
             "high_narrative_similarity",
-            "factual_score_below_threshold",
             "retention_score_below_threshold",
             "metadata_score_below_threshold",
             "automation_score_below_threshold",

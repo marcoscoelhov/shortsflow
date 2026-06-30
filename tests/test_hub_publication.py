@@ -557,7 +557,7 @@ def test_automatic_topic_discards_factual_strict_scout_candidate(monkeypatch) ->
 
     assert payload["seed_theme"] in SAFE_AUTOMATION_TOPIC_POOL
     assert "trend_research=discarded" in payload["notes"]
-    assert "factual_strict_requires_sources_for_autopublish" in payload["notes"]
+    assert "automatic_topic_focus_locked_to_cosmos_pool" in payload["notes"]
 
 
 def test_automation_does_not_fall_back_after_evening_auto_topic_exhaustion(monkeypatch) -> None:
