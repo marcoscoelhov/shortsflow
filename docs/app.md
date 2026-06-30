@@ -206,48 +206,6 @@ A politica de coleta recorrente e:
 
 As recomendacoes rapidas do Centro de Crescimento sao deterministicas e auditaveis. O relatorio historico consolidado fica disponivel no Hub e no CLI por `python -m app.cli growth-report`; ele destaca vencedores, piores retencoes, conversao para inscritos e gaps como baixa conversacao, baixo compartilhamento, retencao alta com pouca distribuicao e snapshots zerados. Relatorios de alcance/impressao/CTR dependem da YouTube Reporting API, que e um fluxo separado de relatorios assincronos, nao da chamada sincronica `reports.query`, e ainda nao esta implementada no runtime.
 
-## Scout competitivo de Shorts
-
-O scout competitivo mapeia Shorts publicos de referencia para aprender estruturas de retencao sem copiar texto literal. A fase atual cobre descoberta por canais aprovados, canais informados manualmente ou buscas textuais, enriquecimento via YouTube Data API, filtro de maturidade/duracao/views e persistencia auditavel em banco mais JSON.
-
-Comando operacional:
-
-```bash
-python -m app.cli competitive-scout --channel-id UC... --query "curiosidades ciencia shorts" --max-results 25
-```
-
-Se nenhum `--channel-id` nem `--query` for informado, o scout usa `ReferenceChannel` com `status=approved` no nicho escolhido. A busca usa `search.list` com `type=video` e `videoDuration=short`, depois valida a duracao real pelo `contentDetails.duration` de `videos.list`; portanto "Short" e tratado como candidato curto e nao como garantia da plataforma.
-
-Quando `competitive_scout_global_enabled=true`, as buscas textuais sao expandidas por regioes fortes em Shorts definidas em `competitive_scout_regions` (padrao: `IN`, `US`, `ID`, `BR`, `MX`, `JP`, `PH`, `VN`, `TH`, `KR`). Para controlar custo e quota, a rodada respeita `competitive_scout_max_query_region_pairs` antes de chamar `search.list` e `competitive_scout_max_analyses_per_run` depois dos filtros de views, duracao e maturidade. Se `competitive_scout_llm_analysis_enabled=false`, a analise dos candidatos usa apenas heuristica local, sem chamada de LLM pago. Os artefatos registram `regions_considered`, `search_requests_considered`, `shorts_matched_filters` e `discovery_contexts` por Short selecionado.
-
-A analise usa o provider LLM primario quando disponivel e cai para heuristica deterministica quando nao houver provider ou quando a resposta falhar. No MVP, referencias externas entram com `transcript_source=none`; transcricao ou download de video externo so devem entrar em uma fase posterior com fonte autorizada ou consentida. Os artefatos ficam em `data/artifacts/scout/<run_id>/` e as tabelas principais sao `reference_channels`, `reference_shorts`, `scout_runs`, `learned_retention_profiles`, `retention_experiments` e `retention_experiment_jobs`.
-
-Depois de uma rodada concluida, o operador pode sintetizar **Perfis de Retencao Aprendidos** por linha editorial. O sistema copia agressivamente o esqueleto estatistico do lote, como sequencia de abertura, movimentos de tensao e contrato de payoff, mas registra explicitamente elementos proibidos de copia literal. Perfis nascem como `pending_approval`; so perfis `approved` ou `promoted` podem iniciar **Experimento de Retencao Aprendida**.
-
-Comandos operacionais:
-
-```bash
-python -m app.cli competitive-scout-profiles <run_id>
-python -m app.cli retention-profile-approve <profile_id>
-python -m app.cli retention-experiment-start <profile_id>
-python -m app.cli retention-experiment-evaluate <experiment_id>
-python -m app.cli retention-experiment-promote <experiment_id>
-```
-
-Enquanto houver experimento `running`, os proximos Jobs do mesmo nicho recebem o esqueleto aprovado nas notas editoriais e sao vinculados em `retention_experiment_jobs`. A avaliacao do experimento usa Analytics proprio do canal, com padrao forte em `retention_experiment_success_retention_percent` (padrao 80%) e volume minimo `retention_experiment_min_views` (padrao 100). Jobs que falham antes de ficarem publicaveis entram como `unpublishable`; snapshots de Analytics ainda sem volume confiavel entram como `measured_low_confidence` e mantem o experimento em `needs_more_data`. Quando o alvo do experimento ja foi preenchido e nao ha Jobs pendentes de publicacao, Analytics ou volume confiavel, isso tambem pode encerrar o experimento como `failed`. O resultado pode ser `success_strong`, `success_partial`, `failed` ou `needs_more_data`.
-
-A promocao final e uma acao humana separada e so aceita experimento com `success_strong`. Quando promovido, o perfil vira `promoted`, arquiva qualquer perfil promovido anterior da mesma linha editorial e passa a orientar Jobs futuros do nicho mesmo sem experimento aberto. Isso ajusta o metaprompt efetivo usado na criacao por meio de notas versionadas do Job, mas nao edita automaticamente a Configuracao Global de Prompt Viral.
-
-O ciclo diario de automacao roda o scout competitivo automaticamente quando `competitive_scout_automation_enabled=true` (padrao). Esse ciclo avalia experimentos em andamento, executa uma nova rodada de scout com canais aprovados e as buscas de `competitive_scout_queries`, e sintetiza perfis para revisao. Por padrao, `competitive_scout_auto_approve_profiles`, `competitive_scout_auto_start_experiments` e `competitive_scout_auto_promote_profiles` ficam desligados para preservar decisao humana; quando ligados explicitamente, o ciclo autoaprova perfis, inicia experimentos ou promove vencedores conforme cada flag. Com o scout global ligado, essas buscas sao repetidas nas regioes configuradas ate o limite de pares busca/regiao. Falha ou ausencia de fonte do scout entra em `AutomationRun.run_metadata.competitive_scout`, mas nao derruba criacao/publicacao do ciclo diario.
-
-No Hub, `POST /competitive-scout/auto-cycle` nao executa mais a rodada dentro do request HTTP. A rota cria uma linha em `competitive_scout_auto_runs`, agenda a execucao em background e redireciona com `scout_auto_run=<id>`. O status persistido fica em `GET /competitive-scout/auto-runs/{auto_run_id}` e tambem aparece no Centro de Crescimento; o fragmento ja atualiza a cada 30s.
-
-Para rodar apenas o scout automatico, sem criar Job nem agenda:
-
-```bash
-python -m app.cli competitive-scout-auto-cycle
-```
-
 ## Publicacao cruzada no TikTok
 
 Quando `SHORTSFLOW_TIKTOK_AUTO_PUBLISH_ENABLED=true`, jobs que ja entraram na agenda ou publicacao do YouTube ganham um registro em `ChannelPublication` para o canal `tiktok`. Jobs com agenda futura seguem o mesmo horario planejado; jobs ja publicados entram em retropostagem controlada, limitada por `SHORTSFLOW_TIKTOK_RETROPOST_DAILY_LIMIT` (padrao 1 por dia).

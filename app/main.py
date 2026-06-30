@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import random
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
@@ -15,7 +15,6 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from app.automation import AutomationService
-from app.competitive_scout import CompetitiveScout, HeuristicScoutAnalyzer
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.domain_contracts import ARTIFACT_TREND_RESEARCH
@@ -29,7 +28,7 @@ from app.hub_prompt import (
     save_viral_prompt_template,
 )
 
-from app.models import CompetitiveScoutAutoRun, Job, Script, TopicPlan, TopicRequest
+from app.models import Job, Script, TopicPlan, TopicRequest
 from app.operational_settings import (
     apply_operational_settings,
     build_operational_settings_context,
@@ -42,11 +41,10 @@ from app.ready_script_import import MAX_READY_SCRIPT_IMPORT_BODY_BYTES, MAX_READ
 from app.hub_context import COMMON_SCHEDULE_TIMEZONES, HubContext
 from app.publication_routes import create_publication_router
 from app.routes.health import router as health_router
-from app.routes.llm_tournament import create_llm_tournament_router
 from pydantic import ValidationError
 
 from app.topic_scout import TopicScout
-from app.utils import new_id, path_from_uri, stable_hash, utcnow
+from app.utils import path_from_uri, utcnow
 from app.web_redirects import redirect_back as _redirect_back
 
 
@@ -135,95 +133,6 @@ _calendar_context = hub_context._calendar_context
 _resolve_job_id = hub_context._resolve_job_id
 
 
-def _competitive_scout_service() -> CompetitiveScout:
-    return CompetitiveScout(settings=settings, analyzer=HeuristicScoutAnalyzer())
-
-
-def _serialize_competitive_scout_auto_run(run: CompetitiveScoutAutoRun | None) -> dict[str, Any] | None:
-    if run is None:
-        return None
-    return {
-        "auto_run_id": run.auto_run_id,
-        "status": run.status,
-        "niche_id": run.niche_id,
-        "scout_run_id": run.scout_run_id,
-        "shorts_selected": run.shorts_selected,
-        "error": run.error,
-        "created_at": run.created_at.isoformat() if run.created_at else None,
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-        "result": run.result_payload or {},
-    }
-
-
-def _acquire_competitive_scout_auto_run(niche_id: str) -> tuple[dict[str, Any], bool]:
-    selected_niche = (niche_id or settings.niche_id or HUB_DEFAULT_NICHE).strip() or HUB_DEFAULT_NICHE
-    now = utcnow()
-    stale_before = now - timedelta(hours=6)
-    with SessionLocal() as session:
-        running = session.scalar(
-            select(CompetitiveScoutAutoRun)
-            .where(CompetitiveScoutAutoRun.niche_id == selected_niche)
-            .where(CompetitiveScoutAutoRun.status.in_(["queued", "running"]))
-            .order_by(CompetitiveScoutAutoRun.created_at.desc())
-            .limit(1)
-        )
-        if running and (running.started_at or running.created_at) >= stale_before:
-            return _serialize_competitive_scout_auto_run(running) or {}, False
-        if running:
-            running.status = "failed"
-            running.finished_at = now
-            running.error = "stale_competitive_scout_auto_run_replaced"
-        run = CompetitiveScoutAutoRun(
-            auto_run_id=new_id(),
-            schema_version=settings.schema_version,
-            content_hash=stable_hash({"niche_id": selected_niche, "created_at": now.isoformat()}),
-            created_at=now,
-            status="queued",
-            niche_id=selected_niche,
-            result_payload={"source": "hub_manual_trigger"},
-        )
-        session.add(run)
-        session.commit()
-        return _serialize_competitive_scout_auto_run(run) or {}, True
-
-
-def _finish_competitive_scout_auto_run(auto_run_id: str, result: dict[str, Any], *, error: str | None = None) -> None:
-    scout_run = result.get("scout_run") if isinstance(result.get("scout_run"), dict) else {}
-    result_status = str(result.get("status") or "completed")
-    status = "failed" if error or result_status == "failed" else result_status
-    with SessionLocal() as session:
-        run = session.get(CompetitiveScoutAutoRun, auto_run_id)
-        if not run:
-            return
-        run.status = status
-        run.finished_at = utcnow()
-        run.error = error or (str(result.get("reason")) if status == "failed" and result.get("reason") else None)
-        run.scout_run_id = str(scout_run.get("run_id")) if scout_run.get("run_id") else None
-        run.shorts_selected = int(scout_run.get("shorts_selected") or 0)
-        run.result_payload = result
-        run.content_hash = stable_hash({"auto_run_id": run.auto_run_id, "status": run.status, "result": result, "error": run.error})
-        session.commit()
-
-
-def _execute_competitive_scout_auto_run(auto_run_id: str) -> None:
-    with SessionLocal() as session:
-        run = session.get(CompetitiveScoutAutoRun, auto_run_id)
-        if not run or run.status not in {"queued", "running"}:
-            return
-        run.status = "running"
-        run.started_at = utcnow()
-        run.error = None
-        session.commit()
-        niche_id = run.niche_id
-    try:
-        result = _competitive_scout_service().run_automation_cycle(niche_id=niche_id)
-    except Exception as exc:  # noqa: BLE001
-        _finish_competitive_scout_auto_run(auto_run_id, {"status": "failed", "reason": str(exc)}, error=str(exc))
-        return
-    _finish_competitive_scout_auto_run(auto_run_id, result)
-
-
 def artifact_url(uri: str | None) -> str:
     if not uri:
         return "#"
@@ -263,7 +172,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.include_router(health_router)
-app.include_router(create_llm_tournament_router(settings, templates))
 app.mount("/artifacts", StaticFiles(directory=str(settings.artifacts_dir)), name="artifacts")
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 
@@ -546,97 +454,6 @@ def publication_dashboard_fragment(request: Request):
     )
 
 
-@app.post("/competitive-scout/runs/{run_id}/profiles")
-def build_scout_profiles(
-    run_id: str,
-    min_references: int | None = Form(default=None),
-    aggressive: bool = Form(default=True),
-    return_to: str | None = Form(default=None),
-):
-    try:
-        result = _competitive_scout_service().synthesize_profiles_from_run(run_id, min_references=min_references, aggressive=aggressive)
-    except ValueError as exc:
-        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
-    return _redirect_back(return_to, {"profiles_created": str(len(result.get("created") or []))}, default="/publication-hub")
-
-
-@app.post("/competitive-scout/auto-cycle")
-def run_competitive_scout_auto_cycle(
-    background_tasks: BackgroundTasks,
-    niche_id: str = Form(default="curiosidades"),
-    return_to: str | None = Form(default=None),
-):
-    auto_run, created = _acquire_competitive_scout_auto_run(niche_id)
-    if created:
-        background_tasks.add_task(_execute_competitive_scout_auto_run, str(auto_run["auto_run_id"]))
-    params = {
-        "scout_auto_status": str(auto_run.get("status") or "queued"),
-        "scout_auto_run": str(auto_run.get("auto_run_id") or ""),
-        "shorts_selected": str(auto_run.get("shorts_selected") or 0),
-    }
-    if not created:
-        params["scout_auto_existing"] = "1"
-    return _redirect_back(return_to, params, default="/publication-hub")
-
-
-@app.get("/competitive-scout/auto-runs/{auto_run_id}")
-def competitive_scout_auto_run_status(auto_run_id: str):
-    with SessionLocal() as session:
-        run = session.get(CompetitiveScoutAutoRun, auto_run_id)
-        if not run:
-            raise HTTPException(status_code=404, detail="competitive scout auto run not found")
-        return _serialize_competitive_scout_auto_run(run)
-
-
-@app.post("/retention-profiles/{profile_id}/approve")
-def approve_retention_profile(profile_id: str, return_to: str | None = Form(default=None)):
-    try:
-        result = _competitive_scout_service().approve_profile(profile_id, action="approve")
-    except ValueError as exc:
-        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
-    return _redirect_back(return_to, {"profile_status": str(result.get("status") or "approved")}, default="/publication-hub")
-
-
-@app.post("/retention-profiles/{profile_id}/reject")
-def reject_retention_profile(profile_id: str, return_to: str | None = Form(default=None)):
-    try:
-        result = _competitive_scout_service().approve_profile(profile_id, action="reject")
-    except ValueError as exc:
-        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
-    return _redirect_back(return_to, {"profile_status": str(result.get("status") or "rejected")}, default="/publication-hub")
-
-
-@app.post("/retention-profiles/{profile_id}/experiments")
-def start_retention_experiment(
-    profile_id: str,
-    target_job_count: int | None = Form(default=None),
-    return_to: str | None = Form(default=None),
-):
-    try:
-        result = _competitive_scout_service().start_experiment(profile_id, target_job_count=target_job_count)
-    except ValueError as exc:
-        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
-    return _redirect_back(return_to, {"experiment_started": str(result.get("experiment_id") or "1")}, default="/publication-hub")
-
-
-@app.post("/retention-experiments/{experiment_id}/evaluate")
-def evaluate_retention_experiment(experiment_id: str, return_to: str | None = Form(default=None)):
-    try:
-        result = _competitive_scout_service().evaluate_experiment(experiment_id)
-    except ValueError as exc:
-        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
-    return _redirect_back(return_to, {"experiment_decision": str(result.get("decision") or "needs_more_data")}, default="/publication-hub")
-
-
-@app.post("/retention-experiments/{experiment_id}/promote")
-def promote_retention_experiment(experiment_id: str, return_to: str | None = Form(default=None)):
-    try:
-        result = _competitive_scout_service().promote_experiment_winner(experiment_id)
-    except ValueError as exc:
-        return _redirect_back(return_to, {"scout_error": str(exc)}, default="/publication-hub")
-    return _redirect_back(return_to, {"profile_promoted": str(result.get("profile_id") or "1")}, default="/publication-hub")
-
-
 @app.get("/library", response_class=HTMLResponse)
 def ready_script_library(request: Request):
     return templates.TemplateResponse(
@@ -685,8 +502,6 @@ def create_job(
 
     try:
         selected_niche = niche_id or HUB_DEFAULT_NICHE
-        scout_service = _competitive_scout_service()
-        active_retention_guidance = scout_service.active_retention_guidance(niche_id=selected_niche)
         result = build_hub_job_request(
             seed_theme=seed_theme,
             input_mode=input_mode,
@@ -704,11 +519,8 @@ def create_job(
             retention_optimized_duration_sec=HUB_RETENTION_OPTIMIZED_DURATION_SEC,
             viral_prompt_template=load_viral_prompt_template(hub_settings_path(settings.data_dir)),
             trend_seed_resolver=resolve_trend_seed,
-            learned_retention_guidance=(active_retention_guidance or {}).get("guidance_text"),
         )
         job_id = orchestrator.create_job(result.payload.model_dump())
-        if active_retention_guidance and active_retention_guidance.get("source_kind") == "experiment":
-            scout_service.attach_job_to_experiment(str(active_retention_guidance["experiment_id"]), job_id)
         if result.trend_report is not None:
             orchestrator.storage.persist_json(job_id, ARTIFACT_TREND_RESEARCH, result.trend_report)
     except ValidationError as exc:

@@ -113,10 +113,6 @@
             <span class="material-symbols-outlined" aria-hidden="true">event_upcoming</span>
             Agendamento
           </a>
-          <a class="{% if active_path[:15] == '/llm-tournament' %}active{% endif %}" href="/llm-tournament" {% if active_path[:15] == '/llm-tournament' %}aria-current="page"{% endif %}>
-            <span class="material-symbols-outlined" aria-hidden="true">emoji_events</span>
-            Torneio
-          </a>
         </nav>
         <div class="sidebar-spacer"></div>
         <button type="button" class="sidebar-new-project" data-open-create-job>
@@ -150,10 +146,6 @@
         <a href="/calendar" class="{% if active_path[:9] == '/calendar' %}active{% endif %}" {% if active_path[:9] == '/calendar' %}aria-current="page"{% endif %}>
           <span class="material-symbols-outlined" aria-hidden="true">event_upcoming</span>
           <span>Agenda</span>
-        </a>
-        <a href="/llm-tournament" class="{% if active_path[:15] == '/llm-tournament' %}active{% endif %}" {% if active_path[:15] == '/llm-tournament' %}aria-current="page"{% endif %}>
-          <span class="material-symbols-outlined" aria-hidden="true">emoji_events</span>
-          <span>Torneio</span>
         </a>
       </nav>
       <main class="page-shell">

@@ -14,13 +14,8 @@ from app.growth_metrics import build_growth_score
 from app.hub_status import NEEDS_ACTION_JOB_STATUSES
 from app.models import (
     ChannelPublication,
-    CompetitiveScoutAutoRun,
     Job,
-    LearnedRetentionProfile,
     PublicationSchedule,
-    RetentionExperiment,
-    RetentionExperimentJob,
-    ScoutRun,
     Script,
     TopicPlan,
     TopicRequest,
@@ -269,40 +264,6 @@ class HubPublicationContext:
                 .where(PublicationSchedule.youtube_video_id.is_not(None))
                 .where(~PublicationSchedule.job_id.in_(select(YouTubeAnalyticsSnapshot.job_id)))
             ) or 0
-            scout_runs = list(
-                session.scalars(
-                    select(ScoutRun)
-                    .order_by(ScoutRun.started_at.desc(), ScoutRun.created_at.desc())
-                    .limit(5)
-                ).all()
-            )
-            scout_auto_runs = list(
-                session.scalars(
-                    select(CompetitiveScoutAutoRun)
-                    .order_by(CompetitiveScoutAutoRun.created_at.desc())
-                    .limit(5)
-                ).all()
-            )
-            retention_profiles = list(
-                session.scalars(
-                    select(LearnedRetentionProfile)
-                    .where(LearnedRetentionProfile.status.in_(["pending_approval", "approved", "promoted"]))
-                    .order_by(LearnedRetentionProfile.updated_at.desc(), LearnedRetentionProfile.created_at.desc())
-                    .limit(8)
-                ).all()
-            )
-            experiment_rows = session.execute(
-                select(RetentionExperiment, LearnedRetentionProfile)
-                .join(LearnedRetentionProfile, LearnedRetentionProfile.profile_id == RetentionExperiment.profile_id)
-                .order_by(RetentionExperiment.created_at.desc())
-                .limit(6)
-            ).all()
-            experiment_counts = {
-                experiment.experiment_id: session.scalar(
-                    select(func.count()).select_from(RetentionExperimentJob).where(RetentionExperimentJob.experiment_id == experiment.experiment_id)
-                ) or 0
-                for experiment, _profile in experiment_rows
-            }
         latest_snapshots: dict[str, dict[str, object]] = {}
         for snapshot, job, topic_request, script, topic_plan in analytics_rows:
             if job.job_id in latest_snapshots:
@@ -442,66 +403,6 @@ class HubPublicationContext:
                 "state": "warn" if awaiting_approval_count else "ok",
             },
         ]
-        competitive_scout = {
-            "auto_runs": [
-                {
-                    "auto_run_id": run.auto_run_id,
-                    "status": run.status,
-                    "niche_id": run.niche_id,
-                    "scout_run_id": run.scout_run_id,
-                    "shorts_selected": run.shorts_selected,
-                    "error": run.error,
-                    "created_at": run.created_at.isoformat() if run.created_at else None,
-                    "started_at": run.started_at.isoformat() if run.started_at else None,
-                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-                }
-                for run in scout_auto_runs
-            ],
-            "runs": [
-                {
-                    "run_id": run.run_id,
-                    "status": run.status,
-                    "niche_id": run.niche_id,
-                    "shorts_considered": run.shorts_considered,
-                    "shorts_selected": run.shorts_selected,
-                    "profiles_created": run.profiles_created,
-                    "artifact_path": run.artifact_path,
-                    "started_at": run.started_at.isoformat() if run.started_at else None,
-                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-                    "summary": run.summary or {},
-                }
-                for run in scout_runs
-            ],
-            "profiles": [
-                {
-                    "profile_id": profile.profile_id,
-                    "title": profile.title,
-                    "status": profile.status,
-                    "line_id": profile.line_id,
-                    "confidence": profile.confidence,
-                    "version": profile.version,
-                    "source_run_id": profile.source_run_id,
-                    "reference_count": len(profile.supporting_reference_short_ids or []),
-                    "metrics": profile.metrics or {},
-                    "dominant_skeleton": profile.dominant_skeleton or {},
-                }
-                for profile in retention_profiles
-            ],
-            "experiments": [
-                {
-                    "experiment_id": experiment.experiment_id,
-                    "profile_id": profile.profile_id,
-                    "profile_title": profile.title,
-                    "status": experiment.status,
-                    "line_id": experiment.line_id,
-                    "target_job_count": experiment.target_job_count,
-                    "assigned_job_count": experiment_counts.get(experiment.experiment_id, 0),
-                    "decision": experiment.decision,
-                    "result_summary": experiment.result_summary or {},
-                }
-                for experiment, profile in experiment_rows
-            ],
-        }
         return {
             "integration": self.youtube_integration_context(request),
             "tiktok_integration": self.tiktok_integration_context(),
@@ -530,7 +431,6 @@ class HubPublicationContext:
                 "channel_report": channel_report,
                 "scoreboard": scoreboard,
                 "action_items": action_items,
-                "competitive_scout": competitive_scout,
                 "decision": {
                     "status": decision_status,
                     "headline": decision_headline,

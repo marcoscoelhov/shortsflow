@@ -2,7 +2,6 @@ from tests.e2e_support import *  # noqa: F403
 from tests.e2e_support import _create_basic_job
 from app.automation import PublishPlan, SAFE_AUTOMATION_TOPIC_POOL
 from app.growth_metrics import build_channel_growth_report, build_growth_score
-from app.models import LearnedRetentionProfile, RetentionExperiment, RetentionExperimentJob
 from app.quality.premium_publish_gate import PremiumPublishGateResult
 
 
@@ -414,142 +413,6 @@ def test_automation_cycle_autoapproves_and_schedules_publishable_job(monkeypatch
     assert attempt.score == 0.93
 
 
-def test_automation_auto_topic_attaches_job_to_running_retention_experiment(monkeypatch) -> None:
-    service = AutomationService(orchestrator)
-    service.set_automation_enabled(True)
-    job_id = "automation-retention-experiment-job"
-    profile_id = "automation-retention-profile"
-    experiment_id = "automation-retention-experiment"
-    target_day = datetime(2099, 6, 11).date()
-    with SessionLocal() as session:
-        for experiment in session.scalars(select(RetentionExperiment).where(RetentionExperiment.status == "running")):
-            experiment.status = "completed"
-        session.add(
-            LearnedRetentionProfile(
-                profile_id=profile_id,
-                schema_version="1.0.0",
-                content_hash=f"{profile_id}-hash",
-                version="test-automation-retention-profile",
-                status="approved",
-                niche_id="curiosidades",
-                line_id="curiosidade_cotidiana",
-                title="Perfil ativo para automacao",
-                confidence="alta",
-                supporting_reference_short_ids=["reference-short-1"],
-                dominant_skeleton={
-                    "line_id": "curiosidade_cotidiana",
-                    "structure_sequence": ["abre com contraste cotidiano", "segura explicacao", "fecha o loop"],
-                    "retention_moves": ["promessa especifica", "micro tensão", "payoff tardio"],
-                    "forbidden_copy_elements": ["titulo literal"],
-                    "generator_directive": "Preserve o esqueleto, trocando tema, fatos e frases.",
-                },
-                metrics={},
-            )
-        )
-        session.add(
-            RetentionExperiment(
-                experiment_id=experiment_id,
-                profile_id=profile_id,
-                schema_version="1.0.0",
-                content_hash=f"{experiment_id}-hash",
-                status="running",
-                line_id="curiosidade_cotidiana",
-                started_at=utcnow(),
-                target_job_count=1,
-                result_summary={},
-            )
-        )
-        session.commit()
-
-    def fake_create_job(payload):
-        assert payload["job_origin"] == "automatic_topic"
-        assert payload["creation_via"] == "daily_cycle"
-        with SessionLocal() as session:
-            _create_basic_job(session, job_id=job_id, status="queued", seed_theme="Automacao com experimento")
-            session.flush()
-            job = session.get(Job, job_id)
-            assert job is not None
-            job.job_origin = "automatic_topic"
-            job.creation_via = "daily_cycle"
-            session.commit()
-        return job_id
-
-    def fake_process_job(created_job_id: str) -> str:
-        assert created_job_id == job_id
-        with SessionLocal() as session:
-            job = session.get(Job, job_id)
-            assert job is not None
-            job.status = "ready_for_upload"
-            job.quality_summary = {
-                "assets": {"asset_semantic_score_avg": 0.93},
-                "monetization": {"passed": True, "final_status": "ready_for_upload", "hard_blockers": [], "manual_required": []},
-            }
-            session.commit()
-        return "ready_for_upload"
-
-    def fake_review_job(payload: dict, reviewed_job_id: str) -> None:
-        assert reviewed_job_id == job_id
-        assert payload["action"] == "approve"
-        with SessionLocal() as session:
-            job = session.get(Job, job_id)
-            assert job is not None
-            job.status = "approved_for_publish"
-            job.review_state = "approved"
-            session.commit()
-
-    def fake_schedule_publication(scheduled_job_id: str, payload: dict) -> None:
-        assert scheduled_job_id == job_id
-        with SessionLocal() as session:
-            session.add(
-                PublicationSchedule(
-                    schedule_id=f"{job_id}-schedule",
-                    job_id=job_id,
-                    schema_version="1.0.0",
-                    content_hash=f"{job_id}-schedule",
-                    scheduled_for_utc=datetime(2099, 6, 11, 21, 0, tzinfo=UTC),
-                    timezone="America/Sao_Paulo",
-                    youtube_visibility="public",
-                    status="scheduled",
-                    youtube_video_id="yt-retention-experiment",
-                    youtube_url="https://www.youtube.com/watch?v=yt-retention-experiment",
-                    notes=payload["notes"],
-                )
-            )
-            session.commit()
-
-    monkeypatch.setattr(service, "_run_competitive_scout_automation", lambda: {"status": "skipped", "reason": "test"})
-    monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
-    monkeypatch.setattr(service, "_vacant_publish_slots", lambda: [PublishSlot(target_day, "18:00", "America/Sao_Paulo")])
-    monkeypatch.setattr(service, "_select_ready_script_item", lambda: None)
-    monkeypatch.setattr(
-        service,
-        "_automatic_topic_payload",
-        lambda: {
-            "seed_theme": "Automacao com experimento",
-            "job_origin": "auto",
-            "creation_via": "daily_cycle",
-        },
-    )
-    monkeypatch.setattr(orchestrator, "create_job", fake_create_job)
-    monkeypatch.setattr(orchestrator, "process_job", fake_process_job)
-    monkeypatch.setattr(service, "evaluate_autoapproval", lambda created_job_id: {"eligible": True, "score": 0.93, "threshold": 0.82, "reasons": [], "components": {}})
-    monkeypatch.setattr(orchestrator, "review_job", fake_review_job)
-    monkeypatch.setattr(orchestrator, "schedule_publication", fake_schedule_publication)
-
-    run_result = service.run_daily_cycle(force=True)
-
-    assert run_result["status"] == "succeeded", run_result
-    with SessionLocal() as session:
-        assignment = session.scalar(select(RetentionExperimentJob).where(RetentionExperimentJob.experiment_id == experiment_id))
-        attempt = session.scalar(select(AutomationAttempt).where(AutomationAttempt.job_id == job_id))
-
-    assert assignment is not None
-    assert assignment.job_id == job_id
-    assert assignment.status == "assigned"
-    assert attempt is not None
-    assert attempt.score_report["retention_experiment"]["experiment_id"] == experiment_id
-    assert attempt.score_report["retention_experiment"]["job_id"] == job_id
-
 def test_automation_daily_cycle_schedules_ready_script_and_automatic_topic_slots(monkeypatch) -> None:
     service = AutomationService(orchestrator)
     service.set_automation_enabled(True)
@@ -711,7 +574,6 @@ def test_automation_does_not_fall_back_after_evening_auto_topic_exhaustion(monke
         return {"scheduled": True, "job_id": "ready-fallback-job", "schedule_id": "ready-fallback-schedule"}
 
     monkeypatch.setattr(orchestrator.settings, "automation_max_generation_attempts", 2)
-    monkeypatch.setattr(service, "_run_competitive_scout_automation", lambda: {"status": "skipped", "reason": "test"})
     monkeypatch.setattr(service, "_youtube_preflight", lambda: {"passed": True, "missing_items": [], "connected": True})
     monkeypatch.setattr(service, "_vacant_publish_slots", lambda: [PublishSlot(target_day, "18:00", "America/Sao_Paulo")])
     monkeypatch.setattr(service, "_run_publishable_backlog", lambda _run_id, _target_plan: [])
@@ -4183,70 +4045,6 @@ def test_publication_dashboard_page_shows_maintenance_summary() -> None:
     assert "checkpoint humano" in response.text
     assert "Cobertura futura" in response.text
 
-
-def test_llm_tournament_route_is_optional_and_sandboxed() -> None:
-    client = TestClient(app)
-
-    page = client.get("/llm-tournament")
-    assert page.status_code == 200
-    assert "Torneio" in page.text or "LLM" in page.text
-
-    outside_file = client.get("/llm-tournament/file", params={"path": "/etc/passwd"})
-    assert outside_file.status_code == 404
-
-
-def test_competitive_scout_auto_cycle_route_enqueues_persisted_run(monkeypatch) -> None:
-    client = TestClient(app)
-    executed: list[str] = []
-
-    monkeypatch.setattr(main_module, "_execute_competitive_scout_auto_run", lambda auto_run_id: executed.append(auto_run_id))
-
-    response = client.post(
-        "/competitive-scout/auto-cycle",
-        data={"niche_id": "async-route-test", "return_to": "/publication-hub"},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 303
-    assert "scout_auto_status=queued" in response.headers["location"]
-    assert len(executed) == 1
-    with SessionLocal() as session:
-        run = session.get(CompetitiveScoutAutoRun, executed[0])
-
-    assert run is not None
-    assert run.status == "queued"
-    assert run.niche_id == "async-route-test"
-
-    status_response = client.get(f"/competitive-scout/auto-runs/{executed[0]}")
-
-    assert status_response.status_code == 200
-    payload = status_response.json()
-    assert payload["auto_run_id"] == executed[0]
-    assert payload["status"] == "queued"
-
-
-def test_competitive_scout_auto_run_worker_persists_result(monkeypatch) -> None:
-    niche_id = f"async-worker-test-{int(time.time() * 1000)}"
-    auto_run, created = main_module._acquire_competitive_scout_auto_run(niche_id)
-
-    class FakeCompetitiveScout:
-        def run_automation_cycle(self, *, niche_id: str) -> dict:
-            assert niche_id.startswith("async-worker-test-")
-            return {"status": "completed", "scout_run": {"run_id": "scout-worker-result", "shorts_selected": 4}}
-
-    monkeypatch.setattr(main_module, "_competitive_scout_service", lambda: FakeCompetitiveScout())
-
-    assert created is True
-    main_module._execute_competitive_scout_auto_run(str(auto_run["auto_run_id"]))
-
-    with SessionLocal() as session:
-        run = session.get(CompetitiveScoutAutoRun, str(auto_run["auto_run_id"]))
-
-    assert run is not None
-    assert run.status == "completed"
-    assert run.scout_run_id == "scout-worker-result"
-    assert run.shorts_selected == 4
-    assert run.finished_at is not None
 
 def test_home_growth_menu_links_to_separate_growth_center() -> None:
     client = TestClient(app)

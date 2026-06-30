@@ -7,7 +7,6 @@ from pathlib import Path
 
 from app.automation import AutomationService
 from app.backlog_recovery import BacklogRecoveryService
-from app.competitive_scout import CompetitiveScout
 from app.db import init_db
 from app.operational_settings import apply_operational_settings
 from app.orchestrator import orchestrator
@@ -48,36 +47,6 @@ def main() -> None:
 
     growth_parser = subparsers.add_parser("growth-report", help="Gera relatorio consolidado de crescimento do canal")
     growth_parser.add_argument("--minimum-views", type=int, default=100, help="Views minimas para marcar um video como evidencia confiavel")
-
-    scout_parser = subparsers.add_parser("competitive-scout", help="Executa scout competitivo de Shorts por canal ou busca")
-    scout_parser.add_argument("--niche-id", default="curiosidades", help="Nicho do scout competitivo")
-    scout_parser.add_argument("--channel-id", action="append", default=None, help="Canal de referencia do YouTube; pode repetir")
-    scout_parser.add_argument("--query", action="append", default=None, help="Busca textual no YouTube; pode repetir")
-    scout_parser.add_argument("--max-results", type=int, default=None, help="Resultados por canal ou busca")
-
-    scout_profiles_parser = subparsers.add_parser("competitive-scout-profiles", help="Sintetiza perfis de retencao de uma rodada de scout")
-    scout_profiles_parser.add_argument("run_id", help="ID da rodada de scout")
-    scout_profiles_parser.add_argument("--min-references", type=int, default=None, help="Referencias minimas por linha")
-    scout_profiles_parser.add_argument("--conservative", action="store_true", help="Gera perfil menos agressivo")
-
-    profile_approve_parser = subparsers.add_parser("retention-profile-approve", help="Aprova um perfil de retencao aprendido")
-    profile_approve_parser.add_argument("profile_id", help="ID do perfil de retencao")
-
-    profile_reject_parser = subparsers.add_parser("retention-profile-reject", help="Rejeita um perfil de retencao aprendido")
-    profile_reject_parser.add_argument("profile_id", help="ID do perfil de retencao")
-
-    experiment_parser = subparsers.add_parser("retention-experiment-start", help="Inicia experimento de retencao com perfil aprovado")
-    experiment_parser.add_argument("profile_id", help="ID do perfil de retencao aprovado")
-    experiment_parser.add_argument("--target-job-count", type=int, default=None, help="Quantidade alvo de Jobs no experimento")
-
-    experiment_eval_parser = subparsers.add_parser("retention-experiment-evaluate", help="Avalia experimento de retencao com Analytics do canal")
-    experiment_eval_parser.add_argument("experiment_id", help="ID do experimento")
-
-    experiment_promote_parser = subparsers.add_parser("retention-experiment-promote", help="Promove perfil de retencao vencedor depois de success_strong")
-    experiment_promote_parser.add_argument("experiment_id", help="ID do experimento com success_strong")
-
-    scout_auto_parser = subparsers.add_parser("competitive-scout-auto-cycle", help="Roda o ciclo automatico do scout competitivo")
-    scout_auto_parser.add_argument("--niche-id", default="curiosidades", help="Nicho do scout competitivo")
 
     import_parser = subparsers.add_parser("import-ready-scripts", help="Importa lote de roteiros prontos")
     import_parser.add_argument("path", type=Path, help="Arquivo txt/md com roteiros rotulados")
@@ -149,55 +118,6 @@ def main() -> None:
 
     if args.command == "growth-report":
         result = orchestrator.build_channel_growth_report(minimum_views=args.minimum_views)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "competitive-scout":
-        result = CompetitiveScout(settings=orchestrator.settings).run(
-            niche_id=args.niche_id,
-            channel_ids=args.channel_id,
-            queries=args.query,
-            max_results_per_source=args.max_results,
-        )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "competitive-scout-profiles":
-        result = CompetitiveScout(settings=orchestrator.settings).synthesize_profiles_from_run(
-            args.run_id,
-            min_references=args.min_references,
-            aggressive=not args.conservative,
-        )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "retention-profile-approve":
-        result = CompetitiveScout(settings=orchestrator.settings).approve_profile(args.profile_id, action="approve")
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "retention-profile-reject":
-        result = CompetitiveScout(settings=orchestrator.settings).approve_profile(args.profile_id, action="reject")
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "retention-experiment-start":
-        result = CompetitiveScout(settings=orchestrator.settings).start_experiment(args.profile_id, target_job_count=args.target_job_count)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "retention-experiment-evaluate":
-        result = CompetitiveScout(settings=orchestrator.settings).evaluate_experiment(args.experiment_id)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "retention-experiment-promote":
-        result = CompetitiveScout(settings=orchestrator.settings).promote_experiment_winner(args.experiment_id)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "competitive-scout-auto-cycle":
-        result = CompetitiveScout(settings=orchestrator.settings).run_automation_cycle(niche_id=args.niche_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 

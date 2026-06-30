@@ -39,14 +39,6 @@ def main() -> int:
             f"app/main.py has {len(main_py.splitlines())} lines",
         ),
         Check(
-            "llm_tournament_out_of_main",
-            1.4,
-            "def llm_tournament_page" not in main_py
-            and "def llm_tournament_file" not in main_py
-            and (ROOT / "app/routes/llm_tournament.py").exists(),
-            "LLM tournament routes live in app/routes/llm_tournament.py",
-        ),
-        Check(
             "fast_lane_formalized",
             1.4,
             (ROOT / "scripts/shortsflow_fast_lane.py").exists()

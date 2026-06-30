@@ -37,7 +37,6 @@ from app.automation_recovery import (
     visual_review_can_be_attempted,
 )
 from app.automation_topics import COSMOS_CURIOSITY_POOL, cosmos_policy_notes, select_cosmos_topic
-from app.competitive_scout import CompetitiveScout
 from app.db import session_scope
 from app.domain_contracts import (
     ARTIFACT_AUTOAPPROVAL_SCORE,
@@ -191,16 +190,12 @@ class AutomationService:
                     run = self._finish_run(run.run_id, status="skipped", skipped_reason="automation_disabled")
                     return serialize_run(run)
 
-            scout_result = self._run_competitive_scout_automation()
-            self._merge_run_metadata(run.run_id, {"competitive_scout": scout_result})
-
             preflight = self._youtube_preflight()
             if not preflight["passed"]:
                 run = self._finish_run(
                     run.run_id,
                     status="failed",
                     error="; ".join(preflight["missing_items"]),
-                    run_metadata={"competitive_scout": scout_result},
                 )
                 return serialize_run(run)
 
@@ -743,9 +738,6 @@ class AutomationService:
                 self._merge_attempt_report(attempt.attempt_id, {"reason_code": AUTOMATION_REASON_FALLBACK_PREVENTED})
                 self._finish_attempt(attempt.attempt_id, status="not_eligible", error=error)
                 return {"scheduled": False, "skip_slot": True, "error": error}
-            retention_experiment_assignment = self._attach_job_to_active_retention_experiment(job_id) if source == AUTOMATION_SOURCE_AUTO_TOPIC else None
-            if retention_experiment_assignment:
-                self._merge_attempt_report(attempt.attempt_id, {"retention_experiment": retention_experiment_assignment})
             if selected_script:
                 self._mark_ready_script_in_progress(selected_script.script_item_id)
             status = self.orchestrator.process_job(job_id)
@@ -1214,34 +1206,6 @@ class AutomationService:
             creation_via=CREATION_VIA_DAILY_CYCLE,
         ).model_dump()
 
-    def _run_competitive_scout_automation(self) -> dict[str, Any]:
-        try:
-            return CompetitiveScout(settings=self.settings).run_automation_cycle(niche_id=self.settings.niche_id)
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "failed", "reason": str(exc)}
-
-    def _attach_job_to_active_retention_experiment(self, job_id: str) -> dict[str, Any] | None:
-        try:
-            return CompetitiveScout(settings=self.settings).attach_job_to_active_experiment(job_id, niche_id=self.settings.niche_id)
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "failed", "reason": str(exc)}
-
-    def _active_retention_guidance_notes(self) -> str | None:
-        try:
-            guidance = CompetitiveScout(settings=self.settings).active_retention_guidance(niche_id=self.settings.niche_id)
-        except Exception:
-            return None
-        if not guidance:
-            return None
-        text = str(guidance.get("guidance_text") or "").strip()
-        if not text:
-            return None
-        return (
-            "Aprendizado competitivo ativo no ciclo diario. Use como diretriz estrutural de retencao, "
-            "sem copiar palavras, roteiro literal ou exemplos de Shorts de referencia.\n"
-            f"{text}"
-        )
-
     def _automatic_topic_payload(self) -> dict[str, Any]:
         with session_scope() as session:
             recent_topics = session.scalars(
@@ -1263,9 +1227,6 @@ class AutomationService:
                 "trend_source=cosmos_curiosity_pool",
             ]
         )
-        retention_guidance = self._active_retention_guidance_notes()
-        if retention_guidance:
-            notes = "\n".join([notes, retention_guidance])
         viral_prompt_template = load_viral_prompt_template(hub_settings_path(self.settings.data_dir))
         viral_prompt_note = build_viral_prompt_note(viral_prompt_template)
         notes = "\n".join([notes, viral_prompt_note])

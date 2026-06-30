@@ -741,7 +741,6 @@ premium_roles ['premium_review', 'gate_judge', 'repair']
   - `app/routes/publication.py`
   - `app/routes/settings.py`
   - `app/routes/youtube.py`
-  - `app/routes/competitive_scout.py`
   - `app/routes/calendar.py`
 - Existing: `app/routes/health.py`
 - Tests: `tests/test_hub_publication.py`, maybe `tests/test_orchestrator_flow.py`
