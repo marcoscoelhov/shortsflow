@@ -11,6 +11,7 @@ from app.competitive_scout import CompetitiveScout
 from app.db import init_db
 from app.operational_settings import apply_operational_settings
 from app.orchestrator import orchestrator
+from app.production_readiness import ProductionReadinessService
 from app.watchdog import AutomationWatchdog
 
 
@@ -25,6 +26,9 @@ def main() -> None:
     watchdog_parser.add_argument("--json", action="store_true", help="Imprime o relatório JSON completo")
     watchdog_parser.add_argument("--emit-alert", action="store_true", help="Imprime brief de alerta ou [SILENT]")
     watchdog_parser.add_argument("--deliver", action="store_true", help="Entrega alerta se configurado")
+
+    readiness_parser = subparsers.add_parser("production-readiness", help="Avalia se o ShortsFlow está pronto para operar em produção")
+    readiness_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
 
     backlog_scan_parser = subparsers.add_parser("backlog-recovery-scan", help="Inventaria backlog recuperável sem mutações")
     backlog_scan_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
@@ -103,6 +107,13 @@ def main() -> None:
             print(watchdog.telegram_brief(report) if report.status == "alert" else "[SILENT]")
         else:
             print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "production-readiness":
+        report = ProductionReadinessService(orchestrator.settings, orchestrator).evaluate()
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+        if report.status == "not_ready":
+            sys.exit(1)
         return
 
     if args.command == "backlog-recovery-scan":
