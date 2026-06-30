@@ -44,8 +44,6 @@ def evaluate_autoapproval_score(
     originality_confirmed = "originality_confirmed" in manual_confirmations
     if repetition_risk == "high" and not originality_confirmed:
         reasons.append("high_narrative_similarity")
-    if automatic_topic_job and repetition_risk in {"medium", "high"} and not originality_confirmed:
-        reasons.append("automatic_topic_repetition_review_required")
 
     factual_score = 1.0
     retention_score = as_score(audit.get("retention_score"))
