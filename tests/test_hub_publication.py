@@ -1,4 +1,5 @@
 from tests.e2e_support import *  # noqa: F403
+from tests.e2e_support import _create_basic_job
 from app.automation import PublishPlan, SAFE_AUTOMATION_TOPIC_POOL
 from app.growth_metrics import build_channel_growth_report, build_growth_score
 from app.models import LearnedRetentionProfile, RetentionExperiment, RetentionExperimentJob
@@ -4161,6 +4162,26 @@ def test_publication_dashboard_fragment_focuses_on_growth_analytics() -> None:
     assert "Para agendar" not in response.text
     assert "/automation/ready-scripts/import" not in response.text
     assert "Linhas editoriais por retenção" in response.text
+
+
+def test_publication_dashboard_page_shows_maintenance_summary() -> None:
+    client = TestClient(app)
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id="publication-maintenance-checkpoint",
+            status="blocked_for_monetization",
+            seed_theme="Buracos negros",
+            quality_summary={"hard_blockers": ["unsupported_claim"]},
+        )
+        session.commit()
+
+    response = client.get("/publication-hub")
+
+    assert response.status_code == 200
+    assert "Manutenção operacional" in response.text
+    assert "checkpoint humano" in response.text
+    assert "Cobertura futura" in response.text
 
 
 def test_llm_tournament_route_is_optional_and_sandboxed() -> None:

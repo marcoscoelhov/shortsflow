@@ -527,6 +527,7 @@ def publication_dashboard_page(request: Request):
         {
             **_publication_dashboard_context(request),
             "growth_return_to": "/publication-hub",
+            "show_maintenance": True,
             "settings": settings,
         },
     )

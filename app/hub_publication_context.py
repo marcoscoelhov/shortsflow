@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import Request
 from sqlalchemy import and_, func, or_, select
 
+from app.backlog_recovery import BacklogRecoveryService
 from app.db import SessionLocal
 from app.growth_metrics import build_growth_score
 from app.hub_status import NEEDS_ACTION_JOB_STATUSES
@@ -94,6 +97,55 @@ class HubPublicationContext:
             "retropost_daily_limit": self.settings.tiktok_retropost_daily_limit,
         }
 
+    def maintenance_summary(self, *, future_scheduled_count: int, needs_action_count: int) -> dict[str, object]:
+        try:
+            backlog = BacklogRecoveryService(self.settings, self.orchestrator).scan(limit=50)
+            summary = backlog.to_dict()["summary"]
+        except Exception:  # noqa: BLE001
+            summary = {}
+        watchdog_payload = self._latest_watchdog_payload()
+        checkpoint_count = int(summary.get("needs_checkpoint") or 0)
+        near_publishable_count = int(summary.get("near_publishable") or 0)
+        minimum = int(getattr(self.settings, "watchdog_min_future_coverage_days", 3))
+        action = "ok"
+        action_label = "Nada urgente"
+        action_body = "Agenda, revisão e watchdog não indicam ação imediata."
+        if future_scheduled_count < minimum:
+            action = "recover_schedule"
+            action_label = "Rodar recovery seguro"
+            action_body = "Cobertura futura abaixo do mínimo; tente recuperar backlog sem publicar checkpoints."
+        elif checkpoint_count:
+            action = "review_checkpoints"
+            action_label = "Revisar checkpoint humano"
+            action_body = "Há jobs bloqueados por risco factual, direitos ou duplicidade; precisam de decisão humana."
+        elif near_publishable_count:
+            action = "recover_near_publishable"
+            action_label = "Recuperar jobs próximos"
+            action_body = "Há jobs perto de publicação que podem passar por reparo seguro."
+        findings = watchdog_payload.get("findings")
+        findings_count = len(findings) if isinstance(findings, list) else 0
+        return {
+            "future_scheduled_count": future_scheduled_count,
+            "minimum_future_scheduled_count": minimum,
+            "needs_action_count": needs_action_count,
+            "checkpoint_count": checkpoint_count,
+            "near_publishable_count": near_publishable_count,
+            "watchdog_status": str(watchdog_payload.get("status") or "sem relatório"),
+            "watchdog_findings_count": findings_count,
+            "recommended_action": action,
+            "recommended_action_label": action_label,
+            "recommended_action_body": action_body,
+        }
+
+    def _latest_watchdog_payload(self) -> dict[str, object]:
+        path = Path(self.settings.data_dir) / "watchdog" / "latest.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return {}
+
     def dashboard_context(self, request: Request, limit: int = 6) -> dict[str, object]:
         refreshed_at = datetime.now(UTC)
         with SessionLocal() as session:
@@ -146,6 +198,12 @@ class HubPublicationContext:
             ) or 0
             scheduled_count = session.scalar(
                 select(func.count()).select_from(PublicationSchedule).where(PublicationSchedule.status == "scheduled")
+            ) or 0
+            future_scheduled_count = session.scalar(
+                select(func.count())
+                .select_from(PublicationSchedule)
+                .where(PublicationSchedule.status.in_(["scheduled", "publishing"]))
+                .where(PublicationSchedule.scheduled_for_utc > refreshed_at)
             ) or 0
             publishing_count = session.scalar(
                 select(func.count()).select_from(PublicationSchedule).where(PublicationSchedule.status == "publishing")
@@ -448,6 +506,7 @@ class HubPublicationContext:
             "integration": self.youtube_integration_context(request),
             "tiktok_integration": self.tiktok_integration_context(),
             "automation": self.automation_service.dashboard_context(),
+            "maintenance": self.maintenance_summary(future_scheduled_count=int(future_scheduled_count), needs_action_count=int(needs_action_count)),
             "ready_to_schedule": ready_to_schedule,
             "upcoming_schedule": upcoming_schedule,
             "recent_publications": recent_publications,

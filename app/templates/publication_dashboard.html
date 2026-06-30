@@ -78,6 +78,60 @@
     {% endfor %}
   </section>
 
+  {% if show_maintenance|default(false) %}
+  <section class="panel growth-command-center growth-next-actions" aria-labelledby="maintenance-summary-title">
+    <div class="panel-heading-row">
+      <div>
+        <p class="eyebrow">Manutenção operacional</p>
+        <h3 id="maintenance-summary-title">O que impede a máquina de seguir sozinha</h3>
+      </div>
+      <p class="publication-note">Mostra só contratos operacionais; jobs de checkpoint humano não são publicados automaticamente.</p>
+    </div>
+    <section class="growth-scoreboard growth-scoreboard-readable" aria-label="Resumo de manutenção operacional">
+      <article class="growth-scorecard {% if maintenance.future_scheduled_count < maintenance.minimum_future_scheduled_count %}bad{% else %}ok{% endif %}">
+        <span>Cobertura futura</span>
+        <strong>{{ maintenance.future_scheduled_count }}/{{ maintenance.minimum_future_scheduled_count }}</strong>
+        <small>slots futuros mínimos</small>
+      </article>
+      <article class="growth-scorecard {% if maintenance.checkpoint_count %}warn{% else %}ok{% endif %}">
+        <span>checkpoint humano</span>
+        <strong>{{ maintenance.checkpoint_count }}</strong>
+        <small>não publicar automaticamente</small>
+      </article>
+      <article class="growth-scorecard {% if maintenance.near_publishable_count %}warn{% else %}ok{% endif %}">
+        <span>Recuperáveis</span>
+        <strong>{{ maintenance.near_publishable_count }}</strong>
+        <small>podem passar por recovery seguro</small>
+      </article>
+      <article class="growth-scorecard {% if maintenance.watchdog_status == 'alert' %}bad{% elif maintenance.watchdog_status == 'silent' %}ok{% else %}warn{% endif %}">
+        <span>Watchdog</span>
+        <strong>{{ maintenance.watchdog_status }}</strong>
+        <small>{{ maintenance.watchdog_findings_count }} alerta(s)</small>
+      </article>
+    </section>
+    <div class="growth-action-list">
+      <article class="growth-action-row {% if maintenance.recommended_action == 'ok' %}is-muted{% endif %}">
+        <div class="growth-action-priority">{% if maintenance.recommended_action == 'ok' %}OK{% else %}P1{% endif %}</div>
+        <div class="growth-action-copy">
+          <strong>{{ maintenance.recommended_action_label }}</strong>
+          <p>{{ maintenance.recommended_action_body }}</p>
+        </div>
+        <div class="growth-action-control">
+          {% if maintenance.recommended_action in ['recover_schedule', 'recover_near_publishable'] %}
+          <form method="post" action="/automation/run" class="inline-form">
+            <input type="hidden" name="force" value="true">
+            <input type="hidden" name="return_to" value="/publication-hub">
+            <button type="submit" class="ghost">Rodar ciclo</button>
+          </form>
+          {% elif maintenance.recommended_action == 'review_checkpoints' %}
+          <a class="button-link ghost-link" href="/jobs?status=needs_action">Abrir fila</a>
+          {% endif %}
+        </div>
+      </article>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="panel growth-command-center growth-next-actions" aria-labelledby="growth-next-actions-title">
     <div class="panel-heading-row">
       <div>
