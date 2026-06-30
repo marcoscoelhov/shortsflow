@@ -36,8 +36,9 @@ from sqlalchemy import select
 _test_data_dir = Path("data-test").resolve()
 os.environ["SHORTSFLOW_DATA_DIR"] = str(_test_data_dir)
 os.environ["SHORTSFLOW_DATABASE_URL"] = f"sqlite:///{(_test_data_dir / 'test.db').resolve()}"
-# Tests must not inherit repo .env mock=false; deterministic mock providers only.
+# Tests must not inherit repo .env production settings.
 os.environ["SHORTSFLOW_USE_MOCK_PROVIDERS"] = "true"
+os.environ["SHORTSFLOW_HUB_AUTH_TOKEN"] = ""
 
 import app.main as main_module  # noqa: E402
 
