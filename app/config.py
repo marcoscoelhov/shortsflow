@@ -61,6 +61,13 @@ class Settings(BaseSettings):
     llm_enable_fallback: bool = True
     llm_script_draft_provider: str = "deepseek"
     llm_script_repair_attempts: int = 1
+    viral_intensity_hard_block: bool = False
+    viral_intensity_min_score: float = 0.72
+    viral_intensity_min_hook_scroll_stop: float = 0.72
+    viral_intensity_min_curiosity_gap: float = 0.68
+    viral_intensity_min_escalation: float = 0.62
+    viral_intensity_min_payoff_surprise: float = 0.50
+    viral_intensity_min_share_trigger: float = 0.45
     llm_topic_repair_attempts: int = 2
     llm_topic_timeout_sec: float = 75.0
     llm_script_draft_timeout_sec: float = 45.0
@@ -369,6 +376,20 @@ class Settings(BaseSettings):
     def validate_automation_score_threshold(cls, value: float) -> float:
         if not 0 <= value <= 1:
             raise ValueError("automation_score_threshold must be between 0 and 1")
+        return value
+
+    @field_validator(
+        "viral_intensity_min_score",
+        "viral_intensity_min_hook_scroll_stop",
+        "viral_intensity_min_curiosity_gap",
+        "viral_intensity_min_escalation",
+        "viral_intensity_min_payoff_surprise",
+        "viral_intensity_min_share_trigger",
+    )
+    @classmethod
+    def validate_viral_intensity_threshold(cls, value: float) -> float:
+        if not 0 <= value <= 1:
+            raise ValueError("viral intensity thresholds must be between 0 and 1")
         return value
 
     @field_validator("premium_publish_min_score")

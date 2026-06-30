@@ -278,3 +278,30 @@ def test_script_pipeline_blocks_generated_script_when_viral_repair_stays_weak() 
             ready_script_mode=False,
             job_id="job-test",
         )
+
+
+def test_script_pipeline_routes_low_viral_script_to_review_when_hard_block_is_disabled() -> None:
+    provider = _RepairingProvider(
+        {"title": "aula", "hook": "Quando isso ocorre, o processo acontece.", "full_narration": "Quando isso ocorre, o processo acontece."}
+    )
+    pipeline = ScriptPipeline.__new__(ScriptPipeline)
+    pipeline.owner = type(
+        "Owner",
+        (),
+        {
+            "settings": type("Settings", (), {"viral_intensity_hard_block": False})(),
+            "viral_intensity_gate": ViralIntensityGate(),
+            "providers": type("Providers", (), {"creative": provider})(),
+        },
+    )()
+
+    _, metrics, repair_file = pipeline._validate_or_repair_viral_intensity(
+        {"title": "aula", "hook": "Quando isso ocorre, o processo acontece.", "full_narration": "Quando isso ocorre, o processo acontece."},
+        plan_dict={},
+        ready_script_mode=False,
+        job_id="job-warning",
+    )
+
+    assert metrics["viral_intensity_warning_only"] is True
+    assert metrics["viral_intensity_hard_block"] is False
+    assert repair_file == "viral_intensity_repair.json"

@@ -257,6 +257,33 @@ class ScriptFactPackDomain(BasePipeline):
                         return pack
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
+        # OpenAlex can have a relevant record without an indexed abstract. Before
+        # downgrading an automatic topic, try a second scholarly index instead of
+        # asking the script model to work without evidence.
+        if query_batch:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(query_batch)))
+            try:
+                future_to_query = {
+                    executor.submit(self._europepmc_fact_pack, query, research_brief): query
+                    for query in query_batch
+                }
+                for future in concurrent.futures.as_completed(future_to_query):
+                    query = future_to_query[future]
+                    try:
+                        pack = future.result()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if pack.get("facts") and self._fact_pack_matches_topic(pack, request, topic_plan, research_brief):
+                        pack["query_used"] = query
+                        pack["status"] = "verified"
+                        pack["queries_attempted"] = query_batch
+                        pack["research_brief"] = research_brief
+                        pack["evidence_cards"] = self._normalize_evidence_cards(pack, research_brief)
+                        pack["viral_truth_policy"] = self._viral_truth_policy(topic_plan, request, research_brief, source_status="verified")
+                        pack["factual_status"] = pack["viral_truth_policy"].get("factual_status")
+                        return pack
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
         common_knowledge_allowed = self._editorial_mode(topic_plan, request) == "viral_curiosidades"
         viral_truth_policy = self._viral_truth_policy(topic_plan, request, research_brief, source_status="limited")
         low_risk_common_accepted = bool(viral_truth_policy.get("automatic_publish_allowed"))
@@ -925,6 +952,49 @@ class ScriptFactPackDomain(BasePipeline):
                 "editorial_rule": "Use peer-reviewed or scholarly article facts as source material only. Preserve viral pacing, but every precise number, date, technical cause, history claim, or scientific claim must be grounded in fact_id references or rewritten conservatively. Do not use Wikipedia as a factual source.",
             }
         return {"status": "limited", "facts": [], "evidence_cards": [], "sources": []}
+
+    def _europepmc_fact_pack(self, query: str, research_brief: dict[str, Any] | None = None) -> dict[str, Any]:
+        try:
+            with httpx.Client(timeout=httpx.Timeout(8.0, connect=3.0), headers={"User-Agent": "yts-render/1.0 fact-pack"}) as client:
+                response = client.get(
+                    "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+                    params={"query": query, "format": "json", "pageSize": 5, "resultType": "core"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except Exception:  # noqa: BLE001
+            return {"status": "limited", "facts": [], "sources": []}
+        for result in payload.get("resultList", {}).get("result", []) if isinstance(payload, dict) else []:
+            if not isinstance(result, dict):
+                continue
+            title = str(result.get("title") or "").strip()
+            abstract = re.sub(r"<[^>]+>", " ", str(result.get("abstractText") or "")).strip()
+            if not title or not abstract or not self._fact_result_is_relevant(query, title, abstract, research_brief):
+                continue
+            sentences = [
+                part.strip()
+                for part in re.split(r"(?<=[.!?])\s+", abstract)
+                if len(part.strip()) > 30 and self._fact_sentence_is_useful(part, query)
+            ]
+            if not sentences:
+                continue
+            facts = [
+                {"fact_id": f"F{index}", "claim": sentence[:260], "source_id": "S1"}
+                for index, sentence in enumerate(sentences[:5], start=1)
+            ]
+            source_url = str(result.get("doi") or result.get("pmid") or result.get("id") or "")
+            if source_url and not source_url.startswith("http"):
+                source_url = f"https://europepmc.org/article/{result.get('source') or 'MED'}/{source_url}"
+            return {
+                "status": "verified",
+                "provider": "europepmc",
+                "topic_title": title,
+                "publication_year": result.get("pubYear"),
+                "facts": facts,
+                "sources": [{"source_id": "S1", "title": title, "url": source_url, "provider": "europepmc", "container": result.get("journalTitle"), "publication_year": result.get("pubYear")}],
+                "editorial_rule": "Use scholarly source facts only. Preserve viral pacing, but ground precise claims in fact_id references.",
+            }
+        return {"status": "limited", "facts": [], "sources": []}
 
     def _openalex_abstract_text(self, abstract_inverted_index: Any) -> str:
         if not isinstance(abstract_inverted_index, dict):

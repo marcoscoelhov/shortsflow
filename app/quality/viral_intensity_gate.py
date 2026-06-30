@@ -61,12 +61,29 @@ class ViralIntensityGate:
     pipeline a hard anti-boredom floor.
     """
 
-    MIN_VIRAL_INTENSITY = 0.80
-    MIN_HOOK_SCROLL_STOP = 0.90
-    MIN_CURIOSITY_GAP = 0.75
-    MIN_ESCALATION = 0.70
-    MIN_PAYOFF_SURPRISE = 0.55
-    MIN_SHARE_TRIGGER = 0.55
+    DEFAULT_MIN_VIRAL_INTENSITY = 0.80
+    DEFAULT_MIN_HOOK_SCROLL_STOP = 0.90
+    DEFAULT_MIN_CURIOSITY_GAP = 0.75
+    DEFAULT_MIN_ESCALATION = 0.70
+    DEFAULT_MIN_PAYOFF_SURPRISE = 0.55
+    DEFAULT_MIN_SHARE_TRIGGER = 0.55
+
+    def __init__(
+        self,
+        *,
+        min_viral_intensity: float = DEFAULT_MIN_VIRAL_INTENSITY,
+        min_hook_scroll_stop: float = DEFAULT_MIN_HOOK_SCROLL_STOP,
+        min_curiosity_gap: float = DEFAULT_MIN_CURIOSITY_GAP,
+        min_escalation: float = DEFAULT_MIN_ESCALATION,
+        min_payoff_surprise: float = DEFAULT_MIN_PAYOFF_SURPRISE,
+        min_share_trigger: float = DEFAULT_MIN_SHARE_TRIGGER,
+    ) -> None:
+        self.min_viral_intensity = min_viral_intensity
+        self.min_hook_scroll_stop = min_hook_scroll_stop
+        self.min_curiosity_gap = min_curiosity_gap
+        self.min_escalation = min_escalation
+        self.min_payoff_surprise = min_payoff_surprise
+        self.min_share_trigger = min_share_trigger
 
     def validate(self, script: dict[str, Any]) -> ViralIntensityResult:
         title = str(script.get("title") or "")
@@ -144,17 +161,17 @@ class ViralIntensityGate:
         reasons: list[str] = []
         if didactic_hits >= 3 or (didactic_hits >= 2 and NEUTRAL_OPENING_PATTERN.search(first_sentence)):
             reasons.append("didactic_or_neutral_tone")
-        if hook_scroll_stop_score < self.MIN_HOOK_SCROLL_STOP:
+        if hook_scroll_stop_score < self.min_hook_scroll_stop:
             reasons.append("hook_not_scroll_stopping")
-        if curiosity_gap_score < self.MIN_CURIOSITY_GAP:
+        if curiosity_gap_score < self.min_curiosity_gap:
             reasons.append("weak_curiosity_gap")
-        if escalation_score < self.MIN_ESCALATION:
+        if escalation_score < self.min_escalation:
             reasons.append("weak_escalation")
-        if payoff_surprise_score < self.MIN_PAYOFF_SURPRISE:
+        if payoff_surprise_score < self.min_payoff_surprise:
             reasons.append("predictable_payoff")
-        if share_trigger_score < self.MIN_SHARE_TRIGGER:
+        if share_trigger_score < self.min_share_trigger:
             reasons.append("weak_share_trigger")
-        if viral_intensity_score < self.MIN_VIRAL_INTENSITY:
+        if viral_intensity_score < self.min_viral_intensity:
             reasons.append("viral_intensity_below_threshold")
 
         metrics = {

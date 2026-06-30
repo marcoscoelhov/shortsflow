@@ -1057,6 +1057,7 @@ def test_fact_pack_rejects_verified_source_for_wrong_primary_topic(monkeypatch) 
         }
 
     monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", fake_article_pack)
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_europepmc_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
     topic_plan = SimpleNamespace(
         canonical_topic="YouTube como plataforma dominante em vídeo",
         angle="Comparar YouTube com Google e TikTok sem trocar a entidade principal.",
@@ -1076,6 +1077,8 @@ def test_fact_pack_accepts_low_risk_common_knowledge_policy(monkeypatch) -> None
     pipeline = orchestrator.script_pipeline
     monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
     monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_fact_pack_matches_topic", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_europepmc_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
     topic_plan = SimpleNamespace(
         canonical_topic="Por que o espelho embaça no banho?",
         angle="Conectar vapor quente, vidro frio e gotículas minúsculas em uma situação familiar.",
@@ -1097,10 +1100,44 @@ def test_fact_pack_accepts_low_risk_common_knowledge_policy(monkeypatch) -> None
     assert report["viral_truth_policy"]["copywriting_allowed"] is True
 
 
+def test_fact_pack_uses_europepmc_when_openalex_has_no_usable_abstract(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_fact_pack_matches_topic", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        pipeline.fact_pack_domain,
+        "_europepmc_fact_pack",
+        lambda query, _brief=None: {
+            "status": "verified",
+            "provider": "europepmc",
+            "topic_title": "Caffeine and adenosine receptors",
+            "facts": [{"fact_id": "F1", "claim": "Caffeine interacts with adenosine receptors.", "source_id": "S1"}],
+            "sources": [{"source_id": "S1", "title": "Caffeine and adenosine receptors"}],
+        },
+    )
+    topic_plan = SimpleNamespace(
+        canonical_topic="Cafeína e adenosina",
+        angle="O mecanismo que mascara a sensação de sono.",
+        hook_promise="Explicar por que a cafeína muda a percepção de cansaço.",
+        search_terms=["caffeine adenosine receptor"],
+        entities=["Cafeína", "Adenosina"],
+        title_candidates=["Como a cafeína interfere na adenosina"],
+        quality_metrics={"editorial_mode": "factual_strict"},
+    )
+    request = SimpleNamespace(seed_theme="Cafeína e adenosina", notes=None, requested_angle=None)
+
+    report = pipeline._build_fact_pack(topic_plan, request)
+
+    assert report["status"] == "verified"
+    assert report["provider"] == "europepmc"
+
+
 def test_fact_pack_accepts_low_risk_product_observation_policy(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
     monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
     monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_europepmc_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
     topic_plan = SimpleNamespace(
         canonical_topic="Por que a tela do celular parece pior no sol?",
         angle="Conectar brilho da tela, reflexo solar e luz ambiente numa cena comum de rua.",
@@ -1124,6 +1161,7 @@ def test_fact_pack_accepts_hyphenated_product_after_normalization(monkeypatch) -
     pipeline = orchestrator.script_pipeline
     monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
     monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_europepmc_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
     topic_plan = SimpleNamespace(
         canonical_topic="Por que o micro-ondas deixa parte da comida fria?",
         angle="Conectar ondas, prato girando e pontos frios numa situação comum de cozinha.",
@@ -1147,6 +1185,7 @@ def test_fact_pack_does_not_accept_platform_or_stats_as_common_product_observati
     pipeline = orchestrator.script_pipeline
     monkeypatch.setattr(pipeline.settings, "use_mock_providers", False)
     monkeypatch.setattr(pipeline.fact_pack_domain, "_scientific_article_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
+    monkeypatch.setattr(pipeline.fact_pack_domain, "_europepmc_fact_pack", lambda _query, _brief=None: {"status": "limited", "facts": [], "sources": []})
     topic_plan = SimpleNamespace(
         canonical_topic="YouTube é maior do que você imagina",
         angle="Mostrar dados de plataforma dominante e estatística de crescimento.",
