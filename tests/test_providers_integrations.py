@@ -53,6 +53,29 @@ def test_script_generation_candidates_skip_duplicate_provider_model() -> None:
     assert provider._script_generation_candidates() == [("primary", primary, 150.0)]
 
 
+def test_generate_script_rejects_empty_provider_payload() -> None:
+    class EmptyProvider:
+        provider_name = "deepseek"
+        model_name = "deepseek-v4-flash"
+
+        def generate_script(self, topic_plan):
+            return {}
+
+    provider = object.__new__(ResilientCreativeProvider)
+    setattr(provider, "strict_minimax_validation", False)
+    setattr(provider, "primary", EmptyProvider())
+    setattr(provider, "fallback", None)
+    setattr(provider, "script_draft_provider", None)
+    setattr(provider, "_script_generation_candidates", lambda: [("primary", provider.primary, 1.0)])
+    setattr(provider, "_run_primary_with_timeout", lambda fn, timeout_sec: fn())
+
+    with pytest.raises(ProviderFailure) as exc:
+        provider.generate_script({"canonical_topic": "cosmos"})
+
+    assert "empty script response" in str(exc.value)
+    assert "deepseek" in str(exc.value)
+
+
 def test_deepseek_provider_uses_v4_flash_openai_compatible_client(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

@@ -84,6 +84,9 @@ class ResilientCreativeProvider:
                     lambda provider=provider: provider.generate_script(topic_plan),
                     timeout_sec=timeout_sec,
                 )
+                if not isinstance(payload, dict) or not str(payload.get("full_narration") or "").strip():
+                    provider_name = getattr(provider, "provider_name", role)
+                    raise ProviderFailure(str(provider_name), f"{provider_name}: empty script response")
                 metrics = payload.setdefault("qa_metrics", {})
                 metrics["generation_provider_role"] = role
                 metrics["generation_provider"] = getattr(provider, "provider_name", role)
