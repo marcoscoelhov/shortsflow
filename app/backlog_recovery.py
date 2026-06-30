@@ -17,12 +17,9 @@ from app.domain_contracts import (
     JOB_STATUS_READY_FOR_UPLOAD,
     JOB_STATUS_SCRIPT_QUALITY_FAILED,
     JOB_STATUS_SUBTITLE_QUALITY_FAILED,
-    REASON_ASSET_VISUAL_REVIEW_REQUIRED,
-    REASON_INVENTED_SOURCE_FACT_IDS,
-    REASON_UNSUPPORTED_CLAIM,
-    REASON_VISUAL_REVIEW_REQUIRED,
 )
 from app.models import BacklogRecoveryAttempt, Job, PublicationSchedule, RenderOutput, SceneAsset, NarrationAsset
+from app.policies.publication_policy import classify_recovery_gate
 from app.utils import new_id, path_from_uri, stable_hash, utcnow
 
 CANDIDATE_STATUSES = {
@@ -34,30 +31,6 @@ CANDIDATE_STATUSES = {
     "render_quality_failed",
     "asset_quality_failed",
     JOB_STATUS_SUBTITLE_QUALITY_FAILED,
-}
-FACTUAL_OR_RIGHTS_MARKERS = {
-    REASON_UNSUPPORTED_CLAIM,
-    REASON_INVENTED_SOURCE_FACT_IDS,
-    "rights",
-    "copyright",
-    "youtube_policy",
-    "policy_risk",
-    "factual",
-}
-CORRECTABLE_MARKERS = {
-    REASON_VISUAL_REVIEW_REQUIRED,
-    REASON_ASSET_VISUAL_REVIEW_REQUIRED,
-    "metadata",
-    "text publish audit missing",
-    "image_semantics_score_below_threshold",
-    "topic quality metrics incomplete",
-    "duration",
-    "render failed",
-    "asset",
-    "tts",
-    "subtitle",
-    "monetization_readiness_gate",
-    "premium_publish_score_below_threshold",
 }
 
 
@@ -150,10 +123,9 @@ class BacklogRecoveryService:
             return BacklogCandidate(job.job_id, job.status, "already_scheduled", ["active_schedule_exists"], [], "low", job.job_origin)
 
         evidence = self._job_evidence(session, job)
-        if evidence["duplicate_risk"]:
-            return BacklogCandidate(job.job_id, job.status, "needs_checkpoint", ["duplicate_or_already_published_risk"], [], "medium", job.job_origin)
-        if any(marker in evidence["text"] for marker in FACTUAL_OR_RIGHTS_MARKERS):
-            return BacklogCandidate(job.job_id, job.status, "needs_checkpoint", ["factual_or_rights_risk"], [], "high", job.job_origin)
+        gate_decision = classify_recovery_gate(evidence["text"], duplicate_risk=bool(evidence["duplicate_risk"]))
+        if gate_decision.classification == "needs_checkpoint":
+            return BacklogCandidate(job.job_id, job.status, "needs_checkpoint", gate_decision.reasons, [], gate_decision.risk, job.job_origin)
         if self._failed_same_repair_twice(session, job.job_id):
             return BacklogCandidate(job.job_id, job.status, "not_worth_recovering", ["same_repair_failed_twice"], [], "high", job.job_origin)
 
@@ -169,10 +141,10 @@ class BacklogRecoveryService:
             allowed_repairs.extend(["monetization_readiness_gate", "derived_audits"])
             reasons.append("rendered_but_waiting_final_gate")
 
-        if job.status == JOB_STATUS_BLOCKED_FOR_MONETIZATION and has_render and any(marker in evidence["text"] for marker in CORRECTABLE_MARKERS):
+        if job.status == JOB_STATUS_BLOCKED_FOR_MONETIZATION and has_render and gate_decision.classification == "correctable":
             allowed_repairs.extend(["metadata", "monetization_readiness_gate", "derived_audits"])
-            reasons.append("correctable_gate_or_score_blocker")
-            risk = "medium"
+            reasons.extend(gate_decision.reasons)
+            risk = gate_decision.risk
 
         if job.status == "render_quality_failed" and has_assets and has_audio:
             allowed_repairs.append("render")
