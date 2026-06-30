@@ -221,3 +221,35 @@ def test_run_records_recovery_attempt(monkeypatch) -> None:
         attempt = session.scalar(select(BacklogRecoveryAttempt).where(BacklogRecoveryAttempt.job_id == "backlog-run"))
     assert attempt is not None
     assert attempt.status == "recovered"
+
+
+def test_run_reports_checkpoint_candidates_without_mutating_them(monkeypatch) -> None:
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id="backlog-checkpoint-safe-stop",
+            status="blocked_for_monetization",
+            quality_summary={"hard_blockers": ["unsupported_claim"]},
+        )
+        _add_render(session, "backlog-checkpoint-safe-stop")
+        session.commit()
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(orchestrator, "reprocess_job_from_step", lambda job_id, step: calls.append((job_id, step)) or "ready_for_upload")
+
+    report = _service().run(mode="reactive", job_id="backlog-checkpoint-safe-stop")
+
+    assert calls == []
+    assert report.actions == [
+        {
+            "job_id": "backlog-checkpoint-safe-stop",
+            "status": "skipped_checkpoint_required",
+            "classification": "needs_checkpoint",
+            "reasons": ["factual_or_rights_risk"],
+        }
+    ]
+    with SessionLocal() as session:
+        attempts = session.scalar(
+            select(func.count()).select_from(BacklogRecoveryAttempt).where(BacklogRecoveryAttempt.job_id == "backlog-checkpoint-safe-stop")
+        )
+    assert attempts == 0

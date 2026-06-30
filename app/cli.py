@@ -26,6 +26,7 @@ def main() -> None:
     watchdog_parser.add_argument("--json", action="store_true", help="Imprime o relatório JSON completo")
     watchdog_parser.add_argument("--emit-alert", action="store_true", help="Imprime brief de alerta ou [SILENT]")
     watchdog_parser.add_argument("--deliver", action="store_true", help="Entrega alerta se configurado")
+    watchdog_parser.add_argument("--recover", action="store_true", help="Executa backlog recovery reativo se o watchdog recomendar")
 
     readiness_parser = subparsers.add_parser("production-readiness", help="Avalia se o ShortsFlow está pronto para operar em produção")
     readiness_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
@@ -100,13 +101,21 @@ def main() -> None:
     if args.command == "automation-watchdog":
         watchdog = AutomationWatchdog(orchestrator.settings, orchestrator)
         report = watchdog.evaluate()
+        recovery_result = None
+        if args.recover and watchdog.recovery_plan(report)["should_recover"]:
+            recovery_result = BacklogRecoveryService(orchestrator.settings, orchestrator).run(mode="reactive")
+            report = watchdog.evaluate()
         if args.deliver:
             report = watchdog.deliver_alert(report)
         watchdog.persist_report(report)
         if args.emit_alert:
             print(watchdog.telegram_brief(report) if report.status == "alert" else "[SILENT]")
         else:
-            print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+            payload = report.to_dict()
+            payload["recovery_plan"] = watchdog.recovery_plan(report)
+            if recovery_result is not None:
+                payload["recovery_result"] = recovery_result.to_dict()
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
     if args.command == "production-readiness":

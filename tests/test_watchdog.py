@@ -166,6 +166,34 @@ def test_watchdog_reports_low_future_coverage() -> None:
     assert any(f.kind == "future_coverage_low" for f in report.findings)
 
 
+def test_watchdog_recovery_plan_recommends_reactive_backlog_for_low_coverage() -> None:
+    now = datetime(2099, 6, 29, 8, 0, tzinfo=UTC)
+    with SessionLocal() as session:
+        session.add(
+            AutomationRun(
+                run_id="watchdog-low-coverage-plan-run",
+                schema_version="1.0.0",
+                content_hash="watchdog-low-coverage-plan-run",
+                local_date="2099-06-29",
+                timezone="America/Sao_Paulo",
+                status="succeeded",
+                started_at=now - timedelta(minutes=20),
+                finished_at=now - timedelta(minutes=10),
+                run_metadata={"schedule_complete": False, "unfilled_slots": ["2099-06-30T11:00"]},
+            )
+        )
+        session.commit()
+
+    watchdog = _watchdog(_settings(watchdog_min_future_coverage_days=999999))
+    report = watchdog.evaluate(now=now)
+    plan = watchdog.recovery_plan(report)
+
+    assert plan["should_recover"] is True
+    assert plan["mode"] == "reactive"
+    assert plan["command"] == ".venv/bin/python -m app.cli backlog-recovery-run --mode reactive --json"
+    assert "future_coverage_low" in plan["triggers"]
+
+
 def test_watchdog_reports_stuck_jobs_by_status() -> None:
     now = datetime(2099, 6, 30, 8, 0, tzinfo=UTC)
     with SessionLocal() as session:

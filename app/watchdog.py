@@ -262,10 +262,19 @@ class AutomationWatchdog:
         return "\n".join(lines)
 
     def recommended_backlog_command(self, report: WatchdogReport) -> str | None:
+        plan = self.recovery_plan(report)
+        return str(plan["command"]) if plan["should_recover"] else None
+
+    def recovery_plan(self, report: WatchdogReport) -> dict[str, Any]:
         trigger_kinds = {"future_coverage_low", "automation_run_failed", "automation_incomplete_schedule"}
-        if any(finding.kind in trigger_kinds for finding in report.findings):
-            return ".venv/bin/python -m app.cli backlog-recovery-run --mode reactive --json"
-        return None
+        triggers = [finding.kind for finding in report.findings if finding.kind in trigger_kinds]
+        should_recover = bool(triggers)
+        return {
+            "should_recover": should_recover,
+            "mode": "reactive" if should_recover else None,
+            "command": ".venv/bin/python -m app.cli backlog-recovery-run --mode reactive --json" if should_recover else None,
+            "triggers": triggers,
+        }
 
     def deliver_alert(self, report: WatchdogReport) -> WatchdogReport:
         if report.status != "alert":

@@ -112,6 +112,16 @@ class BacklogRecoveryService:
         if dry_run:
             return BacklogRecoveryReport(status="ok", mode=mode, dry_run=True, candidates=candidates, actions=[])
         for candidate in candidates:
+            if candidate.classification == "needs_checkpoint":
+                actions.append(
+                    {
+                        "job_id": candidate.job_id,
+                        "status": "skipped_checkpoint_required",
+                        "classification": candidate.classification,
+                        "reasons": candidate.reasons,
+                    }
+                )
+                continue
             if candidate.classification != "near_publishable":
                 continue
             action = self._repair_candidate(candidate)
