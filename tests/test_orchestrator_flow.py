@@ -107,7 +107,7 @@ def test_full_pipeline_reaches_monetization_review() -> None:
     assert detail.status_code == 200
     assert "Decidir revisão" in detail.text
     if final_status == "monetization_review":
-        assert "Aprovar e liberar agenda" in detail.text
+        assert "Aprovar para agendamento (revisão final no YouTube Studio)" in detail.text
     else:
         assert "Rejeitar com motivo" in detail.text
     assert "Agendar no YouTube" in detail.text

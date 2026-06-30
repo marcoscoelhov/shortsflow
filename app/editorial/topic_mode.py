@@ -26,6 +26,19 @@ SCIENCE_TOPIC_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+SPACE_ENTERTAINMENT_TOPIC_PATTERN = re.compile(
+    r"\b(?:astronomia|universo|cosmos|espa[cç]o|espacial|sistema\s+solar|planeta|planetas|marte|venus|mercurio|"
+    r"jupiter|saturno|urano|netuno|estrela|estrelas|gal[aá]xia|gal[aá]xias|buraco\s+negro|buracos\s+negros|"
+    r"lua|luas|exoplaneta|exoplanetas|sol|meteoro|meteorito|asteroide|cometa|nebulosa|supernova|eclipse|nasa|"
+    r"telesc[oó]pio|sonda|sat[eé]lite|[oó]rbita|cosmologia|araneiform|james\s+webb|hubble)\b",
+    re.IGNORECASE,
+)
+
+COSMOS_POLICY_MARKER_PATTERN = re.compile(
+    r"cosmos_astronomia_universo_first|automatic_topic_focus\s*=\s*astronomia",
+    re.IGNORECASE,
+)
+
 NEGATED_SCIENCE_CONTEXT_PATTERN = re.compile(
     r"\b(?:sem|nao|não)\s+(?:parecer\s+)?(?:explica[cç][aã]o\s+)?cient[ií]fic[oa]s?\b",
     re.IGNORECASE,
@@ -78,6 +91,13 @@ def resolve_editorial_mode(topic_plan: Any | None = None, request: Any | None = 
     if override_text and STRICT_OVERRIDE_PATTERN.search(override_text):
         return "factual_strict"
     source_text = " ".join(part for part in [seed_theme, canonical_topic, angle, hook_promise] if part).strip()
+    policy_blob = " ".join(part for part in [notes, requested_angle, source_text] if part)
+    cosmos_policy = bool(
+        COSMOS_POLICY_MARKER_PATTERN.search(policy_blob)
+        or (isinstance(quality_metrics, Mapping) and str(quality_metrics.get("topic_niche") or "").strip() == "astronomia")
+    )
+    if cosmos_policy or (source_text and SPACE_ENTERTAINMENT_TOPIC_PATTERN.search(source_text)):
+        return "viral_curiosidades"
     source_text_for_risk = NEGATED_SCIENCE_CONTEXT_PATTERN.sub(" ", source_text)
     if source_text_for_risk and HIGH_RISK_TOPIC_PATTERN.search(source_text_for_risk):
         return "factual_strict"
@@ -89,8 +109,29 @@ def resolve_editorial_mode(topic_plan: Any | None = None, request: Any | None = 
         return "factual_strict"
     if isinstance(quality_metrics, Mapping):
         existing_mode = str(quality_metrics.get("editorial_mode") or "").strip()
+        if existing_mode == "factual_strict" and (
+            cosmos_policy or (source_text and SPACE_ENTERTAINMENT_TOPIC_PATTERN.search(source_text))
+        ):
+            return "viral_curiosidades"
         if existing_mode == "factual_strict" and visual_craft_context:
             return "viral_curiosidades"
         if existing_mode in {"viral_curiosidades", "factual_strict"}:
             return existing_mode
     return "viral_curiosidades"
+
+
+def is_viral_space_entertainment_context(topic_plan: Any | None = None, request: Any | None = None) -> bool:
+    if resolve_editorial_mode(topic_plan, request) != "viral_curiosidades":
+        return False
+    quality_metrics = _read_field(topic_plan, "quality_metrics", {}) or {}
+    if isinstance(quality_metrics, Mapping) and str(quality_metrics.get("topic_niche") or "").strip() == "astronomia":
+        return True
+    notes = str(_read_field(request, "notes", "") or "")
+    seed_theme = str(_read_field(request, "seed_theme", "") or "")
+    canonical_topic = str(_read_field(topic_plan, "canonical_topic", "") or "")
+    angle = str(_read_field(topic_plan, "angle", "") or "")
+    hook_promise = str(_read_field(topic_plan, "hook_promise", "") or "")
+    blob = " ".join(part for part in [notes, seed_theme, canonical_topic, angle, hook_promise] if part)
+    if COSMOS_POLICY_MARKER_PATTERN.search(blob):
+        return True
+    return bool(blob and SPACE_ENTERTAINMENT_TOPIC_PATTERN.search(blob))

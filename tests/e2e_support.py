@@ -33,11 +33,11 @@ from pydantic import ValidationError
 
 from sqlalchemy import select
 
-os.environ.setdefault("SHORTSFLOW_DATA_DIR", str(Path("data-test").resolve()))
-
-os.environ.setdefault("SHORTSFLOW_DATABASE_URL", f"sqlite:///{Path('data-test/test.db').resolve()}")
-
-os.environ.setdefault("SHORTSFLOW_USE_MOCK_PROVIDERS", "true")
+_test_data_dir = Path("data-test").resolve()
+os.environ["SHORTSFLOW_DATA_DIR"] = str(_test_data_dir)
+os.environ["SHORTSFLOW_DATABASE_URL"] = f"sqlite:///{(_test_data_dir / 'test.db').resolve()}"
+# Tests must not inherit repo .env mock=false; deterministic mock providers only.
+os.environ["SHORTSFLOW_USE_MOCK_PROVIDERS"] = "true"
 
 import app.main as main_module  # noqa: E402
 
@@ -184,7 +184,7 @@ def _create_basic_job(
     return topic_request_id
 
 def _write_job_artifact(job_id: str, relative_path: str, content: str = "artifact") -> Path:
-    artifact_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / relative_path
+    artifact_path = (Path(os.environ["SHORTSFLOW_DATA_DIR"]).resolve() / "artifacts" / job_id / relative_path).resolve()
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(content, encoding="utf-8")
     return artifact_path

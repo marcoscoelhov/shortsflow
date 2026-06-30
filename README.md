@@ -43,7 +43,7 @@ Para rodar sem custo de API:
 
 ```env
 SHORTSFLOW_USE_MOCK_PROVIDERS=true
-SHORTSFLOW_DATABASE_URL=sqlite:///data/shortsflow.db
+SHORTSFLOW_DATABASE_URL=sqlite:///data/shortsflow_render.db
 SHORTSFLOW_DATA_DIR=data
 ```
 
@@ -113,7 +113,7 @@ O prompt viral salvo no Hub orienta a camada editorial dos jobs gerados: tipo de
 
 Ele nao troca a origem do job, nao muda credenciais, nao amplia o nicho permitido, nao habilita fallback entre lanes, nao liga publicacao automatica e nao ignora gates de factualidade, direitos, qualidade, visual ou monetizacao. Se o prompt pedir formato externo diferente, o app continua usando o JSON interno obrigatorio.
 
-Detalhes finais de artifact, nomes de campos e reason codes para `automatic_topic` ainda dependem do smoke E2E. Enquanto isso, nao assuma que o frontend ja exibe origem default/custom do prompt ou reason code detalhado; trate isso como lacuna de acompanhamento.
+Detalhes finais de artifact, nomes de campos e reason codes para `automatic_topic` foram validados no smoke E2E (2 ready_for_upload + 1 gate fail com reason acionavel; job_origin=automatic_topic, creation_via=daily_cycle, viral_prompt_source=hub_settings, policy=cosmos). UI pode ainda nao exibir default/custom do prompt em todos lugares; trate como follow-up de UX.
 
 Exemplos curtos para astronomia:
 
@@ -301,7 +301,19 @@ Rotas principais:
 
 ## Testes
 
-Suite principal:
+Lane rapida Ponytail/operacional — barata, sem pipeline pesado, cobre harness de teste, contratos `automatic_topic`, source isolation, Hub/auth/refresh e contrato viral estruturado:
+
+```bash
+.venv/bin/python scripts/shortsflow_fast_lane.py
+```
+
+Gate estatico Ponytail Ultra — falha se os contratos de simplicidade operacional cairem abaixo de 9.5:
+
+```bash
+.venv/bin/python scripts/ponytail_ultra_gate.py
+```
+
+Suite principal antes de commit/push:
 
 ```bash
 .venv/bin/python -m pytest -q

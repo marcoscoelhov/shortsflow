@@ -16,6 +16,20 @@ class ScriptRepairDomain(BasePipeline):
     def __getattr__(self, name: str) -> Any:
         return getattr(self.owner, name)
 
+    def _gate_context_from_plan(self, plan_dict: dict[str, Any]) -> tuple[Any | None, Any | None]:
+        topic_plan = {
+            "canonical_topic": plan_dict.get("canonical_topic"),
+            "angle": plan_dict.get("angle"),
+            "hook_promise": plan_dict.get("hook_promise"),
+            "quality_metrics": plan_dict.get("quality_metrics") or {},
+        }
+        request = {
+            "seed_theme": plan_dict.get("original_input"),
+            "notes": plan_dict.get("hub_notes"),
+            "requested_angle": plan_dict.get("requested_angle"),
+        }
+        return topic_plan, request
+
     def _fact_pack_consistency_reasons(self, script: dict[str, Any], fact_pack: Any) -> list[str]:
         source_ids = script.get("source_fact_ids") or script.get("qa_metrics", {}).get("source_fact_ids") or []
         if isinstance(source_ids, str):
@@ -30,6 +44,8 @@ class ScriptRepairDomain(BasePipeline):
             if str(source_id)
         ]
         if not isinstance(fact_pack, dict) or fact_pack.get("status") != "verified":
+            if fact_pack.get("provider") == "disabled_by_policy" or fact_pack.get("status") == "disabled":
+                return []
             return ["invented_source_fact_ids"] if source_ids or trace_source_ids else []
         facts = fact_pack.get("facts") or []
         valid_ids = {str(fact.get("fact_id")) for fact in facts if fact.get("fact_id")}
@@ -691,7 +707,13 @@ class ScriptRepairDomain(BasePipeline):
         script = self._apply_cta_policy(dict(script), cta_style)
         script = self._postprocess_script_for_quality(script, plan_dict, [])
         script["qa_metrics"] = normalize_script_metrics(dict(script.get("qa_metrics") or {}))
-        gate_result = self.script_gate.validate(script, target_duration_sec)
+        topic_plan_ctx, request_ctx = self._gate_context_from_plan(plan_dict)
+        gate_result = self.script_gate.validate(
+            script,
+            target_duration_sec,
+            topic_plan=topic_plan_ctx,
+            request=request_ctx,
+        )
         fact_pack = plan_dict.get("fact_pack") if isinstance(plan_dict.get("fact_pack"), dict) else {}
         gate_result = self._downgrade_grounded_fact_risk(script, fact_pack, gate_result)
         consistency_reasons = self._fact_pack_consistency_reasons(script, fact_pack)
@@ -770,7 +792,12 @@ class ScriptRepairDomain(BasePipeline):
             repaired = self._apply_cta_policy(repaired, cta_style)
             repaired = self._postprocess_script_for_quality(repaired, plan_dict, last_reasons)
             repaired["qa_metrics"] = normalize_script_metrics(dict(repaired.get("qa_metrics") or {}))
-            repaired_gate = self.script_gate.validate(repaired, target_duration_sec)
+            repaired_gate = self.script_gate.validate(
+                repaired,
+                target_duration_sec,
+                topic_plan=topic_plan_ctx,
+                request=request_ctx,
+            )
             repaired_gate = self._downgrade_grounded_fact_risk(repaired, fact_pack, repaired_gate)
             repaired_consistency_reasons = self._fact_pack_consistency_reasons(repaired, plan_dict.get("fact_pack"))
             attempts_log.append(
@@ -804,7 +831,12 @@ class ScriptRepairDomain(BasePipeline):
             fallback_repaired = self._apply_cta_policy(fallback_repaired, cta_style)
             fallback_repaired = self._postprocess_script_for_quality(fallback_repaired, plan_dict, last_reasons)
             fallback_repaired["qa_metrics"] = normalize_script_metrics(dict(fallback_repaired.get("qa_metrics") or {}))
-            fallback_gate = self.script_gate.validate(fallback_repaired, target_duration_sec)
+            fallback_gate = self.script_gate.validate(
+                fallback_repaired,
+                target_duration_sec,
+                topic_plan=topic_plan_ctx,
+                request=request_ctx,
+            )
             fallback_gate = self._downgrade_grounded_fact_risk(fallback_repaired, fact_pack, fallback_gate)
             fallback_consistency_reasons = self._fact_pack_consistency_reasons(fallback_repaired, plan_dict.get("fact_pack"))
             attempts_log.append(
@@ -870,7 +902,13 @@ class ScriptRepairDomain(BasePipeline):
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         preserved = dict(script)
         preserved["qa_metrics"] = normalize_script_metrics(dict(preserved.get("qa_metrics") or {}))
-        gate_result = self.script_gate.validate(preserved, target_duration_sec)
+        topic_plan_ctx, request_ctx = self._gate_context_from_plan(plan_dict)
+        gate_result = self.script_gate.validate(
+            preserved,
+            target_duration_sec,
+            topic_plan=topic_plan_ctx,
+            request=request_ctx,
+        )
         fact_pack = plan_dict.get("fact_pack") if isinstance(plan_dict.get("fact_pack"), dict) else {}
         consistency_reasons = self._fact_pack_consistency_reasons(preserved, fact_pack)
         ready_script_gate_reasons = [

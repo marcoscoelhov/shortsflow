@@ -40,7 +40,7 @@ cp .env.example .env
 
 ```env
 SHORTSFLOW_USE_MOCK_PROVIDERS=true
-SHORTSFLOW_DATABASE_URL=sqlite:///data/shortsflow.db
+SHORTSFLOW_DATABASE_URL=sqlite:///data/shortsflow_render.db
 SHORTSFLOW_DATA_DIR=data
 ```
 
@@ -292,6 +292,18 @@ Importante:
 Se um job antigo abrir sem video local, isso pode ser retencao normal, nao corrupcao.
 
 ## 13. Testes
+
+Lane rapida Ponytail/operacional:
+
+```bash
+.venv/bin/python scripts/shortsflow_fast_lane.py
+```
+
+Gate estatico Ponytail Ultra:
+
+```bash
+.venv/bin/python scripts/ponytail_ultra_gate.py
+```
 
 Suite completa:
 

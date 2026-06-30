@@ -39,7 +39,7 @@ class PublishPlan:
 
     @property
     def sources(self) -> list[str]:
-        return list(dict.fromkeys(source for source in [self.source, self.fallback_source] if source))
+        return [self.source]
 
 
 def automation_publish_times(primary_publish_time: str) -> list[str]:
@@ -73,10 +73,6 @@ def generation_source_for_attempt(
     current_slot_attempts: int,
     max_primary_attempts_per_slot: int,
 ) -> str:
-    if not plan_item.fallback_source:
-        return plan_item.source
-    if current_slot_attempts >= max_primary_attempts_per_slot:
-        return plan_item.fallback_source
     return plan_item.source
 
 
@@ -105,7 +101,6 @@ def build_publish_plan(slots: list[PublishSlot], *, primary_publish_time: str) -
         PublishPlan(
             slot=slot,
             source=automation_publish_source_for_time(primary_publish_time, slot.local_time),
-            fallback_source=automation_fallback_source_for_time(slot.local_time),
         )
         for slot in slots
         if slot.local_date == first_incomplete_date

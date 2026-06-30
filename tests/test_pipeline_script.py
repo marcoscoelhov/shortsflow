@@ -1242,6 +1242,24 @@ def test_script_pipeline_promotes_biological_curiosidades_to_factual_mode() -> N
     assert pipeline._editorial_mode(topic_plan, request) == "factual_strict"
     assert pipeline._topic_requires_verified_fact_pack(topic_plan, request) is True
 
+
+def test_script_pipeline_marte_astronomia_stays_viral_entertainment_mode() -> None:
+    pipeline = orchestrator.script_pipeline
+    topic_plan = SimpleNamespace(
+        canonical_topic="Aranhas em Marte: explicação científica das araneiforms",
+        angle="Mistério visual com explicação natural surpreendente",
+        hook_promise="Mostrar que as aranhas em Marte não são animais.",
+        quality_metrics={"editorial_mode": "factual_strict", "topic_niche": "astronomia", "topic_subniche": "planetas"},
+    )
+    request = SimpleNamespace(
+        seed_theme="Aranhas em Marte",
+        notes="automatic_topic_policy=cosmos_astronomia_universo_first",
+        requested_angle=None,
+    )
+
+    assert pipeline._editorial_mode(topic_plan, request) == "viral_curiosidades"
+    assert pipeline._topic_requires_verified_fact_pack(topic_plan, request) is False
+
 def test_visual_non_factual_topic_without_claims_does_not_require_fact_review(monkeypatch) -> None:
     topic_plan = SimpleNamespace(
         canonical_topic="Dioramas hiper-realistas de cidades em miniatura",

@@ -229,8 +229,7 @@ class AutomationService:
                 if not remaining_plan:
                     break
                 plan_item = remaining_plan[0]
-                max_attempts_for_slot = max_primary_attempts_per_slot + (1 if plan_item.fallback_source else 0)
-                if current_slot_attempts >= max_attempts_for_slot:
+                if current_slot_attempts >= max_primary_attempts_per_slot:
                     remaining_plan = remaining_plan[1:]
                     current_slot_attempts = 0
                     continue
@@ -257,14 +256,11 @@ class AutomationService:
                     current_slot_attempts = 0
                     continue
                 if attempt_result.get("skip_slot"):
-                    if source == plan_item.fallback_source or not plan_item.fallback_source:
-                        remaining_plan = remaining_plan[1:]
-                        current_slot_attempts = 0
+                    remaining_plan = remaining_plan[1:]
+                    current_slot_attempts = 0
                     continue
                 if attempt_result.get("provider_limit"):
                     error = str(attempt_result.get("error") or "provider_limit")
-                    if plan_item.fallback_source and source != plan_item.fallback_source:
-                        continue
                     if scheduled_results:
                         return serialize_run(self._finish_successful_schedule_run(run.run_id, scheduled_results, target_slots))
                     return serialize_run(

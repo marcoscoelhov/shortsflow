@@ -20,7 +20,7 @@ VISUAL_IMPACT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SHARE_TRIGGER_PATTERN = re.compile(
-    r"\b(?:da pr[oó]xima vez|lembra|voc[eê] est[aá] vendo|isso muda|repara|olha de novo|volta para|primeira imagem|segunda olhada|nunca mais|quando voc[eê] vir|em tempo real|vai lembrar|j[aá] deve|manda isso|mostra isso|toda vez que|se amanh[aã]|n[aã]o [eé] falta|nunca acaba|se .*grud)\b",
+    r"\b(?:da pr[oó]xima vez|lembra|voc[eê] est[aá] vendo|isso muda|repara|olha de novo|volta para|primeira imagem|segunda olhada|nunca mais|quando voc[eê] vir|em tempo real|vai lembrar|j[aá] deve|manda isso|mostra isso|toda vez que|se amanh[aã]|n[aã]o [eé] falta|nunca acaba|se .*grud|j[aá] imaginou|e voc[eê]|imaginou um|imaginou uma)\b",
     re.IGNORECASE,
 )
 IMPLICIT_GAP_PATTERN = re.compile(
@@ -127,6 +127,8 @@ class ViralIntensityGate:
             + (0.10 if REWATCH_PAYOFF_PATTERN.search(ending) else 0.0)
         )
         share_trigger_score = self._clamp(0.20 + min(0.45, share_hits * 0.18) + min(0.24, visual_hits * 0.018))
+        if question_hits and self._count_matches(SHOCK_SIGNAL_PATTERN, ending) >= 1:
+            share_trigger_score = self._clamp(share_trigger_score + 0.12)
         didactic_penalty = min(0.28, didactic_hits * 0.035)
         neutral_penalty = 0.12 if NEUTRAL_OPENING_PATTERN.search(first_sentence) else 0.0
         viral_intensity_score = self._clamp(

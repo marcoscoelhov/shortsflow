@@ -46,7 +46,7 @@ Testes novos devem preferir a suite de dominio correspondente: `test_pipeline_sc
 
 Persistencia local padrao:
 
-- banco: `data/shortsflow.db`
+- banco: `data/shortsflow_render.db` (ou o valor de SHORTSFLOW_DATABASE_URL)
 - artefatos: `data/artifacts/<job_id>/`
 - token OAuth do YouTube: `data/youtube_oauth_token.json`
 - state temporario do OAuth: `data/youtube_oauth_state.json`
@@ -309,7 +309,7 @@ Arquivos sob `data/artifacts/` sao servidos por `/artifacts/...` quando ainda ex
 
 O prompt viral nao controla source/lane, credenciais, nicho permitido, fallback entre lanes, publish automatico ou bypass de gates. Em `automatic_topic`, a lane continua isolada de `ready_script_bank`; o prompt orienta a pauta gerada dentro do recorte astronomia/universo/planetas, mas nao autoriza assunto fora do nicho nem fallback silencioso.
 
-Estado documentado com cautela: `structured_viral_contract.json` ja existe para jobs gerados, mas os nomes finais de campos/reason codes especificos de `automatic_topic` devem esperar o smoke E2E. Se a UI ainda nao mostrar explicitamente default/custom do prompt ou reason code detalhado, isso e follow-up, nao comportamento garantido.
+`structured_viral_contract.json`, `job_origin.json` e reason_codes estao validados em smoke E2E real (2 ready_for_upload + artifacts com source=automatic_topic, creation_via=daily_cycle, viral_prompt_source=hub_settings, policy cosmos). Reason codes (no_topic, niche_rejected, viral_prompt_missing/defaulted, generation_failed, gate_rejected, fallback_prevented) estao em producao no automation.py e runbook.
 
 Exemplos seguros de prompt para astronomia:
 

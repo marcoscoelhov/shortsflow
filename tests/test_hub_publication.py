@@ -283,7 +283,7 @@ def test_hub_create_job_sends_title_mode_tone_angle_and_seo_notes(monkeypatch) -
         return "job-title-mode"
 
     monkeypatch.setattr(main_module.orchestrator, "create_job", fake_create_job)
-    monkeypatch.setattr(main_module, "_viral_prompt_template", lambda: "Use curiosidade forte e payoff claro.")
+    monkeypatch.setattr(main_module, "load_viral_prompt_template", lambda _path: "Use curiosidade forte e payoff claro.")
     client = TestClient(app)
     response = client.post(
         "/jobs",
@@ -1899,7 +1899,7 @@ def test_ready_script_bank_monetization_embeds_human_editorial_confirmations() -
 
 def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: Path) -> None:
     prompt_path = tmp_path / "hub_settings.json"
-    monkeypatch.setattr(main_module, "_hub_settings_path", lambda: prompt_path)
+    monkeypatch.setattr(main_module, "hub_settings_path", lambda _data_dir: prompt_path)
     monkeypatch.setattr(main_module, "_default_seed_theme", lambda: "abelhas")
     client = TestClient(app)
 
@@ -1930,12 +1930,12 @@ def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: 
     )
     assert save.status_code == 303
     assert save.headers["location"] == "/calendar"
-    assert main_module._viral_prompt_template() == custom_prompt
+    assert main_module.load_viral_prompt_template(prompt_path) == custom_prompt
 
     reset = client.post("/hub/prompt", data={"action": "reset", "return_to": "/jobs?status=queued"}, follow_redirects=False)
     assert reset.status_code == 303
     assert reset.headers["location"] == "/jobs?status=queued"
-    assert main_module._viral_prompt_template() == main_module.DEFAULT_VIRAL_PROMPT_TEMPLATE
+    assert main_module.load_viral_prompt_template(prompt_path) == main_module.DEFAULT_VIRAL_PROMPT_TEMPLATE
 
 def test_default_viral_prompt_avoids_generic_changes_how_you_see_formula() -> None:
     prompt = main_module.DEFAULT_VIRAL_PROMPT_TEMPLATE
@@ -2993,7 +2993,7 @@ def test_job_detail_shows_visual_review_report_as_auxiliary_evidence() -> None:
     assert "Revisão visual auxiliar" in response.text
     assert "codex_vision" in response.text
     assert "Frames revisados sem desvio visual relevante." in response.text
-    assert "Aprovar e liberar agenda" in response.text
+    assert "Aprovar para agendamento (revisão final no YouTube Studio)" in response.text
 
 
 def test_retention_sweep_keeps_publishable_jobs_longer_and_job_detail_handles_cleanup() -> None:
@@ -4160,6 +4160,18 @@ def test_publication_dashboard_fragment_focuses_on_growth_analytics() -> None:
     assert "Agenda ativa" not in response.text
     assert "Para agendar" not in response.text
     assert "/automation/ready-scripts/import" not in response.text
+    assert "Linhas editoriais por retenção" in response.text
+
+
+def test_llm_tournament_route_is_optional_and_sandboxed() -> None:
+    client = TestClient(app)
+
+    page = client.get("/llm-tournament")
+    assert page.status_code == 200
+    assert "Torneio" in page.text or "LLM" in page.text
+
+    outside_file = client.get("/llm-tournament/file", params={"path": "/etc/passwd"})
+    assert outside_file.status_code == 404
 
 
 def test_competitive_scout_auto_cycle_route_enqueues_persisted_run(monkeypatch) -> None:

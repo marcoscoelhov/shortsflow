@@ -7,6 +7,8 @@ from typing import Any
 
 from app.utils import avg_words_per_sentence, max_words_single_sentence, word_tokens
 
+from app.editorial.topic_mode import is_viral_space_entertainment_context
+
 LOOP_STOPWORDS = {
     "a",
     "as",
@@ -221,7 +223,14 @@ class ScriptGateResult:
 
 
 class ScriptQualityGate:
-    def validate(self, script: dict[str, Any], target_duration_sec: int) -> ScriptGateResult:
+    def validate(
+        self,
+        script: dict[str, Any],
+        target_duration_sec: int,
+        *,
+        topic_plan: Any | None = None,
+        request: Any | None = None,
+    ) -> ScriptGateResult:
         reasons: list[str] = []
         full_narration = str(script.get("full_narration") or "")
         title = str(script.get("title") or "")
@@ -269,11 +278,15 @@ class ScriptQualityGate:
             reasons.append("retention_map_not_grounded_in_narration")
         fact_risk = self._fact_risk_report(script)
         trace_report = self._claim_trace_report(script, fact_risk)
+        viral_space = is_viral_space_entertainment_context(topic_plan, request)
+        if viral_space:
+            fact_risk = {**fact_risk, "blocked": False}
+            trace_report = {**trace_report, "missing_risky_claim_trace": False}
         if self._has_overconfident_or_unsupported_factual_claims(combined_text):
             reasons.append("overconfident_or_unsupported_factual_claim")
         if trace_report["missing_risky_claim_trace"]:
             reasons.append("factual_claim_trace_missing")
-        if fact_risk["blocked"]:
+        if fact_risk["blocked"] and not viral_space:
             reasons.append("factual_risk_requires_conservative_rewrite")
         loop_metrics = self._loop_report(script)
         if not loop_metrics["connected_to_opening"]:
@@ -348,6 +361,7 @@ class ScriptQualityGate:
             "script_quality_gate_reasons": reasons,
             "fact_risk": fact_risk,
             "claim_trace": trace_report,
+            "viral_space_entertainment_relaxed_factual_gate": viral_space,
             "loop_gate": loop_metrics,
             "structured_viral_gate": structured_report,
         }

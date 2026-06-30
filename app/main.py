@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import random
 from contextlib import asynccontextmanager
@@ -28,9 +27,8 @@ from app.hub_prompt import (
     hub_settings_path,
     load_viral_prompt_template,
     save_viral_prompt_template,
-    sanitize_viral_prompt_template,
 )
-from app.llm_tournament import latest_llm_tournament_decision_summary
+
 from app.models import CompetitiveScoutAutoRun, Job, Script, TopicPlan, TopicRequest
 from app.operational_settings import (
     apply_operational_settings,
@@ -44,6 +42,7 @@ from app.ready_script_import import MAX_READY_SCRIPT_IMPORT_BODY_BYTES, MAX_READ
 from app.hub_context import COMMON_SCHEDULE_TIMEZONES, HubContext
 from app.publication_routes import create_publication_router
 from app.routes.health import router as health_router
+from app.routes.llm_tournament import create_llm_tournament_router
 from pydantic import ValidationError
 
 from app.topic_scout import TopicScout
@@ -54,7 +53,7 @@ from app.web_redirects import redirect_back as _redirect_back
 settings = get_settings()
 logger = logging.getLogger(__name__)
 automation_service = AutomationService(orchestrator)
-LLM_TOURNAMENT_OUTPUT_ROOT = (settings.data_dir / "llm_tournament").resolve()
+
 
 
 def _generate_premium_finish_background(job_id: str) -> None:
@@ -84,7 +83,7 @@ def _shared_template_context(request: Request) -> dict[str, object]:
         "settings": settings,
         "operational_settings": build_operational_settings_context(settings),
         "automation": automation_service.dashboard_context(),
-        "viral_prompt_template": _viral_prompt_template(),
+        "viral_prompt_template": load_viral_prompt_template(hub_settings_path(settings.data_dir)),
         "return_to": _request_path_with_query(request),
         "hub_defaults": {
             "niche_id": HUB_DEFAULT_NICHE,
@@ -240,67 +239,7 @@ def artifact_url(uri: str | None) -> str:
     return uri
 
 
-def _resolve_llm_tournament_artifact_path(uri: str | None) -> Path | None:
-    if not uri:
-        return None
-    base = LLM_TOURNAMENT_OUTPUT_ROOT
-    source = Path(uri)
-    candidates: list[Path] = []
-    if source.is_absolute():
-        candidates.append(source)
-    else:
-        candidates.extend(
-            (
-                source,
-                Path.cwd() / source,
-                settings.data_dir / source,
-                settings.data_dir / "llm_tournament" / source,
-            )
-        )
-    for candidate in candidates:
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            continue
-        if not resolved.is_file():
-            continue
-        try:
-            resolved.relative_to(base)
-        except ValueError:
-            continue
-        return resolved
-    return None
-
-
-def _llm_tournament_artifact_url(uri: str | None) -> str:
-    path = _resolve_llm_tournament_artifact_path(uri)
-    if not path:
-        return "#"
-    relative_path = path.relative_to(LLM_TOURNAMENT_OUTPUT_ROOT)
-    return f"/llm-tournament/file?path={quote(relative_path.as_posix())}"
-
-
-def _read_llm_tournament_json(uri: str | None) -> Any | None:
-    path = _resolve_llm_tournament_artifact_path(uri)
-    if not path:
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
-def _pretty_json(payload: Any | None) -> str | None:
-    if payload is None:
-        return None
-    try:
-        return json.dumps(payload, ensure_ascii=False, indent=2)
-    except (TypeError, ValueError):
-        return None
-
-
 templates.env.globals["artifact_url"] = artifact_url
-templates.env.globals["llm_tournament_artifact_url"] = _llm_tournament_artifact_url
 templates.env.globals["job_status_label"] = _job_status_label
 templates.env.globals["schedule_status_label"] = _schedule_status_label
 templates.env.globals["job_flow_stage"] = _job_flow_stage
@@ -324,6 +263,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.include_router(health_router)
+app.include_router(create_llm_tournament_router(settings, templates))
 app.mount("/artifacts", StaticFiles(directory=str(settings.artifacts_dir)), name="artifacts")
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 
@@ -387,22 +327,6 @@ async def require_hub_auth(request: Request, call_next):
 
 
 
-
-
-def _hub_settings_path():
-    return hub_settings_path(settings.data_dir)
-
-
-def _sanitize_viral_prompt_template(template: str | None) -> str:
-    return sanitize_viral_prompt_template(template)
-
-
-def _viral_prompt_template() -> str:
-    return load_viral_prompt_template(_hub_settings_path())
-
-
-def _save_viral_prompt_template(template: str | None) -> None:
-    save_viral_prompt_template(_hub_settings_path(), template)
 
 
 def _default_seed_theme() -> str:
@@ -499,6 +423,26 @@ sync_job_youtube_analytics = _publication_route_handlers.sync_job_youtube_analyt
 sync_due_youtube_analytics = _publication_route_handlers.sync_due_youtube_analytics
 
 
+def _jobs_listing_page_context(request: Request, *, deleted_job: str | None, list_context: dict[str, object]) -> dict[str, object]:
+    publication_context = _publication_dashboard_context(request, limit=4)
+    return {
+        **list_context,
+        "workflow_summary": publication_context["metrics"],
+        "youtube_integration": publication_context["integration"],
+        "automation": publication_context["automation"],
+        "hub_defaults": {
+            "niche_id": HUB_DEFAULT_NICHE,
+            "seed_theme": "",
+            "suggested_seed_theme": _default_seed_theme(),
+            "target_duration_sec": HUB_RETENTION_OPTIMIZED_DURATION_SEC,
+        },
+        "viral_prompt_template": load_viral_prompt_template(hub_settings_path(settings.data_dir)),
+        "calendar_url": "/calendar",
+        "settings": settings,
+        "deleted_job": deleted_job,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def jobs_page(
     request: Request,
@@ -513,26 +457,10 @@ def jobs_page(
     deleted_job: str | None = Query(default=None),
 ):
     list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
-    publication_context = _publication_dashboard_context(request, limit=4)
     return templates.TemplateResponse(
         request,
         "jobs.html",
-        {
-            **list_context,
-            "workflow_summary": publication_context["metrics"],
-            "youtube_integration": publication_context["integration"],
-            "automation": publication_context["automation"],
-            "hub_defaults": {
-                "niche_id": HUB_DEFAULT_NICHE,
-                "seed_theme": "",
-                "suggested_seed_theme": _default_seed_theme(),
-                "target_duration_sec": HUB_RETENTION_OPTIMIZED_DURATION_SEC,
-            },
-            "viral_prompt_template": _viral_prompt_template(),
-            "calendar_url": "/calendar",
-            "settings": settings,
-            "deleted_job": deleted_job,
-        },
+        _jobs_listing_page_context(request, deleted_job=deleted_job, list_context=list_context),
     )
 
 
@@ -543,9 +471,9 @@ def update_hub_prompt(
     return_to: str | None = Form(default=None),
 ):
     if action == "reset":
-        _save_viral_prompt_template(DEFAULT_VIRAL_PROMPT_TEMPLATE)
+        save_viral_prompt_template(hub_settings_path(settings.data_dir), DEFAULT_VIRAL_PROMPT_TEMPLATE)
     else:
-        _save_viral_prompt_template(viral_prompt_template)
+        save_viral_prompt_template(hub_settings_path(settings.data_dir), viral_prompt_template)
     return _redirect_back(return_to)
 
 
@@ -579,26 +507,10 @@ def jobs_route(
 ):
     list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
     if request.headers.get("hx-request", "").lower() != "true":
-        publication_context = _publication_dashboard_context(request, limit=4)
         return templates.TemplateResponse(
             request,
             "jobs.html",
-            {
-                **list_context,
-                "workflow_summary": publication_context["metrics"],
-                "youtube_integration": publication_context["integration"],
-                "automation": publication_context["automation"],
-                "hub_defaults": {
-                    "niche_id": HUB_DEFAULT_NICHE,
-                    "seed_theme": "",
-                    "suggested_seed_theme": _default_seed_theme(),
-                    "target_duration_sec": HUB_RETENTION_OPTIMIZED_DURATION_SEC,
-                },
-                "viral_prompt_template": _viral_prompt_template(),
-                "calendar_url": "/calendar",
-                "settings": settings,
-                "deleted_job": deleted_job,
-            },
+            _jobs_listing_page_context(request, deleted_job=deleted_job, list_context=list_context),
         )
     return templates.TemplateResponse(
         request,
@@ -746,62 +658,6 @@ def operational_settings_page(request: Request):
     )
 
 
-@app.get("/llm-tournament", response_class=HTMLResponse)
-def llm_tournament_page(request: Request):
-    tournament = latest_llm_tournament_decision_summary()
-    decision_report = _read_llm_tournament_json(
-        (tournament.get("paths") or {}).get("decision_report_json")
-        if isinstance(tournament, dict) and isinstance(tournament.get("paths"), dict)
-        else None
-    )
-    committee_packet_path: str | None = None
-    if isinstance(decision_report, dict):
-        committee_packet_path = decision_report.get("source_committee_packet_path")
-    elif isinstance(tournament, dict):
-        committee_packet_path = (tournament.get("paths") or {}).get("committee_packet")
-    committee_packet = _read_llm_tournament_json(committee_packet_path)
-    latest_textual_path = None
-    if isinstance(tournament, dict):
-        latest_textual_path = tournament.get("latest_textual_path") or (tournament.get("paths") or {}).get("latest_textual")
-    latest_textual = _read_llm_tournament_json(latest_textual_path)
-    artifact_entries: list[dict[str, str | None]] = []
-    raw_paths = tournament.get("paths") if isinstance(tournament, dict) else None
-    if isinstance(raw_paths, dict):
-        for key, value in raw_paths.items():
-            if key == "run_dir" or not value:
-                continue
-            artifact_entries.append(
-                {
-                    "label": key.replace("_", " ").replace("-", " ").title(),
-                    "path": str(value),
-                    "url": _llm_tournament_artifact_url(str(value)),
-                }
-            )
-    return templates.TemplateResponse(
-        request,
-        "llm_tournament.html",
-        {
-            "settings": settings,
-            "tournament": tournament,
-            "tournament_artifacts": artifact_entries,
-            "tournament_decision_report": decision_report,
-            "tournament_decision_report_pretty": _pretty_json(decision_report),
-            "tournament_committee_packet": committee_packet,
-            "tournament_committee_packet_pretty": _pretty_json(committee_packet),
-            "tournament_latest_textual": latest_textual,
-            "tournament_latest_textual_pretty": _pretty_json(latest_textual),
-        },
-    )
-
-
-@app.get("/llm-tournament/file")
-def llm_tournament_file(path: str | None = Query(default=None)):
-    artifact_path = _resolve_llm_tournament_artifact_path(path)
-    if not artifact_path:
-        raise HTTPException(status_code=404, detail="artifact not found")
-    return PlainTextResponse(artifact_path.read_text(encoding="utf-8"))
-
-
 @app.post("/jobs")
 def create_job(
     seed_theme: str = Form(default=""),
@@ -845,7 +701,7 @@ def create_job(
             ready_script_fact_check_confirmed=ready_script_fact_check_confirmed,
             default_niche_id=HUB_DEFAULT_NICHE,
             retention_optimized_duration_sec=HUB_RETENTION_OPTIMIZED_DURATION_SEC,
-            viral_prompt_template=_viral_prompt_template(),
+            viral_prompt_template=load_viral_prompt_template(hub_settings_path(settings.data_dir)),
             trend_seed_resolver=resolve_trend_seed,
             learned_retention_guidance=(active_retention_guidance or {}).get("guidance_text"),
         )

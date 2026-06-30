@@ -37,7 +37,7 @@
 {% set schedule_status = publication_schedule_display.status if publication_schedule_display else None %}
 {% set is_approved = job.status in ["approved_for_publish", "published"] %}
 {% set schedule_ready = publication_schedule_display and publication_schedule_display.status == "scheduled" %}
-<section class="detail-grid minimalist-detail" {% if job.status in ["queued", "running"] or (publication_schedule_display and publication_schedule_display.status == "publishing") %}hx-get="/jobs/{{ job.job_id }}" hx-trigger="every 4s" hx-select=".detail-grid" hx-swap="outerHTML"{% endif %}>
+<section class="detail-grid minimalist-detail" {% if job.status in ["queued", "running"] or (publication_schedule_display and publication_schedule_display.status == "publishing") %}hx-get="/jobs/{{ job.job_id }}" hx-trigger="every 12s" hx-select=".detail-grid" hx-swap="outerHTML"{% endif %}>
   <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
     Job {{ job.job_id[:8] }} atualizado. Status {{ job_status_label(job.status) }}. Progresso {{ progress.percent }}%, {{ progress.current_label }}.
   </p>
@@ -52,7 +52,7 @@
     <button type="button" role="tab" aria-selected="true" data-job-tab="decidir">Decidir</button>
     <button type="button" role="tab" aria-selected="false" data-job-tab="video">Vídeo</button>
     <button type="button" role="tab" aria-selected="false" data-job-tab="progresso">Progresso</button>
-    <button type="button" role="tab" aria-selected="false" data-job-tab="qualidade">Qualidade</button>
+    <button type="button" role="tab" aria-selected="false" data-job-tab="qualidade">Qualidade</button> <!-- tab kept for mobile, no duplicate controls -->
     <button type="button" role="tab" aria-selected="false" data-job-tab="conteudo">Conteúdo</button>
     <button type="button" role="tab" aria-selected="false" data-job-tab="tecnico">Técnico</button>
   </div>
@@ -474,7 +474,7 @@
       <div class="focus-step {% if is_approved %}completed{% elif can_approve or can_reject or can_retry %}active{% endif %}">
         <p class="eyebrow">Passo 1</p>
         <h3>Decidir revisão</h3>
-        <p class="publication-note">Aprovar libera a agenda. Rejeitar ou refazer exige motivo para orientar o próximo reparo.</p>
+        <p class="publication-note">Aprovar libera para agendamento. Revisão final e upload manual no YouTube Studio. Rejeitar ou refazer exige motivo.</p>
         {% if can_reprocess_tts %}
         <form method="post" action="/jobs/{{ job.job_id }}/reprocess" class="review-form">
           <input type="hidden" name="from_step" value="tts">
@@ -501,7 +501,7 @@
           {% endif %}
           {% if can_approve %}
           <div class="button-row action-stack review-primary-action">
-            <button type="submit" name="action" value="approve">Aprovar e liberar agenda</button>
+            <button type="submit" name="action" value="approve">Aprovar para agendamento (revisão final no YouTube Studio)</button>
           </div>
           {% endif %}
           <details class="inline-disclosure">
