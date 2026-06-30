@@ -102,7 +102,11 @@ def build_finish_plan(
                 "accent": "oklch(0.69 0.19 31)",
                 "accent_soft": "oklch(0.84 0.08 31)",
             },
-            "safe_area": {"x": 72, "top": 132, "bottom": 250},
+            # Keep kinetic captions inside a real lateral safe area. The Remotion
+            # component adds stroke + highlight scaling, so the plan must reserve
+            # more than the visible text box width or the glyph outline can clip
+            # against the 9:16 canvas edges.
+            "safe_area": {"x": 108, "top": 132, "bottom": 250},
         },
         "caption_track": {
             "mode": "one_line_kinetic",

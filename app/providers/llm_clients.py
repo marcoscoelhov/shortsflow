@@ -33,7 +33,7 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
-                    {"role": "system", "content": "Return valid JSON only. No markdown fences. The response must be a JSON object."},
+                    {"role": "system", "content": "Return ONLY the final JSON object. Do not include reasoning or chain-of-thought. No markdown fences. The response must be a JSON object."},
                     {"role": "user", "content": prompt},
                 ],
                 response_format={"type": "json_object"},
@@ -67,7 +67,7 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
-                    {"role": "system", "content": "Return valid JSON only. Top-level must be an array. No markdown fences."},
+                    {"role": "system", "content": "Return ONLY the final JSON array. Do not include reasoning or chain-of-thought. No markdown fences. Top-level must be an array."},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.7,
@@ -192,7 +192,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
-                    {"role": "system", "content": "Return valid JSON only. Top-level must be an array. No markdown fences."},
+                    {"role": "system", "content": "Return ONLY the final JSON array. Do not include reasoning or chain-of-thought. No markdown fences. Top-level must be an array."},
                     {"role": "user", "content": prompt},
                 ],
                 timeout=self.timeout_sec,

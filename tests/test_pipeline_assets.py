@@ -1587,6 +1587,8 @@ def test_subtitle_ass_render_disables_automatic_wrapping() -> None:
     )
 
     assert "WrapStyle: 2" in ass
+    assert "Style: Default,Arial,68" in ass
+    assert ",96,96,230,1" in ass
     assert "\\N" not in ass
 
 def test_subtitle_boundary_repair_moves_words_across_cues() -> None:

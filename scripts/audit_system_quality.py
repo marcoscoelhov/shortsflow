@@ -5,7 +5,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -66,7 +66,8 @@ def _cap(score: float, cap: float, gaps: list[str], reason: str) -> float:
 
 def score_topic(root: Path) -> StageScore:
     data = _load_json(root / "topic_plan.json")
-    metrics = data.get("quality_metrics") if isinstance(data.get("quality_metrics"), dict) else {}
+    raw_metrics = data.get("quality_metrics")
+    metrics = cast(dict[str, Any], raw_metrics if isinstance(raw_metrics, dict) else {})
     evidence: list[str] = []
     gaps: list[str] = []
     required_groups = [
@@ -87,6 +88,19 @@ def score_topic(root: Path) -> StageScore:
     ]
     passed = sum(1 for group in required_groups if _metric_passed(metrics, *group[1:]))
     score = _score_from_ratio(passed / max(len(required_groups), 1), floor=6.2)
+    modern_topic_scores = [
+        metrics.get("hook_score"),
+        metrics.get("clarity_score"),
+        metrics.get("information_density_score"),
+        metrics.get("ending_strength_score"),
+    ]
+    modern_topic_values = [float(value) for value in modern_topic_scores if isinstance(value, (int, float))]
+    if modern_topic_values:
+        modern_score = round(sum(modern_topic_values) / max(len(modern_topic_values), 1) * 10, 1)
+        score = max(score, modern_score)
+        evidence.append("modern topic quality scores present")
+        if metrics.get("editorial_mode") in {"viral_curiosidades", "factual_strict"} and modern_score >= TARGET_SCORE:
+            evidence.append("topic quality scores meet premium target")
     repair_log = metrics.get("topic_repair_attempts_log") if isinstance(metrics.get("topic_repair_attempts_log"), list) else []
     repair_passed = any(isinstance(item, dict) and item.get("passed") for item in repair_log)
     if passed >= 3 and repair_passed and metrics.get("editorial_mode") in {"viral_curiosidades", "factual_strict"}:

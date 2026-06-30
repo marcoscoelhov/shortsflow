@@ -24,7 +24,7 @@ const defaultPlan: FinishPlan = {
       accent: 'oklch(0.69 0.19 31)',
       accent_soft: 'oklch(0.84 0.08 31)'
     },
-    safe_area: {x: 72, top: 132, bottom: 250}
+    safe_area: {x: 108, top: 132, bottom: 250}
   },
   caption_track: {mode: 'one_line_kinetic', max_lines: 1, items: []},
   scenes: [],

@@ -201,22 +201,28 @@ const Caption: React.FC<{caption: CaptionItem; plan: FinishPlan; fps: number}> =
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
   });
+  const sideInset = captionSideInset(plan);
   return (
     <div
       style={{
         position: 'absolute',
-        left: plan.style.safe_area.x,
-        right: plan.style.safe_area.x,
+        left: sideInset,
+        right: sideInset,
         bottom: 292,
         display: 'flex',
         justifyContent: 'center',
-        transform: `translateY(${enter}px) scale(${scale})`
+        transform: `translateY(${enter}px) scale(${scale})`,
+        transformOrigin: 'center center',
+        boxSizing: 'border-box',
+        overflow: 'visible'
       }}
     >
       <div
         style={{
-          maxWidth: 980,
-          padding: '8px 14px 10px',
+          width: '100%',
+          maxWidth: 840,
+          padding: '8px 28px 10px',
+          boxSizing: 'border-box',
           color: plan.style.palette.text,
           fontSize,
           fontWeight: 900,
@@ -225,7 +231,7 @@ const Caption: React.FC<{caption: CaptionItem; plan: FinishPlan; fps: number}> =
           textAlign: 'center',
           whiteSpace: 'nowrap',
           textTransform: 'uppercase',
-          WebkitTextStroke: '10px rgba(5, 5, 7, 0.92)',
+          WebkitTextStroke: '8px rgba(5, 5, 7, 0.92)',
           paintOrder: 'stroke fill',
           filter: 'drop-shadow(0 16px 22px rgba(0,0,0,0.58))'
         }}
@@ -239,7 +245,7 @@ const Caption: React.FC<{caption: CaptionItem; plan: FinishPlan; fps: number}> =
                 style={{
                   display: 'inline-block',
                   color: emphasized ? 'oklch(0.86 0.17 88)' : plan.style.palette.text,
-                  transform: `translateY(${-2 * highlight}px) scale(${1 + 0.06 * highlight})`
+                  transform: `translateY(${-2 * highlight}px) scale(${1 + 0.04 * highlight})`
                 }}
               >
                 {word}
@@ -251,6 +257,11 @@ const Caption: React.FC<{caption: CaptionItem; plan: FinishPlan; fps: number}> =
       </div>
     </div>
   );
+};
+
+const captionSideInset = (plan: FinishPlan) => {
+  const configured = Number(plan.style.safe_area?.x || 0);
+  return Math.max(108, configured);
 };
 
 const TransitionAccent: React.FC<{kind: string; accent: string; progress: number}> = ({kind, accent, progress}) => {
@@ -355,5 +366,5 @@ const transitionClipPath = (kind: string, progress: number) => {
 
 const captionFontSize = (text: string) => {
   const length = Math.max(12, text.length);
-  return Math.max(32, Math.min(68, Math.floor(900 / (length * 0.66))));
+  return Math.max(30, Math.min(64, Math.floor(760 / (length * 0.66))));
 };

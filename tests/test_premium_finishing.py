@@ -645,6 +645,16 @@ def test_premium_caption_highlight_uses_only_current_word() -> None:
     assert "wordHighlightProgress" in source
 
 
+def test_premium_caption_component_keeps_lateral_breathing_room() -> None:
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
+
+    assert "captionSideInset" in source
+    assert "Math.max(108" in source
+    assert "maxWidth: 840" in source
+    assert "padding: '8px 28px 10px'" in source
+    assert "WebkitTextStroke: '8px" in source
+
+
 def test_premium_component_prefers_local_media_for_cli_render() -> None:
     source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
 
