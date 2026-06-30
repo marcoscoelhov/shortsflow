@@ -339,15 +339,18 @@ class ResilientCreativeProvider:
         if self.strict_minimax_validation:
             return [("primary", self.primary, primary_timeout)] if self.primary else []
         candidates: list[tuple[str, llm_facade.LLMProvider, float]] = []
-        seen: set[int] = set()
+        seen: set[tuple[str, str]] = set()
         for role, provider, timeout_sec in [
             ("primary", self.primary, primary_timeout),
             ("fallback", self.fallback, self._provider_timeout_sec(self.fallback, draft_timeout) if self.fallback else draft_timeout),
             ("draft", getattr(self, "script_draft_provider", None), draft_timeout),
         ]:
-            if not provider or id(provider) in seen:
+            if not provider:
                 continue
-            seen.add(id(provider))
+            key = (str(getattr(provider, "provider_name", "")), str(getattr(provider, "model_name", "")))
+            if key in seen:
+                continue
+            seen.add(key)
             candidates.append((role, provider, timeout_sec))
         return candidates
 

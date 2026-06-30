@@ -35,6 +35,24 @@ def test_llm_registry_does_not_mock_fallback_in_real_runs(monkeypatch) -> None:
 
     assert registry.fallback_provider() is None
 
+
+def test_script_generation_candidates_skip_duplicate_provider_model() -> None:
+    class Provider:
+        provider_name = "deepseek"
+        model_name = "deepseek-v4-flash"
+        timeout_sec = 180.0
+
+    provider = object.__new__(ResilientCreativeProvider)
+    setattr(provider, "settings", SimpleNamespace(minimax_script_timeout_sec=150.0, llm_script_draft_timeout_sec=45.0))
+    setattr(provider, "strict_minimax_validation", False)
+    primary = Provider()
+    setattr(provider, "primary", primary)
+    setattr(provider, "fallback", None)
+    setattr(provider, "script_draft_provider", Provider())
+
+    assert provider._script_generation_candidates() == [("primary", primary, 150.0)]
+
+
 def test_deepseek_provider_uses_v4_flash_openai_compatible_client(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
