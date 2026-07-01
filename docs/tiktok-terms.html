@@ -6,110 +6,258 @@
     <title>ShortsFlow Terms of Service</title>
     <link rel="icon" href="./shortsflow-mark-1024.png" type="image/png">
     <style>
+      :root {
+        color-scheme: dark;
+        --bg: #09090b;
+        --panel: rgb(31 31 34 / 0.72);
+        --line: rgb(255 255 255 / 0.08);
+        --line-subtle: rgb(255 255 255 / 0.04);
+        --ink: rgb(228 225 230);
+        --ink-heading: rgb(246 241 240);
+        --ink-warm: rgb(255 215 209);
+        --ink-nav: rgb(244 212 207);
+        --muted: #b8a5a2;
+        --muted-strong: rgb(199 182 179);
+        --accent: #ff5540;
+        --accent-soft: #ffb4a8;
+        --success: #22c55e;
+        --surface-chrome: rgb(19 19 22 / 0.96);
+        --ink-on-accent: rgb(38 1 0);
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
+      }
+
+      * { box-sizing: border-box; }
+
       body {
         margin: 0;
-        background: #f6f8fb;
-        color: #15191f;
-        font-family: Arial, Helvetica, sans-serif;
+        min-height: 100vh;
+        overflow-x: hidden;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
         line-height: 1.6;
       }
 
-      main {
-        width: min(920px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 48px 0;
+      a { color: inherit; }
+
+      .app-topbar {
+        position: fixed;
+        inset: 0 0 auto 0;
+        z-index: 50;
+        display: grid;
+        grid-template-columns: 280px minmax(220px, 1fr) auto;
+        align-items: center;
+        gap: 1rem;
+        height: 4.25rem;
+        padding: 0 1.35rem;
+        border-bottom: 1px solid var(--line);
+        background: rgba(24, 24, 27, 0.9);
       }
 
-      article {
-        background: #ffffff;
-        border: 1px solid #d9dee7;
-        border-radius: 8px;
-        padding: 30px;
-      }
-
-      h1,
-      h2 {
-        line-height: 1.2;
-      }
-
-      a {
-        color: #0f766e;
-        font-weight: 700;
-      }
-
-      .meta {
-        color: #596272;
-      }
-
-      .brand {
+      .topbar-product,
+      .brand-card {
         display: inline-flex;
         align-items: center;
-        gap: 10px;
-        color: #15191f;
+        gap: 0.7rem;
+        color: var(--ink);
+        font-weight: 800;
         text-decoration: none;
       }
 
-      .brand img {
-        width: 36px;
-        height: 36px;
+      .brand-mark { width: 40px; height: 40px; border-radius: 10px; }
+
+      .topbar-search {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 0.55rem;
+        max-width: 680px;
+        padding: 0.1rem 0.85rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(9, 9, 11, 0.72);
+        color: var(--muted);
       }
+
+      .topbar-search span:last-child { padding: 0.68rem 0; }
+      .topbar-actions { display: flex; align-items: center; gap: 0.5rem; }
+
+      .topbar-icon,
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 2rem;
+        padding: 0 0.75rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--line-subtle);
+        color: var(--ink-nav);
+        text-decoration: none;
+      }
+
+      .topbar-icon { width: 2.75rem; height: 2.75rem; padding: 0; }
+
+      .app-sidebar {
+        position: fixed;
+        inset: 4.25rem auto 0 0;
+        z-index: 40;
+        display: grid;
+        align-content: start;
+        gap: 0.9rem;
+        width: 280px;
+        padding: 1.25rem;
+        overflow-y: auto;
+        border-right: 1px solid var(--line);
+        background: rgba(15, 15, 18, 0.96);
+      }
+
+      .brand-card { padding: 0.25rem 0 0.75rem; }
+      .brand-card span { display: grid; gap: 0.1rem; }
+      .brand-card small,
+      .eyebrow,
+      .badge {
+        color: var(--muted);
+        font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
+        font-size: 0.74rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .topnav,
+      .sidebar-footer-nav { display: grid; gap: 0.35rem; }
+
+      .topnav a,
+      .sidebar-footer-nav a {
+        display: flex;
+        align-items: center;
+        min-height: 2.65rem;
+        gap: 0.65rem;
+        padding: 0.72rem 0.85rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+        text-decoration: none;
+      }
+
+      .topnav a.active {
+        background: rgba(255, 85, 64, 0.12);
+        border-color: rgba(255, 180, 168, 0.24);
+        color: var(--ink-warm);
+      }
+
+      .sidebar-spacer { min-height: 1rem; }
+
+      .page-shell {
+        margin-left: 280px;
+        padding: 6rem 2rem 3rem;
+      }
+
+      .page-hero {
+        display: grid;
+        gap: 0.8rem;
+        padding: 0.35rem 0 1.55rem;
+      }
+
+      .page-hero h1 {
+        margin: 0.2rem 0 0;
+        color: var(--ink-heading);
+        font-size: clamp(2.6rem, 6vw, 5.1rem);
+        line-height: 0.96;
+        letter-spacing: -0.05em;
+      }
+
+      .page-hero p { max-width: 760px; margin: 0; color: var(--muted-strong); font-size: 1.05rem; }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .content-card { padding: clamp(1.2rem, 3vw, 2rem); max-width: 980px; }
+      .content-card h2 { margin: 1.4rem 0 0.45rem; color: var(--ink-heading); }
+      .content-card h2:first-child { margin-top: 0; }
+      .content-card p, .content-card li { color: var(--muted-strong); }
+      .content-card a { color: var(--accent-soft); font-weight: 800; }
+      .meta { color: var(--muted); }
+      code { border-radius: 4px; padding: 0.12rem 0.32rem; background: rgba(255,255,255,0.08); color: var(--ink-warm); }
+
+      video { width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--line); border-radius: 8px; background: #050506; }
+
+      .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.25rem; }
+      .button { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: 0 1rem; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); text-decoration: none; }
+      .button.primary { border-color: transparent; background: var(--accent); color: var(--ink-on-accent); font-weight: 800; }
+
+      @media (max-width: 860px) {
+        .app-topbar { position: static; grid-template-columns: 1fr auto; }
+        .topbar-search { display: none; }
+        .app-sidebar { position: static; width: auto; }
+        .page-shell { margin-left: 0; padding: 1rem; }
+      }
+
     </style>
   </head>
   <body>
-    <main>
-      <article>
-        <a class="brand" href="./index.html">
-          <img src="./shortsflow-mark-1024.png" width="36" height="36" alt="">
-          <strong>ShortsFlow</strong>
-        </a>
-        <h1>Terms of Service</h1>
-        <p class="meta">Effective date: May 21, 2026</p>
+    <header class="app-topbar" aria-label="Top bar">
+      <a class="topbar-product" href="./index.html">
+        <img class="brand-mark" src="./shortsflow-mark-1024.png" width="40" height="40" alt="" aria-hidden="true">
+        <span>ShortsFlow</span>
+      </a>
+      <div class="topbar-search" aria-label="Review context">
+        <span>⌕</span>
+        <span>TikTok review-ready publishing workflow</span>
+      </div>
+      <div class="topbar-actions">
+        <a class="topbar-icon" href="./tiktok-privacy.html" aria-label="Privacy">?</a>
+        <a class="topbar-icon" href="./tiktok-terms.html" aria-label="Terms">SF</a>
+      </div>
+    </header>
 
+    <aside class="app-sidebar">
+      <a class="brand-card" href="./index.html">
+        <img class="brand-mark" src="./shortsflow-mark-1024.png" width="40" height="40" alt="">
+        <span><strong>ShortsFlow</strong><small>TikTok Review</small></span>
+      </a>
+      <nav class="topnav" aria-label="Main navigation">
+        <a class="active" href="./index.html">▣ Automação</a>
+        <a class="" href="./tiktok-integration-demo.html">▣ Biblioteca</a>
+        <a class="" href="#data-rights">▣ Crescimento</a>
+        <a class="" href="./demo-videos/tiktok-demo-download.html">▣ Agendamento</a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <nav class="sidebar-footer-nav" aria-label="Legal">
+        <a href="./tiktok-privacy.html">? Privacy Policy</a>
+        <a href="./tiktok-terms.html">↩ Terms of Service</a>
+      </nav>
+    </aside>
+
+    <main class="page-shell">
+      <section class="page-hero" aria-labelledby="page-title">
+        <p class="eyebrow">TikTok Content Posting API</p>
+        <h1 id="page-title">Terms of Service</h1>
+        <p>Terms for authorized creator workspaces using ShortsFlow to prepare, review, and publish approved short-form videos.</p>
+      </section>
+      <article class="panel content-card">
+        <p class="meta">Effective date: July 1, 2026</p>
         <h2>1. Service description</h2>
-        <p>
-          ShortsFlow is a creator workflow tool powered by ShortsFlow and used by authorized channel operators to generate,
-          review, schedule, and publish short-form videos to authorized creator
-          channels, including TikTok when the TikTok account owner grants access.
-        </p>
-
+        <p>ShortsFlow is a creator publishing operations tool for authorized creator workspaces. It helps channel operators create, review, schedule, and publish approved short-form videos to connected channels, including TikTok when the account owner grants access or provides an authorized access token.</p>
         <h2>2. Authorized use</h2>
-        <p>
-          The service is intended for use by authorized creator teams and channel
-          operators. It is not an anonymous public posting tool and does not
-          provide open self-service account registration.
-        </p>
-
-        <h2>3. TikTok publishing</h2>
-        <p>
-          TikTok publishing is performed only for a TikTok account that has
-          authorized the application through TikTok's official authorization
-          flow. The operator remains responsible for reviewing the content,
-          captions, rights, disclosures, and publishing settings before enabling
-          automated posting.
-        </p>
-
-        <h2>4. Content responsibility</h2>
-        <p>
-          The operator is responsible for ensuring that all published content
-          complies with applicable laws, third-party rights, TikTok policies, and
-          platform rules. ShortsFlow does not grant rights to music, images,
-          voices, trademarks, or other third-party materials.
-        </p>
-
-        <h2>5. Availability</h2>
-        <p>
-          The service is provided for internal operational use. It may be changed,
-          paused, or discontinued at any time.
-        </p>
-
-        <h2>6. Contact</h2>
-        <p>
-          For questions about these terms, contact the repository owner through
-          the public project page:
-          <a href="https://github.com/marcoscoelhov/shortsflow">github.com/marcoscoelhov/shortsflow</a>.
-        </p>
-
-        <p><a href="./index.html">Back to ShortsFlow</a></p>
+        <p>The service is intended for legitimate creator teams, agencies, and channel operators managing accounts they are authorized to operate. It is not an anonymous public posting tool, spam system, engagement manipulation service, or account-sharing marketplace.</p>
+        <h2>3. TikTok publishing workflow</h2>
+        <p>TikTok publishing is performed only for an authorized TikTok account and only after the operator reviews the generated video package, caption, hashtags, rights, disclosure status, and publishing settings. ShortsFlow uses the TikTok Content Posting API for eligible approved videos and stores publication identifiers and status for auditability.</p>
+        <h2>4. Content responsibility and platform compliance</h2>
+        <p>The operator remains responsible for ensuring that all published content complies with applicable laws, third-party rights, TikTok policies, TikTok Community Guidelines, advertising or commercial-content requirements, and platform rules. ShortsFlow does not grant rights to music, images, voices, trademarks, likenesses, or other third-party materials.</p>
+        <h2>5. Synthetic or AI-assisted content</h2>
+        <p>ShortsFlow can assist with generated scripts, captions, visuals, audio, and metadata. Operators must review content before publication and use the appropriate TikTok disclosure settings when content is altered, synthetic, AI-generated, sponsored, or otherwise requires disclosure.</p>
+        <h2>6. Availability and changes</h2>
+        <p>The service is provided as an operational publishing workflow for authorized workspaces. Features may be changed, paused, or discontinued to improve safety, comply with platform requirements, or maintain service reliability.</p>
+        <h2>7. Contact</h2>
+        <p>For questions about these terms, contact the repository owner through the public project page: <a href="https://github.com/marcoscoelhov/shortsflow">github.com/marcoscoelhov/shortsflow</a>.</p>
+        <div class="actions"><a class="button primary" href="./index.html">Back to ShortsFlow</a><a class="button" href="./tiktok-privacy.html">Privacy Policy</a></div>
       </article>
     </main>
   </body>

@@ -6,75 +6,249 @@
     <title>ShortsFlow | TikTok Callback</title>
     <link rel="icon" href="./shortsflow-mark-1024.png" type="image/png">
     <style>
+      :root {
+        color-scheme: dark;
+        --bg: #09090b;
+        --panel: rgb(31 31 34 / 0.72);
+        --line: rgb(255 255 255 / 0.08);
+        --line-subtle: rgb(255 255 255 / 0.04);
+        --ink: rgb(228 225 230);
+        --ink-heading: rgb(246 241 240);
+        --ink-warm: rgb(255 215 209);
+        --ink-nav: rgb(244 212 207);
+        --muted: #b8a5a2;
+        --muted-strong: rgb(199 182 179);
+        --accent: #ff5540;
+        --accent-soft: #ffb4a8;
+        --success: #22c55e;
+        --surface-chrome: rgb(19 19 22 / 0.96);
+        --ink-on-accent: rgb(38 1 0);
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
+      }
+
+      * { box-sizing: border-box; }
+
       body {
         margin: 0;
-        background: #f6f8fb;
-        color: #15191f;
-        font-family: Arial, Helvetica, sans-serif;
+        min-height: 100vh;
+        overflow-x: hidden;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
         line-height: 1.6;
       }
 
-      main {
-        width: min(820px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 48px 0;
+      a { color: inherit; }
+
+      .app-topbar {
+        position: fixed;
+        inset: 0 0 auto 0;
+        z-index: 50;
+        display: grid;
+        grid-template-columns: 280px minmax(220px, 1fr) auto;
+        align-items: center;
+        gap: 1rem;
+        height: 4.25rem;
+        padding: 0 1.35rem;
+        border-bottom: 1px solid var(--line);
+        background: rgba(24, 24, 27, 0.9);
       }
 
-      article {
-        background: #ffffff;
-        border: 1px solid #d9dee7;
-        border-radius: 8px;
-        padding: 30px;
-      }
-
-      code {
-        background: #eef2f7;
-        border-radius: 4px;
-        padding: 2px 5px;
-      }
-
-      a {
-        color: #0f766e;
-        font-weight: 700;
-      }
-
-      .brand {
+      .topbar-product,
+      .brand-card {
         display: inline-flex;
         align-items: center;
-        gap: 10px;
-        color: #15191f;
+        gap: 0.7rem;
+        color: var(--ink);
+        font-weight: 800;
         text-decoration: none;
       }
 
-      .brand img {
-        width: 36px;
-        height: 36px;
+      .brand-mark { width: 40px; height: 40px; border-radius: 10px; }
+
+      .topbar-search {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 0.55rem;
+        max-width: 680px;
+        padding: 0.1rem 0.85rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(9, 9, 11, 0.72);
+        color: var(--muted);
       }
+
+      .topbar-search span:last-child { padding: 0.68rem 0; }
+      .topbar-actions { display: flex; align-items: center; gap: 0.5rem; }
+
+      .topbar-icon,
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 2rem;
+        padding: 0 0.75rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--line-subtle);
+        color: var(--ink-nav);
+        text-decoration: none;
+      }
+
+      .topbar-icon { width: 2.75rem; height: 2.75rem; padding: 0; }
+
+      .app-sidebar {
+        position: fixed;
+        inset: 4.25rem auto 0 0;
+        z-index: 40;
+        display: grid;
+        align-content: start;
+        gap: 0.9rem;
+        width: 280px;
+        padding: 1.25rem;
+        overflow-y: auto;
+        border-right: 1px solid var(--line);
+        background: rgba(15, 15, 18, 0.96);
+      }
+
+      .brand-card { padding: 0.25rem 0 0.75rem; }
+      .brand-card span { display: grid; gap: 0.1rem; }
+      .brand-card small,
+      .eyebrow,
+      .badge {
+        color: var(--muted);
+        font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
+        font-size: 0.74rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .topnav,
+      .sidebar-footer-nav { display: grid; gap: 0.35rem; }
+
+      .topnav a,
+      .sidebar-footer-nav a {
+        display: flex;
+        align-items: center;
+        min-height: 2.65rem;
+        gap: 0.65rem;
+        padding: 0.72rem 0.85rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+        text-decoration: none;
+      }
+
+      .topnav a.active {
+        background: rgba(255, 85, 64, 0.12);
+        border-color: rgba(255, 180, 168, 0.24);
+        color: var(--ink-warm);
+      }
+
+      .sidebar-spacer { min-height: 1rem; }
+
+      .page-shell {
+        margin-left: 280px;
+        padding: 6rem 2rem 3rem;
+      }
+
+      .page-hero {
+        display: grid;
+        gap: 0.8rem;
+        padding: 0.35rem 0 1.55rem;
+      }
+
+      .page-hero h1 {
+        margin: 0.2rem 0 0;
+        color: var(--ink-heading);
+        font-size: clamp(2.6rem, 6vw, 5.1rem);
+        line-height: 0.96;
+        letter-spacing: -0.05em;
+      }
+
+      .page-hero p { max-width: 760px; margin: 0; color: var(--muted-strong); font-size: 1.05rem; }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .content-card { padding: clamp(1.2rem, 3vw, 2rem); max-width: 980px; }
+      .content-card h2 { margin: 1.4rem 0 0.45rem; color: var(--ink-heading); }
+      .content-card h2:first-child { margin-top: 0; }
+      .content-card p, .content-card li { color: var(--muted-strong); }
+      .content-card a { color: var(--accent-soft); font-weight: 800; }
+      .meta { color: var(--muted); }
+      code { border-radius: 4px; padding: 0.12rem 0.32rem; background: rgba(255,255,255,0.08); color: var(--ink-warm); }
+
+      video { width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--line); border-radius: 8px; background: #050506; }
+
+      .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.25rem; }
+      .button { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: 0 1rem; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); text-decoration: none; }
+      .button.primary { border-color: transparent; background: var(--accent); color: var(--ink-on-accent); font-weight: 800; }
+
+      @media (max-width: 860px) {
+        .app-topbar { position: static; grid-template-columns: 1fr auto; }
+        .topbar-search { display: none; }
+        .app-sidebar { position: static; width: auto; }
+        .page-shell { margin-left: 0; padding: 1rem; }
+      }
+
     </style>
   </head>
   <body>
-    <main>
-      <article>
-        <a class="brand" href="./index.html">
-          <img src="./shortsflow-mark-1024.png" width="36" height="36" alt="">
-          <strong>ShortsFlow</strong>
-        </a>
-        <h1>TikTok authorization callback</h1>
-        <p>
-          This static page is used as the registered TikTok OAuth redirect URI
-          for ShortsFlow.
-        </p>
-        <p>
-          After TikTok redirects back here, copy the <code>code</code> parameter
-          from the browser address bar and exchange it for a user access token
-          using TikTok's official OAuth token endpoint.
-        </p>
-        <p>
-          If the URL contains an <code>error</code> parameter, the authorization
-          did not complete and the app configuration or requested scopes should
-          be reviewed in TikTok for Developers.
-        </p>
-        <p><a href="./index.html">Back to ShortsFlow</a></p>
+    <header class="app-topbar" aria-label="Top bar">
+      <a class="topbar-product" href="./index.html">
+        <img class="brand-mark" src="./shortsflow-mark-1024.png" width="40" height="40" alt="" aria-hidden="true">
+        <span>ShortsFlow</span>
+      </a>
+      <div class="topbar-search" aria-label="Review context">
+        <span>⌕</span>
+        <span>TikTok review-ready publishing workflow</span>
+      </div>
+      <div class="topbar-actions">
+        <a class="topbar-icon" href="./tiktok-privacy.html" aria-label="Privacy">?</a>
+        <a class="topbar-icon" href="./tiktok-terms.html" aria-label="Terms">SF</a>
+      </div>
+    </header>
+
+    <aside class="app-sidebar">
+      <a class="brand-card" href="./index.html">
+        <img class="brand-mark" src="./shortsflow-mark-1024.png" width="40" height="40" alt="">
+        <span><strong>ShortsFlow</strong><small>TikTok Review</small></span>
+      </a>
+      <nav class="topnav" aria-label="Main navigation">
+        <a class="active" href="./index.html">▣ Automação</a>
+        <a class="" href="./tiktok-integration-demo.html">▣ Biblioteca</a>
+        <a class="" href="#data-rights">▣ Crescimento</a>
+        <a class="" href="./demo-videos/tiktok-demo-download.html">▣ Agendamento</a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <nav class="sidebar-footer-nav" aria-label="Legal">
+        <a href="./tiktok-privacy.html">? Privacy Policy</a>
+        <a href="./tiktok-terms.html">↩ Terms of Service</a>
+      </nav>
+    </aside>
+
+    <main class="page-shell">
+      <section class="page-hero" aria-labelledby="page-title">
+        <p class="eyebrow">TikTok Content Posting API</p>
+        <h1 id="page-title">TikTok callback</h1>
+        <p>Redirect URI support page for the ShortsFlow TikTok web app configuration.</p>
+      </section>
+      <article class="panel content-card">
+        <h2>Registered redirect page</h2>
+        <p>This static page is hosted on the same public domain as the ShortsFlow website and can be registered as the TikTok web redirect URI for app review.</p>
+        <h2>How ShortsFlow uses it</h2>
+        <p>The production ShortsFlow Hub keeps TikTok credentials server-side. When TikTok redirects an authorized account back to this domain, the authorization result is handled by the operator workflow and is not exposed on this public review page.</p>
+        <h2>Reviewer note</h2>
+        <p>If an <code>error</code> parameter appears in the URL, authorization did not complete and the app configuration, redirect URI, or requested scopes should be reviewed in TikTok for Developers. No token or credential should be pasted into this public page.</p>
+        <div class="actions"><a class="button primary" href="./index.html">Back to ShortsFlow</a><a class="button" href="./tiktok-integration-demo.html">Open integration demo</a></div>
       </article>
     </main>
   </body>
