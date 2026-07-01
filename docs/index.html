@@ -9,291 +9,297 @@
       :root {
         color-scheme: dark;
         --bg: #09090b;
-        --panel: #17171b;
+        --panel: rgb(31 31 34 / 0.72);
         --panel-strong: #1f1f22;
-        --ink: #f6f1f0;
+        --line: rgb(255 255 255 / 0.08);
+        --line-subtle: rgb(255 255 255 / 0.04);
+        --ink: rgb(228 225 230);
+        --ink-heading: rgb(246 241 240);
+        --ink-warm: rgb(255 215 209);
+        --ink-nav: rgb(244 212 207);
         --muted: #b8a5a2;
-        --line: #343035;
+        --muted-strong: rgb(199 182 179);
         --accent: #ff5540;
         --accent-soft: #ffb4a8;
-        --ok: #22c55e;
+        --success: #22c55e;
         --warn: #f59e0b;
+        --secondary: #89ceff;
+        --control-hit-area: 2.75rem;
+        --surface-chrome: rgb(19 19 22 / 0.96);
+        --ink-on-accent: rgb(38 1 0);
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
       }
 
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
 
       body {
         margin: 0;
+        min-height: 100vh;
+        overflow-x: hidden;
         background: var(--bg);
         color: var(--ink);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
         line-height: 1.55;
       }
 
-      a {
-        color: var(--accent-soft);
-        font-weight: 700;
-      }
+      a { color: inherit; }
 
-      main {
-        width: min(1120px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 32px 0 56px;
-      }
-
-      .topbar {
-        display: flex;
+      .app-topbar {
+        position: fixed;
+        inset: 0 0 auto 0;
+        z-index: 50;
+        display: grid;
+        grid-template-columns: 280px minmax(220px, 1fr) auto;
         align-items: center;
-        justify-content: space-between;
-        gap: 20px;
-        padding: 16px 0 36px;
+        gap: 1rem;
+        height: 4.25rem;
+        padding: 0 1.35rem;
+        border-bottom: 1px solid var(--line);
+        background: rgba(24, 24, 27, 0.9);
       }
 
-      .brand {
+      .topbar-product,
+      .brand-card {
         display: inline-flex;
         align-items: center;
-        gap: 12px;
+        gap: 0.7rem;
         color: var(--ink);
+        font-weight: 800;
         text-decoration: none;
       }
 
-      .brand img {
-        width: 42px;
-        height: 42px;
+      .brand-mark { width: 40px; height: 40px; border-radius: 10px; }
+
+      .topbar-search {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 0.55rem;
+        max-width: 680px;
+        padding: 0.1rem 0.85rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(9, 9, 11, 0.72);
+        color: var(--muted);
       }
 
-      .brand strong {
-        display: block;
-        font-size: 1rem;
-        line-height: 1.1;
+      .topbar-search span:last-child { padding: 0.68rem 0; }
+
+      .topbar-actions { display: flex; align-items: center; gap: 0.5rem; }
+
+      .topbar-provider-badge,
+      .topbar-icon,
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 2rem;
+        padding: 0 0.75rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--line-subtle);
+        color: var(--ink-nav);
+        text-decoration: none;
       }
 
-      .brand span,
+      .topbar-icon { width: var(--control-hit-area); height: var(--control-hit-area); padding: 0; }
+      .topbar-provider-badge { color: var(--success); border-color: rgb(34 197 94 / 0.28); }
+
+      .app-sidebar {
+        position: fixed;
+        inset: 4.25rem auto 0 0;
+        z-index: 40;
+        display: grid;
+        align-content: start;
+        gap: 0.9rem;
+        width: 280px;
+        padding: 1.25rem;
+        overflow-y: auto;
+        border-right: 1px solid var(--line);
+        background: rgba(15, 15, 18, 0.96);
+      }
+
+      .brand-card { padding: 0.25rem 0 0.75rem; }
+      .brand-card span { display: grid; gap: 0.1rem; }
+      .brand-card small,
       .eyebrow,
-      .pill {
+      .badge {
         color: var(--muted);
         font-family: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", "Liberation Mono", monospace;
-        font-size: 0.76rem;
+        font-size: 0.74rem;
         font-weight: 700;
         letter-spacing: 0.06em;
         text-transform: uppercase;
       }
 
-      nav {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 14px;
-      }
+      .topnav,
+      .sidebar-footer-nav { display: grid; gap: 0.35rem; }
 
-      nav a {
-        color: var(--muted);
+      .topnav a,
+      .sidebar-footer-nav a {
+        display: flex;
+        align-items: center;
+        min-height: 2.65rem;
+        gap: 0.65rem;
+        padding: 0.72rem 0.85rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
         text-decoration: none;
       }
 
-      .hero {
-        display: grid;
-        grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
-        gap: 28px;
-        align-items: stretch;
+      .topnav a.active {
+        background: rgba(255, 85, 64, 0.12);
+        border-color: rgba(255, 180, 168, 0.24);
+        color: var(--ink-warm);
       }
 
-      .hero-copy,
+      .sidebar-spacer { min-height: 1rem; }
+
+      .page-shell {
+        margin-left: 280px;
+        padding: 6rem 2rem 3rem;
+      }
+
+      .jobs-control-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 390px);
+        align-items: end;
+        gap: 1.5rem;
+        padding: 0.35rem 0 1.55rem;
+      }
+
+      .jobs-hero-copy h1 {
+        margin: 0.2rem 0 0;
+        max-width: 10ch;
+        color: var(--ink-heading);
+        font-size: clamp(3rem, 7vw, 5.8rem);
+        line-height: 0.96;
+        letter-spacing: -0.05em;
+      }
+
+      .jobs-hero-copy p:not(.eyebrow) {
+        max-width: 720px;
+        margin: 0.75rem 0 0;
+        color: var(--muted-strong);
+        font-size: 1.05rem;
+      }
+
       .panel {
-        background: var(--panel);
         border: 1px solid var(--line);
         border-radius: 8px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
       }
 
-      .hero-copy {
-        padding: clamp(28px, 5vw, 54px);
+      .summary-grid,
+      .data-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.8rem;
       }
 
-      h1,
-      h2,
-      h3 {
-        margin: 0;
-        line-height: 1.12;
+      .summary-card,
+      .data-card,
+      .step {
+        display: grid;
+        gap: 0.5rem;
+        min-height: 8.75rem;
+        padding: 1rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
       }
 
-      h1 {
-        max-width: 12ch;
-        font-size: clamp(2.6rem, 7vw, 5.7rem);
-        font-weight: 850;
-      }
+      .summary-card strong,
+      .data-card strong,
+      .step strong { color: var(--ink-heading); }
+      .summary-card p,
+      .data-card p,
+      .step p { margin: 0; color: var(--muted); }
 
-      h2 {
-        font-size: clamp(1.5rem, 3vw, 2.15rem);
-      }
+      .demo-card { padding: 1rem; }
+      video { width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--line); border-radius: 8px; background: #050506; }
+      .demo-card p { margin: 0.9rem 0 0; color: var(--muted); }
 
-      h3 {
-        font-size: 1rem;
-      }
-
-      p {
-        margin: 0;
-        max-width: 72ch;
-      }
-
-      .lede {
-        margin-top: 22px;
-        color: var(--muted);
-        font-size: clamp(1.05rem, 2vw, 1.25rem);
-      }
-
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 28px;
-      }
+      .actions,
+      .legal { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.25rem; }
 
       .button {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-height: 44px;
+        min-height: 2.75rem;
+        padding: 0 1rem;
         border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 0 16px;
         color: var(--ink);
         text-decoration: none;
       }
 
-      .button.primary {
-        border-color: transparent;
-        background: var(--accent);
-        color: #161111;
-      }
+      .button.primary { border-color: transparent; background: var(--accent); color: var(--ink-on-accent); font-weight: 800; }
 
-      .demo-card {
-        padding: 20px;
-      }
-
-      video {
-        display: block;
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        background: #050506;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-      }
-
-      .demo-card p {
-        margin-top: 14px;
-        color: var(--muted);
-      }
-
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 16px;
-        margin-top: 28px;
-      }
-
-      .panel {
-        padding: 22px;
-      }
-
-      .panel h3,
-      .panel h2 {
-        margin-bottom: 10px;
-      }
-
-      .panel p,
-      li {
-        color: var(--muted);
-      }
-
-      .flow {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
-        margin-top: 28px;
-      }
-
-      .step {
-        min-height: 148px;
-        background: var(--panel-strong);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 18px;
-      }
-
-      .step .pill {
-        color: var(--accent-soft);
-      }
-
-      .step h3 {
-        margin: 12px 0 8px;
-      }
-
-      section {
-        margin-top: 32px;
-      }
-
-      ul {
-        margin: 14px 0 0;
-        padding-left: 20px;
-      }
-
-      .legal {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-        margin-top: 24px;
-      }
+      .flow-panel { margin-top: 1rem; padding: 1.2rem; }
+      .flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; margin-top: 1rem; }
+      .step .badge { justify-self: start; color: var(--accent-soft); }
+      .legal a { color: var(--accent-soft); font-weight: 800; }
 
       @media (max-width: 860px) {
-        .topbar,
-        .hero {
-          display: block;
-        }
-
-        nav {
-          margin-top: 18px;
-        }
-
-        .demo-card {
-          margin-top: 16px;
-        }
-
-        .grid,
-        .flow {
-          grid-template-columns: 1fr;
-        }
+        .app-topbar { position: static; grid-template-columns: 1fr auto; }
+        .topbar-search { display: none; }
+        .app-sidebar { position: static; width: auto; }
+        .page-shell { margin-left: 0; padding: 1rem; }
+        .jobs-control-hero,
+        .summary-grid,
+        .data-grid,
+        .flow { grid-template-columns: 1fr; }
       }
     </style>
   </head>
   <body>
-    <main>
-      <header class="topbar">
-        <a class="brand" href="./index.html" aria-label="ShortsFlow home">
-          <img src="./shortsflow-mark-1024.png" width="42" height="42" alt="">
-          <span>
-            <strong>ShortsFlow</strong>
-            TikTok Publishing Workflow
-          </span>
-        </a>
-        <nav aria-label="Public navigation">
-          <a href="#flow">End-to-end flow</a>
-          <a href="./tiktok-integration-demo.html">Live demo</a>
-          <a href="./demo-videos/tiktok-demo-download.html">Demo video</a>
-          <a href="./tiktok-privacy.html">Privacy</a>
-          <a href="./tiktok-terms.html">Terms</a>
-        </nav>
-      </header>
+    <header class="app-topbar" aria-label="Top bar">
+      <a class="topbar-product" href="./index.html">
+        <img class="brand-mark" src="./shortsflow-mark-1024.png" width="40" height="40" alt="" aria-hidden="true">
+        <span>ShortsFlow</span>
+      </a>
+      <div class="topbar-search" aria-label="Search placeholder">
+        <span>⌕</span>
+        <span>Buscar por título, tema ou job_id</span>
+      </div>
+      <div class="topbar-actions">
+        <span class="topbar-provider-badge">Produção</span>
+        <a class="topbar-icon" href="./tiktok-privacy.html" aria-label="Privacy">?</a>
+        <a class="topbar-icon" href="./tiktok-terms.html" aria-label="Terms">SF</a>
+      </div>
+    </header>
 
-      <section class="hero" aria-labelledby="hero-title">
-        <div class="hero-copy">
+    <aside class="app-sidebar">
+      <a class="brand-card" href="./index.html">
+        <img class="brand-mark" src="./shortsflow-mark-1024.png" width="40" height="40" alt="">
+        <span><strong>ShortsFlow</strong><small>TikTok Review</small></span>
+      </a>
+      <nav class="topnav" aria-label="Main navigation">
+        <a class="active" href="./index.html">▣ Automação</a>
+        <a href="./tiktok-integration-demo.html">▤ Biblioteca</a>
+        <a href="#flow">▥ Crescimento</a>
+        <a href="./demo-videos/tiktok-demo-download.html">▦ Agendamento</a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <nav class="sidebar-footer-nav" aria-label="Support">
+        <a href="./tiktok-privacy.html">? Privacy</a>
+        <a href="./tiktok-terms.html">↩ Terms</a>
+      </nav>
+    </aside>
+
+    <main class="page-shell">
+      <section class="jobs-control-hero" aria-labelledby="hero-title">
+        <div class="jobs-hero-copy">
           <p class="eyebrow">Creator publishing operations system</p>
           <h1 id="hero-title">ShortsFlow</h1>
-          <p class="lede">
-            ShortsFlow is the public identity for the ShortsFlow review and
-            publishing workflow. It helps authorized channel operators and creator
-            teams create, review, schedule, and publish approved short-form videos
-            to YouTube and TikTok.
+          <p>
+            ShortsFlow is the public review surface for the same operational Hub used to create,
+            review, schedule, and publish approved short-form videos to YouTube and TikTok.
           </p>
           <div class="actions">
             <a class="button primary" href="./demo-videos/tiktok-demo-download.html">Watch TikTok demo</a>
@@ -301,91 +307,33 @@
             <a class="button" href="./tiktok-callback.html">OAuth redirect page</a>
           </div>
         </div>
-
         <aside class="panel demo-card" aria-label="TikTok integration demo">
           <video controls preload="metadata" src="./demo-videos/tiktok-developer-review-demo.mp4"></video>
-          <p>
-            The sandbox review demos show the complete TikTok Content
-            Posting API flow: OAuth context, approved video package, TikTok
-            publication queue, upload request, and status tracking.
-          </p>
+          <p>The sandbox review demo shows OAuth context, approved video package, TikTok publication queue, upload request, and status tracking.</p>
         </aside>
       </section>
 
-      <section class="grid" aria-label="Service boundaries">
-        <article class="panel">
-          <h3>Authorized creators only</h3>
-          <p>
-            TikTok publishing runs only after the TikTok account owner grants
-            access. ShortsFlow is operated for authorized creator workspaces,
-            not for anonymous or unapproved posting.
-          </p>
-        </article>
-        <article class="panel">
-          <h3>Human review first</h3>
-          <p>
-            Videos pass through script, visual, audio, render, monetization, and
-            review gates before any automated TikTok posting job is eligible.
-          </p>
-        </article>
-        <article class="panel">
-          <h3>Operational audit trail</h3>
-          <p>
-            The hub records scheduling state, TikTok publish identifiers, status
-            checks, and errors so duplicate posting can be avoided.
-          </p>
-        </article>
+      <section class="summary-grid" aria-label="Service boundaries">
+        <article class="summary-card"><strong>Authorized creators only</strong><p>TikTok publishing runs only after the TikTok account owner grants access.</p></article>
+        <article class="summary-card"><strong>Human review first</strong><p>Script, visual, audio, render, monetization, and review gates run before automated posting.</p></article>
+        <article class="summary-card"><strong>Operational audit trail</strong><p>The Hub records scheduling state, TikTok publish IDs, status checks, and errors.</p></article>
       </section>
 
-      <section id="flow" class="panel" aria-labelledby="flow-title">
+      <section id="flow" class="panel flow-panel" aria-labelledby="flow-title">
         <p class="eyebrow">TikTok Content Posting API</p>
         <h2 id="flow-title">End-to-end integration flow</h2>
         <div class="flow">
-          <article class="step">
-            <span class="pill">01</span>
-            <h3>Connect</h3>
-            <p>The authorized TikTok account grants the required publishing scope through TikTok OAuth.</p>
-          </article>
-          <article class="step">
-            <span class="pill">02</span>
-            <h3>Approve</h3>
-            <p>The operator reviews the generated short, metadata, captions, audio, and quality gates.</p>
-          </article>
-          <article class="step">
-            <span class="pill">03</span>
-            <h3>Publish</h3>
-            <p>ShortsFlow creates a TikTok publication record and submits the approved video package.</p>
-          </article>
-          <article class="step">
-            <span class="pill">04</span>
-            <h3>Track</h3>
-            <p>The worker syncs TikTok publication status and stores the outcome in the operator hub.</p>
-          </article>
+          <article class="step"><span class="badge">01</span><strong>Connect</strong><p>The authorized TikTok account grants the required publishing scope through OAuth.</p></article>
+          <article class="step"><span class="badge">02</span><strong>Approve</strong><p>The operator reviews the generated short, metadata, captions, audio, and quality gates.</p></article>
+          <article class="step"><span class="badge">03</span><strong>Publish</strong><p>ShortsFlow creates a TikTok publication record and submits the approved video package.</p></article>
+          <article class="step"><span class="badge">04</span><strong>Track</strong><p>The worker syncs TikTok publication status and stores the outcome in the Hub.</p></article>
         </div>
       </section>
 
-      <section class="grid" aria-label="TikTok data usage">
-        <article class="panel">
-          <h3>Data processed</h3>
-          <p>
-            Access token, creator info, generated video file, caption, hashtags,
-            publish identifier, publication status, and TikTok API errors.
-          </p>
-        </article>
-        <article class="panel">
-          <h3>Data purpose</h3>
-          <p>
-            The data is used only to publish approved videos, check status, avoid
-            duplicate posts, and show operational state to the operator.
-          </p>
-        </article>
-        <article class="panel">
-          <h3>No unrelated data sharing</h3>
-          <p>
-            ShortsFlow uses TikTok data only for the authorized publishing workflow and
-            does not sell, rent, or use TikTok data for advertising.
-          </p>
-        </article>
+      <section class="data-grid" aria-label="TikTok data usage" style="margin-top: 1rem">
+        <article class="data-card"><strong>Data processed</strong><p>Access token, creator info, generated video file, caption, hashtags, publish ID, status, and API errors.</p></article>
+        <article class="data-card"><strong>Data purpose</strong><p>Used only to publish approved videos, check status, avoid duplicates, and show operational state.</p></article>
+        <article class="data-card"><strong>No unrelated sharing</strong><p>ShortsFlow does not sell, rent, or use TikTok data for advertising.</p></article>
       </section>
 
       <footer class="legal">
