@@ -287,17 +287,17 @@
 
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow">Private creator publishing system</p>
+          <p class="eyebrow">Creator publishing operations system</p>
           <h1 id="hero-title">ShortsFlow</h1>
           <p class="lede">
             ShortsFlow is the public identity for the ShortsFlow review and
-            publishing workflow. It helps one authorized channel operator create,
-            review, schedule, and publish approved short-form videos to YouTube
-            and TikTok.
+            publishing workflow. It helps authorized channel operators and creator
+            teams create, review, schedule, and publish approved short-form videos
+            to YouTube and TikTok.
           </p>
           <div class="actions">
             <a class="button primary" href="./demo-videos/tiktok-demo-download.html">Watch TikTok demo</a>
-            <a class="button" href="./tiktok-integration-demo.html">Open live mockup</a>
+            <a class="button" href="./tiktok-integration-demo.html">Open integration demo</a>
             <a class="button" href="./tiktok-callback.html">OAuth redirect page</a>
           </div>
         </div>
@@ -305,7 +305,7 @@
         <aside class="panel demo-card" aria-label="TikTok integration demo">
           <video controls preload="metadata" src="./demo-videos/tiktok-developer-review-demo.mp4"></video>
           <p>
-            The sandbox/mockup review demos show the complete TikTok Content
+            The sandbox review demos show the complete TikTok Content
             Posting API flow: OAuth context, approved video package, TikTok
             publication queue, upload request, and status tracking.
           </p>
@@ -314,10 +314,11 @@
 
       <section class="grid" aria-label="Service boundaries">
         <article class="panel">
-          <h3>Authorized account only</h3>
+          <h3>Authorized creators only</h3>
           <p>
             TikTok publishing runs only after the TikTok account owner grants
-            access. ShortsFlow does not offer public user registration.
+            access. ShortsFlow is operated for authorized creator workspaces,
+            not for anonymous or unapproved posting.
           </p>
         </article>
         <article class="panel">
@@ -358,7 +359,7 @@
           <article class="step">
             <span class="pill">04</span>
             <h3>Track</h3>
-            <p>The worker syncs TikTok publication status and stores the outcome in the private hub.</p>
+            <p>The worker syncs TikTok publication status and stores the outcome in the operator hub.</p>
           </article>
         </div>
       </section>
@@ -379,10 +380,10 @@
           </p>
         </article>
         <article class="panel">
-          <h3>No third-party marketplace</h3>
+          <h3>No unrelated data sharing</h3>
           <p>
-            ShortsFlow does not manage unrelated creator accounts and does not
-            sell, rent, or use TikTok data for advertising.
+            ShortsFlow uses TikTok data only for the authorized publishing workflow and
+            does not sell, rent, or use TikTok data for advertising.
           </p>
         </article>
       </section>

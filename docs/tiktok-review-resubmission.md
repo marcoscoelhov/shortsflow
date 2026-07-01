@@ -4,7 +4,7 @@
 
 The original TikTok review video is `app/static/demo-videos/tiktok-developer-review-demo.mp4`.
 
-It was created on 2026-05-22, runs for 68.2 seconds, and is a 1280x720 MP4. The video presents a sandbox/mockup review flow for the TikTok Content Posting API, not a live public production post.
+It was created on 2026-05-22, runs for 68.2 seconds, and is a 1280x720 MP4. The video presents a sandbox review flow for the TikTok Content Posting API, not a live public production post.
 
 The first demo showed:
 
@@ -13,7 +13,7 @@ The first demo showed:
 3. Sandbox privacy `SELF_ONLY`.
 4. Explicitly unused scopes: Share Kit, Display API, Login Kit.
 5. Public website URL and redirect URL prefix verification.
-6. The private Hub dashboard with TikTok cross-posting status.
+6. The operator Hub dashboard with TikTok cross-posting status.
 7. Hub settings for TikTok publishing.
 8. An approved video ready for publishing.
 9. End-to-end publishing steps: approve, schedule, queue TikTok publication, track status.
@@ -36,14 +36,14 @@ Do not submit a different ShortsFlow icon in TikTok Developers. The reviewer exp
 
 ### Website URL
 
-Use the public URL that serves `docs/index.html`.
+Use the GitHub Pages URL that serves `docs/index.html`. For this repository, the expected GitHub Pages shape is `https://marcoscoelhov.github.io/shortsflow/` when Pages is enabled from `main` + `/docs`.
 
 The website now includes:
 
 - product identity: ShortsFlow
 - TikTok publishing workflow summary
 - embedded TikTok review demo
-- interactive sandbox/mockup app demo
+- interactive sandbox app demo
 - end-to-end TikTok integration flow
 - data usage explanation
 - Terms of Service
@@ -71,12 +71,12 @@ Do not reuse the old demo without context, because it says `ShortsFlow` and show
 The resubmission should use one of these options:
 
 1. Preferred: record a new demo from the updated website and Hub with ShortsFlow branding.
-2. Acceptable if time is short: submit the existing MP4 with the updated demo page and a reviewer note explaining it is a sandbox/mockup end-to-end flow.
+2. Acceptable if time is short: submit the existing MP4 with the updated demo page and a reviewer note explaining it is a sandbox/sandbox end-to-end flow.
 
 The new or explained demo must show:
 
 - the public ShortsFlow website with the same icon
-- the interactive mockup page at `docs/tiktok-integration-demo.html`
+- the interactive sandbox page at `https://marcoscoelhov.github.io/shortsflow/tiktok-integration-demo.html`
 - TikTok OAuth context or callback page
 - Hub settings with TikTok publishing enabled
 - an approved video package
@@ -87,15 +87,15 @@ The new or explained demo must show:
 
 ## Suggested Reviewer Note
 
-ShortsFlow is a private creator publishing workflow powered by ShortsFlow. We updated the public website to be fully developed and to use the same ShortsFlow icon consistently across the TikTok app icon, website logo, and favicon. The redirect domain now matches the public website domain, and the callback page is hosted on the same domain.
+ShortsFlow is a creator publishing workflow powered by ShortsFlow. We updated the public website to be fully developed and to use the same ShortsFlow icon consistently across the TikTok app icon, website logo, and favicon. The redirect domain now matches the public website domain, and the callback page is hosted on the same domain.
 
-The demo video is a sandbox/mockup demonstration of the complete TikTok Content Posting API flow. It shows the authorized publishing context, approved video package, TikTok publication queue, upload request, status tracking, and final operational state. No production secrets, access tokens, or private credentials are displayed.
+The demo video is a sandbox review demonstration of the complete TikTok Content Posting API flow. It shows the authorized publishing context, approved video package, TikTok publication queue, upload request, status tracking, and final operational state. No production secrets, access tokens, or private credentials are displayed.
 
 ## Resubmission Checklist
 
 - Upload `docs/shortsflow-mark-1024.png` as the TikTok app icon.
-- Set Website URL to the public URL serving `docs/index.html`.
+- Set Website URL to `https://marcoscoelhov.github.io/shortsflow/` after GitHub Pages is enabled and returning 200.
 - Set Redirect domain to the same host as Website URL.
 - Confirm `tiktokQZ82W1qR5IDvPKFFY9y6ib3DDh84DuoC.txt` is still publicly reachable if TikTok requires site verification.
-- Use `docs/demo-videos/tiktok-developer-review-demo.mp4` or a freshly recorded ShortsFlow-branded replacement as the demo video.
+- Use `https://marcoscoelhov.github.io/shortsflow/demo-videos/tiktok-developer-review-demo.mp4` or a freshly recorded ShortsFlow-branded replacement as the demo video.
 - Paste the suggested reviewer note, adjusted with the real public domain.
