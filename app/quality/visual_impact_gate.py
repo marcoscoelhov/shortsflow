@@ -5,6 +5,9 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.utils import clamp01 as _clamp
+from app.utils import float_or as _float
+
 GENERIC_VISUAL_PATTERN = re.compile(r"\b(?:generic|stock|calm|plain|simple|vago|gen[eé]rico|fundo|sem\s+foco)\b", re.I)
 IMPACT_VISUAL_PATTERN = re.compile(r"\b(?:macro|close|extreme|dramatic|contrast|sharp|flash|flashing|vibrant|predator|approaching|tension|foreground|filtered|orange|blue|red|fogo|explod|reveal|cinematic|luz|sombra|olho|pele|textura|vanish|disappearing|sumir|rouba|estranho)\b", re.I)
 VERTICAL_PATTERN = re.compile(r"\b(?:vertical|9:16|portrait|1080x1920|shorts)\b", re.I)
@@ -93,13 +96,6 @@ def _corpus(scene: dict[str, Any], asset: dict[str, Any]) -> str:
     return " ".join(str(x or "") for x in [scene.get("visual_intent"), scene.get("image_prompt"), scene.get("narration_text"), asset.get("prompt_snapshot"), asset.get("source_url")])
 
 
-def _float(value: Any, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _count(pattern: re.Pattern[str], text: str) -> int:
     return len(pattern.findall(text or ""))
 
@@ -126,7 +122,3 @@ def _is_vertical(asset: dict[str, Any]) -> bool:
 def _normalized(value: Any) -> str:
     text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"\s+", " ", text.lower()).strip()
-
-
-def _clamp(value: float) -> float:
-    return max(0.0, min(1.0, value))

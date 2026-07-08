@@ -5,6 +5,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.utils import clamp01 as _clamp
 from app.utils import word_tokens
 
 TENSION_PATTERN = re.compile(r"\b(?:não|nunca|segredo|rouba|esconde|estranho|imposs[ií]vel|antes|por que|muda tudo|ningu[eé]m|predador|fogo|sumir|desaparece|notar)\b", re.I)
@@ -89,7 +90,3 @@ def _get(obj: dict[str, Any] | Any, key: str) -> str:
 
 def _normalize(text: str) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
-
-
-def _clamp(value: float) -> float:
-    return max(0.0, min(1.0, value))

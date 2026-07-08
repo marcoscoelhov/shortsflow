@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import get_settings
+from app.utils import float_or as _float
+from app.utils import text_list as _text_list
 
 
 HOOK_MIN_SEMANTIC_SCORE = 0.80
@@ -235,19 +237,6 @@ def _contains_unnegated_term(corpus: str, term: str) -> bool:
             continue
         return True
     return False
-
-
-def _text_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item or "").strip()]
-
-
-def _float(value: Any) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _normalized_text(value: Any) -> str:

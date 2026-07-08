@@ -1,7 +1,11 @@
 import React, {useMemo} from 'react';
-import type {Caption as RemotionCaption} from '@remotion/captions';
-import {Audio} from '@remotion/media';
-import {AbsoluteFill, Img, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, Audio, Img, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
+
+type RemotionCaption = {
+  text: string;
+  startMs: number;
+  endMs: number;
+};
 
 type SceneMotion = {
   kind: string;

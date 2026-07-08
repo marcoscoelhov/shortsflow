@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from app.utils import path_from_uri
+
 
 DEFAULT_TRACKS: list[dict[str, Any]] = [
     {
@@ -259,7 +261,8 @@ def import_minimax_music_artifacts(
         if not quality.get("passed"):
             skipped.append({"job_id": job_id, "reason": "quality_report_not_passed"})
             continue
-        source_path = _path_from_file_uri(str(payload.get("audio_uri") or ""))
+        raw_audio_uri = str(payload.get("audio_uri") or "")
+        source_path = path_from_uri(raw_audio_uri) if raw_audio_uri else None
         if not source_path or not source_path.exists():
             skipped.append({"job_id": job_id, "reason": "missing_audio_file"})
             continue
@@ -314,14 +317,6 @@ def _read_quality_report(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {"passed": False, "invalid": True}
     return payload if isinstance(payload, dict) else {"passed": False, "invalid": True}
-
-
-def _path_from_file_uri(value: str) -> Path | None:
-    if value.startswith("file://"):
-        return Path(value.removeprefix("file://"))
-    if value:
-        return Path(value)
-    return None
 
 
 def _file_sha256(path: Path) -> str:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.utils import float_or as _float
+
 
 @dataclass(frozen=True)
 class GrowthScoreGateResult:
@@ -78,10 +80,3 @@ class GrowthScoreGate:
 
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
-
-
-def _float(value: Any, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default

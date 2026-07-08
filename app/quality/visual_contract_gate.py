@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.utils import text_list as _text_list
+
 
 GENERIC_VISUAL_TEXTS = {
     "imagem forte",
@@ -84,12 +86,6 @@ class VisualContractGate:
 
 def _has_text(value: Any) -> bool:
     return bool(str(value or "").strip())
-
-
-def _text_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item or "").strip()]
 
 
 def _is_generic(value: Any) -> bool:

@@ -50,6 +50,23 @@ def word_tokens(text: str) -> list[str]:
     return re.findall(r"\w+", text.lower(), flags=re.UNICODE)
 
 
+def float_or(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item or "").strip()]
+
+
 def sentence_split(text: str) -> list[str]:
     sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", text.strip()) if item.strip()]
     return sentences or [text.strip()]
