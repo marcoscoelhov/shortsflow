@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from app.db import session_scope
 from app.domain_contracts import (
     ACTIVE_SCHEDULE_STATUSES,
+    AUTOMATION_SOURCE_READY_SCRIPT,
     JOB_STATUS_QUEUED,
     JOB_STATUS_RUNNING,
     PUBLICATION_STATUS_PUBLISHING,
@@ -64,11 +65,12 @@ class AutomationWatchdog:
     def evaluate(self, *, now: datetime | None = None) -> WatchdogReport:
         now = _ensure_utc(now or utcnow())
         findings: list[WatchdogFinding] = []
-        findings.extend(self._automation_run_findings(now))
-        findings.extend(self._stuck_job_findings(now))
-        findings.extend(self._recurring_error_findings())
-        findings.extend(self._youtube_preflight_findings())
         future_count = self._future_scheduled_count(now)
+        coverage_ok = future_count >= int(self.settings.watchdog_min_future_coverage_days)
+        findings.extend(self._automation_run_findings(now, coverage_ok=coverage_ok))
+        findings.extend(self._stuck_job_findings(now))
+        findings.extend(self._recurring_error_findings(coverage_ok=coverage_ok))
+        findings.extend(self._youtube_preflight_findings())
         if future_count < int(self.settings.watchdog_min_future_coverage_days):
             findings.append(
                 WatchdogFinding(
@@ -86,7 +88,7 @@ class AutomationWatchdog:
             future_scheduled_count=future_count,
         )
 
-    def _automation_run_findings(self, now: datetime) -> list[WatchdogFinding]:
+    def _automation_run_findings(self, now: datetime, *, coverage_ok: bool = False) -> list[WatchdogFinding]:
         findings: list[WatchdogFinding] = []
         local_tz = ZoneInfo(str(self.settings.automation_daily_timezone))
         local_now = now.astimezone(local_tz)
@@ -122,7 +124,7 @@ class AutomationWatchdog:
                         run_id=run.run_id,
                     )
                 )
-        if run.status == "failed":
+        if run.status == "failed" and not (coverage_ok and _is_ready_script_no_topic_failure(run)):
             findings.append(
                 WatchdogFinding(
                     kind="automation_run_failed",
@@ -172,7 +174,7 @@ class AutomationWatchdog:
                 )
         return findings
 
-    def _recurring_error_findings(self) -> list[WatchdogFinding]:
+    def _recurring_error_findings(self, *, coverage_ok: bool = False) -> list[WatchdogFinding]:
         threshold = int(self.settings.watchdog_recurring_error_threshold)
         if threshold <= 1:
             threshold = 2
@@ -193,7 +195,7 @@ class AutomationWatchdog:
                 action="Agrupar causa raiz antes de novas tentativas.",
             )
             for error, count in rows
-            if error
+            if error and not (coverage_ok and _is_ready_script_no_topic_error(str(error)))
         ]
 
     def _youtube_preflight_findings(self) -> list[WatchdogFinding]:
@@ -292,6 +294,21 @@ class AutomationWatchdog:
         )
         response.raise_for_status()
         return WatchdogReport(**{**report.to_dict(), "findings": report.findings, "delivery_status": "sent_telegram"})
+
+
+def _is_ready_script_no_topic_failure(run: AutomationRun) -> bool:
+    if run.error != "max_generation_attempts_exhausted":
+        return False
+    blockers = (run.run_metadata or {}).get("publish_blockers") or []
+    return bool(blockers) and all(
+        item.get("source") == AUTOMATION_SOURCE_READY_SCRIPT and item.get("reason_code") == "no_topic"
+        for item in blockers
+        if isinstance(item, dict)
+    )
+
+
+def _is_ready_script_no_topic_error(error: str) -> bool:
+    return "reason_code=no_topic" in error and "Banco de roteiros" in error
 
 
 def _ensure_utc(value: datetime) -> datetime:

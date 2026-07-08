@@ -37,6 +37,7 @@ from app.automation_recovery import (
     visual_review_can_be_attempted,
 )
 from app.automation_topics import COSMOS_CURIOSITY_POOL, cosmos_policy_notes, select_cosmos_topic
+from app.airtable_ready_scripts import AirtableReadyScriptClient, AirtableReadyScriptSyncResult
 from app.db import session_scope
 from app.domain_contracts import (
     ARTIFACT_AUTOAPPROVAL_SCORE,
@@ -143,6 +144,32 @@ class AutomationService:
                 )
                 imported += 1
         return ReadyScriptImportResult(imported=imported, errors=errors)
+
+    def sync_airtable_ready_scripts(self, *, dry_run: bool = False, limit: int | None = None) -> AirtableReadyScriptSyncResult:
+        client = AirtableReadyScriptClient(self.settings)
+        records = client.list_ready_records(limit=limit)
+        result = AirtableReadyScriptSyncResult(fetched=len(records), eligible=len(records), dry_run=dry_run)
+        for record in records:
+            if dry_run:
+                result.skipped += 1
+                continue
+            import_result = self.import_ready_script_batch(
+                record.raw_text,
+                fact_check_confirmed=record.fact_check_confirmed,
+                source=f"airtable:{record.record_id}",
+            )
+            if import_result.imported:
+                result.imported += import_result.imported
+                if self.settings.airtable_mark_imported:
+                    client.mark_imported(record.record_id, imported_count=import_result.imported)
+                    result.marked_imported += 1
+                continue
+            error = "; ".join(import_result.errors) or "airtable_ready_script_import_failed"
+            result.errors.append(f"{record.record_id}: {error}")
+            if self.settings.airtable_mark_imported:
+                client.mark_error(record.record_id, error)
+                result.marked_error += 1
+        return result
 
     def dashboard_context(self) -> dict[str, Any]:
         with session_scope() as session:

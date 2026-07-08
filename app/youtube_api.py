@@ -245,6 +245,33 @@ class YouTubePublisher:
             return None
         return f"https://www.youtube.com/watch?v={normalized}"
 
+    def post_top_level_comment(self, *, video_id: str, text: str) -> dict[str, Any]:
+        normalized_video_id = str(video_id or "").strip()
+        normalized_text = str(text or "").strip()
+        if not normalized_video_id:
+            raise YouTubeIntegrationError("video_id do YouTube ausente")
+        if not normalized_text:
+            raise YouTubeIntegrationError("comentário do YouTube vazio")
+        if not self.settings.youtube_channel_id:
+            raise YouTubeIntegrationError("SHORTSFLOW_YOUTUBE_CHANNEL_ID ausente")
+        credentials = self._load_credentials(refresh=True)
+        discovery, _ = self._google_upload_dependencies()
+        service = discovery.build("youtube", "v3", credentials=credentials, cache_discovery=False)
+        return self._serialize_response(
+            service.commentThreads()
+            .insert(
+                part="snippet",
+                body={
+                    "snippet": {
+                        "channelId": self.settings.youtube_channel_id,
+                        "videoId": normalized_video_id,
+                        "topLevelComment": {"snippet": {"textOriginal": normalized_text[:500]}},
+                    }
+                },
+            )
+            .execute()
+        )
+
     def _load_credentials(self, *, refresh: bool) -> Any:
         payload = self._read_json(self.settings.youtube_token_path)
         if not payload:

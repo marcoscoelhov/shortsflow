@@ -125,15 +125,16 @@ class AssetVisualGate:
         if _float(asset.get("total_score")) < total_threshold:
             reasons.append("hook_total_score_below_visual_threshold")
         corpus = _asset_scene_corpus(scene, asset)
+        visual_corpus = _asset_visual_corpus(scene, asset)
         must_show = _text_list(hook_frame.get("must_show"))
         if must_show and not any(_contains_term(corpus, item) for item in must_show):
             reasons.append("hook_must_show_missing_from_asset_prompt")
         for item in _text_list(hook_frame.get("must_hide")):
-            if _contains_unnegated_term(corpus, item):
+            if _contains_unnegated_term(visual_corpus, item):
                 reasons.append("hook_reveals_hidden_element_in_asset_prompt")
                 break
         for item in _text_list(hook_frame.get("negative_reads")):
-            if _contains_unnegated_term(corpus, item):
+            if _contains_unnegated_term(visual_corpus, item):
                 reasons.append("hook_negative_read_present_in_asset_prompt")
                 break
         return reasons
@@ -172,6 +173,23 @@ def _asset_scene_corpus(scene: dict[str, Any], asset: dict[str, Any]) -> str:
                 scene.get("visual_intent"),
                 asset.get("prompt_snapshot"),
                 asset.get("provider"),
+                asset.get("source_url"),
+                asset.get("attribution"),
+                asset.get("license_note"),
+            ]
+        )
+    )
+
+
+def _asset_visual_corpus(scene: dict[str, Any], asset: dict[str, Any]) -> str:
+    return _normalized_text(
+        " ".join(
+            str(value or "")
+            for value in [
+                scene.get("primary_subject"),
+                scene.get("image_prompt"),
+                scene.get("visual_intent"),
+                asset.get("prompt_snapshot"),
                 asset.get("source_url"),
                 asset.get("attribution"),
                 asset.get("license_note"),

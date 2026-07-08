@@ -5,44 +5,45 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_VIRAL_PROMPT_TEMPLATE = """Crie uma pauta de curiosidades para YouTube Shorts em pt-BR.
+DEFAULT_VIRAL_PROMPT_TEMPLATE = """Crie uma pauta de YouTube Shorts em pt-BR no padrão viral de espaço/astronomia.
 Objetivo: maximizar retencao, compartilhamento, comentarios e replay mental sem clickbait falso.
+Emule a estrutura dos concorrentes virais de espaço: medo, escala, ameaça visual e quebra de crença.
 Use estrutura de copywriting agressiva para retenção:
-1. Hook de choque nos primeiros 1-2 segundos: contraste, ameaça cognitiva, paradoxo ou fato que pareça impossivel mas seja verdadeiro.
-2. Loop aberto imediato: plante uma pergunta mental que so sera fechada no final.
-3. Promessa clara e especifica: diga/implique por que a pessoa precisa continuar assistindo agora.
-4. Escalada em 3 a 5 beats: cada frase deve revelar algo mais forte, mais estranho ou mais visual que a anterior.
-5. Payoff atrasado: guarde a explicacao mais surpreendente para o ultimo terco.
-6. Fechamento com recontextualizacao forte ou loop: termine fazendo o espectador repensar o primeiro hook, com frase memoravel.
+1. Título com ameaça, escala ou crença quebrada: “assusta”, “brutal”, “mentira”, “não é o que parece”, “mudaria tudo”.
+2. Hook de choque em ate 8 palavras nos primeiros 1-2 segundos; sem introdução.
+3. Loop aberto imediato: “então por que...?”, “o problema é...”, “mas a parte pior é...”.
+4. Escalada em 3 a 5 beats: crença comum quebrada → fato estranho → consequência visual → virada.
+5. Payoff atrasado: guarde a explicacao mais forte para o ultimo terco.
+6. Fechamento com imagem mental forte, quase comentário fixado.
 Obrigatório para o roteiro passar no gate:
-- hook deve criar uma interrupção de rolagem, não apenas explicar o tema
+- hook deve criar interrupção de rolagem por medo, escala ou quebra de crença; não apenas explicar o tema
+- título deve ser competitivo contra padrões como “The size will scare you”, “Most violent weather in space” e “NASA saw this...”
 - body_beats deve ter exatamente 3 a 5 frases independentes em escalada; nunca compacte os beats em uma frase só
 - full_narration deve ser hook + body_beats + ending, sem perder nenhum beat
 - inclua um share trigger implícito: algo que faça a pessoa pensar “vou mandar isso para alguém”
 - o payoff precisa ser menos óbvio que o hook; se o espectador já adivinha tudo na primeira frase, reescreva
 Retenção:
 - cada frase deve criar motivo para assistir a proxima
-- evite frase neutra, didatica ou enciclopedica quando puder virar tensão, contraste ou consequência
+- troque frase neutra por tensão, contraste, ameaça visual, escala ou consequência
 - use curiosidade concreta, causalidade e imagens mentais fortes
-- priorize consequencia visual especifica, tensão concreta ou virada verificavel sobre lista de fatos soltos
-- para curiosidades cotidianas de senso comum, não invente precisão nem fonte; use linguagem simples e observacional
+- priorize consequência visual específica (consequencia visual especifica), tensão concreta ou virada verificável (virada verificavel) sobre lista de fatos soltos
 SEO:
 - palavra-chave principal cedo no titulo quando natural
-- titulo com curiosidade especifica, 45 a 75 caracteres quando possivel
-- evite titulo generico, caixa alta exagerada e promessa que o roteiro nao prove
+- titulo curto, forte e específico; CAPS permitido se parecer título de Short viral
+- evite titulo generico, morno ou promessa que o roteiro nao prove
 Tom:
-- rapido, intrigante, confiante e mais agressivo em retenção
-- linguagem brasileira natural, com tensão e ritmo de Shorts
-- sem enrolacao, sem aula morna, sem introducao generica
+- rapido, agressivo, visual, confiante e brasileiro
+- sem aula morna, sem introducao generica, sem voz enciclopedica
+- drama permitido; mentira factual não
 Proibido:
 - nao comece com "voce sabia", "você sabia", "ja imaginou", "já imaginou", "nesse video" ou aberturas genericas equivalentes
-- o hook deve abrir direto com contraste, consequencia, conflito ou fato especifico
 - nao entregue a explicacao completa no primeiro beat; abra um loop e feche depois
 - nao use clickbait falso: todo choque precisa ser provado no roteiro
-Modelos de hook mais fortes que explicação neutra:
-- "Seu copo não está vazando. O ar está deixando água nele."
-- "A chuva ainda não caiu, mas o chão já mandou o cheiro."
-- "Esse refrão não grudou por acaso. Ele deixou uma armadilha aberta."
+Modelos de hook para astronomia:
+- "O Sol vira poeira nessa comparação."
+- "Netuno parece calmo. Não é."
+- "A Lua não cresceu. Você caiu."
+- "Saturno não usa joia. Usa destroço."
 """
 HUB_SETTINGS_FILENAME = "hub_settings.json"
 MAX_VIRAL_PROMPT_TEMPLATE_CHARS = 12000

@@ -25,6 +25,26 @@ class YouTubePublicationOperations:
     def youtube(self) -> Any:
         return self.owner.youtube
 
+    def first_comment_text(self, title: str | None) -> str:
+        clean_title = str(title or "").strip().rstrip(".!?")
+        if clean_title:
+            return f"Sobre {clean_title}: qual detalhe mais te surpreendeu?"
+        return "Qual detalhe desse vídeo mais te surpreendeu?"
+
+    def post_first_public_comment(self, job_id: str, *, video_id: str | None, title: str | None) -> dict[str, Any] | None:
+        normalized_video_id = str(video_id or "").strip()
+        if not normalized_video_id:
+            return None
+        text = self.first_comment_text(title)
+        try:
+            response = self.youtube.post_top_level_comment(video_id=normalized_video_id, text=text)
+        except YouTubeIntegrationError as exc:
+            self.owner._append_event(job_id, "youtube.first_comment_failed", "failed", {"error": str(exc), "video_id": normalized_video_id})
+            return None
+        payload = {"video_id": normalized_video_id, "text": text, "response": response}
+        self.owner._append_event(job_id, "youtube.first_comment_posted", "succeeded", payload)
+        return payload
+
     def api_mode_enabled(self) -> bool:
         return bool(self.settings.youtube_api_enabled and self.settings.youtube_publish_mode == "api")
 
@@ -148,6 +168,12 @@ class YouTubePublicationOperations:
             privacy_status = str(status.get("privacyStatus") or "").strip().lower()
             if privacy_status != "public":
                 continue
+            publish_package = self.owner._read_job_json(str(job_id), "publish_package.json")
+            first_comment_payload = self.post_first_public_comment(
+                str(job_id),
+                video_id=str(youtube_video_id or ""),
+                title=str(publish_package.get("title") or ""),
+            )
             published_at = utcnow()
             with session_scope() as session:
                 job = session.get(Job, job_id)
@@ -171,6 +197,8 @@ class YouTubePublicationOperations:
                     "youtube_url": schedule.youtube_url,
                 }
                 quality_summary["youtube"] = payload
+                if first_comment_payload:
+                    quality_summary["youtube_first_comment"] = first_comment_payload
                 job.quality_summary = quality_summary
                 self.owner._update_publication_artifact_index(job)
                 self.owner._ensure_tiktok_publication_for_schedule(session, job, schedule, source="youtube_schedule")

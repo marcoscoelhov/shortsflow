@@ -30,7 +30,8 @@
 {% set retention = (job.quality_summary or {}).get("retention", {}) %}
 {% set retention_cleanup = details.retention_cleanup or {} %}
 {% set artifacts_cleaned = details.artifacts_cleaned %}
-{% set can_approve = job.status in ["monetization_review", "ready_for_upload"] and not monetization.get("hard_blockers") %}
+{% set approval_hard_blockers = monetization.get("hard_blockers", [])|reject("equalto", "channel_repetition_high")|list %}
+{% set can_approve = job.status in ["monetization_review", "blocked_for_monetization", "ready_for_upload"] and not approval_hard_blockers %}
 {% set can_reject = job.status in ["monetization_review", "blocked_for_monetization", "ready_for_upload", "rejected", "failed", "script_quality_failed", "scene_plan_quality_failed", "asset_quality_failed", "subtitle_quality_failed", "render_quality_failed"] %}
 {% set can_retry = job.status in ["monetization_review", "blocked_for_monetization", "rejected", "failed", "script_quality_failed", "scene_plan_quality_failed", "asset_quality_failed", "subtitle_quality_failed", "render_quality_failed"] %}
 {% set can_reprocess_tts = job.status in ["monetization_review", "blocked_for_monetization", "failed"] and "technical_tts_provider_not_publishable" in monetization.get("hard_blockers", []) %}

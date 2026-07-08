@@ -97,13 +97,18 @@ def test_hub_auth_token_protects_pages_and_artifacts(monkeypatch) -> None:
     authed_client.cookies.set("shortsflow_hub_token", "secret-token")
     main_module.settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    assert client.get("/").status_code == 401
+    login = client.get("/")
+    assert login.status_code == 200
+    assert "Informe o token" in login.text
     assert client.get("/", headers={"x-shortsflow-hub-token": "secret-token"}).status_code == 200
     assert authed_client.get("/").status_code == 200
     assert client.get("/artifacts/missing.mp4").status_code == 401
     assert authed_client.get("/artifacts/missing.mp4").status_code == 404
     assert client.get("/artifacts/missing.mp4?access_token=secret-token").status_code == 401
-    assert authed_client.post("/jobs", data={"seed_theme": "polvos"}).status_code == 401
+    assert authed_client.post("/jobs", data={"seed_theme": "polvos"}).status_code in {200, 303, 422}
+    login_post = client.post("/auth", data={"token": "secret-token"}, follow_redirects=False)
+    assert login_post.status_code == 303
+    assert "shortsflow_hub_token" in login_post.headers.get("set-cookie", "")
     assert (
         client.post(
             "/operations/settings",
@@ -274,6 +279,43 @@ def test_job_detail_explains_specific_monetization_blockers_in_plain_language() 
     assert "Roteiro não bate com as fontes" in response.text
     assert "claim sem fonte confiável" in response.text
     assert "As hashtags fracas detectadas foram: #fatos." in response.text
+
+
+def test_job_detail_can_confirm_originality_for_repetition_blocker() -> None:
+    client = TestClient(app)
+    job_id = "confirm-originality-blocker"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="blocked_for_monetization", seed_theme="Marte vermelho")
+        session.commit()
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {
+            "passed": False,
+            "final_status": "blocked_for_monetization",
+            "hard_blockers": ["channel_repetition_high"],
+            "manual_required": ["originality_review_required"],
+            "human_review_checklist": {
+                "items": [
+                    {
+                        "code": "originality_review_required",
+                        "confirmation_code": "originality_confirmed",
+                        "label": "Originalidade em relação ao canal confirmada",
+                        "required": True,
+                        "completed": False,
+                    }
+                ]
+            },
+            "quality_checklist": {},
+        },
+    )
+
+    response = client.get(f"/jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert 'name="confirmation_codes" value="originality_confirmed"' in response.text
+    assert "Aprovar para agendamento (revisão final no YouTube Studio)" in response.text
+
 
 def test_hub_create_job_sends_title_mode_tone_angle_and_seo_notes(monkeypatch) -> None:
     captured: dict[str, object] = {}
@@ -3567,6 +3609,58 @@ def test_api_publish_uploads_video_without_manual_url(monkeypatch) -> None:
     assert schedule.youtube_url == "https://www.youtube.com/watch?v=yt123"
     assert job and job.status == "published"
 
+
+def test_api_publish_posts_first_comment_only_for_public_video(monkeypatch) -> None:
+    _allow_premium_publish_gate(monkeypatch)
+    client = TestClient(app)
+    job_id = "api-publish-comment-job"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="approved_for_publish", seed_theme="Marte", review_state="approved")
+        session.add(
+            PublicationSchedule(
+                schedule_id=f"{job_id}-schedule",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-schedule",
+                scheduled_for_utc=utcnow(),
+                timezone="UTC",
+                youtube_visibility="public",
+                status="scheduled",
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(orchestrator.settings, "youtube_api_enabled", True)
+    monkeypatch.setattr(orchestrator.settings, "youtube_publish_mode", "api")
+    monkeypatch.setattr(orchestrator.publication_ops, "_ensure_youtube_api_ready", lambda: None)
+    monkeypatch.setattr(
+        orchestrator.publication_ops,
+        "_upload_publish_package",
+        lambda package, visibility: {
+            "mode": "api",
+            "api_enabled": True,
+            "video_id": "yt-comment-public",
+            "url": "https://www.youtube.com/watch?v=yt-comment-public",
+            "published_at": "2099-06-10T14:30:00+00:00",
+            "target_visibility": visibility,
+            "actual_visibility": "public",
+            "response": {"id": "yt-comment-public", "status": {"privacyStatus": "public"}},
+        },
+    )
+    comments: list[dict] = []
+    monkeypatch.setattr(orchestrator.youtube, "post_top_level_comment", lambda **kwargs: comments.append(kwargs) or {"id": "comment-1"})
+
+    response = client.post(f"/jobs/{job_id}/publish", data={}, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert comments == [
+        {
+            "video_id": "yt-comment-public",
+            "text": "Sobre Marte: qual detalhe mais te surpreendeu?",
+        }
+    ]
+
+
 def test_claim_due_publication_schedule_skips_video_already_scheduled_on_youtube(monkeypatch) -> None:
     job_id = "scheduled-native-due-job"
     due_at = utcnow() - timedelta(minutes=5)
@@ -3638,6 +3732,9 @@ def test_sync_native_scheduled_publication_marks_job_as_published(monkeypatch) -
         },
     )
 
+    comments: list[dict] = []
+    monkeypatch.setattr(orchestrator.youtube, "post_top_level_comment", lambda **kwargs: comments.append(kwargs) or {"id": "comment-sync"})
+
     synced = orchestrator.publication_ops._sync_native_scheduled_publications()
 
     assert synced >= 1
@@ -3647,6 +3744,9 @@ def test_sync_native_scheduled_publication_marks_job_as_published(monkeypatch) -
 
     assert schedule.status == "published"
     assert schedule.published_at is not None
+    expected_comment = {"video_id": "yt-native-sync", "text": "Qual detalhe desse vídeo mais te surpreendeu?"}
+    assert expected_comment in comments
+    assert comments.count(expected_comment) == 1
     assert job is not None
     assert job.status == "published"
     assert job.quality_summary["youtube_publish"]["status"] == "published"

@@ -3824,6 +3824,16 @@ def test_script_gate_rejects_100_words_for_45s_natural_pace() -> None:
     assert result.metrics["natural_min_words"] >= 115
 
 
+def test_default_viral_prompt_uses_competitor_scale_fear_pattern() -> None:
+    from app.hub_prompt import DEFAULT_VIRAL_PROMPT_TEMPLATE, extract_viral_prompt_criteria
+
+    criteria = extract_viral_prompt_criteria(DEFAULT_VIRAL_PROMPT_TEMPLATE)
+
+    assert "medo, escala, ameaça visual e quebra de crença" in DEFAULT_VIRAL_PROMPT_TEMPLATE
+    assert any("The size will scare you" in item for item in criteria["required"])
+    assert any("Netuno parece calmo" in item for item in criteria["hook_models"])
+
+
 def test_automatic_topic_payload_uses_cosmos_focus() -> None:
     from app.hub_prompt import hub_settings_path, save_viral_prompt_template
 

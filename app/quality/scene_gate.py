@@ -154,11 +154,12 @@ class ScenePlanGate:
         if expected_hook_intent and first_intent != expected_hook_intent:
             reasons.append("scene-1:visual_contract_hook_intent_mismatch")
         first_corpus = _scene_corpus(first)
+        first_visual_corpus = _scene_visual_corpus(first)
         must_show = _text_list(hook_frame.get("must_show"))
         if must_show and not any(_contains_required_term(first_corpus, item) for item in must_show):
             reasons.append("scene-1:visual_contract_hook_must_show_missing")
         for item in _text_list(hook_frame.get("must_hide")):
-            if _contains_forbidden_term(first_corpus, item):
+            if _contains_forbidden_term(first_visual_corpus, item):
                 reasons.append("scene-1:visual_contract_hook_reveals_hidden_element")
                 break
         early_scenes = [scene for scene in ordered[:-1] if str(scene.get("retention_role") or "").strip().lower() not in {"turn_or_payoff", "loop_close"}]
@@ -190,6 +191,14 @@ def _scene_corpus(scene: dict[str, Any]) -> str:
         " ".join(
             str(scene.get(key) or "")
             for key in ("narration_text", "primary_subject", "topic_hint", "image_prompt", "visual_intent")
+        )
+    )
+
+
+def _scene_visual_corpus(scene: dict[str, Any]) -> str:
+    return _normalized_text(
+        " ".join(
+            str(scene.get(key) or "") for key in ("primary_subject", "image_prompt", "visual_intent")
         )
     )
 
@@ -247,7 +256,9 @@ def _contains_forbidden_term(corpus: str, term: str) -> bool:
     normalized = _normalized_text(term)
     if not normalized:
         return False
-    if normalized in corpus:
+    tokens = corpus.split()
+    marker_tokens = normalized.split()
+    if marker_tokens and _marker_present_unnegated(tokens, marker_tokens):
         return True
     return _contains_forbidden_simple_term(corpus, normalized)
 

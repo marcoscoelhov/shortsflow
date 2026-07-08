@@ -1,6 +1,6 @@
 # ShortsFlow Control
 
-Last updated: 2026-07-01T23:24:59+00:00
+Last updated: 2026-07-02T22:35:28+00:00
 
 ## Product North Star
 
@@ -44,6 +44,8 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 - Baseline is still 191.5 mature median views; target remains 600+ mature median views.
 - Quality audit recognizes modern topic/script evidence.
 - Generation quality is passing publish readiness; immediate blocker moved to distribution/measurement.
+- Watchdog is silent with `future_scheduled_count=5` as of 2026-07-02T22:34Z.
+- Four extra cosmos candidates from cron ideas are already `ready_for_upload` on 2026-07-02; use them as backlog, not as proof of strategy success.
 - CEO/operator brief loop exists weekly on Discord and must read this file first.
 
 ## Last Production Run
@@ -88,11 +90,11 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 
 ## Current Bottleneck
 
-Distribution/measurement. The engine can generate publishable candidates; now the system needs enough cosmos videos published and mature before changing topic strategy.
+Measurement, not generation. The engine has scheduled coverage and extra `ready_for_upload` backlog; the missing proof is mature YouTube performance for the current cosmos run.
 
 ## Next Task
 
-Single next task: keep the one-channel cosmos experiment moving and measure mature performance.
+Single next task: wait for the scheduled cosmos videos to publish/mature, then refresh YouTube analytics and update the mature median.
 
 Acceptance:
 

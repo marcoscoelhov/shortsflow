@@ -121,6 +121,55 @@ def test_watchdog_reports_failed_latest_run() -> None:
     assert any(f.kind == "automation_run_failed" and f.run_id == "watchdog-failed-run" for f in report.findings)
 
 
+def test_watchdog_stays_silent_for_covered_empty_ready_script_bank() -> None:
+    now = datetime(2099, 6, 27, 8, 0, tzinfo=UTC)
+    error = "reason_code=no_topic; Banco de roteiros: não há roteiro disponível para o slot diário."
+    with SessionLocal() as session:
+        session.add(
+            AutomationRun(
+                run_id="watchdog-empty-ready-bank-run",
+                schema_version="1.0.0",
+                content_hash="watchdog-empty-ready-bank-run",
+                local_date="2099-06-27",
+                timezone="America/Sao_Paulo",
+                status="failed",
+                started_at=now - timedelta(minutes=20),
+                finished_at=now - timedelta(minutes=10),
+                error="max_generation_attempts_exhausted",
+                run_metadata={
+                    "publish_blockers": [
+                        {
+                            "source": "ready_script_bank",
+                            "status": "not_eligible",
+                            "reason_code": "no_topic",
+                            "reason": error,
+                        }
+                    ]
+                },
+            )
+        )
+        for idx in range(2):
+            session.add(
+                AutomationAttempt(
+                    attempt_id=f"watchdog-empty-ready-bank-attempt-{idx}",
+                    run_id="watchdog-empty-ready-bank-run",
+                    schema_version="1.0.0",
+                    content_hash=f"watchdog-empty-ready-bank-attempt-{idx}",
+                    attempt_number=idx + 1,
+                    source="ready_script_bank",
+                    status="not_eligible",
+                    error=error,
+                )
+            )
+        _add_future_schedule(session, "watchdog-empty-ready-bank-coverage", now + timedelta(days=1))
+        session.commit()
+
+    report = _watchdog().evaluate(now=now)
+
+    assert report.status == "silent"
+    assert report.findings == []
+
+
 def test_watchdog_reports_long_running_run() -> None:
     now = datetime(2099, 6, 28, 8, 0, tzinfo=UTC)
     with SessionLocal() as session:

@@ -52,6 +52,10 @@ def main() -> None:
     import_parser.add_argument("path", type=Path, help="Arquivo txt/md com roteiros rotulados")
     import_parser.add_argument("--fact-check-confirmed", action="store_true", help="Assume a confirmacao factual do lote")
 
+    airtable_parser = subparsers.add_parser("airtable-ready-scripts-sync", help="Sincroniza roteiros prontos futuros do Airtable")
+    airtable_parser.add_argument("--dry-run", action="store_true", help="Lista elegíveis sem importar ou marcar no Airtable")
+    airtable_parser.add_argument("--limit", type=int, default=None, help="Limite de registros elegíveis")
+
     args = parser.parse_args()
     init_db()
     apply_operational_settings(orchestrator.settings)
@@ -125,6 +129,13 @@ def main() -> None:
         raw_text = args.path.read_text(encoding="utf-8")
         result = service.import_ready_script_batch(raw_text, fact_check_confirmed=args.fact_check_confirmed, source=str(args.path))
         print(json.dumps({"imported": result.imported, "errors": result.errors}, ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "airtable-ready-scripts-sync":
+        result = service.sync_airtable_ready_scripts(dry_run=args.dry_run, limit=args.limit)
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+        if result.errors:
+            sys.exit(1)
         return
 
 

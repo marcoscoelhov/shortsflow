@@ -96,10 +96,17 @@ class PublicationWorkflowOperations:
         self.owner._append_publication_attempt(job_id, attempt_payload)
 
         try:
+            first_comment_payload = None
             if self.owner._youtube_api_mode_enabled():
                 youtube_payload = self.owner._upload_publish_package(package_snapshot, visibility)
                 youtube_video_id = youtube_payload.get("video_id")
                 youtube_url = youtube_payload.get("url")
+                if str(visibility).lower() == "public" and str(youtube_payload.get("actual_visibility") or "").lower() == "public":
+                    first_comment_payload = self.owner.youtube_ops.post_first_public_comment(
+                        job_id,
+                        video_id=str(youtube_video_id or ""),
+                        title=str(package_snapshot.get("title") or ""),
+                    )
             else:
                 youtube_payload = {
                     "mode": self.settings.youtube_publish_mode,
@@ -108,6 +115,7 @@ class PublicationWorkflowOperations:
                     "url": str(youtube_url or "").strip() or None,
                     "published_at": iso_now(),
                 }
+                first_comment_payload = None
         except Exception as exc:
             with session_scope() as session:
                 job = session.get(Job, job_id)
@@ -176,6 +184,8 @@ class PublicationWorkflowOperations:
             package_snapshot["youtube_url"] = schedule.youtube_url
             package_snapshot["publication_schedule"] = self.owner._publication_schedule_payload(schedule)
             package_snapshot["youtube"] = youtube_payload
+            if first_comment_payload:
+                package_snapshot["youtube_first_comment"] = first_comment_payload
             self.storage.persist_json(job.job_id, "publish_result.json", self.owner._serialize_for_json(package_snapshot))
             job.status = "published"
             job.review_state = "published"

@@ -5,7 +5,7 @@ import random
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+import secrets
 from urllib.parse import quote, urlencode
 
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, Request
@@ -183,16 +183,25 @@ def _authorized_request(request: Request) -> bool:
     authorization = request.headers.get("authorization") or ""
     if authorization.lower().startswith("bearer "):
         supplied = authorization.split(" ", 1)[1].strip()
-    if not supplied and request.method in {"GET", "HEAD"}:
+    if not supplied:
         supplied = request.cookies.get("shortsflow_hub_token")
-    return supplied == settings.hub_auth_token
+    return bool(supplied) and secrets.compare_digest(str(supplied), str(settings.hub_auth_token))
+
+
+def _hub_login_response(status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(
+        """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ShortsFlow Hub</title></head><body style="font-family:system-ui;margin:3rem;max-width:32rem"><h1>ShortsFlow Hub</h1><p>Informe o token do Hub.</p><form method="post" action="/auth"><input name="token" type="password" autocomplete="current-password" autofocus style="width:100%;padding:.75rem"><button type="submit" style="margin-top:1rem;padding:.75rem 1rem">Entrar</button></form></body></html>""",
+        status_code=status_code,
+    )
 
 
 @app.middleware("http")
 async def require_hub_auth(request: Request, call_next):
-    if request.url.path.startswith("/healthz") or request.url.path.startswith("/static"):
+    if request.url.path.startswith("/healthz") or request.url.path.startswith("/static") or request.url.path == "/auth":
         return await call_next(request)
     if request.method != "OPTIONS" and not _authorized_request(request):
+        if request.method in {"GET", "HEAD"} and request.url.path == "/":
+            return _hub_login_response()
         return PlainTextResponse("unauthorized", status_code=401)
     if request.method == "POST" and request.url.path == "/automation/ready-scripts/import":
         if content_length_exceeds(request, MAX_READY_SCRIPT_IMPORT_BODY_BYTES):
@@ -203,6 +212,15 @@ async def require_hub_auth(request: Request, call_next):
         replay_request_body(request, body)
         return await call_next(request)
     return await call_next(request)
+
+
+@app.post("/auth")
+async def authenticate_hub(token: str = Form(default="")):
+    if not settings.hub_auth_token or secrets.compare_digest(str(token), str(settings.hub_auth_token)):
+        response = RedirectResponse(url="/", status_code=303)
+        response.set_cookie("shortsflow_hub_token", str(token), httponly=True, samesite="lax")
+        return response
+    return _hub_login_response(status_code=401)
 
 
 

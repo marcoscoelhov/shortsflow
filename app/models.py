@@ -12,6 +12,24 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+class CronVideoIdea(Base):
+    __tablename__ = "cron_video_ideas"
+    __table_args__ = (UniqueConstraint("cron_item_id", name="uq_cron_video_ideas_item_id"),)
+
+    idea_id: Mapped[str] = mapped_column(String, primary_key=True)
+    cron_job_id: Mapped[str] = mapped_column(String, index=True)
+    cron_item_id: Mapped[str] = mapped_column(String, index=True)
+    title: Mapped[str] = mapped_column(String)
+    hook: Mapped[str | None] = mapped_column(Text, nullable=True)
+    loop_question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visual_promise: Mapped[str | None] = mapped_column(Text, nullable=True)
+    emotional_angle: Mapped[str | None] = mapped_column(String, nullable=True)
+    viral_score: Mapped[str | None] = mapped_column(String, nullable=True)
+    repetition_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
