@@ -81,8 +81,10 @@ class AutomationWatchdog:
                     action="Rodar backlog recovery reativo ou geração automática.",
                 )
             )
+        alert_kinds = {"future_coverage_low", "automation_timer_missing", "automation_run_stuck", "job_stuck", "youtube_preflight_failed"}
+        status = "alert" if any(item.severity == "critical" or item.kind in alert_kinds for item in findings) else "silent"
         return WatchdogReport(
-            status="alert" if findings else "silent",
+            status=status,
             checked_at=now.isoformat(),
             findings=findings,
             future_scheduled_count=future_count,
@@ -124,17 +126,31 @@ class AutomationWatchdog:
                         run_id=run.run_id,
                     )
                 )
-        if run.status == "failed" and not (coverage_ok and _is_ready_script_no_topic_failure(run)):
-            findings.append(
-                WatchdogFinding(
-                    kind="automation_run_failed",
-                    severity="critical",
-                    title="Automation run falhou",
-                    detail=run.error or "Run terminou como failed sem erro detalhado.",
-                    action="Classificar falha e acionar backlog recovery se cobertura estiver em risco.",
-                    run_id=run.run_id,
+        if run.status == "failed":
+            if coverage_ok and _is_ready_script_no_topic_failure(run):
+                return findings
+            if coverage_ok:
+                findings.append(
+                    WatchdogFinding(
+                        kind="automation_run_failed_historical",
+                        severity="warning",
+                        title="Automation run falhou, mas cobertura está recomposta",
+                        detail=run.error or "Run terminou como failed sem erro detalhado.",
+                        action="Sem ação imediata enquanto a cobertura futura estiver no mínimo.",
+                        run_id=run.run_id,
+                    )
                 )
-            )
+            else:
+                findings.append(
+                    WatchdogFinding(
+                        kind="automation_run_failed",
+                        severity="critical",
+                        title="Automation run falhou",
+                        detail=run.error or "Run terminou como failed sem erro detalhado.",
+                        action="Classificar falha e acionar backlog recovery se cobertura estiver em risco.",
+                        run_id=run.run_id,
+                    )
+                )
         if run.status == "succeeded" and (run.run_metadata or {}).get("schedule_complete") is False:
             findings.append(
                 WatchdogFinding(

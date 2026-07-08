@@ -96,7 +96,7 @@ def test_watchdog_silent_when_latest_run_succeeded_and_coverage_exists() -> None
     assert report.findings == []
 
 
-def test_watchdog_reports_failed_latest_run() -> None:
+def test_watchdog_downgrades_failed_latest_run_when_coverage_exists() -> None:
     now = datetime(2099, 6, 27, 8, 0, tzinfo=UTC)
     with SessionLocal() as session:
         session.add(
@@ -117,8 +117,8 @@ def test_watchdog_reports_failed_latest_run() -> None:
 
     report = _watchdog().evaluate(now=now)
 
-    assert report.status == "alert"
-    assert any(f.kind == "automation_run_failed" and f.run_id == "watchdog-failed-run" for f in report.findings)
+    assert report.status == "silent"
+    assert any(f.kind == "automation_run_failed_historical" and f.run_id == "watchdog-failed-run" for f in report.findings)
 
 
 def test_watchdog_stays_silent_for_covered_empty_ready_script_bank() -> None:
