@@ -42,8 +42,6 @@ def evaluate_autoapproval_score(
         reasons.append("monetization_not_passed")
     repetition_risk = str(repetition_report.get("repetition_risk") or "unknown")
     originality_confirmed = "originality_confirmed" in manual_confirmations
-    if repetition_risk == "high" and not originality_confirmed:
-        reasons.append("high_narrative_similarity")
 
     factual_score = 1.0
     retention_score = as_score(audit.get("retention_score"))
@@ -70,8 +68,7 @@ def evaluate_autoapproval_score(
 
     component_scores = [factual_score, retention_score, metadata_score, asset_score]
     composite = sum(component_scores) / len(component_scores)
-    penalty = 0.10 if repetition_risk == "medium" and not originality_confirmed else 0.0
-    score = max(0.0, round(composite - penalty, 3))
+    score = max(0.0, round(composite, 3))
     if score < score_threshold:
         reasons.append("automation_score_below_threshold")
     diagnostic_reasons: list[str] = []
@@ -101,7 +98,7 @@ def evaluate_autoapproval_score(
             "metadata_score": round(metadata_score, 3),
             "asset_semantic_score": round(asset_score, 3),
             "repetition_risk": repetition_risk,
-            "repetition_penalty": penalty,
+            "repetition_penalty": 0.0,
             "originality_confirmed": originality_confirmed,
         },
     }

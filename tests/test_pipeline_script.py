@@ -25,7 +25,6 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
         data={
             "input_mode": "script",
             "ready_script_text": ready_script,
-            "ready_script_fact_check_confirmed": "true",
             "target_duration_sec": 35,
         },
         follow_redirects=False,
@@ -38,7 +37,7 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
     assert captured["creation_via"] == "hub"
     assert "input_mode=script" in str(captured["notes"])
     assert "[[SHORTSFLOW_READY_SCRIPT_BEGIN]]" in str(captured["notes"])
-    assert "ready_script_fact_check_confirmed=true" in str(captured["notes"])
+    assert "fact_check" not in str(captured["notes"])
 
 def test_hub_create_job_normalizes_markdown_ready_script(monkeypatch) -> None:
     captured: dict[str, object] = {}
@@ -64,7 +63,6 @@ Enquanto isso, ele completa uma volta inteira ao redor do Sol.
         data={
             "input_mode": "script",
             "ready_script_text": ready_script,
-            "ready_script_fact_check_confirmed": "true",
             "target_duration_sec": 35,
         },
         follow_redirects=False,
@@ -1652,7 +1650,7 @@ Fechamento: Em Venus, aniversário chega antes do pôr do sol."""
         "ready-script-test",
     )
 
-    assert metrics["ready_script_declared_fact_check_accepted"] is True
+    assert metrics["ready_script_preserved_accepted"] is True
     assert metrics["script_quality_gate_pass"] is True
     assert "script_quality_gate_warnings" in metrics
     assert "243 dias para girar" in script["full_narration"]
@@ -1991,17 +1989,17 @@ def test_ready_script_declared_fact_check_skips_text_publish_audit(monkeypatch) 
         {"title": "Venus", "hook": "243 dias", "ending": "Final forte", "full_narration": "243 dias."},
         {
             "status": "verified",
-            "provider": "user_declared_fact_check",
-            "facts": [{"fact_id": "D1", "claim": "243 dias.", "source_id": "USER_DECLARED_FACT_CHECK"}],
+            "provider": "ready_script",
+            "facts": [{"fact_id": "D1", "claim": "243 dias.", "source_id": "READY_SCRIPT"}],
         },
     )
 
     assert audit == {
         "passed": True,
         "reasons": [],
-        "provider": "user_declared_fact_check",
+        "provider": "ready_script",
         "skipped": True,
-        "scope": "ready_script_human_fact_confirmation",
+        "scope": "ready_script_editorial_input",
     }
 
 def test_text_publish_audit_runs_for_verified_fact_pack(monkeypatch) -> None:
@@ -2473,7 +2471,7 @@ Hashtags: #curiosidades #deepsea #biologia #shorts""",
         assert job is not None
         report = orchestrator.monetization_pipeline.build_monetization_report(session, job)
 
-    assert report["passed"] is True
+    assert report["passed"] is True, report["hard_blockers"]
     assert report["final_status"] == "ready_for_upload"
     assert report["manual_required"] == []
     assert report["publish_readiness"]["minimax_audit"]["provider"] == "ready_script_manual_fact_check"

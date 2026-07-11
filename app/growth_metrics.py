@@ -9,6 +9,8 @@ from app.utils import utcnow
 
 GROWTH_MIN_CONFIDENT_VIEWS = 100
 GROWTH_STALE_AFTER_HOURS = 48
+BREAKOUT_MIN_VIEWS = 10_000
+MATURE_MEDIAN_MULTIPLIER = 10
 
 
 def as_utc(value: datetime | None) -> datetime | None:
@@ -199,6 +201,10 @@ def build_channel_growth_report(
         key=lambda item: (float(item["like_rate"] or 0), int(item["views"])),
         reverse=True,
     )[:10]
+    mature_median_views = median([float(video["views"]) for video in reliable_videos]) if reliable_videos else 0
+    breakout_target_views = max(BREAKOUT_MIN_VIEWS, int(mature_median_views * MATURE_MEDIAN_MULTIPLIER))
+    breakout_videos = [video for video in reliable_videos if int(video["views"]) >= breakout_target_views]
+    best_video = top_views[0] if top_views else None
     distribution_gap = [
         video
         for video in reliable_videos
@@ -322,6 +328,14 @@ def build_channel_growth_report(
             "views": _stats(views_values),
             "retention_percent_nonzero": _stats(nonzero_retention_values),
             "retention_percent_reliable": _stats(reliable_retention_values),
+        },
+        "breakout": {
+            "reached": bool(breakout_videos),
+            "target_views": breakout_target_views,
+            "mature_median_views": round(mature_median_views, 2),
+            "best_views": int(best_video["views"]) if best_video else 0,
+            "best_title": best_video["title"] if best_video else None,
+            "winners": breakout_videos[:3],
         },
         "rankings": {
             "top_views": top_views,

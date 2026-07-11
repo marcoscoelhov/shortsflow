@@ -1767,9 +1767,9 @@ def test_ready_script_bank_monetization_embeds_human_editorial_confirmations() -
         "fact_pack.json",
         {
             "status": "verified",
-            "provider": "user_declared_fact_check",
+            "provider": "ready_script",
             "facts": [],
-            "sources": [{"kind": "human_confirmation"}],
+            "sources": [{"kind": "editorial_input"}],
         },
     )
     orchestrator.storage.persist_json(
@@ -3693,6 +3693,39 @@ def test_claim_due_publication_schedule_skips_video_already_scheduled_on_youtube
 
     assert orchestrator.publication_ops._claim_due_publication_schedule() is None
 
+
+def test_recover_stale_publication_schedule_marks_unknown_upload_as_failed(monkeypatch) -> None:
+    job_id = "stale-publication-schedule"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="approved_for_publish", seed_theme="Marte", review_state="approved")
+        session.add(
+            PublicationSchedule(
+                schedule_id=f"{job_id}-schedule",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-schedule",
+                scheduled_for_utc=utcnow(),
+                timezone="UTC",
+                youtube_visibility="public",
+                status="publishing",
+                updated_at=utcnow() - timedelta(minutes=31),
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(orchestrator.settings, "youtube_api_enabled", True)
+    monkeypatch.setattr(orchestrator.settings, "youtube_publish_mode", "api")
+
+    assert orchestrator.publication_ops._recover_stale_publication_schedules() == 1
+    with SessionLocal() as session:
+        schedule = session.query(PublicationSchedule).filter_by(job_id=job_id).one()
+        job = session.get(Job, job_id)
+
+    assert schedule.status == "publish_failed"
+    assert job is not None
+    assert job.quality_summary["youtube_publish"]["status"] == "publish_failed"
+
+
 def test_sync_native_scheduled_publication_marks_job_as_published(monkeypatch) -> None:
     job_id = "scheduled-native-sync-job"
     due_at = utcnow() - timedelta(minutes=5)
@@ -4247,6 +4280,14 @@ def test_channel_growth_report_surfaces_history_gaps_and_rankings() -> None:
 
     assert report["totals"]["views"] == 2020
     assert report["totals"]["subscribers_net"] == 6
+    assert report["breakout"] == {
+        "reached": False,
+        "target_views": 10000,
+        "mature_median_views": 900.0,
+        "best_views": 1000,
+        "best_title": "Planeta sem estrela",
+        "winners": [],
+    }
     assert report["rankings"]["top_retention"][0]["title"] == "Peixe luminoso"
     assert report["rankings"]["bottom_retention"][0]["title"] == "Tema abstrato"
     assert any(gap["kind"] == "retention_gap" for gap in report["gaps"])

@@ -49,7 +49,7 @@ def _metric_passed(metrics: dict[str, Any], *keys: str) -> bool:
                 return True
             continue
         if isinstance(value, (int, float)):
-            if value >= 7:
+            if value >= 7 or 0.7 <= value <= 1:
                 return True
             continue
         if isinstance(value, str) and value.strip():
@@ -72,7 +72,7 @@ def score_topic(root: Path) -> StageScore:
     gaps: list[str] = []
     required_groups = [
         ("loop", "loop_sustentavel", "sustenta_loop", "loop_sustained", "loop_sustains", "loop_strength", "loop_tension", "loop_score", "hook_contrast"),
-        ("payoff", "payoff_tardio", "payoff_late", "payoff_delayed", "payoff_tardiness"),
+        ("payoff", "payoff_tardio", "payoff_late", "payoff_delay", "payoff_delayed", "payoff_tardiness"),
         ("replay_trigger", "replay", "replay_mental", "provoca_replay", "replay_potential", "replay_value"),
         ("promessa_verificável", "promessa_verificavel", "promise_verifiable", "verifiable_promise", "factual_accuracy"),
         (

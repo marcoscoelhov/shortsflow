@@ -293,6 +293,9 @@ class PublicationOperations:
     def _claim_due_publication_schedule(self) -> str | None:
         return self.youtube_ops.claim_due_publication_schedule()
 
+    def _recover_stale_publication_schedules(self) -> int:
+        return self.youtube_ops.recover_stale_publication_schedules()
+
     def review_job(self, payload: dict[str, Any], job_id: str) -> str | None:
         return self.review_ops.review_job(payload, job_id)
 

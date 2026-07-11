@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select, update
@@ -252,3 +252,34 @@ class YouTubePublicationOperations:
             if job and schedule:
                 self.owner._persist_publication_schedule_artifact(job, schedule)
             return claimed_job_id
+
+    def recover_stale_publication_schedules(self) -> int:
+        if not self.api_mode_enabled():
+            return 0
+        cutoff = utcnow() - timedelta(minutes=30)
+        recovered: list[str] = []
+        with session_scope() as session:
+            rows = session.scalars(
+                select(PublicationSchedule)
+                .where(PublicationSchedule.status == "publishing")
+                .where(PublicationSchedule.youtube_video_id.is_(None))
+                .where(PublicationSchedule.updated_at < cutoff)
+            ).all()
+            for schedule in rows:
+                job = session.get(Job, schedule.job_id)
+                if not job:
+                    continue
+                schedule.status = "publish_failed"
+                update_publication_schedule_content_hash(schedule)
+                self.owner._persist_publication_schedule_artifact(job, schedule)
+                quality_summary = dict(job.quality_summary or {})
+                quality_summary["youtube_publish"] = {
+                    "status": "publish_failed",
+                    "last_error": "publication attempt interrupted before YouTube returned a video id",
+                    "last_attempt_at": iso_now(),
+                }
+                job.quality_summary = quality_summary
+                recovered.append(job.job_id)
+        for job_id in recovered:
+            self.owner._append_event(job_id, "youtube.publish_recovered", "failed", {"reason": "stale_publishing_without_video_id"})
+        return len(recovered)

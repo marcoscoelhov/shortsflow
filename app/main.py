@@ -507,7 +507,7 @@ def create_job(
     requested_angle: str | None = Form(default=None),
     custom_angle: str | None = Form(default=None),
     ready_script_text: str | None = Form(default=None),
-    ready_script_fact_check_confirmed: bool = Form(default=False),
+
 ):
     def resolve_trend_seed(selected_niche: str) -> HubTrendSeed:
         trend_theme, trend_angle, trend_notes, trend_report = _trend_seed_theme(selected_niche)
@@ -532,7 +532,7 @@ def create_job(
             requested_angle=requested_angle,
             custom_angle=custom_angle,
             ready_script_text=ready_script_text,
-            ready_script_fact_check_confirmed=ready_script_fact_check_confirmed,
+
             default_niche_id=HUB_DEFAULT_NICHE,
             retention_optimized_duration_sec=HUB_RETENTION_OPTIMIZED_DURATION_SEC,
             viral_prompt_template=load_viral_prompt_template(hub_settings_path(settings.data_dir)),

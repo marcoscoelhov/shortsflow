@@ -53,11 +53,11 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
     async def import_ready_scripts(
         ready_script_batch: str = Form(default=""),
         ready_script_file: UploadFile | None = File(default=None),
-        fact_check_confirmed: bool = Form(default=False),
+
         return_to: str | None = Form(default=None),
     ):
         raw_text = await deps.ready_script_import_text(ready_script_batch, ready_script_file)
-        result = deps.automation_service.import_ready_script_batch(raw_text, fact_check_confirmed=True)
+        result = deps.automation_service.import_ready_script_batch(raw_text)
         params = {"imported": str(result.imported)}
         if result.errors:
             params["errors"] = str(len(result.errors))

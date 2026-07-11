@@ -56,7 +56,6 @@ class ScriptPipeline(BasePipeline):
         ready_script = extract_ready_script_from_notes(request.notes)
         if ready_script is not None:
             plan_dict["ready_script_mode"] = True
-            plan_dict["ready_script_fact_check_confirmed"] = ready_script.fact_check_confirmed
             self.storage.persist_json(
                 job.job_id,
                 "ready_script_input.json",
@@ -64,7 +63,6 @@ class ScriptPipeline(BasePipeline):
                     "schema_version": self.settings.schema_version,
                     "job_id": job.job_id,
                     "created_at": utcnow().isoformat(),
-                    "fact_check_confirmed": ready_script.fact_check_confirmed,
                     "raw_text": ready_script.raw_text,
                     "hashtags": ready_script.hashtags,
                 },

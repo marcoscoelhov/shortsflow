@@ -310,16 +310,10 @@ Rotas principais:
 
 ## Testes
 
-Lane rapida Ponytail/operacional — barata, sem pipeline pesado, cobre harness de teste, contratos `automatic_topic`, source isolation, Hub/auth/refresh e contrato viral estruturado:
+Lane rápida operacional — barata, sem pipeline pesado, cobre harness de teste, contratos `automatic_topic`, source isolation, Hub/auth/refresh e contrato viral estruturado:
 
 ```bash
 .venv/bin/python scripts/shortsflow_fast_lane.py
-```
-
-Gate estatico Ponytail Ultra — falha se os contratos de simplicidade operacional cairem abaixo de 9.5:
-
-```bash
-.venv/bin/python scripts/ponytail_ultra_gate.py
 ```
 
 Suite principal antes de commit/push:

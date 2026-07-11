@@ -19,7 +19,7 @@ class AirtableReadyScriptRecord:
     raw_text: str
     fields: dict[str, Any]
     score: float | None = None
-    fact_check_confirmed: bool = True
+
 
 
 @dataclass
@@ -132,10 +132,7 @@ class AirtableReadyScriptClient:
         score = self._numeric_field(fields, self.settings.airtable_score_field)
         if score is not None and score < self.settings.airtable_min_score:
             return None
-        fact_check = self._fact_check_confirmed(fields)
-        if not fact_check:
-            return None
-        return AirtableReadyScriptRecord(record_id=record_id, raw_text=raw_text, fields=fields, score=score, fact_check_confirmed=fact_check)
+        return AirtableReadyScriptRecord(record_id=record_id, raw_text=raw_text, fields=fields, score=score)
 
     def _raw_script_from_fields(self, fields: dict[str, Any]) -> str:
         script_field = self.settings.airtable_script_field
@@ -170,15 +167,6 @@ class AirtableReadyScriptClient:
             return float(value)
         except (TypeError, ValueError):
             raise RuntimeError(f"Campo Airtable {field_name!r} não é numérico: {value!r}")
-
-    def _fact_check_confirmed(self, fields: dict[str, Any]) -> bool:
-        field_name = self.settings.airtable_fact_check_field
-        if not field_name or field_name not in fields:
-            return True
-        value = fields.get(field_name)
-        if isinstance(value, bool):
-            return value
-        return str(value or "").strip().lower() in {"true", "sim", "yes", "1", "confirmed", "confirmado"}
 
     def _table_url(self) -> str:
         return f"{AIRTABLE_API_BASE_URL}/{self.base_id}/{self.table_id}"

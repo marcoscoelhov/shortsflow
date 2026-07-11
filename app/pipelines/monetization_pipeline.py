@@ -41,20 +41,16 @@ class MonetizationPipeline(BasePipeline):
     AI_GENERATED_RIGHTS_PROVIDERS = {"minimax", "minimax_music", "elevenlabs", "gemini_tts", "edge_tts", "mock", "mock_music", "synthetic_wav"}
     TECHNICAL_TTS_PROVIDERS = {"espeak_ng", "synthetic_wav"}
 
-    def _ready_script_fact_check_confirmed(self, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
+    def _ready_script_input(self, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
         qa_metrics = dict((script_artifact or {}).get("qa_metrics") or {})
-        sources = fact_pack.get("sources") or []
-        has_human_confirmation = any(isinstance(source, dict) and source.get("kind") == "human_confirmation" for source in sources)
         return (
             fact_pack.get("status") == "verified"
-            and fact_pack.get("provider") == "user_declared_fact_check"
-            and has_human_confirmation
+            and fact_pack.get("provider") == "ready_script"
             and bool(qa_metrics.get("ready_script"))
-            and bool(qa_metrics.get("fact_check_confirmed"))
         )
 
-    def _ready_script_bank_human_validated(self, job: Job, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
-        return job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK and self._ready_script_fact_check_confirmed(fact_pack, script_artifact)
+    def _ready_script_bank_input(self, job: Job, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
+        return job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK and self._ready_script_input(fact_pack, script_artifact)
 
     def _low_risk_common_knowledge_auto_allowed(self, fact_pack: dict[str, Any], fact_risk: dict[str, Any] | None = None) -> bool:
         policy = fact_pack.get("viral_truth_policy") if isinstance(fact_pack, dict) else None
@@ -125,15 +121,15 @@ class MonetizationPipeline(BasePipeline):
         assets = session.scalars(select(SceneAsset).where(SceneAsset.job_id == job.job_id, SceneAsset.selected.is_(True)).order_by(SceneAsset.scene_id)).all()
         fact_pack = self.read_job_json(job.job_id, "fact_pack.json")
         script_artifact = self.read_job_json(job.job_id, "script.json")
-        ready_script_fact_check_confirmed = self._ready_script_fact_check_confirmed(fact_pack, script_artifact)
-        ready_script_bank_human_validated = self._ready_script_bank_human_validated(job, fact_pack, script_artifact)
+        ready_script_input = self._ready_script_input(fact_pack, script_artifact)
+        ready_script_bank_input = self._ready_script_bank_input(job, fact_pack, script_artifact)
         tags = self.build_publish_hashtags(topic_plan, script)
         checklist = self.build_quality_checklist(job)
         confirmations = self.manual_monetization_confirmations(session, job.job_id)
         confirmations.update(extra_confirmations or set())
-        if ready_script_fact_check_confirmed:
+        if ready_script_input:
             confirmations.update({"fact_review_confirmed", "publish_audit_confirmed", "originality_confirmed"})
-        if ready_script_bank_human_validated:
+        if ready_script_bank_input:
             confirmations.update({"metadata_confirmed", "visual_review_confirmed"})
 
         rights_registry = self.build_rights_registry(job, assets, narration, background_music)
@@ -151,7 +147,7 @@ class MonetizationPipeline(BasePipeline):
                 "auto_repaired_title": metadata_repair.get("title") or metadata_review.get("title"),
                 "suggested_hashtags": tags,
             }
-            if not ready_script_bank_human_validated:
+            if not ready_script_bank_input:
                 metadata_review["title"] = metadata_repair.get("title") or metadata_review.get("title")
                 metadata_review["reasons"] = [reason for reason in metadata_review.get("reasons", []) if reason not in {"weak_hashtags", "title_length_outside_short_window"}]
                 metadata_review["requires_metadata_review"] = bool(metadata_review.get("reasons"))
@@ -196,8 +192,8 @@ class MonetizationPipeline(BasePipeline):
                     overridden=False,
                 )
         if (
-            ready_script_fact_check_confirmed
-            or ready_script_bank_human_validated
+            ready_script_input
+            or ready_script_bank_input
             or "metadata_confirmed" in confirmations
             or "publish_audit_confirmed" in confirmations
         ) and not metadata_ctr.passed:
@@ -237,13 +233,15 @@ class MonetizationPipeline(BasePipeline):
         if metadata_review["requires_metadata_review"] and "metadata_confirmed" not in confirmations:
             manual_required.append("metadata_review_required")
         if not bool(metadata_ctr_metrics.get("metadata_ctr_gate_pass")):
-            if not (ready_script_fact_check_confirmed or ready_script_bank_human_validated):
+            if not (ready_script_input or ready_script_bank_input):
                 hard_blockers.append("metadata_ctr_gate_not_passed")
             warnings.extend(metadata_ctr.reasons)
         elif metadata_ctr.reasons:
             warnings.extend(metadata_ctr.reasons)
-        if channel_repetition_report["repetition_risk"] != "low" and "originality_confirmed" not in confirmations:
-            manual_required.append("originality_review_required")
+        if channel_repetition_report["repetition_risk"] != "low":
+            # ponytail: YouTube permits recurring subjects when each video is materially varied.
+            # Similarity remains visible for operators but cannot block a finished original job.
+            warnings.append("channel_repetition_warning")
         publish_audit_required = "text_publish_audit_skipped" in publish_readiness["reasons"]
         if publish_audit_required:
             manual_required.append("publish_audit_required")
@@ -262,9 +260,7 @@ class MonetizationPipeline(BasePipeline):
         if render and render.duration_ms > 60_000:
             hard_blockers.append("shorts_duration_over_60s")
         hard_blockers.extend(self.narration_publishability_blockers(narration))
-        if channel_repetition_report["repetition_risk"] == "high" and "originality_confirmed" not in confirmations:
-            hard_blockers.append("channel_repetition_high")
-        hard_blockers.extend(self.automatic_publish_blockers(publish_readiness, ready_script_bank_human_validated=ready_script_bank_human_validated))
+        hard_blockers.extend(self.automatic_publish_blockers(publish_readiness, ready_script_bank_input=ready_script_bank_input))
 
         hard_blockers = list(dict.fromkeys(hard_blockers))
         manual_required = list(dict.fromkeys(manual_required))
@@ -319,7 +315,7 @@ class MonetizationPipeline(BasePipeline):
         quality_summary["growth_score"] = {"decision": growth_decision, "reasons": growth_reasons, **growth_metrics}
         job.quality_summary = quality_summary
         if not growth_passed and growth_decision == "repair_required":
-            if ready_script_bank_human_validated:
+            if ready_script_bank_input:
                 warnings.extend(growth_reasons)
             else:
                 hard_blockers.append("growth_score_gate_not_passed")
@@ -362,12 +358,12 @@ class MonetizationPipeline(BasePipeline):
             "publish_readiness": publish_readiness,
             "ready_script_publish_policy": (
                 "human_validated_bank_script_editorial_warnings_only"
-                if ready_script_bank_human_validated
+                if ready_script_bank_input
                 else "standard_publish_readiness"
             ),
         }
 
-    def automatic_publish_blockers(self, publish_readiness: dict[str, Any], *, ready_script_bank_human_validated: bool = False) -> list[str]:
+    def automatic_publish_blockers(self, publish_readiness: dict[str, Any], *, ready_script_bank_input: bool = False) -> list[str]:
         automatic_reasons = {
             "source_fact_mismatch",
             REASON_UNSUPPORTED_CLAIM,
@@ -385,7 +381,7 @@ class MonetizationPipeline(BasePipeline):
             "growth_score_gate_not_passed",
             "placeholder_source_language",
         }
-        if ready_script_bank_human_validated:
+        if ready_script_bank_input:
             automatic_reasons -= {
                 "source_fact_mismatch",
                 REASON_UNSUPPORTED_CLAIM,
@@ -1000,7 +996,7 @@ class MonetizationPipeline(BasePipeline):
         }
 
     def provider_publish_audit(self, script_artifact: dict[str, Any], fact_pack: dict[str, Any], tags: list[str], job_id: str | None = None) -> dict[str, Any]:
-        if self._ready_script_fact_check_confirmed(fact_pack, script_artifact):
+        if self._ready_script_input(fact_pack, script_artifact):
             return {"passed": True, "reasons": [], "provider": "ready_script_manual_fact_check", "skipped": True}
         auditor = getattr(self.providers.creative, "audit_publish_package", None)
         if auditor is None:

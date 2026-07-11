@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the ShortsFlow Ponytail fast lane.
+"""Run the ShortsFlow operational fast lane.
 
 This is the cheap confidence gate for operator-facing contracts: test harness
 isolation, automatic_topic source/niche contracts, Hub action/auth/refresh

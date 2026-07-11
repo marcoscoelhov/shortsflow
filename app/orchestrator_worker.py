@@ -103,6 +103,7 @@ class OrchestratorWorkerOperations:
                 self.owner._last_retention_sweep_at = time.monotonic()
                 self.owner._run_worker_task("retention_sweep", self.owner.publication_ops._run_retention_sweep)
         if self.owner.publication_ops._youtube_api_mode_enabled():
+            self.owner._run_worker_task("youtube_publication_recovery", self.owner.publication_ops._recover_stale_publication_schedules)
             self.owner._run_worker_task("youtube_native_schedule_sync", self.owner.publication_ops._sync_native_scheduled_publications)
         if self.owner.publication_ops._tiktok_auto_publish_enabled():
             self.owner._run_worker_task("tiktok_status_sync", self.owner.publication_ops._sync_tiktok_publication_statuses)

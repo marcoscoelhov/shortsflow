@@ -112,18 +112,18 @@ class AutomationService:
             else:
                 row.value = {"enabled": enabled}
 
-    def import_ready_script_batch(self, raw_text: str, *, fact_check_confirmed: bool, source: str = "batch") -> ReadyScriptImportResult:
+    def import_ready_script_batch(self, raw_text: str, *, source: str = "batch", fact_check_confirmed: bool | None = None) -> ReadyScriptImportResult:
         blocks = split_ready_script_batch(raw_text)
         imported = 0
         errors: list[str] = []
         with session_scope() as session:
             for index, block in enumerate(blocks, start=1):
                 try:
-                    ready_script = parse_ready_script(block, fact_check_confirmed=fact_check_confirmed)
+                    ready_script = parse_ready_script(block)
                 except ValueError as exc:
                     errors.append(f"bloco {index}: {exc}")
                     continue
-                content_hash = stable_hash({"raw_text": ready_script.raw_text, "fact_check_confirmed": fact_check_confirmed})
+                content_hash = stable_hash({"raw_text": ready_script.raw_text})
                 existing = session.scalar(select(ReadyScriptItem).where(ReadyScriptItem.content_hash == content_hash))
                 if existing:
                     errors.append(f"bloco {index}: roteiro duplicado ignorado")
@@ -133,13 +133,13 @@ class AutomationService:
                         script_item_id=new_id(),
                         schema_version=self.settings.schema_version,
                         content_hash=content_hash,
-                        status="available" if fact_check_confirmed else "needs_review",
+                        status="available",
                         source=source,
                         title=str(ready_script.script["title"]),
                         raw_text=ready_script.raw_text,
                         parsed_script=ready_script.script,
                         hashtags=ready_script.hashtags,
-                        fact_check_confirmed=fact_check_confirmed,
+                        fact_check_confirmed=True,
                     )
                 )
                 imported += 1
@@ -155,7 +155,6 @@ class AutomationService:
                 continue
             import_result = self.import_ready_script_batch(
                 record.raw_text,
-                fact_check_confirmed=record.fact_check_confirmed,
                 source=f"airtable:{record.record_id}",
             )
             if import_result.imported:
@@ -1227,7 +1226,7 @@ class AutomationService:
             target_duration_sec=self.settings.target_duration_sec,
             tone="intrigante_direto",
             cta_style="none",
-            notes=build_ready_script_notes(None, item.raw_text, item.fact_check_confirmed),
+            notes=build_ready_script_notes(None, item.raw_text),
             requested_angle=None,
             job_origin=JOB_ORIGIN_READY_SCRIPT_BANK,
             creation_via=CREATION_VIA_DAILY_CYCLE,
@@ -1444,7 +1443,7 @@ def serialize_ready_script_item(item: ReadyScriptItem) -> dict[str, Any]:
         "status": item.status,
         "source": item.source,
         "title": item.title,
-        "fact_check_confirmed": item.fact_check_confirmed,
+
         "consumed_job_id": item.consumed_job_id,
         "last_skip_reason": item.last_skip_reason,
         "last_similarity_score": item.last_similarity_score,

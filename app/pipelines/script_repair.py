@@ -43,7 +43,8 @@ class ScriptRepairDomain(BasePipeline):
             for source_id in (item.get("source_fact_ids") or [])
             if str(source_id)
         ]
-        if not isinstance(fact_pack, dict) or fact_pack.get("status") != "verified":
+        ready_script_input = isinstance(fact_pack, dict) and fact_pack.get("provider") == "ready_script" and fact_pack.get("status") == "verified"
+        if not isinstance(fact_pack, dict) or (fact_pack.get("status") != "verified" and not ready_script_input):
             if fact_pack.get("provider") == "disabled_by_policy" or fact_pack.get("status") == "disabled":
                 return []
             return ["invented_source_fact_ids"] if source_ids or trace_source_ids else []
@@ -934,7 +935,7 @@ class ScriptRepairDomain(BasePipeline):
             "script_quality_gate_blocking": False,
             "script_quality_gate_warnings": ready_script_gate_reasons,
             "fact_pack_consistency_pass": True,
-            "ready_script_declared_fact_check_accepted": bool(plan_dict.get("ready_script_fact_check_confirmed")),
+            "ready_script_preserved_accepted": bool(plan_dict.get("ready_script_mode")),
             "ready_script_preserved": True,
             "script_auto_repair_skipped": True,
             "script_repair_attempts_log": attempts_log,
@@ -950,10 +951,10 @@ class ScriptRepairDomain(BasePipeline):
         gate_reasons: list[str],
         consistency_reasons: list[str],
     ) -> bool:
-        if not plan_dict.get("ready_script_mode") or not plan_dict.get("ready_script_fact_check_confirmed"):
+        if not plan_dict.get("ready_script_mode"):
             return False
         fact_pack = plan_dict.get("fact_pack") if isinstance(plan_dict.get("fact_pack"), dict) else {}
-        if fact_pack.get("provider") != "user_declared_fact_check" or fact_pack.get("status") != "verified":
+        if fact_pack.get("provider") != "ready_script" or fact_pack.get("status") != "editorial_input":
             return False
         if consistency_reasons:
             return False

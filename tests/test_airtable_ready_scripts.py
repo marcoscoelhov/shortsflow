@@ -39,7 +39,6 @@ def test_airtable_ready_script_client_builds_script_from_split_fields() -> None:
     assert record is not None
     assert "Título: A LUA MENTE NO HORIZONTE" in record.raw_text
     assert "- A virada é que o cenário muda a comparação" in record.raw_text
-    assert record.fact_check_confirmed is True
 
 
 def test_airtable_sync_imports_only_client_eligible_future_records(monkeypatch) -> None:
@@ -66,7 +65,6 @@ Payoff: O status é a fronteira entre histórico e sincronização.
 Fechamento: Manual antigo fica quieto; futuro Ready entra no fluxo.
 Hashtags: #shorts #automacao""",
                     fields={},
-                    fact_check_confirmed=True,
                 )
             ]
 

@@ -182,7 +182,7 @@ class Settings(BaseSettings):
     airtable_script_field: str | None = "Roteiro"
     airtable_status_field: str = "Status"
     airtable_score_field: str | None = "Score"
-    airtable_fact_check_field: str | None = "FactCheckConfirmed"
+
     airtable_title_field: str = "Título"
     airtable_hook_field: str = "Hook"
     airtable_loop_field: str = "Loop"

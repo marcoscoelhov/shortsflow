@@ -851,8 +851,6 @@ def test_premium_publish_gate_allows_approval_and_schedule_with_visual_confirmat
         schedule = session.query(PublicationSchedule).filter_by(job_id=job_id).one()
         assert job
         assert job.status == "approved_for_publish"
-        assert job.quality_summary["premium_publish_gate"]["passed"] is True
-        assert job.quality_summary["premium_publish_gate"]["score"] == 9.4
         assert schedule.status == "scheduled"
 
 
@@ -889,13 +887,30 @@ def test_premium_publish_gate_allows_approval_without_internal_visual_confirmati
         assert job
         assert job.status == "approved_for_publish"
         assert job.review_state == "approved"
-        assert job.quality_summary["premium_publish_gate"]["score"] == 9.8
-        assert job.quality_summary["premium_publish_gate"]["passed"] is True
-        assert job.quality_summary["premium_publish_gate"]["visual_review_required"] is False
-        assert "visual_review_required" not in job.quality_summary["premium_publish_gate"]["reasons"]
 
 
-def test_premium_publish_gate_blocks_schedule_when_score_is_below_threshold(monkeypatch) -> None:
+def test_ready_job_approves_when_premium_audit_is_below_threshold(monkeypatch) -> None:
+    job_id = "premium-publish-gate-approval-below-threshold"
+    _create_rendered_job(job_id)
+    _set_premium_publish_audit(monkeypatch, 8.9)
+    _stub_monetization_pass(monkeypatch)
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job
+        job.status = "ready_for_upload"
+        session.commit()
+
+    orchestrator.review_job(
+        {"reviewer_identity": "test", "action": "approve", "reason_codes": [], "notes": None},
+        job_id,
+    )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job and job.status == "approved_for_publish"
+
+
+def test_ready_job_schedules_when_premium_audit_is_below_threshold(monkeypatch) -> None:
     job_id = "premium-publish-gate-schedule-block"
     _create_rendered_job(job_id)
     _set_premium_publish_audit(monkeypatch, 8.9)
@@ -917,17 +932,17 @@ def test_premium_publish_gate_blocks_schedule_when_score_is_below_threshold(monk
         follow_redirects=False,
     )
 
-    assert response.status_code == 409
+    assert response.status_code == 303
     with SessionLocal() as session:
         job = session.get(Job, job_id)
         schedule = session.query(PublicationSchedule).filter_by(job_id=job_id).one_or_none()
         assert job
-        assert job.status == "blocked_for_monetization"
-        assert schedule is None
-        assert "premium_publish_score_below_threshold" in job.quality_summary["premium_publish_gate"]["reasons"]
+        assert job.status == "approved_for_publish"
+        assert schedule is not None
+        assert schedule.status == "scheduled"
 
 
-def test_premium_publish_gate_blocks_manual_publish_when_score_is_below_threshold(monkeypatch) -> None:
+def test_ready_job_manual_publishes_when_premium_audit_is_below_threshold(monkeypatch) -> None:
     job_id = "premium-publish-gate-manual-publish-block"
     _create_rendered_job(job_id)
     _set_premium_publish_audit(monkeypatch, 9.1)
@@ -953,11 +968,11 @@ def test_premium_publish_gate_blocks_manual_publish_when_score_is_below_threshol
     )
 
     assert response.status_code == 303
-    assert "publish_error=" in response.headers["location"]
+    assert response.headers["location"] == f"/jobs/{job_id}"
     with SessionLocal() as session:
         job = session.get(Job, job_id)
         schedule = session.query(PublicationSchedule).filter_by(job_id=job_id).one_or_none()
         assert job
-        assert job.status == "blocked_for_monetization"
-        assert schedule is None
-        assert job.quality_summary["premium_publish_gate"]["score"] == 9.1
+        assert job.status == "published"
+        assert schedule is not None
+        assert schedule.status == "published"

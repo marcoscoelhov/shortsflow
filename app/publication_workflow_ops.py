@@ -55,12 +55,6 @@ class PublicationWorkflowOperations:
                 self.owner._ensure_youtube_api_ready()
             elif not (str(youtube_video_id or "").strip() or str(youtube_url or "").strip()):
                 raise FatalStepError("manual publish requires youtube_video_id or youtube_url")
-            gate_result = self.owner._run_premium_publish_gate(session, job, context=f"publish_{trigger}")
-            if not gate_result.passed:
-                message = self.owner._block_job_for_premium_publish_gate(job, gate_result)
-                self.owner._refresh_retention_state(session, job, schedule)
-                session.commit()
-                raise FatalStepError(message)
             package = self.monetization_pipeline.build_publish_package(session, job)
             published_at = utcnow()
             if schedule is None:
@@ -269,12 +263,6 @@ class PublicationWorkflowOperations:
                 raise KeyError(job_id)
             if job.status != "approved_for_publish":
                 raise FatalStepError("job must be approved_for_publish before entering the publication schedule")
-            gate_result = self.owner._run_premium_publish_gate(session, job, context="schedule_publication")
-            if not gate_result.passed:
-                message = self.owner._block_job_for_premium_publish_gate(job, gate_result)
-                self.owner._refresh_retention_state(session, job)
-                session.commit()
-                raise FatalStepError(message)
             schedule = session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job_id))
             package = self.monetization_pipeline.build_publish_package(session, job) if self.owner._youtube_api_mode_enabled() and (schedule is None or not schedule.youtube_video_id) else None
             if schedule is not None:

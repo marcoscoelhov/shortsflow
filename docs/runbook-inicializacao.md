@@ -293,16 +293,10 @@ Se um job antigo abrir sem video local, isso pode ser retencao normal, nao corru
 
 ## 13. Testes
 
-Lane rapida Ponytail/operacional:
+Lane rápida operacional:
 
 ```bash
 .venv/bin/python scripts/shortsflow_fast_lane.py
-```
-
-Gate estatico Ponytail Ultra:
-
-```bash
-.venv/bin/python scripts/ponytail_ultra_gate.py
 ```
 
 Suite completa:
@@ -321,7 +315,7 @@ Fatiamento recomendado:
 .venv/bin/python -m pytest -q tests/test_providers_integrations.py
 ```
 
-Se mexer em hub, agenda, publicacao, automacao, revisao visual ou retencao, rode `tests/test_hub_publication.py` e a suite completa antes de commit. Se mexer em prompts/qualidade visual, rode tambem `tests/test_pipeline_assets.py`; se mexer em fact pack, roteiro, loop/payoff ou politica factual, rode `tests/test_pipeline_script.py`. Testes novos devem entrar na suite de dominio correspondente, nao em uma suite e2e monolitica.
+Se mexer em hub, agenda, publicacao, automacao, revisao visual ou retencao, rode `tests/test_hub_publication.py` e a suite completa antes de commit. Se mexer em roteiro, loop/payoff ou qualidade editorial, rode tambem `tests/test_pipeline_script.py`; se mexer em prompts/qualidade visual, rode `tests/test_pipeline_assets.py`. Testes novos devem entrar na suite de dominio correspondente, nao em uma suite e2e monolitica.
 
 ## 14. Expor via Tailscale
 

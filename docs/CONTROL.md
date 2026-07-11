@@ -1,6 +1,6 @@
 # ShortsFlow Control
 
-Last updated: 2026-07-02T22:35:28+00:00
+Last updated: 2026-07-10T18:02:08+00:00
 
 ## Product North Star
 
@@ -14,7 +14,7 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 
 - Minimum proof: 1 video reaches viral breakout status.
 - Working viral definition until Marcos overrides it: `10,000+ views` or `10x current mature median`, whichever is higher.
-- Baseline: 191.5 mature median views.
+- Current mature median: 506 views from real YouTube Analytics snapshots on 2026-07-10.
 - Secondary health target: 600+ mature median views.
 - Cadence: 1 strong cosmos/astronomy video/day.
 - Scope now: one YouTube Shorts channel, winner-model visual/extreme cosmos topics.
@@ -40,12 +40,11 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 
 ## Current Evidence
 
-- Seed bank expanded to 30+ curated winner-model topics.
-- Baseline is still 191.5 mature median views; target remains 600+ mature median views.
-- Quality audit recognizes modern topic/script evidence.
-- Generation quality is passing publish readiness; immediate blocker moved to distribution/measurement.
-- Watchdog is silent with `future_scheduled_count=5` as of 2026-07-02T22:34Z.
-- Four extra cosmos candidates from cron ideas are already `ready_for_upload` on 2026-07-02; use them as backlog, not as proof of strategy success.
+- Analytics refreshed on 2026-07-10: 50 videos, 28 reliable mature snapshots, 13,517 total views.
+- Breakout not reached: best video has 853 views; current target is 10,000 views.
+- Mature median is 506 views, still below the 600+ secondary health target.
+- Current top repeat pattern: concrete cosmic paradox + visual object — Lua no horizonte, Vênus mais quente que Mercúrio, Marte vermelho/ferrugem, anéis de Saturno e som de buraco negro/NASA.
+- Rendering can reach `ready_for_upload`, but the latest automatic run exhausted four attempts: two `gate_rejected` candidates and one final premium score of 6.5/9.4 left future coverage at 2 of 3 slots.
 - CEO/operator brief loop exists weekly on Discord and must read this file first.
 
 ## Last Production Run
@@ -90,15 +89,16 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 
 ## Current Bottleneck
 
-Measurement, not generation. The engine has scheduled coverage and extra `ready_for_upload` backlog; the missing proof is mature YouTube performance for the current cosmos run.
+Restore reliable scheduled coverage, then performance learning. The engine has enough mature Analytics to repeat winners, but no breakout yet.
 
 ## Next Task
 
-Single next task: wait for the scheduled cosmos videos to publish/mature, then refresh YouTube analytics and update the mature median.
+Single next task: run reactive backlog recovery once to restore the third future slot; then keep one strong cosmos video/day and let the daily growth loop compare mature winners/losers before changing prompts.
 
 Acceptance:
 
 - maintain 1 strong cosmos/astronomy scheduled or published video/day;
+- restore at least 3 future scheduled slots before another forced generation run;
 - do not change niche/strategy before mature evidence exists;
 - check YouTube performance for scheduled videos after they mature;
 - update baseline/median only from real performance evidence;

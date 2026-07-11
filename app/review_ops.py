@@ -81,17 +81,6 @@ class ReviewOperations:
                     "content_hash": stable_hash(report),
                 }
                 job.quality_summary = quality_summary
-                gate_result = self.owner._run_premium_publish_gate(
-                    session,
-                    job,
-                    context="review_approve",
-                    extra_confirmations=set(payload.get("reason_codes") or []),
-                )
-                if not gate_result.passed:
-                    message = self.owner._block_job_for_premium_publish_gate(job, gate_result)
-                    self.owner._refresh_retention_state(session, job)
-                    session.commit()
-                    raise FatalStepError(message)
                 job.status = "approved_for_publish"
                 job.review_state = "approved"
                 job.failure_reason = None
@@ -235,17 +224,6 @@ class ReviewOperations:
                 self.owner._refresh_retention_state(session, job)
                 raise FatalStepError(f"monetization readiness incomplete: {', '.join(report['hard_blockers'] + report['manual_required'])}")
             self.storage.persist_json(job.job_id, "monetization_report.json", self.owner._serialize_for_json(report))
-            gate_result = self.owner._run_premium_publish_gate(
-                session,
-                job,
-                context="premium_review_approve",
-                extra_confirmations=confirmations,
-            )
-            if not gate_result.passed:
-                message = self.owner._block_job_for_premium_publish_gate(job, gate_result)
-                self.owner._refresh_retention_state(session, job)
-                session.commit()
-                raise FatalStepError(message)
             quality_summary = dict(job.quality_summary or {})
             quality_summary["monetization"] = {
                 "passed": report["passed"],

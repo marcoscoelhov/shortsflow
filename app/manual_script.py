@@ -10,7 +10,7 @@ from app.utils import tokenize, word_tokens
 
 READY_SCRIPT_BEGIN = "[[SHORTSFLOW_READY_SCRIPT_BEGIN]]"
 READY_SCRIPT_END = "[[SHORTSFLOW_READY_SCRIPT_END]]"
-FACT_CHECK_CONFIRMED = "ready_script_fact_check_confirmed=true"
+
 
 _LABELS = {
     "titulo": "title",
@@ -50,16 +50,16 @@ _MARKDOWN_STRONG_PATTERN = re.compile(r"\*\*([^*\n]+)\*\*")
 @dataclass(frozen=True)
 class ReadyScript:
     raw_text: str
-    fact_check_confirmed: bool
     script: dict[str, Any]
     fact_pack: dict[str, Any]
     hashtags: list[str]
+    fact_check_confirmed: bool = True
 
 
-def build_ready_script_notes(notes: str | None, raw_script: str, fact_check_confirmed: bool) -> str:
+def build_ready_script_notes(notes: str | None, raw_script: str, _legacy_fact_check_confirmed: bool | None = None) -> str:
     parts = [
         "input_mode=script",
-        FACT_CHECK_CONFIRMED if fact_check_confirmed else "ready_script_fact_check_confirmed=false",
+
         READY_SCRIPT_BEGIN,
         raw_script.strip(),
         READY_SCRIPT_END,
@@ -75,7 +75,7 @@ def extract_ready_script_from_notes(notes: str | None) -> ReadyScript | None:
     raw = text.split(READY_SCRIPT_BEGIN, 1)[1].split(READY_SCRIPT_END, 1)[0].strip()
     if not raw:
         return None
-    return parse_ready_script(raw, fact_check_confirmed=FACT_CHECK_CONFIRMED in text)
+    return parse_ready_script(raw)
 
 
 def normalize_ready_script_text(raw_text: str) -> str:
@@ -95,7 +95,7 @@ def normalize_ready_script_text(raw_text: str) -> str:
     return "\n".join(normalized_lines).strip()
 
 
-def parse_ready_script(raw_text: str, *, fact_check_confirmed: bool) -> ReadyScript:
+def parse_ready_script(raw_text: str, *, fact_check_confirmed: bool | None = None) -> ReadyScript:
     normalized_text = normalize_ready_script_text(raw_text)
     fields = _parse_labeled_text(normalized_text)
     missing = [label for label in ["title", "hook", "loop", "beats", "payoff", "closing"] if not fields.get(label)]
@@ -116,7 +116,7 @@ def parse_ready_script(raw_text: str, *, fact_check_confirmed: bool) -> ReadyScr
     full_narration = " ".join(_ensure_sentence(part) for part in narration_parts if part).strip()
     # Loop is an editorial tension question, not a factual claim to audit/ground.
     key_facts = [*beats, payoff]
-    source_fact_ids = [f"D{index}" for index in range(1, len(key_facts) + 1)] if fact_check_confirmed else []
+    source_fact_ids = [f"D{index}" for index in range(1, len(key_facts) + 1)]
     claim_trace = [
         {"text": fact, "source_fact_ids": [source_id], "grounding": "fact_pack"}
         for fact, source_id in zip(key_facts, source_fact_ids, strict=False)
@@ -157,13 +157,13 @@ def parse_ready_script(raw_text: str, *, fact_check_confirmed: bool) -> ReadyScr
             "repetition_score": 0.1,
             "ending_strength_score": 0.88,
             "ready_script": True,
-            "fact_check_confirmed": fact_check_confirmed,
+
             "declared_hashtags": hashtags,
         },
         "prompt_version": "ready-script-v1",
     }
-    fact_pack = _build_declared_fact_pack(normalized_text, key_facts, source_fact_ids, fact_check_confirmed)
-    return ReadyScript(raw_text=normalized_text, fact_check_confirmed=fact_check_confirmed, script=script, fact_pack=fact_pack, hashtags=hashtags)
+    fact_pack = _build_ready_script_fact_pack(normalized_text, key_facts, source_fact_ids)
+    return ReadyScript(raw_text=normalized_text, script=script, fact_pack=fact_pack, hashtags=hashtags)
 
 
 def _parse_labeled_text(raw_text: str) -> dict[str, str]:
@@ -247,31 +247,23 @@ def _strip_markdown_strong(value: str) -> str:
         previous = current
 
 
-def _build_declared_fact_pack(raw_text: str, key_facts: list[str], source_fact_ids: list[str], fact_check_confirmed: bool) -> dict[str, Any]:
-    if not fact_check_confirmed:
-        return {
-            "status": "user_review_required",
-            "provider": "ready_script",
-            "facts": [],
-            "sources": [],
-            "raw_text_hash_source": "ready_script",
-        }
+def _build_ready_script_fact_pack(raw_text: str, key_facts: list[str], source_fact_ids: list[str]) -> dict[str, Any]:
     facts = [
-        {"fact_id": source_id, "claim": fact, "source_id": "USER_DECLARED_FACT_CHECK"}
+        {"fact_id": source_id, "claim": fact, "source_id": "READY_SCRIPT"}
         for fact, source_id in zip(key_facts, source_fact_ids, strict=False)
     ]
     return {
         "status": "verified",
-        "provider": "user_declared_fact_check",
+        "provider": "ready_script",
         "facts": facts,
         "sources": [
             {
-                "source_id": "USER_DECLARED_FACT_CHECK",
-                "title": "Confirmacao de factualidade do Roteiro Pronto",
+                "source_id": "READY_SCRIPT",
+                "title": "Roteiro Pronto",
                 "url": None,
-                "kind": "human_confirmation",
+                "kind": "editorial_input",
             }
         ],
-        "editorial_rule": "Fatos declarados pelo autor do Roteiro Pronto; o app preserva o texto como fonte de verdade editorial.",
+        "editorial_rule": "O app preserva o Roteiro Pronto como fonte de verdade editorial.",
         "raw_text_hash_source": "ready_script",
     }

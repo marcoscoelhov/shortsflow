@@ -94,12 +94,13 @@ def build_hub_job_request(
     requested_angle: str | None,
     custom_angle: str | None,
     ready_script_text: str | None,
-    ready_script_fact_check_confirmed: bool,
+
     default_niche_id: str,
     retention_optimized_duration_sec: int,
     viral_prompt_template: str,
     trend_seed_resolver: Callable[[str], HubTrendSeed],
     learned_retention_guidance: str | None = None,
+    **_legacy_options: object,
 ) -> HubJobRequestBuildResult:
     normalized_mode = normalize_hub_input_mode(input_mode)
     angle = selected_angle(custom_angle, requested_angle)
@@ -107,9 +108,9 @@ def build_hub_job_request(
     trend_report: dict[str, object] | None = None
 
     if normalized_mode == "script":
-        ready_script = parse_ready_script(ready_script_text or "", fact_check_confirmed=True)
+        ready_script = parse_ready_script(ready_script_text or "")
         selected_seed_theme = str(ready_script.script["title"]).strip()
-        combined_notes = build_ready_script_notes(notes, ready_script.raw_text, True)
+        combined_notes = build_ready_script_notes(notes, ready_script.raw_text)
         job_origin = JOB_ORIGIN_MANUAL_READY_SCRIPT
         notes_mode = "script"
     elif seed_theme.strip():

@@ -19,13 +19,13 @@ class ScriptAuditDomain(BasePipeline):
         fact_pack: dict[str, Any],
         topic_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if fact_pack.get("provider") == "user_declared_fact_check" and fact_pack.get("status") == "verified":
+        if fact_pack.get("provider") == "ready_script" and fact_pack.get("status") == "verified":
             audit = {
                 "passed": True,
                 "reasons": [],
-                "provider": "user_declared_fact_check",
+                "provider": "ready_script",
                 "skipped": True,
-                "scope": "ready_script_human_fact_confirmation",
+                "scope": "ready_script_editorial_input",
             }
             self.storage.persist_json(
                 job_id,

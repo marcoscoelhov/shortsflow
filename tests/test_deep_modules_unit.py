@@ -453,6 +453,30 @@ def test_quality_audit_topic_accepts_provider_metric_aliases(tmp_path) -> None:
     assert "topic provider fallback used" in score.gaps
 
 
+def test_quality_audit_topic_accepts_zero_to_one_provider_metrics(tmp_path) -> None:
+    (tmp_path / "topic_plan.json").write_text(
+        """
+        {
+          "quality_metrics": {
+            "loop_strength": 0.9,
+            "payoff_delay": 0.85,
+            "replay_trigger": 0.8,
+            "factual_accuracy": 0.9,
+            "topic_uniqueness_pass": true,
+            "editorial_mode": "viral_curiosidades",
+            "topic_repair_attempts_log": [{"passed": true}]
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    score = score_topic(tmp_path)
+
+    assert score.score >= 9.4
+    assert "3/5 topic quality fields passed" in score.evidence
+
+
 def test_quality_audit_topic_does_not_infer_missing_editorial_metrics(tmp_path) -> None:
     (tmp_path / "topic_plan.json").write_text(
         """

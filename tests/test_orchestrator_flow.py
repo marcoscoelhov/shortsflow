@@ -255,7 +255,7 @@ def test_operational_settings_rejects_secret_fields() -> None:
     with pytest.raises(ValueError, match="desconhecida"):
         validate_operational_update(main_module.settings, {"openai_api_key": "secret"})
 
-def test_autoapproval_score_blocks_high_repetition() -> None:
+def test_autoapproval_allows_high_repetition_as_a_diagnostic() -> None:
     service = AutomationService(orchestrator)
     job_id = "auto-score-high-repetition"
     topic_request_id = f"{job_id}-request"
@@ -329,8 +329,8 @@ def test_autoapproval_score_blocks_high_repetition() -> None:
 
     report = service.evaluate_autoapproval(job_id)
 
-    assert report["eligible"] is False
-    assert "high_narrative_similarity" in report["reasons"]
+    assert report["eligible"] is True
+    assert "high_narrative_similarity" not in report["reasons"]
     assert report["score"] >= 0.82
 
 
@@ -1559,6 +1559,7 @@ def test_worker_iteration_continues_when_retention_sweep_hits_database_lock(monk
     monkeypatch.setattr(test_orchestrator.settings, "youtube_api_enabled", True)
     monkeypatch.setattr(test_orchestrator.settings, "tiktok_auto_publish_enabled", False)
     monkeypatch.setattr(test_orchestrator.publication_ops, "_run_retention_sweep", locked_retention_sweep)
+    monkeypatch.setattr(test_orchestrator.publication_ops, "_recover_stale_publication_schedules", lambda: synced.append("recovery") or 0)
     monkeypatch.setattr(test_orchestrator.publication_ops, "_sync_native_scheduled_publications", lambda: synced.append("youtube") or 0)
     monkeypatch.setattr(test_orchestrator.publication_ops, "_claim_due_publication_schedule", lambda: None)
     monkeypatch.setattr(test_orchestrator.publication_ops, "_claim_due_tiktok_publication", lambda: None)
@@ -1567,7 +1568,7 @@ def test_worker_iteration_continues_when_retention_sweep_hits_database_lock(monk
     did_work = test_orchestrator._worker_iteration()
 
     assert did_work is False
-    assert synced == ["youtube"]
+    assert synced == ["recovery", "youtube"]
 
 def test_process_job_returns_persisted_cancelled_status_after_step_abort(monkeypatch) -> None:
     job_id = orchestrator.create_job(
@@ -2242,7 +2243,7 @@ def test_full_pipeline_with_sound_design_persists_rights_and_artifacts(monkeypat
         )
         assert response.status_code == 303
         job_id = response.headers["location"].split("/")[-1]
-        assert orchestrator.process_job(job_id) in {"monetization_review", "blocked_for_monetization"}
+        assert orchestrator.process_job(job_id) in {"ready_for_upload", "monetization_review", "blocked_for_monetization"}
     finally:
         orchestrator.start_worker()
     with SessionLocal() as session:
