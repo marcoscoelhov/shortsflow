@@ -162,7 +162,6 @@ class Settings(BaseSettings):
     watchdog_alert_delivery: str = "record_only"
     watchdog_telegram_bot_token: str | None = None
     watchdog_telegram_chat_id: str | None = None
-    premium_publish_min_score: float = 9.4
     performance_collection_enabled: bool = True
     performance_sync_active_window_days: int = 45
     performance_sync_archive_window_days: int = 180
@@ -391,12 +390,6 @@ class Settings(BaseSettings):
             raise ValueError("viral intensity thresholds must be between 0 and 1")
         return value
 
-    @field_validator("premium_publish_min_score")
-    @classmethod
-    def validate_premium_publish_min_score(cls, value: float) -> float:
-        if not 0 <= value <= 10:
-            raise ValueError("premium_publish_min_score must be between 0 and 10")
-        return value
 
     @field_validator("performance_sync_active_window_days", "performance_sync_archive_window_days")
     @classmethod

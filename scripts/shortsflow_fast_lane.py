@@ -24,6 +24,8 @@ FAST_TESTS = [
     "tests/test_hub_publication.py::test_automatic_topic_attempt_rejects_ready_script_origin_fallback",
     "tests/test_hub_publication.py::test_automatic_topic_payload_rejection_reason_codes",
     "tests/test_pipeline_script.py::test_automatic_topic_payload_uses_cosmos_focus",
+    "tests/test_pipeline_script.py::test_automatic_topic_contract_requires_recognizable_hook_object",
+    "tests/test_pipeline_script.py::test_automatic_topic_payload_rejects_abstract_hook_without_recognizable_object",
     "tests/test_pipeline_script.py::test_structured_viral_contract_preserves_topic_niche_quality_metrics",
 ]
 

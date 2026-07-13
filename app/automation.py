@@ -36,7 +36,7 @@ from app.automation_recovery import (
     only_safe_visual_review_remains,
     visual_review_can_be_attempted,
 )
-from app.automation_topics import COSMOS_CURIOSITY_POOL, cosmos_policy_notes, select_cosmos_topic
+from app.automation_topics import COSMOS_CURIOSITY_POOL, cosmos_policy_notes, has_recognizable_hook_object, select_cosmos_topic
 from app.airtable_ready_scripts import AirtableReadyScriptClient, AirtableReadyScriptSyncResult
 from app.db import session_scope
 from app.domain_contracts import (
@@ -82,6 +82,7 @@ AUTOMATION_REASON_VIRAL_PROMPT_DEFAULTED = "viral_prompt_missing/defaulted"
 AUTOMATION_REASON_GENERATION_FAILED = "generation_failed"
 AUTOMATION_REASON_GATE_REJECTED = "gate_rejected"
 AUTOMATION_REASON_FALLBACK_PREVENTED = "fallback_prevented"
+AUTOMATION_REASON_RECOGNIZABLE_HOOK_OBJECT_MISSING = "recognizable_hook_object_missing"
 
 
 
@@ -872,6 +873,14 @@ class AutomationService:
             return AUTOMATION_REASON_FALLBACK_PREVENTED
         if "automatic_topic_policy=" in lower_notes and "automatic_topic_policy=cosmos_astronomia_universo_first" not in lower_notes:
             return AUTOMATION_REASON_NICHE_REJECTED
+        if "automatic_topic_hook_object_required=true" in lower_notes:
+            hook_seed = ""
+            for line in notes.splitlines():
+                if line.lower().startswith("topic_hook_seed="):
+                    hook_seed = line.split("=", 1)[1].strip()
+                    break
+            if not has_recognizable_hook_object(hook_seed or seed_theme):
+                return AUTOMATION_REASON_RECOGNIZABLE_HOOK_OBJECT_MISSING
         return None
 
     def _automation_failure_reason_code(self, source: str, status: str, classification: dict[str, Any]) -> str:

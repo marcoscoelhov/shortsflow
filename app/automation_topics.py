@@ -22,7 +22,7 @@ COSMOS_CURIOSITY_POOL: tuple[CosmosCuriositySeed, ...] = (
     CosmosCuriositySeed(
         topic="Por que Vênus é mais quente que Mercúrio?",
         requested_angle="Explicar o paradoxo visual: Mercúrio fica mais perto do Sol, mas Vênus prende calor com uma atmosfera espessa. Linguagem conservadora, sem números precisos.",
-        hook_seed="O planeta mais quente não é o mais perto do Sol.",
+        hook_seed="Vênus é o planeta mais quente, mas não é o mais perto do Sol.",
         visual_seed="Vênus brilhando coberto por nuvens densas, Mercúrio perto do Sol, comparação cinematográfica sem texto",
         tags=("venus", "mercurio", "planetas", "atmosfera"),
         base_score=0.97,
@@ -54,7 +54,7 @@ COSMOS_CURIOSITY_POOL: tuple[CosmosCuriositySeed, ...] = (
     CosmosCuriositySeed(
         topic="Por que buracos negros parecem engolir luz?",
         requested_angle="Usar metáfora visual segura: perto de um buraco negro, a gravidade curva caminhos da luz de modo extremo. Evitar números e certezas exageradas.",
-        hook_seed="Existe um lugar onde até a luz perde a saída.",
+        hook_seed="Um buraco negro é um lugar onde até a luz perde a saída.",
         visual_seed="buraco negro com disco de acreção brilhante curvando luz, espaço escuro cinematográfico, sem texto",
         tags=("buraco negro", "luz", "gravidade", "universo"),
         base_score=0.93,
@@ -62,7 +62,7 @@ COSMOS_CURIOSITY_POOL: tuple[CosmosCuriositySeed, ...] = (
     CosmosCuriositySeed(
         topic="Por que existem estrelas que piscam no céu?",
         requested_angle="Explicar a cintilação como turbulência da atmosfera da Terra distorcendo a luz das estrelas, visual simples e poético sem exagero.",
-        hook_seed="A estrela não pisca sozinha: o ar mexe na luz.",
+        hook_seed="Uma estrela não pisca sozinha: o ar mexe na luz.",
         visual_seed="estrela tremulando no céu noturno através de camadas de ar quente, atmosfera terrestre sutil, realismo",
         tags=("estrelas", "atmosfera", "ceu", "luz"),
         base_score=0.94,
@@ -86,7 +86,7 @@ COSMOS_CURIOSITY_POOL: tuple[CosmosCuriositySeed, ...] = (
     CosmosCuriositySeed(
         topic="Por que meteoros viram riscos de luz no céu?",
         requested_angle="Explicar o brilho do meteoro entrando rápido na atmosfera e aquecendo o ar ao redor, sem números precisos.",
-        hook_seed="Uma pedrinha espacial pode riscar o céu inteiro.",
+        hook_seed="Um meteoro pode riscar o céu inteiro.",
         visual_seed="meteoro brilhante atravessando céu noturno, atmosfera iluminada, paisagem escura embaixo, cinematográfico",
         tags=("meteoro", "atmosfera", "ceu", "espaco"),
         base_score=0.96,
@@ -94,7 +94,7 @@ COSMOS_CURIOSITY_POOL: tuple[CosmosCuriositySeed, ...] = (
     CosmosCuriositySeed(
         topic="Por que eclipses solares assustavam tanta gente?",
         requested_angle="Mostrar a cena visual do dia escurecendo quando a Lua cobre o Sol, focando no impacto visual e não em história específica sem fonte.",
-        hook_seed="O dia pode escurecer como se alguém apagasse o Sol.",
+        hook_seed="A Lua pode apagar o Sol por alguns minutos.",
         visual_seed="eclipse solar com céu escurecendo, pessoas em silhueta olhando com segurança, atmosfera dramática sem texto",
         tags=("eclipse", "sol", "lua", "ceu"),
         base_score=0.91,
@@ -115,6 +115,37 @@ _CANONICAL_GROUPS: dict[str, set[str]] = {
     "eclipse": {"eclipse", "eclipses"},
 }
 
+_RECOGNIZABLE_HOOK_OBJECT_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("lua", r"\blua\b|\blunar\b"),
+    ("marte", r"\bmarte\b|\bmarcian[oa]s?\b"),
+    ("saturno", r"\bsaturno\b"),
+    ("voyager", r"\bvoyager\b"),
+    ("buraco_negro", r"\bburaco\s+negro\b|\bburacos\s+negros\b"),
+    ("venus", r"\bvenus\b|\bvenusian[oa]s?\b"),
+    ("mercurio", r"\bmercurio\b"),
+    ("jupiter", r"\bjupiter\b"),
+    ("netuno", r"\bnetuno\b"),
+    ("sol", r"\bsol\b|\bsolar\b"),
+    ("estrela", r"\bestrela\b|\bestrelas\b"),
+    ("meteoro", r"\bmeteoro\b|\bmeteoros\b|\bmeteorito\b|\bmeteoritos\b"),
+    ("asteroide", r"\basteroide\b|\basteroides\b"),
+    ("cometa", r"\bcometa\b|\bcometas\b"),
+    ("eclipse", r"\beclipse\b|\beclipses\b"),
+    ("galaxia", r"\bgalaxia\b|\bgalaxias\b|\bvia\s+lactea\b"),
+)
+
+
+def recognizable_hook_object(text: str) -> str | None:
+    normalized = _normalize(text)
+    for object_name, pattern in _RECOGNIZABLE_HOOK_OBJECT_PATTERNS:
+        if re.search(pattern, normalized):
+            return object_name
+    return None
+
+
+def has_recognizable_hook_object(text: str) -> bool:
+    return recognizable_hook_object(text) is not None
+
 
 def cosmos_policy_notes() -> list[str]:
     return [
@@ -123,6 +154,8 @@ def cosmos_policy_notes() -> list[str]:
         "automatic_topic_policy=cosmos_astronomia_universo_first",
         "automatic_topic_focus=astronomia, universo, planetas, luas, estrelas, buracos negros, meteoros, eclipses e fenomenos espaciais visualmente fortes.",
         "Use curiosidade viral de universo/astronomia com linguagem pt-BR simples, segura e conservadora.",
+        "automatic_topic_hook_object_required=true",
+        "O hook do automatic_topic deve nomear no primeiro segundo um objeto reconhecivel para leigos, como Lua, Marte, Saturno, Voyager ou buraco negro.",
         "Evite tema cotidiano generico fora de astronomia no automatic_topic; banco de roteiros pode continuar variado.",
         "Evite numeros precisos, datas, descobertas jornalisticas e claims tecnicos sem fonte; prefira formulacoes como 'em geral', 'pode', 'uma das explicacoes'.",
     ]

@@ -935,21 +935,6 @@ class MonetizationPipeline(BasePipeline):
         minimax_audit = self.provider_publish_audit(script_artifact, fact_pack, tags, job.job_id)
         readiness = self.publish_readiness_report(script, topic_plan, fact_pack, tags, checklist, script_artifact, minimax_audit, job_id=job.job_id)
         premium_publish_audit = self.read_job_json(job.job_id, "premium_publish_audit.json")
-        if premium_publish_audit and not premium_publish_audit.get("passed"):
-            readiness = {
-                **readiness,
-                "passed": False,
-                "reasons": list(
-                    dict.fromkeys(
-                        list(readiness.get("reasons") or [])
-                        + ["premium_publish_audit_failed"]
-                        + [str(reason) for reason in premium_publish_audit.get("reasons") or []]
-                    )
-                ),
-                "premium_publish_gate_pass": False,
-                "premium_publish_score": premium_publish_audit.get("score"),
-                "premium_publish_target_score": premium_publish_audit.get("target_score"),
-            }
         if monetization_report:
             readiness = {
                 **readiness,

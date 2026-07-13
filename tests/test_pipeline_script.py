@@ -3851,6 +3851,37 @@ def test_automatic_topic_payload_uses_cosmos_focus() -> None:
     assert any(term in payload["seed_theme"].lower() for term in ["vênus", "venus", "lua", "saturno", "marte", "buraco", "estrela", "júpiter", "jupiter", "netuno", "meteoro", "eclipse"])
 
 
+def test_automatic_topic_contract_requires_recognizable_hook_object() -> None:
+    from app.automation_topics import has_recognizable_hook_object
+
+    service = AutomationService(orchestrator)
+    payload = service._automatic_topic_payload()
+    notes = str(payload["notes"])
+
+    assert "automatic_topic_hook_object_required=true" in notes
+    assert has_recognizable_hook_object("A Lua aparece gigante no horizonte.")
+    assert has_recognizable_hook_object("Marte parece enferrujado visto de longe.")
+    assert not has_recognizable_hook_object("O universo guarda uma surpresa invisível.")
+
+
+def test_automatic_topic_payload_rejects_abstract_hook_without_recognizable_object() -> None:
+    service = AutomationService(orchestrator)
+    payload = {
+        "seed_theme": "Por que o universo parece estranho?",
+        "notes": "\n".join(
+            [
+                "automation_source=automatic_topic",
+                "automatic_topic_policy=cosmos_astronomia_universo_first",
+                "automatic_topic_hook_object_required=true",
+                "topic_hook_seed=Existe uma surpresa invisível no começo.",
+            ]
+        ),
+        "job_origin": "automatic_topic",
+    }
+
+    assert service._automatic_topic_payload_rejection_reason(payload) == "recognizable_hook_object_missing"
+
+
 def test_structured_viral_contract_preserves_topic_niche_quality_metrics() -> None:
     from app.hub_prompt import build_viral_prompt_note
 
