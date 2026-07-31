@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import Job, RenderOutput, SceneAsset, ScenePlan
 from app.providers.image import SemanticVerifier
 from app.storage import StorageManager
@@ -64,6 +65,7 @@ class AutoVisualReviewService:
                 "render_exists": render_exists,
                 "verification_modes": sorted(modes),
                 "real_visual_evidence": real_visual_evidence,
+                "local_vision_release_approved": get_settings().local_vision_release_approved,
                 "verification_attempts": verification_attempts,
             },
         }
@@ -105,17 +107,23 @@ class AutoVisualReviewService:
         critical_assets = self.critical_assets(selected_assets, scene_plan.scenes)
         critical_scene_ids = [str(asset.scene_id) for asset in critical_assets]
         asset_summary["asset_visual_critical_scene_ids"] = critical_scene_ids
+        verifier = SemanticVerifier()
         verified_scene_ids = {
             str(asset.scene_id)
             for asset in critical_assets
             if (asset.scores or {}).get("vision_aligned") is True
             and not (asset.scores or {}).get("verification_fallback_reason")
+            and (asset.scores or {}).get("vision_provider") == "local_openai"
+            and (asset.scores or {}).get("vision_model") == verifier.local_model
         }
         asset_summary["asset_visual_verified_critical_scene_ids"] = sorted(verified_scene_ids)
         if critical_scene_ids and set(critical_scene_ids) == verified_scene_ids:
-            asset_summary["asset_visual_real_vision_checked"] = True
+            asset_summary["asset_visual_real_vision_checked"] = self._has_real_visual_evidence(
+                asset_summary,
+                modes,
+                selected_asset_scores,
+            )
             return []
-        verifier = SemanticVerifier()
         attempts: list[dict[str, Any]] = []
         for asset in critical_assets:
             if str(asset.scene_id) in verified_scene_ids:
@@ -208,7 +216,7 @@ class AutoVisualReviewService:
         critical_scene_ids = {str(item) for item in asset_summary.get("asset_visual_critical_scene_ids") or []}
         if critical_scene_ids:
             verified_scene_ids = {str(item) for item in asset_summary.get("asset_visual_verified_critical_scene_ids") or []}
-            return critical_scene_ids == verified_scene_ids
+            return get_settings().local_vision_release_approved and critical_scene_ids == verified_scene_ids
         return (
             asset_summary.get("asset_visual_real_vision_checked") is True
             or any(mode and mode != "prompt_heuristic" for mode in modes)

@@ -284,13 +284,13 @@ Defaults importantes:
 - `niche_id=curiosidades`
 - `language=pt-BR`
 - `target_duration_sec=50`
-- `llm_primary_provider=deepseek`
+- `llm_primary_provider=openai` com `openai_model=gpt-5.6-luna` e `openai_reasoning_effort=high`
 - `llm_fallback_provider=disabled`
-- `llm_gate_judge_provider=deepseek`
-- `llm_gate_judge_model=deepseek-v4-flash`
+- `llm_gate_judge_provider=xai`
+- `llm_gate_judge_model=grok-4.5` com `xai_reasoning_effort=high`
 - `llm_premium_review_enabled=true`
-- `llm_premium_review_provider=deepseek`
-- `llm_premium_review_model=deepseek-v4-pro` apenas para exceções: revisão premium/final, tema complexo ou sinal explícito de escalonamento.
+- `llm_premium_review_provider=xai`
+- `llm_premium_review_model=grok-4.5` apenas para exceções: revisão premium/final, tema complexo ou sinal explícito de escalonamento.
 - `llm_json_max_tokens=4096`
 - `youtube_publish_mode=manual`
 - `youtube_api_enabled=false`

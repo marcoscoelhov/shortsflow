@@ -67,7 +67,7 @@ SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>
 SHORTSFLOW_MINIMAX_IMAGE_API_KEY=<redigido>
 ```
 
-Politica LLM operacional: DeepSeek v4 Flash e o padrao barato para provider principal, rascunho de roteiro, reparo, planejamento de cenas e juiz comum dos gates. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e o padrao para evitar fallback caro e invisivel. Qwen remoto e opcional para enriquecimento visual/referencias quando a chave estiver configurada. O verificador visual local usa Qwen3-VL 2B Q4, sem custo de API, somente nas imagens selecionadas de hook, prova e payoff. DeepSeek v4 Pro deve ficar restrito a excecoes premium/final/complexas via `SHORTSFLOW_LLM_PREMIUM_REVIEW_*`; nao configure Pro como fallback geral automatico.
+Politica LLM operacional: GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho, reparo e planejamento de cenas. Grok 4.5 com `reasoning_effort=high` atua como juiz independente nos gates comuns e revisoes premium. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e `SHORTSFLOW_LLM_ENABLE_FALLBACK=false` evitam retorno silencioso ao DeepSeek. Qwen remoto continua opcional para enriquecimento visual/referencias. O verificador visual local usa Qwen3-VL 2B Q4, sem custo de API, somente nas imagens selecionadas de hook, prova e payoff. Mantenha `SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED=false` ate o modelo passar e registrar o eval local de 20 imagens; antes disso ele coleta resultados, mas nao remove a pendencia que protege a autopublicacao.
 
 Para imagem, a chave de texto MiniMax e usada primeiro. `SHORTSFLOW_MINIMAX_IMAGE_API_KEY` funciona como chave dedicada de imagem e entra apenas quando a chave de texto retorna quota, saldo, credito ou rate limit. Se a chave de texto estiver vazia, a dedicada de imagem e usada diretamente.
 
@@ -127,7 +127,7 @@ curl http://127.0.0.1:8080/healthz
 Resposta esperada:
 
 ```json
-{"status":"ok","app":"ShortsFlow","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","providers":{"mode":"production","llm_primary":"deepseek","llm_gate_judge":"deepseek","llm_gate_judge_model":"deepseek-v4-flash","tts_primary":"gemini_tts","render_backend":"remotion"},"render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
+{"status":"ok","app":"ShortsFlow","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","providers":{"mode":"production","llm_primary":"openai","llm_gate_judge":"xai","llm_gate_judge_model":"grok-4.5","tts_primary":"gemini_tts","render_backend":"remotion"},"render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
 ```
 
 Se estiver usando outra porta, ajuste a URL do `curl`.

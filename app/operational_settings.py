@@ -126,6 +126,13 @@ OPERATIONAL_SETTING_SPECS = (
     OperationalSettingSpec("local_vision_base_url", "URL da visao local", "Visao local", "text"),
     OperationalSettingSpec("local_vision_model", "Modelo da visao local", "Visao local", "text"),
     OperationalSettingSpec(
+        "local_vision_release_approved",
+        "Eval local de 20 imagens aprovado",
+        "Visao local",
+        "checkbox",
+        description="Libera o modelo local para remover a pendencia visual da autopublicacao.",
+    ),
+    OperationalSettingSpec(
         "vision_verifier_timeout_sec",
         "Timeout da visao",
         "Visao local",
