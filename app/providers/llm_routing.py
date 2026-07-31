@@ -193,7 +193,7 @@ class ResilientCreativeProvider:
 
     def _quality_judge_candidates(self, gate_kind: str | None = None, payload: dict[str, Any] | None = None) -> list[tuple[str, Any]]:
         candidates: list[tuple[str, Any]] = []
-        seen: set[int] = set()
+        seen: set[tuple[str, str]] = set()
         ordered: list[tuple[str, Any]] = []
         if self._should_use_premium_review(gate_kind or "", payload or {}):
             ordered.append(("premium_review", getattr(self, "premium_review_provider", None)))
@@ -206,9 +206,14 @@ class ResilientCreativeProvider:
                 ]
             )
         for role, provider in ordered:
-            if provider is None or id(provider) in seen or not hasattr(provider, "judge_quality_gate"):
+            if provider is None or not hasattr(provider, "judge_quality_gate"):
                 continue
-            seen.add(id(provider))
+            provider_name = str(getattr(provider, "provider_name", "") or "")
+            model_name = str(getattr(provider, "model_name", "") or "")
+            key = (provider_name, model_name) if provider_name or model_name else ("instance", str(id(provider)))
+            if key in seen:
+                continue
+            seen.add(key)
             candidates.append((role, provider))
         return candidates
 
@@ -408,6 +413,8 @@ class LLMProviderRegistry:
     def fallback_provider(self) -> llm_facade.LLMProvider | None:
         if self.settings.use_mock_providers:
             return llm_facade.MockCreativeProvider()
+        if not bool(getattr(self.settings, "llm_enable_fallback", False)):
+            return None
         provider = self._build_provider(self.settings.llm_fallback_provider, required=False)
         if provider:
             return provider

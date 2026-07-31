@@ -75,7 +75,7 @@ OPERATIONAL_SETTING_SPECS = (
         "LLM",
         "select",
         PROVIDER_OPTIONS,
-        description="Provider para juiz editorial (viral, metadata, visual, growth). Recomendado: DeepSeek v4 Flash; use modelos premium só por exceção.",
+        description="Provider para juiz editorial (viral, metadata, visual, growth). Operacao atual: xAI com Grok 4.5.",
     ),
     OperationalSettingSpec(
         "llm_gate_judge_model",
@@ -89,7 +89,7 @@ OPERATIONAL_SETTING_SPECS = (
         "Usar LLM Pro em exceções",
         "LLM",
         "checkbox",
-        description="Permite DeepSeek V4 Pro apenas em revisão premium/final, temas complexos ou escalonamento explícito.",
+        description="Permite Grok 4.5 em revisão premium/final, temas complexos ou escalonamento explícito.",
     ),
     OperationalSettingSpec("llm_premium_review_provider", "LLM Pro excepcional", "LLM", "select", PROVIDER_OPTIONS),
     OperationalSettingSpec("llm_premium_review_model", "Modelo Pro excepcional", "LLM", "text"),

@@ -312,6 +312,15 @@ class Settings(BaseSettings):
             raise ValueError("minimax_text_thinking must be one of: auto, enabled, disabled")
         return normalized
 
+    @field_validator("openai_reasoning_effort", "xai_reasoning_effort")
+    @classmethod
+    def validate_reasoning_effort(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+        if normalized not in allowed:
+            raise ValueError("reasoning effort must be one of: none, minimal, low, medium, high, xhigh, max")
+        return normalized
+
     @field_validator("asset_generation_parallelism")
     @classmethod
     def validate_asset_generation_parallelism(cls, value: int) -> int:
