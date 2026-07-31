@@ -416,10 +416,6 @@ class MonetizationPipeline(BasePipeline):
         }
 
     def visual_review_required_for_assets(self, job: Job) -> bool:
-        if not bool(getattr(self.settings, "auto_visual_review_enabled", False)):
-            return False
-        if str(getattr(self.settings, "vision_verifier_provider", "disabled") or "disabled").lower() == "disabled":
-            return False
         quality_summary = job.quality_summary or {}
         asset_summary = quality_summary.get("assets", {}) if isinstance(quality_summary.get("assets"), dict) else {}
         if not asset_summary:

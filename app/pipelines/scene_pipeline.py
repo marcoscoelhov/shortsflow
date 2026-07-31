@@ -197,6 +197,8 @@ class ScenePipeline(BasePipeline):
         visual_world = str(scene.get("visual_world") or contract.get("visual_world") or "").strip()
         if visual_world:
             normalized["visual_world"] = visual_world
+        if contract.get("visual_style_profile") and not normalized.get("visual_style_profile"):
+            normalized["visual_style_profile"] = contract["visual_style_profile"]
         base_queries = [
             query.replace("_", " ").strip()
             for query in scene.get("fallback_queries", [topic_text, f"{topic_text} astronomia", f"{topic_text} espaco"])

@@ -691,6 +691,69 @@ def test_minimax_safe_image_prompt_includes_shorts_ratio() -> None:
     assert "vertical 9:16 frame for YouTube Shorts" in prompt
 
 
+def test_visual_style_profiles_produce_stable_distinct_no_text_prompts() -> None:
+    expected_directives = {
+        "analog_documentary": "tactile 35mm film grain",
+        "scientific_watercolor": "translucent pigment washes",
+        "high_contrast_comic": "bold ink contours",
+        "editorial_diorama": "handcrafted physical materials",
+    }
+    prompts: dict[str, str] = {}
+
+    for profile_id, expected_directive in expected_directives.items():
+        scene = {
+            "scene_id": "scene-2",
+            "order": 2,
+            "retention_role": "visual_evidence",
+            "primary_subject": "octopus camouflage",
+            "topic_hint": "octopus camouflage",
+            "visual_intent": "visual_evidence",
+            "image_prompt": "octopus changing skin texture on a coral reef",
+            "visual_style_profile": {"id": profile_id, "version": "visual-style-v1"},
+        }
+        prompt = orchestrator.asset_pipeline.image_assets.semantic_english_image_prompt(
+            scene,
+            scene["topic_hint"],
+            scene["primary_subject"],
+        )
+
+        assert prompt == orchestrator.asset_pipeline.image_assets.semantic_english_image_prompt(
+            scene,
+            scene["topic_hint"],
+            scene["primary_subject"],
+        )
+        assert expected_directive in prompt
+        assert "reserve clean negative space" in prompt
+        assert "no readable text" in prompt
+        prompts[profile_id] = prompt
+
+    assert len(set(prompts.values())) == 4
+
+
+def test_visual_style_profiles_do_not_change_legacy_prompt_without_explicit_selection() -> None:
+    scene = {
+        "scene_id": "scene-2",
+        "order": 2,
+        "retention_role": "visual_evidence",
+        "primary_subject": "octopus camouflage",
+        "topic_hint": "octopus camouflage",
+        "visual_intent": "visual_evidence",
+        "image_prompt": "octopus changing skin texture on a coral reef",
+    }
+
+    prompt = orchestrator.asset_pipeline.image_assets.semantic_english_image_prompt(
+        scene,
+        scene["topic_hint"],
+        scene["primary_subject"],
+    )
+
+    assert "tactile 35mm film grain" not in prompt
+    assert "translucent pigment washes" not in prompt
+    assert "bold ink contours" not in prompt
+    assert "handcrafted physical materials" not in prompt
+    assert "reserve clean negative space" not in prompt
+
+
 def test_minimax_image_provider_prefers_text_key_before_dedicated_key(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
@@ -1742,6 +1805,29 @@ def test_scene_semantics_keeps_image_prompt_in_english() -> None:
     assert "no text printed on objects" in prompt
     assert "no product packaging" in prompt
     assert "sem texto" not in prompt
+
+
+def test_scene_semantics_flows_visual_contract_style_into_image_prompt() -> None:
+    normalized = orchestrator.scene_pipeline.normalize_scene_semantics(
+        {
+            "scene_id": "scene-1",
+            "primary_subject": "polvos",
+            "image_prompt": "cinematic macro scene of an octopus changing skin texture",
+            "fallback_queries": ["polvos"],
+        },
+        "polvos",
+        visual_contract={
+            "visual_style_profile": {
+                "id": "editorial_diorama",
+                "version": "visual-style-v1",
+            }
+        },
+    )
+
+    assert normalized["visual_style_profile"]["id"] == "editorial_diorama"
+    assert "handcrafted physical materials" in normalized["image_prompt"]
+    assert "reserve clean negative space" in normalized["image_prompt"]
+
 
 def test_scene_semantics_uses_visual_contract_domain_for_non_science_prompt() -> None:
     normalized = orchestrator.scene_pipeline.normalize_scene_semantics(

@@ -60,3 +60,34 @@ def test_local_openai_vision_verifier_scores_image(monkeypatch, tmp_path: Path) 
     assert result["semantic_match"] == 0.94
 
     get_settings.cache_clear()
+
+
+def test_prompt_heuristic_requires_visual_review_for_hook_and_payoff(monkeypatch) -> None:
+    monkeypatch.setenv("SHORTSFLOW_USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", "disabled")
+    get_settings.cache_clear()
+
+    verifier = SemanticVerifier()
+    asset = {
+        "provider": "minimax",
+        "uri": "file:///tmp/scene.png",
+        "prompt_snapshot": "octopus changing skin color, no readable text anywhere",
+    }
+
+    for retention_role in ("visual_hook", "turn_or_payoff", "loop_close"):
+        result = verifier.score(
+            {
+                "retention_role": retention_role,
+                "primary_subject": "octopus",
+                "narration_text": "The octopus changes its skin color.",
+                "image_prompt": asset["prompt_snapshot"],
+            },
+            asset,
+        )
+
+        assert result["verification_mode"] == "prompt_heuristic"
+        assert result["visual_review_required"] is True
+        assert result["visual_review_reason"] == "critical_scene_requires_pixel_verification"
+        assert result.get("pixel_verified") is not True
+
+    get_settings.cache_clear()

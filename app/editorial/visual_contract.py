@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.editorial.visual_style import public_visual_style_profile
 from app.utils import stable_hash
 
 
@@ -165,6 +166,9 @@ def normalize_visual_contract_payload(
             ),
         },
     }
+    visual_style_profile = public_visual_style_profile(raw.get("visual_style_profile"))
+    if visual_style_profile is not None:
+        contract["visual_style_profile"] = visual_style_profile
     return contract
 
 

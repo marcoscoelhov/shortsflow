@@ -22,6 +22,26 @@ type SceneOverlay = {
   duration_ms: number;
 };
 
+type SceneVisualEvent = {
+  kind: 'reframe' | 'punch_in' | 'accent' | 'reveal';
+  start_ms: number;
+  duration_ms: number;
+  scale_delta?: number;
+  x_delta?: number;
+  y_delta?: number;
+  intensity?: number;
+};
+
+type VisualStyleProfile = {
+  id: string;
+  version: string;
+  finishing?: {
+    contrast: number;
+    saturation: number;
+    accent_treatment: string;
+  };
+};
+
 type ScenePlan = {
   scene_id: string;
   order: number;
@@ -38,6 +58,8 @@ type ScenePlan = {
   motion: SceneMotion;
   transition: {kind: string; duration_ms: number};
   overlays: SceneOverlay[];
+  visual_events?: SceneVisualEvent[];
+  visual_style_profile?: Pick<VisualStyleProfile, 'id' | 'version'>;
 };
 
 type CaptionItem = RemotionCaption & {
@@ -70,6 +92,7 @@ export type FinishPlan = {
     font_family: string;
     palette: Record<string, string>;
     safe_area: {x: number; top: number; bottom: number};
+    visual_style_profile?: VisualStyleProfile;
   };
   caption_track: {mode: string; max_lines: number; items: CaptionItem[]};
   scenes: ScenePlan[];
@@ -93,7 +116,13 @@ export const PremiumShort: React.FC<FinishPlan> = (plan) => {
   return (
     <AbsoluteFill style={{background: plan.style.palette.background, fontFamily: plan.style.font_family}}>
       {plan.scenes.map((scene) => (
-        <SceneLayer key={scene.scene_id} scene={scene} fps={fps} accent={plan.style.palette.accent} />
+        <SceneLayer
+          key={scene.scene_id}
+          scene={scene}
+          fps={fps}
+          accent={plan.style.palette.accent}
+          styleProfile={plan.style.visual_style_profile}
+        />
       ))}
       <Vignette />
       {activeCaption ? <Caption caption={activeCaption} plan={plan} fps={fps} /> : null}
@@ -102,7 +131,12 @@ export const PremiumShort: React.FC<FinishPlan> = (plan) => {
   );
 };
 
-const SceneLayer: React.FC<{scene: ScenePlan; fps: number; accent: string}> = ({scene, fps, accent}) => {
+const SceneLayer: React.FC<{
+  scene: ScenePlan;
+  fps: number;
+  accent: string;
+  styleProfile?: VisualStyleProfile;
+}> = ({scene, fps, accent, styleProfile}) => {
   const frame = useCurrentFrame();
   const startFrame = msToFrame(scene.start_ms, fps);
   const durationFrames = Math.max(1, msToFrame(scene.duration_ms, fps));
@@ -113,12 +147,13 @@ const SceneLayer: React.FC<{scene: ScenePlan; fps: number; accent: string}> = ({
     extrapolateRight: 'clamp'
   });
   const easedMotion = easeInOutCubic(motionProgress);
+  const eventCamera = eventCameraOffset(scene.visual_events, localFrame, fps);
   const pulse = scene.motion.kind === 'payoff_pulse'
     ? Math.sin(Math.PI * motionProgress) * 0.018
     : Math.sin(Math.PI * motionProgress * 2) * 0.006;
-  const scale = scene.motion.start_scale + (scene.motion.end_scale - scene.motion.start_scale) * easedMotion + pulse;
-  const x = scene.motion.x_delta * easedMotion;
-  const y = scene.motion.y_delta * easedMotion;
+  const scale = scene.motion.start_scale + (scene.motion.end_scale - scene.motion.start_scale) * easedMotion + pulse + eventCamera.scale;
+  const x = scene.motion.x_delta * easedMotion + eventCamera.x;
+  const y = scene.motion.y_delta * easedMotion + eventCamera.y;
   const opacityIn = scene.order === 1 ? 1 : interpolate(localFrame, [0, transitionFrames], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
@@ -135,11 +170,18 @@ const SceneLayer: React.FC<{scene: ScenePlan; fps: number; accent: string}> = ({
   });
   const transitionLift = transitionOffset(scene.transition.kind, enter);
   const clipPath = transitionClipPath(scene.transition.kind, enter);
-  const imageFilter = scene.retention_role === 'visual_hook'
-    ? 'contrast(1.12) saturate(1.12)'
+  const roleContrast = scene.retention_role === 'visual_hook'
+    ? 1.12
     : scene.retention_role === 'turn_or_payoff' || scene.retention_role === 'loop_close'
-      ? 'contrast(1.1) saturate(1.08)'
-      : 'contrast(1.04) saturate(1.04)';
+      ? 1.1
+      : 1.04;
+  const roleSaturation = scene.retention_role === 'visual_hook'
+    ? 1.12
+    : scene.retention_role === 'turn_or_payoff' || scene.retention_role === 'loop_close'
+      ? 1.08
+      : 1.04;
+  const profileFinishing = styleProfile?.finishing;
+  const imageFilter = `contrast(${roleContrast * ((profileFinishing?.contrast ?? 1.07) / 1.07)}) saturate(${roleSaturation * ((profileFinishing?.saturation ?? 0.96) / 0.96)})`;
   const assetSource = mediaSource(scene.asset_src || scene.asset_uri || scene.asset_path);
 
   return (
@@ -156,10 +198,60 @@ const SceneLayer: React.FC<{scene: ScenePlan; fps: number; accent: string}> = ({
           }}
         />
         <SceneTone scene={scene} accent={accent} localFrame={localFrame} fps={fps} />
+        <EventAccent
+          events={scene.visual_events}
+          localFrame={localFrame}
+          fps={fps}
+          accent={accent}
+          treatment={profileFinishing?.accent_treatment}
+        />
         <TransitionAccent kind={scene.transition.kind} accent={accent} progress={enter} />
       </AbsoluteFill>
     </Sequence>
   );
+};
+
+const eventCameraOffset = (events: SceneVisualEvent[] | undefined, localFrame: number, fps: number) => {
+  return (events ?? []).reduce(
+    (total, event) => {
+      if (event.kind === 'accent') {
+        return total;
+      }
+      const progress = visualEventProgress(event, localFrame, fps);
+      return {
+        scale: total.scale + Number(event.scale_delta || 0) * progress,
+        x: total.x + Number(event.x_delta || 0) * progress,
+        y: total.y + Number(event.y_delta || 0) * progress
+      };
+    },
+    {scale: 0, x: 0, y: 0}
+  );
+};
+
+const EventAccent: React.FC<{
+  events?: SceneVisualEvent[];
+  localFrame: number;
+  fps: number;
+  accent: string;
+  treatment?: string;
+}> = ({events, localFrame, fps, accent, treatment}) => {
+  const intensity = (events ?? [])
+    .filter((event) => event.kind === 'accent')
+    .reduce((maximum, event) => {
+      const progress = visualEventPulse(event, localFrame, fps);
+      return Math.max(maximum, Number(event.intensity || 0.22) * progress);
+    }, 0);
+  if (intensity <= 0) {
+    return null;
+  }
+  const background = treatment === 'paper_wash'
+    ? `radial-gradient(circle at 50% 34%, color-mix(in oklch, ${accent} ${Math.round(intensity * 70)}%, transparent), transparent 58%)`
+    : treatment === 'ink_strike'
+      ? `linear-gradient(112deg, transparent 18%, color-mix(in oklch, ${accent} ${Math.round(intensity * 100)}%, transparent) 49%, transparent 52%)`
+      : treatment === 'miniature_spotlight'
+        ? `radial-gradient(ellipse at 50% 44%, color-mix(in oklch, ${accent} ${Math.round(intensity * 64)}%, transparent), transparent 48%)`
+        : `linear-gradient(90deg, color-mix(in oklch, ${accent} ${Math.round(intensity * 78)}%, transparent), transparent 46%)`;
+  return <AbsoluteFill style={{background, pointerEvents: 'none'}} />;
 };
 
 const mediaSource = (value: string): string => {
@@ -304,6 +396,30 @@ const Vignette: React.FC = () => (
 );
 
 const msToFrame = (ms: number, fps: number) => Math.round((ms / 1000) * fps);
+
+const visualEventProgress = (event: SceneVisualEvent, localFrame: number, fps: number) => {
+  const startFrame = msToFrame(event.start_ms, fps);
+  const durationFrames = Math.max(1, msToFrame(event.duration_ms, fps));
+  return interpolate(localFrame, [startFrame, startFrame + durationFrames], [0, 1], {
+    easing: easeInOutCubic,
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  });
+};
+
+const visualEventPulse = (event: SceneVisualEvent, localFrame: number, fps: number) => {
+  const startFrame = msToFrame(event.start_ms, fps);
+  const durationFrames = Math.max(2, msToFrame(event.duration_ms, fps));
+  return interpolate(
+    localFrame,
+    [startFrame, startFrame + durationFrames * 0.42, startFrame + durationFrames],
+    [0, 1, 0],
+    {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp'
+    }
+  );
+};
 
 const captionStartMs = (caption: CaptionItem) => caption.startMs ?? caption.start_ms ?? 0;
 

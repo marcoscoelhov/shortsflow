@@ -2087,7 +2087,7 @@ def test_quality_checklist_requires_executed_asset_visual_gate_to_pass() -> None
     assert checklist["asset_gate_pass"] is True
     assert checklist["asset_visual_gate_pass"] is False
 
-def test_visual_review_not_required_when_final_review_is_youtube_studio() -> None:
+def test_visual_review_required_when_assets_only_have_prompt_heuristics() -> None:
     job = SimpleNamespace(
         quality_summary={
             "assets": {
@@ -2099,7 +2099,7 @@ def test_visual_review_not_required_when_final_review_is_youtube_studio() -> Non
         }
     )
 
-    assert orchestrator.monetization_pipeline.visual_review_required_for_assets(job) is False
+    assert orchestrator.monetization_pipeline.visual_review_required_for_assets(job) is True
 
 def test_visual_review_not_required_after_real_vision_check() -> None:
     job = SimpleNamespace(

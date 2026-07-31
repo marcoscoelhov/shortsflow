@@ -4,6 +4,7 @@ import copy
 from pathlib import Path
 from typing import Any
 
+from app.editorial.visual_style import public_visual_style_profile
 from app.models import BackgroundMusicAsset, Job, NarrationAsset, RenderOutput, SceneAsset, ScenePlan, SubtitleTrack
 from app.pipelines.timeline import normalize_scene_timings
 from app.utils import path_from_uri, stable_hash
@@ -30,6 +31,7 @@ def build_finish_plan(
     scene_segments = normalize_scene_timings(scene_plan.scenes, narration.duration_ms)
     assets_by_scene = {asset.scene_id: asset for asset in selected_assets}
     contract = visual_contract if isinstance(visual_contract, dict) else {}
+    visual_style_profile = public_visual_style_profile(contract.get("visual_style_profile"))
     scenes = []
     for index, scene in enumerate(scene_segments):
         asset = assets_by_scene.get(str(scene.get("scene_id")))
@@ -37,13 +39,14 @@ def build_finish_plan(
             raise ValueError(f"missing selected asset for scene {scene.get('scene_id')}")
         start_ms = int(scene.get("actual_start_ms") or 0)
         end_ms = int(scene.get("actual_end_ms") or start_ms)
+        duration_ms = max(500, end_ms - start_ms)
         scenes.append(
             {
                 "scene_id": str(scene.get("scene_id") or f"scene-{index + 1}"),
                 "order": int(scene.get("order") or index + 1),
                 "start_ms": start_ms,
                 "end_ms": end_ms,
-                "duration_ms": max(500, end_ms - start_ms),
+                "duration_ms": duration_ms,
                 "asset_uri": asset.uri,
                 "asset_src": _media_src(asset.uri, media_base_url=media_base_url, artifacts_dir=artifacts_dir),
                 "asset_path": str(path_from_uri(asset.uri)),
@@ -54,6 +57,17 @@ def build_finish_plan(
                 "motion": _motion_for_scene(index, len(scene_segments), scene),
                 "transition": _transition_for_scene(index, len(scene_segments), scene),
                 "overlays": _overlays_for_scene(index, len(scene_segments), scene, contract),
+                "visual_events": _visual_events_for_scene(index, len(scene_segments), scene, duration_ms),
+                **(
+                    {
+                        "visual_style_profile": {
+                            "id": visual_style_profile["id"],
+                            "version": visual_style_profile["version"],
+                        }
+                    }
+                    if visual_style_profile is not None
+                    else {}
+                ),
             }
         )
     audio_uri = (
@@ -95,6 +109,7 @@ def build_finish_plan(
             "component_policy": "free_only",
             "caption_style": "one_line_kinetic",
             "font_family": "Inter, system-ui, sans-serif",
+            **({"visual_style_profile": visual_style_profile} if visual_style_profile is not None else {}),
             "palette": {
                 "background": "oklch(0.13 0.012 25)",
                 "text": "oklch(0.96 0.012 35)",
@@ -243,3 +258,77 @@ def _overlays_for_scene(
     visual_contract: dict[str, Any],
 ) -> list[dict[str, Any]]:
     return []
+
+
+def _visual_events_for_scene(
+    index: int,
+    scene_count: int,
+    scene: dict[str, Any],
+    duration_ms: int,
+) -> list[dict[str, Any]]:
+    role = str(scene.get("retention_role") or _retention_role_for_index(index, scene_count))
+    direction = -1 if index % 2 else 1
+    events: list[dict[str, Any]] = [
+        {
+            "kind": "reframe",
+            "start_ms": 0,
+            "duration_ms": _event_duration(duration_ms, 0.3),
+            "scale_delta": 0.008,
+            "x_delta": 0,
+            "y_delta": 0,
+        }
+    ]
+    if role == "visual_hook":
+        events.extend(
+            [
+                {
+                    "kind": "punch_in",
+                    "start_ms": round(duration_ms * 0.28),
+                    "duration_ms": _event_duration(duration_ms, 0.22),
+                    "scale_delta": 0.025,
+                    "x_delta": 0,
+                    "y_delta": 0,
+                },
+                {
+                    "kind": "accent",
+                    "start_ms": round(duration_ms * 0.68),
+                    "duration_ms": _event_duration(duration_ms, 0.18),
+                    "intensity": 0.24,
+                },
+            ]
+        )
+    elif role in {"turn_or_payoff", "loop_close"}:
+        events.extend(
+            [
+                {
+                    "kind": "reveal",
+                    "start_ms": round(duration_ms * 0.42),
+                    "duration_ms": _event_duration(duration_ms, 0.24),
+                    "scale_delta": 0.02,
+                    "x_delta": -10 * direction,
+                    "y_delta": 0,
+                },
+                {
+                    "kind": "accent",
+                    "start_ms": round(duration_ms * 0.72),
+                    "duration_ms": _event_duration(duration_ms, 0.16),
+                    "intensity": 0.3,
+                },
+            ]
+        )
+    else:
+        events.append(
+            {
+                "kind": "punch_in",
+                "start_ms": round(duration_ms * 0.56),
+                "duration_ms": _event_duration(duration_ms, 0.22),
+                "scale_delta": 0.02,
+                "x_delta": 0,
+                "y_delta": 0,
+            }
+        )
+    return events
+
+
+def _event_duration(duration_ms: int, fraction: float) -> int:
+    return min(1200, max(260, round(duration_ms * fraction)))

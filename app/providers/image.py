@@ -38,7 +38,7 @@ class SemanticVerifier:
 
     def score(self, scene: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
         if self.use_mock_providers:
-            return {
+            heuristic = {
                 "semantic_match": 0.9,
                 "subject_salience": 0.88,
                 "style_match": 0.84,
@@ -48,25 +48,26 @@ class SemanticVerifier:
                 "text_or_watermark_penalty": 0.0,
                 "total_score": 0.854,
             }
+            return self._verification_failed_score(scene, heuristic, "mock verifier does not inspect image pixels")
         heuristic = self._heuristic_score(scene, asset)
         if asset["provider"] == "local_semantic":
-            return heuristic
+            return self._verification_failed_score(scene, heuristic, "pixel verification unavailable for local semantic fallback")
         cache_key = f"{asset.get('uri')}::{scene.get('topic_hint') or scene.get('primary_subject')}"
         if cache_key in self._cache:
             return {**heuristic, **self._cache[cache_key]}
         if not self.enabled:
-            return self._verification_failed_score(heuristic, "vision verifier unavailable")
+            return self._verification_failed_score(scene, heuristic, "vision verifier unavailable")
         if self._vision_disabled_reason:
-            return self._verification_failed_score(heuristic, self._vision_disabled_reason)
+            return self._verification_failed_score(scene, heuristic, self._vision_disabled_reason)
         try:
             verified = self._vision_score(scene, asset)
             self._cache[cache_key] = verified
             return {**heuristic, **verified}
         except subprocess.TimeoutExpired as exc:
             self._vision_disabled_reason = f"vision verifier timed out after {exc.timeout}s"
-            return self._verification_failed_score(heuristic, self._vision_disabled_reason)
+            return self._verification_failed_score(scene, heuristic, self._vision_disabled_reason)
         except Exception as exc:  # noqa: BLE001
-            return self._verification_failed_score(heuristic, str(exc))
+            return self._verification_failed_score(scene, heuristic, str(exc))
 
     def _heuristic_score(self, scene: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
         expected_terms = self._keywords(
@@ -143,12 +144,28 @@ class SemanticVerifier:
             "total_score": round(total, 3),
         }
 
-    def _verification_failed_score(self, heuristic: dict[str, Any], reason: str) -> dict[str, Any]:
-        return {
+    def _verification_failed_score(
+        self,
+        scene: dict[str, Any],
+        heuristic: dict[str, Any],
+        reason: str,
+    ) -> dict[str, Any]:
+        retention_role = str(scene.get("retention_role") or "").strip().lower()
+        try:
+            is_first_scene = int(scene.get("order") or 0) == 1
+        except (TypeError, ValueError):
+            is_first_scene = False
+        visual_review_required = is_first_scene or retention_role in {"visual_hook", "turn_or_payoff", "loop_close"}
+        result = {
             **heuristic,
             "verification_fallback_reason": reason,
             "verification_mode": "prompt_heuristic",
+            "pixel_verified": False,
+            "visual_review_required": visual_review_required,
         }
+        if visual_review_required:
+            result["visual_review_reason"] = "critical_scene_requires_pixel_verification"
+        return result
 
     def _vision_score(self, scene: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
         asset_path = Path(asset["uri"][7:]) if str(asset.get("uri", "")).startswith("file://") else Path(asset["uri"])
@@ -227,6 +244,7 @@ class SemanticVerifier:
         data = self._parse_vision_json(content, provider="local_openai_vision")
         result = self._vision_data_to_scores(data)
         result["verification_mode"] = "vision"
+        result["pixel_verified"] = True
         result["vision_provider"] = "local_openai"
         result["vision_model"] = self.local_model
         return result
@@ -265,6 +283,7 @@ class SemanticVerifier:
         data = self._parse_vision_json(content, provider="minimax_vision")
         parsed = self._vision_data_to_scores(data)
         parsed["verification_mode"] = "vision"
+        parsed["pixel_verified"] = True
         parsed["vision_provider"] = "minimax_mmx"
         return parsed
 

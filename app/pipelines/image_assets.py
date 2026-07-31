@@ -8,6 +8,7 @@ from typing import Any
 
 from PIL import Image
 
+from app.editorial.visual_style import NEGATIVE_SPACE_DIRECTIVE, resolve_visual_style_profile
 from app.pipelines.common import RecoverableStepError
 from app.utils import path_from_uri
 
@@ -250,6 +251,13 @@ class ImageAssetDomain:
             prompt = self.replace_subject_aliases(prompt)
         prompt = self.single_frame_composition_prompt(prompt)
         prompt = self.remove_incompatible_scientific_style(prompt, scene)
+        if scene.get("visual_style_profile"):
+            style_profile = resolve_visual_style_profile(scene.get("visual_style_profile"))
+            style_directive = str(style_profile["image_prompt_directive"])
+            if style_directive.lower() not in prompt.lower():
+                prompt = f"{prompt}, {style_directive}".strip(", ")
+            if NEGATIVE_SPACE_DIRECTIVE.lower() not in prompt.lower():
+                prompt = f"{prompt}, {NEGATIVE_SPACE_DIRECTIVE}".strip(", ")
         if semantic_directive.lower() not in prompt.lower():
             prompt = f"{prompt}, {semantic_directive}".strip(", ")
         conservative_science_directive = self.conservative_science_visual_directive(scene)
@@ -634,6 +642,8 @@ class ImageAssetDomain:
             self.domain_negative_constraints(scene),
             self.minimax_no_text_constraint(scene),
         ]
+        if scene.get("visual_style_profile"):
+            required_constraints.insert(0, NEGATIVE_SPACE_DIRECTIVE)
         if self.is_visual_hook_scene(scene):
             required_constraints.insert(0, "first-frame hook for Shorts under one second, concrete contrast or consequence, do not reveal later payoff")
         for constraint in required_constraints:

@@ -571,6 +571,42 @@ def test_premium_finishing_gate_rejects_excessive_motion(tmp_path: Path) -> None
     assert "scene-1:excessive_motion" in result.reasons
 
 
+def test_premium_finishing_gate_rejects_excessive_visual_event_motion(tmp_path: Path) -> None:
+    class PassingRenderGate:
+        def validate(self, video_path: Path, expected_duration_ms: int) -> RenderGateResult:
+            return RenderGateResult(True, [], {"duration_ms": expected_duration_ms})
+
+    video_path = tmp_path / "premium.mp4"
+    video_path.write_bytes(b"video")
+    plan = {
+        "style": {"component_policy": "free_only"},
+        "caption_track": {"max_lines": 1, "items": [{"text": "Legenda curta"}]},
+        "scenes": [
+            {
+                "scene_id": "scene-1",
+                "transition": {"kind": "soft_cut"},
+                "motion": {"kind": "subtle_push", "start_scale": 1.02, "end_scale": 1.1, "x_delta": 6, "y_delta": 0},
+                "overlays": [],
+                "visual_events": [
+                    {
+                        "kind": "punch_in",
+                        "start_ms": 1000,
+                        "duration_ms": 500,
+                        "scale_delta": 0.2,
+                        "x_delta": 0,
+                        "y_delta": 0,
+                    }
+                ],
+            }
+        ],
+    }
+
+    result = PremiumFinishingGate(PassingRenderGate()).validate(video_path, 35_000, plan)
+
+    assert result.passed is False
+    assert "scene-1:excessive_visual_event_motion" in result.reasons
+
+
 def test_finish_plan_limits_caption_emphasis_to_data_only() -> None:
     job_id = "premium-caption-emphasis"
     _create_rendered_job(job_id)
@@ -634,6 +670,68 @@ def test_finish_plan_repairs_invalid_caption_end_after_start() -> None:
     caption = plan["caption_track"]["items"][0]
     assert caption["startMs"] == 1200
     assert caption["endMs"] == 1201
+
+
+def test_finish_plan_exposes_versioned_style_and_dense_deterministic_visual_events() -> None:
+    roles = [
+        "visual_hook",
+        "visual_evidence",
+        "visual_evidence",
+        "visual_evidence",
+        "turn_or_payoff",
+        "loop_close",
+    ]
+    scenes = [
+        {
+            "scene_id": f"scene-{index + 1}",
+            "order": index + 1,
+            "token_start": index * 10,
+            "token_end": index * 10 + 9,
+            "retention_role": role,
+            "visual_intent": "visual_evidence",
+            "primary_subject": "octopus",
+            "narration_text": f"Scene {index + 1}",
+        }
+        for index, role in enumerate(roles)
+    ]
+    assets = [
+        SimpleNamespace(
+            scene_id=scene["scene_id"],
+            uri=f"file:///tmp/{scene['scene_id']}.png",
+            content_hash=f"asset-{index}",
+        )
+        for index, scene in enumerate(scenes)
+    ]
+    kwargs = {
+        "schema_version": "1.0.0",
+        "job": SimpleNamespace(job_id="visual-events-job"),
+        "scene_plan": SimpleNamespace(scenes=scenes, content_hash="scene-plan"),
+        "selected_assets": assets,
+        "narration": SimpleNamespace(
+            duration_ms=36_000,
+            content_hash="narration",
+            normalized_audio_uri=None,
+            audio_uri="file:///tmp/narration.wav",
+        ),
+        "subtitles": SimpleNamespace(items=[], content_hash="subtitles"),
+        "background_music": None,
+        "render": None,
+        "visual_contract": {"visual_style_profile": "scientific_watercolor"},
+    }
+
+    first = public_finish_plan(build_finish_plan(**kwargs))
+    second = public_finish_plan(build_finish_plan(**kwargs))
+
+    assert first["style"]["visual_style_profile"]["id"] == "scientific_watercolor"
+    assert first["style"]["visual_style_profile"]["version"] == "visual-style-v1"
+    assert sum(len(scene["visual_events"]) for scene in first["scenes"]) >= 12
+    assert [scene["visual_events"] for scene in first["scenes"]] == [
+        scene["visual_events"] for scene in second["scenes"]
+    ]
+    assert all(
+        scene["visual_style_profile"] == {"id": "scientific_watercolor", "version": "visual-style-v1"}
+        for scene in first["scenes"]
+    )
 
 
 def test_premium_caption_highlight_uses_only_current_word() -> None:

@@ -10,6 +10,7 @@ ALLOWED_COMPONENT_POLICY = "free_only"
 ALLOWED_TRANSITIONS = {"cold_open", "evidence_cut", "payoff_reveal", "soft_cut"}
 ALLOWED_MOTIONS = {"stable_hold", "subtle_push", "slow_drift", "payoff_pulse"}
 ALLOWED_OVERLAYS = {"hook_tag", "payoff_tag", "evidence_marker"}
+ALLOWED_VISUAL_EVENTS = {"reframe", "punch_in", "accent", "reveal"}
 MAX_SCALE_DELTA = 0.18
 MAX_TRANSLATION_DELTA = 60
 
@@ -61,6 +62,24 @@ class PremiumFinishingGate:
             y_delta = abs(_float_value(motion.get("y_delta"), 0.0))
             if abs(end_scale - start_scale) > MAX_SCALE_DELTA or x_delta > MAX_TRANSLATION_DELTA or y_delta > MAX_TRANSLATION_DELTA:
                 reasons.append(f"{scene_id}:excessive_motion")
+            event_scale_delta = 0.0
+            event_x_delta = 0.0
+            event_y_delta = 0.0
+            for event in scene.get("visual_events") or []:
+                if not isinstance(event, dict) or event.get("kind") not in ALLOWED_VISUAL_EVENTS:
+                    reasons.append(f"{scene_id}:unsupported_visual_event")
+                    continue
+                if _float_value(event.get("duration_ms"), 0.0) <= 0 or _float_value(event.get("start_ms"), -1.0) < 0:
+                    reasons.append(f"{scene_id}:invalid_visual_event_timing")
+                event_scale_delta += abs(_float_value(event.get("scale_delta"), 0.0))
+                event_x_delta += abs(_float_value(event.get("x_delta"), 0.0))
+                event_y_delta += abs(_float_value(event.get("y_delta"), 0.0))
+            if (
+                abs(end_scale - start_scale) + event_scale_delta > MAX_SCALE_DELTA
+                or x_delta + event_x_delta > MAX_TRANSLATION_DELTA
+                or y_delta + event_y_delta > MAX_TRANSLATION_DELTA
+            ):
+                reasons.append(f"{scene_id}:excessive_visual_event_motion")
             for overlay in scene.get("overlays") or []:
                 if not isinstance(overlay, dict) or overlay.get("kind") not in ALLOWED_OVERLAYS:
                     reasons.append(f"{scene_id}:unsupported_overlay")
