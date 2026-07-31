@@ -20,6 +20,10 @@ type SceneOverlay = {
   text: string;
   start_ms: number;
   duration_ms: number;
+  variant?: 'choice_label' | 'sand_progress' | 'choice_state' | 'outcome_comparison' | 'comment_prompt';
+  side?: 'left' | 'right';
+  progress?: number;
+  secondary_text?: string;
 };
 
 type SceneVisualEvent = {
@@ -121,6 +125,7 @@ export const PremiumShort: React.FC<FinishPlan> = (plan) => {
           scene={scene}
           fps={fps}
           accent={plan.style.palette.accent}
+          safeArea={plan.style.safe_area}
           styleProfile={plan.style.visual_style_profile}
         />
       ))}
@@ -135,8 +140,9 @@ const SceneLayer: React.FC<{
   scene: ScenePlan;
   fps: number;
   accent: string;
+  safeArea: FinishPlan['style']['safe_area'];
   styleProfile?: VisualStyleProfile;
-}> = ({scene, fps, accent, styleProfile}) => {
+}> = ({scene, fps, accent, safeArea, styleProfile}) => {
   const frame = useCurrentFrame();
   const startFrame = msToFrame(scene.start_ms, fps);
   const durationFrames = Math.max(1, msToFrame(scene.duration_ms, fps));
@@ -206,8 +212,272 @@ const SceneLayer: React.FC<{
           treatment={profileFinishing?.accent_treatment}
         />
         <TransitionAccent kind={scene.transition.kind} accent={accent} progress={enter} />
+        <SceneOverlays overlays={scene.overlays} fps={fps} accent={accent} safeArea={safeArea} />
       </AbsoluteFill>
     </Sequence>
+  );
+};
+
+const SceneOverlays: React.FC<{
+  overlays: SceneOverlay[];
+  fps: number;
+  accent: string;
+  safeArea: FinishPlan['style']['safe_area'];
+}> = ({overlays, fps, accent, safeArea}) => {
+  const frame = useCurrentFrame();
+  const choiceCardTop = Math.max(212, safeArea.top + 80);
+  const sandProgressTop = choiceCardTop + 148;
+  return (
+    <>
+      {overlays.map((overlay, index) => {
+        const startFrame = msToFrame(overlay.start_ms, fps);
+        const durationFrames = Math.max(1, msToFrame(overlay.duration_ms, fps));
+        const activeFrame = frame - startFrame;
+        if (activeFrame < 0 || activeFrame >= durationFrames) {
+          return null;
+        }
+        const enter = spring({
+          frame: activeFrame,
+          fps,
+          config: {damping: 18, stiffness: 170, mass: 0.7}
+        });
+        const opacity = interpolate(activeFrame, [0, Math.max(2, fps * 0.16)], [0, 1], {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp'
+        });
+        const key = `${overlay.variant || overlay.kind}-${overlay.side || index}`;
+
+        if (overlay.variant === 'choice_label') {
+          const pulseFrames = Math.max(12, Math.round(fps * 0.8));
+          const pulse = interpolate(activeFrame % pulseFrames, [0, pulseFrames / 2, pulseFrames], [1, 1.045, 1]);
+          return (
+            <div
+              key={key}
+              style={{
+                position: 'absolute',
+                top: choiceCardTop,
+                [overlay.side === 'right' ? 'right' : 'left']: Math.max(96, safeArea.x),
+                width: 350,
+                padding: '24px 30px',
+                boxSizing: 'border-box',
+                border: `3px solid ${accent}`,
+                borderRadius: 24,
+                background: 'rgba(7, 8, 10, 0.84)',
+                color: 'white',
+                fontSize: 48,
+                fontWeight: 900,
+                letterSpacing: 2,
+                textAlign: 'center',
+                opacity,
+                scale: enter * pulse,
+                translate: `${(overlay.side === 'right' ? 1 : -1) * (1 - enter) * 42}px 0`,
+                boxShadow: `0 18px 48px rgba(0,0,0,0.42), inset 0 0 28px color-mix(in oklch, ${accent} 18%, transparent)`
+              }}
+            >
+              {overlay.text}
+            </div>
+          );
+        }
+
+        if (overlay.variant === 'sand_progress') {
+          const target = Math.min(1, Math.max(0, Number(overlay.progress ?? 0)));
+          const progress = interpolate(activeFrame, [0, durationFrames], [0, target], {
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp'
+          });
+          return (
+            <div
+              key={key}
+              style={{
+                position: 'absolute',
+                top: sandProgressTop,
+                left: Math.max(108, safeArea.x),
+                right: Math.max(108, safeArea.x),
+                opacity,
+                translate: `0 ${(1 - enter) * -24}px`
+              }}
+            >
+              <div style={{display: 'flex', justifyContent: 'space-between', color: 'white', fontSize: 32, fontWeight: 850}}>
+                <span>{overlay.text}</span>
+                <span>{Math.round(progress * 100)}%</span>
+              </div>
+              <div style={{height: 22, marginTop: 12, borderRadius: 20, background: 'rgba(255,255,255,0.2)', overflow: 'hidden'}}>
+                <div
+                  style={{
+                    width: `${progress * 100}%`,
+                    height: '100%',
+                    borderRadius: 20,
+                    background: `linear-gradient(90deg, oklch(0.82 0.11 78), ${accent})`,
+                    boxShadow: `0 0 26px color-mix(in oklch, ${accent} 68%, transparent)`
+                  }}
+                />
+              </div>
+            </div>
+          );
+        }
+
+        if (overlay.variant === 'choice_state') {
+          const lock = interpolate(activeFrame, [0, Math.max(3, fps * 0.42)], [0, 1], {
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp'
+          });
+          return (
+            <div
+              key={key}
+              style={{
+                position: 'absolute',
+                left: Math.max(150, safeArea.x),
+                right: Math.max(150, safeArea.x),
+                bottom: safeArea.bottom + 470,
+                height: 180,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderTop: `6px solid ${accent}`,
+                borderBottom: `6px solid ${accent}`,
+                background: 'rgba(7, 8, 10, 0.82)',
+                color: 'white',
+                fontSize: 50,
+                fontWeight: 950,
+                letterSpacing: 3,
+                opacity,
+                scale: 0.92 + enter * 0.08,
+                clipPath: `inset(0 ${Math.round((1 - lock) * 48)}% 0 ${Math.round((1 - lock) * 48)}%)`
+              }}
+            >
+              {overlay.text}
+            </div>
+          );
+        }
+
+        if (overlay.variant === 'outcome_comparison') {
+          const delayedEnter = spring({
+            frame: Math.max(0, activeFrame - (overlay.side === 'right' ? Math.round(fps * 0.12) : 0)),
+            fps,
+            config: {damping: 20, stiffness: 150, mass: 0.78}
+          });
+          const wrong = overlay.side !== 'right';
+          const outcomeIndicatorProgress = interpolate(activeFrame, [0, Math.max(3, fps * 0.28)], [0, 1], {
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp'
+          });
+          return (
+            <div
+              key={key}
+              style={{
+                position: 'absolute',
+                [overlay.side === 'right' ? 'right' : 'left']: Math.max(76, safeArea.x - 30),
+                bottom: safeArea.bottom + 470,
+                width: 420,
+                minHeight: 260,
+                padding: '34px 28px',
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 18,
+                borderRadius: 28,
+                border: `4px solid ${wrong ? 'oklch(0.65 0.2 28)' : 'oklch(0.78 0.18 145)'}`,
+                background: wrong ? 'rgba(36, 8, 10, 0.88)' : 'rgba(5, 31, 18, 0.9)',
+                color: 'white',
+                textAlign: 'center',
+                opacity,
+                scale: 0.88 + delayedEnter * 0.12,
+                translate: `0 ${(1 - delayedEnter) * 46}px`,
+                boxShadow: '0 24px 54px rgba(0,0,0,0.48)'
+              }}
+            >
+              <div
+                style={{
+                  color: wrong ? 'oklch(0.72 0.22 28)' : 'oklch(0.82 0.2 145)',
+                  fontSize: 72,
+                  fontWeight: 950,
+                  lineHeight: 0.8,
+                  opacity: outcomeIndicatorProgress,
+                  scale: 0.55 + outcomeIndicatorProgress * 0.45
+                }}
+              >
+                {wrong ? '×' : '✓'}
+              </div>
+              <div style={{fontSize: 38, fontWeight: 950, lineHeight: 1.05}}>{overlay.text}</div>
+              {overlay.secondary_text ? (
+                <div style={{fontSize: 46, fontWeight: 850, color: wrong ? 'oklch(0.82 0.12 28)' : 'oklch(0.86 0.15 145)'}}>
+                  {overlay.secondary_text}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+
+        if (overlay.variant === 'comment_prompt') {
+          const commentEnter = spring({
+            frame: activeFrame,
+            fps,
+            config: {damping: 16, stiffness: 180, mass: 0.72}
+          });
+          const commentLift = interpolate(activeFrame, [0, Math.max(3, fps * 0.28)], [54, 0], {
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp'
+          });
+          const choices = (overlay.secondary_text || '').replace(/\?$/, '').split(/\s+OU\s+/);
+          const emphasisFrames = Math.max(8, Math.round(fps * 0.42));
+          const emphasizedChoiceIndex = Math.floor(activeFrame / emphasisFrames) % Math.max(1, choices.length);
+          const emphasisPulse = interpolate(activeFrame % emphasisFrames, [0, emphasisFrames / 2, emphasisFrames], [0.65, 1, 0.65]);
+          return (
+            <div
+              key={key}
+              style={{
+                position: 'absolute',
+                left: Math.max(108, safeArea.x),
+                right: Math.max(108, safeArea.x),
+                bottom: safeArea.bottom + 240,
+                maxWidth: 820,
+                minHeight: 300,
+                margin: '0 auto',
+                padding: '42px 48px',
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 26,
+                border: `5px solid ${accent}`,
+                borderRadius: 34,
+                background: 'rgba(7, 8, 10, 0.92)',
+                color: 'white',
+                textAlign: 'center',
+                opacity,
+                scale: 0.88 + commentEnter * 0.12,
+                translate: `0 ${commentLift}px`,
+                boxShadow: `0 30px 72px rgba(0,0,0,0.58), inset 0 0 42px color-mix(in oklch, ${accent} 18%, transparent)`
+              }}
+            >
+              <div style={{fontSize: 66, fontWeight: 950, lineHeight: 1.02, letterSpacing: 1}}>{overlay.text}</div>
+              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20, fontSize: 58, fontWeight: 950}}>
+                {choices.map((choice, choiceIndex) => (
+                  <React.Fragment key={`${choice}-${choiceIndex}`}>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        color: choiceIndex === emphasizedChoiceIndex ? accent : 'white',
+                        scale: choiceIndex === emphasizedChoiceIndex ? 1 + emphasisPulse * 0.06 : 1,
+                        opacity: choiceIndex === emphasizedChoiceIndex ? 1 : 0.82
+                      }}
+                    >
+                      {choice}
+                    </span>
+                    {choiceIndex < choices.length - 1 ? <span style={{fontSize: 36, opacity: 0.68}}>OU</span> : null}
+                  </React.Fragment>
+                ))}
+                <span>?</span>
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })}
+    </>
   );
 };
 

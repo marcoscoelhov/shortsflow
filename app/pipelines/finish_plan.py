@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from typing import Any
 
 from app.editorial.visual_style import public_visual_style_profile
 from app.models import BackgroundMusicAsset, Job, NarrationAsset, RenderOutput, SceneAsset, ScenePlan, SubtitleTrack
 from app.pipelines.timeline import normalize_scene_timings
+from app.survival_experiment import extract_survival_choice_labels
 from app.utils import path_from_uri, stable_hash
 
 
@@ -32,6 +34,7 @@ def build_finish_plan(
     assets_by_scene = {asset.scene_id: asset for asset in selected_assets}
     contract = visual_contract if isinstance(visual_contract, dict) else {}
     visual_style_profile = public_visual_style_profile(contract.get("visual_style_profile"))
+    survival_choices = _survival_choice_labels(job, scene_segments, contract)
     scenes = []
     for index, scene in enumerate(scene_segments):
         asset = assets_by_scene.get(str(scene.get("scene_id")))
@@ -56,7 +59,14 @@ def build_finish_plan(
                 "narration_text": str(scene.get("narration_text") or ""),
                 "motion": _motion_for_scene(index, len(scene_segments), scene),
                 "transition": _transition_for_scene(index, len(scene_segments), scene),
-                "overlays": _overlays_for_scene(index, len(scene_segments), scene, contract),
+                "overlays": _overlays_for_scene(
+                    index,
+                    len(scene_segments),
+                    scene,
+                    contract,
+                    duration_ms=duration_ms,
+                    survival_choices=survival_choices,
+                ),
                 "visual_events": _visual_events_for_scene(index, len(scene_segments), scene, duration_ms),
                 **(
                     {
@@ -256,8 +266,140 @@ def _overlays_for_scene(
     scene_count: int,
     scene: dict[str, Any],
     visual_contract: dict[str, Any],
+    *,
+    duration_ms: int,
+    survival_choices: tuple[str, str] | None,
 ) -> list[dict[str, Any]]:
-    return []
+    if survival_choices is None:
+        return []
+    left_choice, right_choice = survival_choices
+    if index == 0:
+        choice_overlays = [
+            {
+                "kind": "hook_tag",
+                "variant": "choice_label",
+                "side": side,
+                "text": text,
+                "start_ms": 0,
+                "duration_ms": duration_ms,
+            }
+            for side, text in (("left", left_choice), ("right", right_choice))
+        ]
+        return [
+            *choice_overlays,
+            {
+                "kind": "evidence_marker",
+                "variant": "sand_progress",
+                "text": "AREIA SUBINDO",
+                "progress": 0.25,
+                "start_ms": 0,
+                "duration_ms": duration_ms,
+            },
+        ]
+    if index == scene_count - 1:
+        secondary = _safe_payoff_choices(scene, survival_choices)
+        minimum_outcome_window_ms = max(34, duration_ms // 4)
+        comment_start_ms = max(120 + minimum_outcome_window_ms, duration_ms - 2_500)
+        comment_start_ms = min(comment_start_ms, max(154, duration_ms - 34))
+        end_padding_ms = min(200, max(0, duration_ms // 10))
+        overlays = []
+        for side, text, choice in (
+            ("left", "ESCOLHA ERRADA", secondary[0]),
+            ("right", "SAÍDA REAL", secondary[1]),
+        ):
+            overlay = {
+                "kind": "payoff_tag",
+                "variant": "outcome_comparison",
+                "side": side,
+                "text": text,
+                "start_ms": 120,
+                "duration_ms": max(34, comment_start_ms - 120),
+            }
+            if choice:
+                overlay["secondary_text"] = choice
+            overlays.append(overlay)
+        overlays.append(
+            {
+                "kind": "payoff_tag",
+                "variant": "comment_prompt",
+                "text": "VOCÊ ESCOLHEU QUAL?",
+                "secondary_text": f"{left_choice} OU {right_choice}?",
+                "start_ms": comment_start_ms,
+                "duration_ms": max(34, duration_ms - comment_start_ms - end_padding_ms),
+            }
+        )
+        return overlays
+    overlay_start_ms = min(160, max(0, duration_ms // 10))
+    overlay_end_padding_ms = min(400, max(0, duration_ms // 10))
+    overlay_duration_ms = max(34, duration_ms - overlay_start_ms - overlay_end_padding_ms)
+    if index == scene_count - 2:
+        return [
+            {
+                "kind": "evidence_marker",
+                "variant": "choice_state",
+                "text": "ESCOLHA TRAVADA",
+                "start_ms": overlay_start_ms,
+                "duration_ms": overlay_duration_ms,
+            }
+        ]
+    decision_count = max(1, scene_count - 3)
+    return [
+        {
+            "kind": "evidence_marker",
+            "variant": "sand_progress",
+            "text": "AREIA SUBINDO",
+            "progress": round(index / decision_count, 3),
+            "start_ms": overlay_start_ms,
+            "duration_ms": overlay_duration_ms,
+        }
+    ]
+
+
+def _survival_choice_labels(
+    job: Job,
+    scenes: list[dict[str, Any]],
+    visual_contract: dict[str, Any],
+) -> tuple[str, str] | None:
+    if str(getattr(job, "niche_id", "") or "") != "survival_decisions":
+        return None
+    candidates = [
+        str(getattr(job, "topic_summary", "") or ""),
+        str(scenes[0].get("narration_text") or "") if scenes else "",
+        str(visual_contract.get("visual_thesis") or ""),
+    ]
+    return extract_survival_choice_labels(*candidates) or ("OPÇÃO A", "OPÇÃO B")
+
+
+def _safe_payoff_choices(
+    scene: dict[str, Any],
+    choices: tuple[str, str],
+) -> tuple[str | None, str | None]:
+    narration = str(scene.get("narration_text") or "").casefold()
+    wrong_choice = next(
+        (
+            choice
+            for choice in choices
+            if re.search(rf"\b{re.escape(choice.casefold())}\b[^,.!?;]{{0,48}}\berrad", narration)
+        ),
+        None,
+    )
+    real_choice = next(
+        (
+            choice
+            for choice in choices
+            if re.search(rf"\b{re.escape(choice.casefold())}\b[^,.!?;]{{0,48}}\b(?:sa[ií]da|revela)", narration)
+        ),
+        None,
+    )
+    if wrong_choice is not None and real_choice is None:
+        remaining_choices = [choice for choice in choices if choice != wrong_choice]
+        if len(remaining_choices) == 1:
+            real_choice = remaining_choices[0]
+    elif real_choice is not None and wrong_choice is None:
+        remaining_choices = [choice for choice in choices if choice != real_choice]
+        if len(remaining_choices) == 1:
+            wrong_choice = remaining_choices[0]
+    return wrong_choice, real_choice
 
 
 def _visual_events_for_scene(

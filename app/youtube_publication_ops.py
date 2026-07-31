@@ -71,6 +71,7 @@ class YouTubePublicationOperations:
                 tags=list(package.get("hashtags") or []),
                 privacy_status=visibility,
                 altered_or_synthetic=bool(package.get("altered_or_synthetic")),
+                category_id="24" if package.get("category") == "Entertainment" else "27",
             )
         except YouTubeIntegrationError as exc:
             raise FatalStepError(str(exc)) from exc
@@ -98,6 +99,7 @@ class YouTubePublicationOperations:
                 privacy_status=visibility,
                 altered_or_synthetic=bool(package.get("altered_or_synthetic")),
                 publish_at=scheduled_for_utc,
+                category_id="24" if package.get("category") == "Entertainment" else "27",
             )
         except YouTubeIntegrationError as exc:
             raise FatalStepError(str(exc)) from exc

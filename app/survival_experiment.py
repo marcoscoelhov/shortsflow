@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import re
 from dataclasses import asdict, dataclass
 
 from app.automation_topics import COSMOS_CURIOSITY_POOL, cosmos_policy_notes
@@ -162,6 +163,82 @@ SURVIVAL_SCENARIO_POOL: tuple[SurvivalScenarioSeed, ...] = (
         visual_seed="jardim fantástico sem gravidade, corda flutuante e semente luminosa gigante indo para lados opostos, payoff estrelado",
     ),
 )
+
+
+_CHOICE_ARTICLE_PATTERN = re.compile(
+    r"\b(?:o|a|os|as|um|uma|no|na|nos|nas|ao|aos|à|às)\s+([\wÀ-ÿ-]+)",
+    flags=re.IGNORECASE,
+)
+_CHOICE_TOKEN_PATTERN = re.compile(r"[\wÀ-ÿ-]+", flags=re.UNICODE)
+_CHOICE_COMMAND_PATTERN = re.compile(
+    r"\b(?:abra|aperte|decida|escolha|fecha|feche|gira|gire|leve|mantenha|pegue|prenda|salve|segure|siga|use|usar|você)\b",
+    flags=re.IGNORECASE,
+)
+_CHOICE_STOPWORDS = {
+    "a",
+    "ao",
+    "aos",
+    "as",
+    "com",
+    "da",
+    "das",
+    "de",
+    "do",
+    "dos",
+    "e",
+    "em",
+    "na",
+    "nas",
+    "no",
+    "nos",
+    "o",
+    "os",
+    "ou",
+    "para",
+    "por",
+    "um",
+    "uma",
+}
+
+
+def extract_survival_choice_labels(*texts: str) -> tuple[str, str] | None:
+    """Extract the two compact option labels from survival-choice prose."""
+
+    for raw_text in texts:
+        text = " ".join(str(raw_text or "").split())
+        for separator in re.finditer(r"\bou\b", text, flags=re.IGNORECASE):
+            left = re.split(r"[,?:;.!\u2013\u2014]", text[: separator.start()])[-1]
+            right = re.split(r"[,?:;.!\u2013\u2014]", text[separator.end() :], maxsplit=1)[0]
+            left_articles = _CHOICE_ARTICLE_PATTERN.findall(left)
+            right_articles = _CHOICE_ARTICLE_PATTERN.findall(right)
+            if left_articles and right_articles:
+                labels = (_choice_label(left_articles[-1]), _choice_label(right_articles[0]))
+            elif _is_unpunctuated_noun_phrase_choice(text):
+                labels = (_first_meaningful_choice_token(left), _first_meaningful_choice_token(right))
+            else:
+                labels = (_last_meaningful_choice_token(left), _last_meaningful_choice_token(right))
+            if all(labels):
+                return labels[0], labels[1]
+    return None
+
+
+def _is_unpunctuated_noun_phrase_choice(value: str) -> bool:
+    value_without_terminal_question = value.removesuffix("?")
+    return not re.search(r"[,?:;.!\u2013\u2014]", value_without_terminal_question) and not _CHOICE_COMMAND_PATTERN.search(value)
+
+
+def _first_meaningful_choice_token(value: str) -> str:
+    tokens = [token for token in _CHOICE_TOKEN_PATTERN.findall(value) if token.casefold() not in _CHOICE_STOPWORDS]
+    return _choice_label(tokens[0]) if tokens else ""
+
+
+def _last_meaningful_choice_token(value: str) -> str:
+    tokens = [token for token in _CHOICE_TOKEN_PATTERN.findall(value) if token.casefold() not in _CHOICE_STOPWORDS]
+    return _choice_label(tokens[-1]) if tokens else ""
+
+
+def _choice_label(value: str) -> str:
+    return re.sub(r"[^\wÀ-ÿ-]", "", value, flags=re.UNICODE).upper()[:24]
 
 
 def survival_policy_notes() -> tuple[str, ...]:

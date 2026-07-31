@@ -29,6 +29,21 @@ SINGLE_VERTICAL_IMAGE_CONSTRAINT = (
     "no panels, no picture-in-picture, no timeline, no arrows, no guide lines, no overlay graphics"
 )
 
+HIGH_CONTRAST_COMIC_DIRECTIVE = (
+    "high-contrast editorial comic illustration, bold ink contours, limited palette, "
+    "one full-frame 9:16 composition"
+)
+
+HIGH_CONTRAST_COMIC_NEGATIVE_DIRECTIVE = "no anime or manga aesthetics, no panels"
+
+HIGH_CONTRAST_COMIC_HOOK_ROLE_DIRECTIVE = (
+    "two choice objects equally prominent left and right, neither favored, rising hazard visible immediately"
+)
+
+HIGH_CONTRAST_COMIC_PAYOFF_ROLE_DIRECTIVE = (
+    "failed path visibly blocked and true route visibly illuminated in one coherent scene"
+)
+
 ENGLISH_SUBJECT_ALIASES = {
     "polvo": "octopus",
     "polvos": "octopuses",
@@ -644,6 +659,12 @@ class ImageAssetDomain:
         ]
         if scene.get("visual_style_profile"):
             required_constraints.insert(0, NEGATIVE_SPACE_DIRECTIVE)
+        if self._uses_high_contrast_comic(scene):
+            required_constraints.insert(0, HIGH_CONTRAST_COMIC_NEGATIVE_DIRECTIVE)
+            required_constraints.insert(0, HIGH_CONTRAST_COMIC_DIRECTIVE)
+            role_directive = self._high_contrast_comic_role_directive(scene)
+            if role_directive:
+                required_constraints.insert(0, role_directive)
         if self.is_visual_hook_scene(scene):
             required_constraints.insert(0, "first-frame hook for Shorts under one second, concrete contrast or consequence, do not reveal later payoff")
         for constraint in required_constraints:
@@ -652,7 +673,9 @@ class ImageAssetDomain:
 
         prompt = self._dedupe_prompt_clauses(prompt)
         if len(prompt) <= MINIMAX_IMAGE_PROMPT_TARGET_CHARS:
-            return prompt
+            return self._sanitize_high_contrast_comic_prompt(prompt, scene)
+        if self._uses_high_contrast_comic(scene):
+            return self._compact_high_contrast_comic_prompt(prompt, scene)
 
         clauses = [clause.strip() for clause in prompt.split(",") if clause.strip()]
         required_tail = self._dedupe_prompt_clauses(", ".join(required_constraints))
@@ -669,7 +692,96 @@ class ImageAssetDomain:
         compact = self._dedupe_prompt_clauses(", ".join([*keep, required_tail]))
         if len(compact) > MINIMAX_IMAGE_PROMPT_TARGET_CHARS:
             compact = self._dedupe_prompt_clauses(required_tail)
-        return compact.strip(" ,")
+        return self._sanitize_high_contrast_comic_prompt(compact.strip(" ,"), scene)
+
+    def _compact_high_contrast_comic_prompt(self, prompt: str, scene: dict[str, Any]) -> str:
+        essential_constraints = [
+            self._high_contrast_comic_role_directive(scene),
+            HIGH_CONTRAST_COMIC_DIRECTIVE,
+            HIGH_CONTRAST_COMIC_NEGATIVE_DIRECTIVE,
+            NEGATIVE_SPACE_DIRECTIVE,
+            f"vertical {self.minimax_image_aspect_ratio} frame for YouTube Shorts",
+            "single full-frame vertical image, no split screen, no side-by-side, no collage, no picture-in-picture",
+            self.domain_negative_constraints(scene),
+            (
+                "no readable text, no fake letters, no words, no numbers, no logo, no watermark, no captions, "
+                "no subtitles, no typography, no labels, no signs, no UI"
+            ),
+        ]
+        required_tail = self._dedupe_prompt_clauses(", ".join(essential_constraints))
+        head_budget = max(180, MINIMAX_IMAGE_PROMPT_TARGET_CHARS - len(required_tail) - 2)
+        primary_subject = self._sanitize_high_contrast_comic_prompt(str(scene.get("primary_subject") or ""), scene)
+        source_prompt = self._sanitize_high_contrast_comic_prompt(str(scene.get("image_prompt") or ""), scene)
+        compacted_prompt = self._sanitize_high_contrast_comic_prompt(prompt, scene)
+        narrative_clauses = [
+            *[clause.strip() for clause in primary_subject.split(",") if clause.strip()],
+            *[clause.strip() for clause in source_prompt.split(",") if clause.strip()][:4],
+            *[clause.strip() for clause in compacted_prompt.split(",") if clause.strip()][:2],
+        ]
+        keep: list[str] = []
+        for clause in narrative_clauses:
+            if clause.lower() in required_tail.lower():
+                continue
+            if len(clause) > 260:
+                clause = clause[:260].rsplit(" ", 1)[0].strip()
+            candidate = self._dedupe_prompt_clauses(", ".join([*keep, clause]))
+            if len(candidate) <= head_budget:
+                keep.append(clause)
+        compact = self._dedupe_prompt_clauses(", ".join([*keep, required_tail]))
+        return self._sanitize_high_contrast_comic_prompt(compact.strip(" ,"), scene)
+
+    def _high_contrast_comic_role_directive(self, scene: dict[str, Any]) -> str:
+        role = str(scene.get("retention_role") or "")
+        if role == "visual_hook":
+            return HIGH_CONTRAST_COMIC_HOOK_ROLE_DIRECTIVE
+        if role in {"turn_or_payoff", "loop_close"}:
+            return HIGH_CONTRAST_COMIC_PAYOFF_ROLE_DIRECTIVE
+        return ""
+
+    def _uses_high_contrast_comic(self, scene: dict[str, Any]) -> bool:
+        profile = scene.get("visual_style_profile")
+        if isinstance(profile, dict):
+            profile = profile.get("id") or profile.get("profile_id")
+        return str(profile or "").strip() == "high_contrast_comic"
+
+    def _sanitize_high_contrast_comic_prompt(self, prompt: str, scene: dict[str, Any]) -> str:
+        if not self._uses_high_contrast_comic(scene):
+            return prompt
+
+        conflicting_phrases = (
+            "cinematic documentary realism",
+            "documentary photography",
+            "natural photographic lighting",
+            "natural dramatic lighting",
+            "natural lighting",
+            "realistic vertical",
+            "photorealistic",
+        )
+        sanitized_clauses: list[str] = []
+        for clause in (part.strip() for part in prompt.split(",")):
+            lowered = clause.lower()
+            if lowered == "manga" or lowered.startswith("avoid anime, manga"):
+                continue
+            if self._is_hostile_high_contrast_semantic_clause(lowered):
+                continue
+            for phrase in conflicting_phrases:
+                clause = re.sub(rf"\b{re.escape(phrase)}\b", "", clause, flags=re.IGNORECASE)
+            clause = " ".join(clause.split()).strip(" -")
+            if clause:
+                sanitized_clauses.append(clause)
+        return self._dedupe_prompt_clauses(", ".join(sanitized_clauses))
+
+    def _is_hostile_high_contrast_semantic_clause(self, clause: str) -> bool:
+        return any(
+            re.search(pattern, clause, flags=re.IGNORECASE)
+            for pattern in (
+                r"\b(?:favor|favour|prefer|hide|conceal)\b",
+                r"\bomit\b.*\b(?:failed|path|route|tunnel|option|choice)\b",
+                r"\bshow\s+only\b",
+                r"\bdelay\b.*\b(?:danger|hazard|threat|risk)\b",
+                r"\bseparate\b.*\b(?:poster\s+)?panels?\b",
+            )
+        )
 
     def _dedupe_prompt_clauses(self, prompt: str) -> str:
         clauses = [clause.strip() for clause in re.split(r",|;", prompt) if clause.strip()]

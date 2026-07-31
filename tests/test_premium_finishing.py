@@ -734,6 +734,353 @@ def test_finish_plan_exposes_versioned_style_and_dense_deterministic_visual_even
     )
 
 
+def test_survival_finish_plan_tells_the_binary_choice_through_scene_overlays() -> None:
+    roles = ["visual_hook", "proof_or_tension", "escalation", "turn_or_payoff", "loop_close"]
+    narrations = [
+        "Areia invade a biblioteca: você leva a chave ou o livro?",
+        "A areia já cobre o primeiro degrau.",
+        "As estantes somem e a saída parece fechar.",
+        "Sua escolha agora está travada.",
+        "A chave abre a porta errada, mas o livro revela a saída real.",
+    ]
+    scenes = [
+        {
+            "scene_id": f"scene-{index + 1}",
+            "order": index + 1,
+            "actual_start_ms": index * 4_000,
+            "actual_end_ms": (index + 1) * 4_000,
+            "retention_role": role,
+            "narration_text": narrations[index],
+        }
+        for index, role in enumerate(roles)
+    ]
+    kwargs = {
+        "schema_version": "1.0.0",
+        "job": SimpleNamespace(
+            job_id="survival-overlay-job",
+            niche_id="survival_decisions",
+            topic_summary="Na biblioteca enchendo de areia, você leva a chave ou o livro?",
+        ),
+        "scene_plan": SimpleNamespace(scenes=scenes, content_hash="scene-plan"),
+        "selected_assets": [
+            SimpleNamespace(scene_id=scene["scene_id"], uri=f"scene-{index}.png", content_hash=f"asset-{index}")
+            for index, scene in enumerate(scenes)
+        ],
+        "narration": SimpleNamespace(
+            duration_ms=20_000,
+            content_hash="narration",
+            normalized_audio_uri=None,
+            audio_uri="narration.wav",
+        ),
+        "subtitles": SimpleNamespace(items=[], content_hash="subtitles"),
+        "background_music": None,
+        "render": None,
+        "visual_contract": {},
+    }
+
+    first = build_finish_plan(**kwargs)
+    second = build_finish_plan(**kwargs)
+
+    assert first["scenes"][0]["overlays"] == [
+        {
+            "kind": "hook_tag",
+            "variant": "choice_label",
+            "side": "left",
+            "text": "CHAVE",
+            "start_ms": 0,
+            "duration_ms": 4_000,
+        },
+        {
+            "kind": "hook_tag",
+            "variant": "choice_label",
+            "side": "right",
+            "text": "LIVRO",
+            "start_ms": 0,
+            "duration_ms": 4_000,
+        },
+        {
+            "kind": "evidence_marker",
+            "variant": "sand_progress",
+            "text": "AREIA SUBINDO",
+            "progress": 0.25,
+            "start_ms": 0,
+            "duration_ms": 4_000,
+        },
+    ]
+    assert first["scenes"][1]["overlays"][0] == {
+        "kind": "evidence_marker",
+        "variant": "sand_progress",
+        "text": "AREIA SUBINDO",
+        "progress": 0.5,
+        "start_ms": 160,
+        "duration_ms": 3_440,
+    }
+    assert first["scenes"][2]["overlays"][0]["progress"] == 1.0
+    assert first["scenes"][3]["overlays"][0]["variant"] == "choice_state"
+    assert first["scenes"][3]["overlays"][0]["text"] == "ESCOLHA TRAVADA"
+    assert first["scenes"][4]["overlays"] == [
+        {
+            "kind": "payoff_tag",
+            "variant": "outcome_comparison",
+            "side": "left",
+            "text": "ESCOLHA ERRADA",
+            "secondary_text": "CHAVE",
+            "start_ms": 120,
+            "duration_ms": 1_380,
+        },
+        {
+            "kind": "payoff_tag",
+            "variant": "outcome_comparison",
+            "side": "right",
+            "text": "SAÍDA REAL",
+            "secondary_text": "LIVRO",
+            "start_ms": 120,
+            "duration_ms": 1_380,
+        },
+        {
+            "kind": "payoff_tag",
+            "variant": "comment_prompt",
+            "text": "VOCÊ ESCOLHEU QUAL?",
+            "secondary_text": "CHAVE OU LIVRO?",
+            "start_ms": 1_500,
+            "duration_ms": 2_300,
+        },
+    ]
+    assert [scene["overlays"] for scene in first["scenes"]] == [scene["overlays"] for scene in second["scenes"]]
+
+
+def test_survival_finish_plan_completes_binary_payoff_from_one_confident_outcome() -> None:
+    payoff_narration = (
+        "então o teto se ilumina o livro desenha a planta e a chave abre a porta errada quando seu amigo escolher a "
+        "chave lembre do teto a fechadura era distração"
+    )
+    scenes = [
+        {
+            "scene_id": "scene-1",
+            "order": 1,
+            "actual_start_ms": 0,
+            "actual_end_ms": 4_000,
+            "retention_role": "visual_hook",
+            "narration_text": "Você precisa escolher a chave metálica ou o livro luminoso.",
+        },
+        {
+            "scene_id": "scene-2",
+            "order": 2,
+            "actual_start_ms": 4_000,
+            "actual_end_ms": 8_000,
+            "retention_role": "loop_close",
+            "narration_text": payoff_narration,
+        },
+    ]
+
+    plan = build_finish_plan(
+        schema_version="1.0.0",
+        job=SimpleNamespace(
+            job_id="survival-binary-payoff-fallback",
+            niche_id="survival_decisions",
+            topic_summary="Biblioteca subterrânea invadida por areia: escolher a chave metálica ou o livro luminoso",
+        ),
+        scene_plan=SimpleNamespace(scenes=scenes, content_hash="scene-plan"),
+        selected_assets=[
+            SimpleNamespace(scene_id=scene["scene_id"], uri=f"scene-{index}.png", content_hash=f"asset-{index}")
+            for index, scene in enumerate(scenes)
+        ],
+        narration=SimpleNamespace(
+            duration_ms=8_000,
+            content_hash="narration",
+            normalized_audio_uri=None,
+            audio_uri="narration.wav",
+        ),
+        subtitles=SimpleNamespace(items=[], content_hash="subtitles"),
+        background_music=None,
+        render=None,
+        visual_contract={},
+    )
+
+    opening_overlays = plan["scenes"][0]["overlays"]
+    payoff_overlays = plan["scenes"][-1]["overlays"]
+    assert [overlay["text"] for overlay in opening_overlays] == ["CHAVE", "LIVRO", "AREIA SUBINDO"]
+    assert next(overlay for overlay in payoff_overlays if overlay["text"] == "ESCOLHA ERRADA")["secondary_text"] == "CHAVE"
+    assert next(overlay for overlay in payoff_overlays if overlay["text"] == "SAÍDA REAL")["secondary_text"] == "LIVRO"
+
+
+@pytest.mark.parametrize("scene_duration_ms", [500, 2_620])
+def test_survival_finish_plan_keeps_short_overlay_windows_frame_visible(scene_duration_ms: int) -> None:
+    narrations = [
+        "Você escolhe a corda ou a semente?",
+        "O perigo se aproxima.",
+        "A escolha precisa acontecer.",
+        "A escolha está travada.",
+        "A corda dá errado, mas a semente revela a saída.",
+    ]
+    scenes = [
+        {
+            "scene_id": f"scene-{index + 1}",
+            "order": index + 1,
+            "actual_start_ms": index * scene_duration_ms,
+            "actual_end_ms": (index + 1) * scene_duration_ms,
+            "retention_role": "loop_close" if index == 4 else "visual_evidence",
+            "narration_text": narration,
+        }
+        for index, narration in enumerate(narrations)
+    ]
+    plan = build_finish_plan(
+        schema_version="1.0.0",
+        job=SimpleNamespace(
+            job_id="short-survival-overlays",
+            niche_id="survival_decisions",
+            topic_summary="No jardim sem gravidade, você prende a corda ou segura a semente?",
+        ),
+        scene_plan=SimpleNamespace(scenes=scenes, content_hash="scene-plan"),
+        selected_assets=[
+            SimpleNamespace(scene_id=scene["scene_id"], uri=f"scene-{index}.png", content_hash=f"asset-{index}")
+            for index, scene in enumerate(scenes)
+        ],
+        narration=SimpleNamespace(
+            duration_ms=scene_duration_ms * len(scenes),
+            content_hash="narration",
+            normalized_audio_uri=None,
+            audio_uri="narration.wav",
+        ),
+        subtitles=SimpleNamespace(items=[], content_hash="subtitles"),
+        background_music=None,
+        render=None,
+        visual_contract={},
+    )
+
+    for scene in plan["scenes"][1:4]:
+        assert all(overlay["duration_ms"] >= 34 for overlay in scene["overlays"])
+        assert all(overlay["start_ms"] + overlay["duration_ms"] <= scene_duration_ms for overlay in scene["overlays"])
+    payoff = plan["scenes"][-1]["overlays"]
+    outcomes = [overlay for overlay in payoff if overlay["variant"] == "outcome_comparison"]
+    comment = next(overlay for overlay in payoff if overlay["variant"] == "comment_prompt")
+    assert len(outcomes) == 2
+    assert all(overlay["duration_ms"] >= 34 for overlay in outcomes)
+    assert all(overlay["start_ms"] + overlay["duration_ms"] <= comment["start_ms"] for overlay in outcomes)
+    assert comment["duration_ms"] >= 34
+    assert comment["secondary_text"] == "CORDA OU SEMENTE?"
+    assert comment["start_ms"] + comment["duration_ms"] <= scene_duration_ms
+
+
+def test_survival_finish_plan_preserves_long_payoff_overlay_timing() -> None:
+    duration_ms = 10_305
+    scenes = [
+        {
+            "scene_id": f"scene-{index + 1}",
+            "order": index + 1,
+            "actual_start_ms": index * duration_ms,
+            "actual_end_ms": (index + 1) * duration_ms,
+            "retention_role": "loop_close" if index == 1 else "visual_hook",
+            "narration_text": (
+                "A chave abre a porta errada, mas o livro revela a saída real."
+                if index == 1
+                else "Escolha a chave metálica ou o livro luminoso."
+            ),
+        }
+        for index in range(2)
+    ]
+    plan = build_finish_plan(
+        schema_version="1.0.0",
+        job=SimpleNamespace(
+            job_id="long-survival-overlays",
+            niche_id="survival_decisions",
+            topic_summary="a chave metálica ou o livro luminoso",
+        ),
+        scene_plan=SimpleNamespace(scenes=scenes, content_hash="scene-plan"),
+        selected_assets=[
+            SimpleNamespace(scene_id=scene["scene_id"], uri=f"scene-{index}.png", content_hash=f"asset-{index}")
+            for index, scene in enumerate(scenes)
+        ],
+        narration=SimpleNamespace(
+            duration_ms=duration_ms * 2,
+            content_hash="narration",
+            normalized_audio_uri=None,
+            audio_uri="narration.wav",
+        ),
+        subtitles=SimpleNamespace(items=[], content_hash="subtitles"),
+        background_music=None,
+        render=None,
+        visual_contract={},
+    )
+
+    payoff = plan["scenes"][-1]["overlays"]
+    assert [(overlay["start_ms"], overlay["duration_ms"]) for overlay in payoff] == [
+        (120, 7_685),
+        (120, 7_685),
+        (7_805, 2_300),
+    ]
+
+
+def test_remotion_survival_overlay_variants_are_frame_driven() -> None:
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
+
+    assert "<SceneOverlays" in source
+    assert "overlay.variant === 'choice_label'" in source
+    assert "overlay.variant === 'sand_progress'" in source
+    assert "overlay.variant === 'choice_state'" in source
+    assert "overlay.variant === 'outcome_comparison'" in source
+    assert "overlay.variant === 'comment_prompt'" in source
+    overlay_source = source[source.index("const SceneOverlays"):source.index("const eventCameraOffset")]
+    assert "useCurrentFrame()" in overlay_source
+    assert "interpolate(" in overlay_source
+    assert "spring({" in overlay_source
+    assert "const choiceCardTop" in overlay_source
+    assert "const sandProgressTop = choiceCardTop +" in overlay_source
+    assert "top: sandProgressTop" in overlay_source
+    assert "const outcomeIndicatorProgress = interpolate(" in overlay_source
+    assert "wrong ? '×' : '✓'" in overlay_source
+    assert "color: wrong ? 'oklch(0.72 0.22 28)' : 'oklch(0.82 0.2 145)'" in overlay_source
+    assert "const emphasizedChoiceIndex" in overlay_source
+    assert "bottom: safeArea.bottom + 240" in overlay_source
+    assert "left: Math.max(108, safeArea.x)" in overlay_source
+    assert "right: Math.max(108, safeArea.x)" in overlay_source
+    assert "transition:" not in overlay_source
+    assert "animation:" not in overlay_source
+    assert "@keyframes" not in source
+
+
+def test_survival_overlay_labels_fall_back_neutrally_without_changing_generic_plans() -> None:
+    scene = {
+        "scene_id": "scene-1",
+        "order": 1,
+        "actual_start_ms": 0,
+        "actual_end_ms": 4_000,
+        "retention_role": "visual_hook",
+        "narration_text": "Uma decisão precisa ser tomada agora.",
+    }
+    base_kwargs = {
+        "schema_version": "1.0.0",
+        "scene_plan": SimpleNamespace(scenes=[scene], content_hash="scene-plan"),
+        "selected_assets": [SimpleNamespace(scene_id="scene-1", uri="scene.png", content_hash="asset")],
+        "narration": SimpleNamespace(
+            duration_ms=4_000,
+            content_hash="narration",
+            normalized_audio_uri=None,
+            audio_uri="narration.wav",
+        ),
+        "subtitles": SimpleNamespace(items=[], content_hash="subtitles"),
+        "background_music": None,
+        "render": None,
+        "visual_contract": {},
+    }
+
+    survival = build_finish_plan(
+        **base_kwargs,
+        job=SimpleNamespace(job_id="survival-fallback", niche_id="survival_decisions", topic_summary="Decisão impossível"),
+    )
+    generic = build_finish_plan(
+        **base_kwargs,
+        job=SimpleNamespace(job_id="generic-overlay", niche_id="curiosidades", topic_summary="Curiosidade"),
+    )
+
+    assert [overlay["text"] for overlay in survival["scenes"][0]["overlays"]] == [
+        "OPÇÃO A",
+        "OPÇÃO B",
+        "AREIA SUBINDO",
+    ]
+    assert generic["scenes"][0]["overlays"] == []
+
+
 def test_premium_caption_highlight_uses_only_current_word() -> None:
     source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
 

@@ -754,6 +754,202 @@ def test_visual_style_profiles_do_not_change_legacy_prompt_without_explicit_sele
     assert "reserve clean negative space" not in prompt
 
 
+def test_high_contrast_comic_sanitizes_hostile_job_prompt_in_every_provider_variant() -> None:
+    scene = {
+        "scene_id": "cena_02",
+        "order": 2,
+        "retention_role": "proof_or_tension",
+        "primary_subject": "Close-up da chave metálica alinhada perfeitamente à fechadura visível da porta de pedra.",
+        "topic_hint": "Biblioteca subterrânea invadida por areia: escolher a chave metálica ou o livro luminoso",
+        "visual_domain": "cinematic documentary realism",
+        "narration_text": "a chave parece vencer é concreta metálica e encaixa na fechadura que todo mundo consegue ver",
+        "visual_intent": "visual_contrast",
+        "image_prompt": (
+            "close-up inside the same underground stone-and-wood library, a solid metal key partially inserted and "
+            "fitting perfectly into a prominent stone door lock, sharp cold reflections making the key look reliable "
+            "and victorious, golden sand beginning to gather around the doorway, shallow depth of field, manga, "
+            "reserve clean negative space in the upper and lower frame for editorial composition, keep the main "
+            "subject inside the central safe area, vertical 9:16 frame for YouTube Shorts, single full-frame 9:16 "
+            "vertical image, no split screen, no side-by-side, no collage, no panels, no picture-in-picture, no "
+            "timeline, no arrows, no guide lines, no overlay graphics, no irrelevant props, no product packaging, "
+            "no signage, vertical cinematic documentary realism, photorealistic, natural lighting, every visible "
+            "object blank and unbranded, text is forbidden, no text of any kind, no readable text anywhere, no fake "
+            "letters, no letters, no words, no numbers, no symbols, no logo, no watermark, no captions, no subtitles, "
+            "no typography, no labels, no UI, no text on cups, packages, screens, charts or labels, no signs, no "
+            "posters, no billboards, no packaging text, no screen text, no text printed on objects"
+        ),
+        "visual_style_profile": {"id": "high_contrast_comic", "version": "visual-style-v1"},
+    }
+
+    variants = orchestrator.asset_pipeline.image_assets.image_prompt_variants(scene)
+
+    assert variants
+    for variant in variants:
+        prompt = variant["image_prompt"].lower()
+        clauses = {clause.strip() for clause in prompt.split(",")}
+        assert "high-contrast editorial comic illustration" in prompt
+        assert "bold ink contours" in prompt
+        assert "limited palette" in prompt
+        assert "one full-frame 9:16 composition" in prompt
+        assert "no anime or manga aesthetics" in prompt
+        assert "no panels" in prompt
+        assert "manga" not in clauses
+        assert "photorealistic" not in prompt
+        assert "cinematic documentary realism" not in prompt
+        assert "natural lighting" not in prompt
+
+
+def test_high_contrast_comic_preserves_payoff_narrative_in_every_provider_variant() -> None:
+    from app.pipelines.image_assets import MINIMAX_IMAGE_PROMPT_TARGET_CHARS
+
+    scene = {
+        "scene_id": "cena_06",
+        "order": 6,
+        "retention_role": "turn_or_payoff",
+        "primary_subject": (
+            "Teto iluminado pela projeção do livro, revelando a planta da biblioteca enquanto a chave abre "
+            "uma porta falsa sem saída."
+        ),
+        "topic_hint": "Biblioteca subterrânea invadida por areia: escolher a chave metálica ou o livro luminoso",
+        "visual_domain": "cinematic documentary realism",
+        "narration_text": "A chave abre uma porta falsa, mas o livro revela a saída verdadeira.",
+        "visual_intent": "turn_or_payoff",
+        "image_prompt": (
+            "wide vertical view of the same underground library and central pedestal, the glowing book on the right "
+            "projects a complete unlabeled architectural floor plan across the ceiling in warm amber light, connecting "
+            "the scattered marks toward the true exit, golden sand still surrounds the pedestal, avoid anime, manga, "
+            "photorealistic, cinematic documentary realism, realistic vertical, documentary photography, natural "
+            "photographic lighting, natural dramatic lighting, natural lighting"
+        ),
+        "visual_style_profile": {"id": "high_contrast_comic", "version": "visual-style-v1"},
+    }
+
+    variants = orchestrator.asset_pipeline.image_assets.image_prompt_variants(scene)
+
+    assert variants
+    for variant in variants:
+        prompt = variant["image_prompt"].lower()
+        clauses = {clause.strip() for clause in prompt.split(",")}
+        assert "porta falsa" in prompt or "false door" in prompt
+        assert "true exit" in prompt
+        assert "high-contrast editorial comic illustration" in prompt
+        assert "bold ink contours" in prompt
+        assert "limited palette" in prompt
+        assert "one full-frame 9:16 composition" in prompt
+        assert "no anime or manga aesthetics" in prompt
+        assert "no panels" in prompt
+        assert "manga" not in clauses
+        assert "photorealistic" not in prompt
+        assert "cinematic documentary realism" not in prompt
+        assert "realistic vertical" not in prompt
+        assert "documentary photography" not in prompt
+        assert "natural photographic lighting" not in prompt
+        assert "natural dramatic lighting" not in prompt
+        assert "natural lighting" not in prompt
+        assert len(variant["image_prompt"]) <= MINIMAX_IMAGE_PROMPT_TARGET_CHARS
+
+
+def test_high_contrast_comic_visual_hook_variants_retain_balanced_choice_direction_after_compaction() -> None:
+    from app.pipelines.image_assets import MINIMAX_IMAGE_PROMPT_TARGET_CHARS
+
+    scene = {
+        "scene_id": "opening-choice",
+        "order": 1,
+        "retention_role": "visual_hook",
+        "primary_subject": "A climbing rope and a signal flare threatened by rapidly rising floodwater.",
+        "topic_hint": "A survival choice between a climbing rope and a signal flare",
+        "visual_domain": "cinematic documentary realism",
+        "narration_text": "The water rises while both options remain equally plausible.",
+        "visual_intent": "balanced_binary_choice",
+        "image_prompt": (
+            "favor the climbing rope as the obvious answer, hide the signal flare in the distant background, "
+            "delay any visible danger until later, calm establishing shot, photorealistic, natural lighting, "
+            + "ornate environmental detail that competes with the central decision, " * 90
+        ),
+        "visual_style_profile": {"id": "high_contrast_comic", "version": "visual-style-v1"},
+    }
+
+    variants = orchestrator.asset_pipeline.image_assets.image_prompt_variants(scene)
+
+    assert variants
+    for variant in variants:
+        prompt = variant["image_prompt"].lower()
+        assert "two choice objects equally prominent left and right, neither favored, rising hazard visible immediately" in prompt
+        assert "favor the climbing rope" not in prompt
+        assert "hide the signal flare" not in prompt
+        assert "delay any visible danger" not in prompt
+        assert len(variant["image_prompt"]) <= MINIMAX_IMAGE_PROMPT_TARGET_CHARS
+
+
+def test_high_contrast_comic_payoff_variants_retain_blocked_and_illuminated_routes_after_compaction() -> None:
+    from app.pipelines.image_assets import MINIMAX_IMAGE_PROMPT_TARGET_CHARS
+
+    scene = {
+        "scene_id": "survival-payoff",
+        "order": 5,
+        "retention_role": "turn_or_payoff",
+        "primary_subject": "A collapsed tunnel and a newly illuminated mountain passage in the same view.",
+        "topic_hint": "The apparent tunnel fails while a hidden mountain passage becomes usable",
+        "visual_domain": "cinematic documentary realism",
+        "narration_text": "The obvious tunnel collapses, but reflected light exposes the safe passage.",
+        "visual_intent": "turn_or_payoff",
+        "image_prompt": (
+            "show only the safe passage and omit the failed tunnel, separate poster panels, photorealistic, "
+            "documentary photography, natural dramatic lighting, "
+            + "decorative geological detail that obscures the causal payoff, " * 90
+        ),
+        "visual_style_profile": {"id": "high_contrast_comic", "version": "visual-style-v1"},
+    }
+
+    variants = orchestrator.asset_pipeline.image_assets.image_prompt_variants(scene)
+
+    assert variants
+    for variant in variants:
+        prompt = variant["image_prompt"].lower()
+        assert "failed path visibly blocked and true route visibly illuminated in one coherent scene" in prompt
+        assert "show only the safe passage" not in prompt
+        assert "omit the failed tunnel" not in prompt
+        assert "separate poster panels" not in prompt
+        assert len(variant["image_prompt"]) <= MINIMAX_IMAGE_PROMPT_TARGET_CHARS
+
+
+def test_high_contrast_comic_characterizes_generic_conflicting_inherited_styles() -> None:
+    scene = {
+        "scene_id": "scene-3",
+        "order": 3,
+        "retention_role": "visual_evidence",
+        "primary_subject": "a clockwork bird",
+        "topic_hint": "a clockwork bird",
+        "visual_domain": "editorial",
+        "narration_text": "The clockwork bird opens its wings.",
+        "visual_intent": "subject_reveal",
+        "image_prompt": (
+            "a clockwork bird opening its wings, manga, photorealistic, cinematic documentary realism, "
+            "realistic vertical, documentary photography, natural photographic lighting, no manga aesthetics"
+        ),
+        "visual_style_profile": {"id": "high_contrast_comic", "version": "visual-style-v1"},
+    }
+
+    variants = orchestrator.asset_pipeline.image_assets.image_prompt_variants(scene)
+
+    assert variants
+    for variant in variants:
+        prompt = variant["image_prompt"].lower()
+        clauses = {clause.strip() for clause in prompt.split(",")}
+        assert "high-contrast editorial comic illustration" in prompt
+        assert "bold ink contours" in prompt
+        assert "limited palette" in prompt
+        assert "one full-frame 9:16 composition" in prompt
+        assert "no anime or manga aesthetics" in prompt
+        assert "no panels" in prompt
+        assert "manga" not in clauses
+        assert "photorealistic" not in prompt
+        assert "cinematic documentary realism" not in prompt
+        assert "realistic vertical" not in prompt
+        assert "documentary photography" not in prompt
+        assert "natural photographic lighting" not in prompt
+
+
 def test_minimax_image_provider_prefers_text_key_before_dedicated_key(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
