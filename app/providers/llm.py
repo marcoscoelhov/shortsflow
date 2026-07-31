@@ -514,6 +514,7 @@ Regras:
 - se Entrada JSON.editorial_mode for "viral_curiosidades", priorize simplicidade viral, clareza e wording seguro; não force explicação mecanística específica quando o fact_pack não sustentar isso
 - se Entrada JSON.editorial_mode for "factual_strict", priorize grounding factual e não complete lacunas causais com plausibilidade editorial
 - retention_map deve refletir os blocos da Entrada JSON.retention_map e mapear o roteiro em: visual_hook, proof_or_tension, escalation, turn_or_payoff, loop_close
+- cada valor textual de retention_map deve ser cópia literal de um trecho existente em full_narration; não resuma nem parafraseie
 - visual_opening deve descrever o primeiro frame esperado: sujeito, contraste visual, ação/resultado e o que evitar
 - os primeiros 0-2s precisam funcionar visualmente mesmo sem áudio, com resultado, movimento ou contraste concreto
 - use golden_sample_brief como régua editorial: aproxime-se dos padrões bons e evite os padrões ruins
@@ -532,6 +533,7 @@ Regras:
 - não use frase meta como "fecha o ciclo", "agora tudo faz sentido" ou "essa curiosidade muda como você olha" no ending
 - transforme fatos em consequência visual/mental, evitando tom de Wikipedia
 - todos os campos textuais do JSON devem estar em portugues do Brasil (pt-BR)
+- em qa_metrics, repetition_score usa escala 0.0 a 1.0 e mede repetição indesejada: 0.0 é melhor, 1.0 é pior
 - não use travessão nem en dash nos campos narrados; proibido usar os caracteres "—" e "–"; prefira ponto, virgula, dois-pontos ou frase nova
 - nao use chines, ingles, espanhol ou outro idioma em title, hook, body_beats, ending, cta, full_narration, key_facts ou valores textuais de qa_metrics
 - excecoes permitidas: nomes proprios, nomes cientificos, siglas, marcas, titulos de fontes e URLs
@@ -643,6 +645,7 @@ title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_du
 
 Regras obrigatórias:
 - mantenha prompt_version="{EDITORIAL_PROMPT_VERSION}" e preserve/atualize retention_map e visual_opening
+- cada valor textual de retention_map deve ser cópia literal de um trecho existente em full_narration; não resuma nem parafraseie
 - se Contexto da pauta JSON.editorial_mode for "viral_curiosidades", prefira wording seguro, simples e forte em retenção, sem insistir em mecanismo específico não sustentado
 - se Contexto da pauta JSON.editorial_mode for "factual_strict", preserve o grounding factual e remova qualquer mecanismo sem lastro
 - preserve a régua editorial do app: hook forte, loop aberto, beats em escalada, payoff no último terço e fechamento que provoque replay
@@ -688,6 +691,7 @@ Regras obrigatórias:
 - para afirmações de alto risco sem fonte explícita, use linguagem conservadora: “pode”, “tende a”, “em geral”, “uma das explicações”, “cerca de”, ou remova o detalhe específico
 - se um detalhe técnico parecer duvidoso, substitua por formulação conservadora e verificável
 - qa_metrics deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass
+- em qa_metrics, repetition_score usa escala 0.0 a 1.0 e mede repetição indesejada: 0.0 é melhor, 1.0 é pior
 Sem markdown.
 """
         payload = self._json_completion(prompt)

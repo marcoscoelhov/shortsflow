@@ -1,4 +1,5 @@
 from tests.e2e_support import *  # noqa: F403
+from app.providers.llm_clients import XAICreativeProvider
 
 
 def test_llm_facade_preserves_public_provider_imports() -> None:
@@ -134,6 +135,8 @@ def test_deepseek_provider_uses_v4_flash_openai_compatible_client(monkeypatch) -
     assert captured["model"] == "deepseek-v4-flash"
     assert captured["response_format"] == {"type": "json_object"}
     assert captured["max_tokens"] == 4096
+    assert "cada valor textual de retention_map deve ser cópia literal" in str(captured["messages"])
+    assert "repetition_score usa escala 0.0 a 1.0" in str(captured["messages"])
     assert result["qa_metrics"]["repair_provider"] == "deepseek"
 
 def test_llm_registry_builds_qwen_optional_provider(monkeypatch) -> None:
@@ -201,7 +204,9 @@ def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> Non
             openai_api_key="openai-key",
             openai_base_url="https://api.openai.com/v1",
             openai_model="gpt-5.4",
+            openai_reasoning_effort="max",
             openai_timeout_sec=120,
+            llm_json_max_tokens=4096,
         ),
     )
     monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
@@ -211,7 +216,10 @@ def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> Non
 
     assert captured["client_kwargs"]["api_key"] == "openai-key"
     assert captured["model"] == "gpt-5.4"
+    assert captured["reasoning"] == {"effort": "max"}
     assert captured["text"] == {"format": {"type": "json_object"}}
+    assert "cada valor textual de retention_map deve ser cópia literal" in str(captured["input"])
+    assert "repetition_score usa escala 0.0 a 1.0" in str(captured["input"])
     assert "meta editorial: retenção máxima, replay, compartilhamento orgânico e espanto genuíno" in str(captured["input"])
     assert "body_beats equivale aos Beats em escalada" in str(captured["input"])
     assert result["qa_metrics"]["source_provider"] == "openai"
@@ -319,6 +327,60 @@ def test_gate_judge_provider_uses_strong_openai_model(monkeypatch) -> None:
     assert provider is not None
     assert provider.provider_name == "openai"
     assert provider.model_name == "gpt-5.4"
+
+
+def test_xai_grok45_gate_judge_uses_high_reasoning(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {
+                                    "passed": True,
+                                    "confidence": 0.91,
+                                    "reasons": [],
+                                    "scores": {"hook": 0.9},
+                                    "provider": "xai",
+                                }
+                            )
+                        )
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            llm_gate_judge_provider="xai",
+            llm_gate_judge_model="grok-4.5",
+            xai_api_key="xai-key",
+            xai_base_url="https://api.x.ai/v1",
+            xai_model="grok-4.20-non-reasoning",
+            xai_reasoning_effort="high",
+            xai_timeout_sec=120,
+            llm_json_max_tokens=4096,
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    provider = LLMProviderRegistry().gate_judge_provider()
+    assert isinstance(provider, XAICreativeProvider)
+
+    result = provider.judge_quality_gate("editorial", {"script": {"hook": "Escolha agora"}})
+
+    assert result["passed"] is True
+    assert captured["model"] == "grok-4.5"
+    assert captured["reasoning_effort"] == "high"
 
 
 def test_quality_judge_candidates_prioritize_gate_judge_provider() -> None:

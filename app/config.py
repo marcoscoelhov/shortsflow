@@ -217,10 +217,12 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-5.4-nano"
+    openai_reasoning_effort: str = "medium"
     openai_timeout_sec: float = 180.0
     xai_api_key: str | None = None
     xai_base_url: str = "https://api.x.ai/v1"
     xai_model: str = "grok-4.20-non-reasoning"
+    xai_reasoning_effort: str = "high"
     xai_timeout_sec: float = 180.0
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"

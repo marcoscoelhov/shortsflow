@@ -396,22 +396,23 @@ class ScriptQualityGate:
         retention_map_entries = self._retention_map_entries(retention_map)
         ungrounded_keys: list[str] = []
         for key in RETENTION_MAP_REQUIRED_KEYS & set(retention_map_entries):
-            text = retention_map_entries[key]
-            if text and self._normalize(text) not in full_narration:
+            texts = retention_map_entries[key]
+            if any(self._normalize(text) not in full_narration for text in texts if text):
                 ungrounded_keys.append(key)
         return {
             "hook_first_word": first_word,
             "hook_first_word_weak": first_word in WEAK_HOOK_FIRST_WORDS,
             "body_beat_count": len(body_beats),
             "body_beat_count_valid": 3 <= len(body_beats) <= 5,
-            "retention_map_complete": RETENTION_MAP_REQUIRED_KEYS.issubset(set(retention_map_entries)),
+            "retention_map_complete": RETENTION_MAP_REQUIRED_KEYS.issubset(set(retention_map_entries))
+            and all(retention_map_entries.get(key) for key in RETENTION_MAP_REQUIRED_KEYS),
             "retention_map_ungrounded_keys": sorted(ungrounded_keys),
         }
 
-    def _retention_map_entries(self, retention_map: dict[str, Any]) -> dict[str, str]:
-        entries: dict[str, str] = {}
+    def _retention_map_entries(self, retention_map: dict[str, Any]) -> dict[str, list[str]]:
+        entries: dict[str, list[str]] = {}
         for key in RETENTION_MAP_REQUIRED_KEYS & set(retention_map):
-            entries[key] = self._retention_map_item_text(retention_map.get(key))
+            entries[key] = self._retention_map_item_texts(retention_map.get(key))
 
         raw_segments = retention_map.get("segments")
         if isinstance(raw_segments, list):
@@ -420,17 +421,22 @@ class ScriptQualityGate:
                     continue
                 code = str(segment.get("code") or "").strip()
                 if code in RETENTION_MAP_REQUIRED_KEYS:
-                    entries[code] = self._retention_map_item_text(segment)
+                    entries[code] = self._retention_map_item_texts(segment)
         return entries
 
-    def _retention_map_item_text(self, item: Any) -> str:
+    def _retention_map_item_texts(self, item: Any) -> list[str]:
+        if isinstance(item, list):
+            texts: list[str] = []
+            for value in item:
+                texts.extend(self._retention_map_item_texts(value))
+            return texts
         if isinstance(item, dict):
             for key in ("text", "mapped_text", "narration"):
-                text = str(item.get(key) or "").strip()
-                if text:
-                    return text
-            return ""
-        return str(item or "").strip()
+                if key in item:
+                    return self._retention_map_item_texts(item.get(key))
+            return []
+        text = str(item or "").strip()
+        return [text] if text else []
 
     def _contains_foreign_language(self, text: str) -> bool:
         normalized = self._normalize(text)

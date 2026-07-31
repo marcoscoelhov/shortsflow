@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from google import genai
 from google.genai import types as genai_types
@@ -153,6 +153,8 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
             raise ProviderFailure(self.failure_provider_name, "missing openai api key")
         self.timeout_sec = settings.openai_timeout_sec
         self.model_name = settings.openai_model
+        self.reasoning_effort: Any = str(getattr(settings, "openai_reasoning_effort", "medium") or "medium").strip().lower()
+        self.max_output_tokens = max(4096, int(getattr(settings, "llm_json_max_tokens", 4096) or 4096))
         self.client = llm_facade.OpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
@@ -165,7 +167,9 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
                 model=self.model_name,
                 instructions="Return valid JSON only. No markdown fences.",
                 input=prompt,
+                reasoning=cast(Any, {"effort": self.reasoning_effort}),
                 text={"format": {"type": "json_object"}},
+                max_output_tokens=self.max_output_tokens,
                 timeout=self.timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
@@ -195,6 +199,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
                     {"role": "system", "content": "Return ONLY the final JSON array. Do not include reasoning or chain-of-thought. No markdown fences. Top-level must be an array."},
                     {"role": "user", "content": prompt},
                 ],
+                reasoning_effort=self.reasoning_effort,
                 timeout=self.timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
@@ -227,11 +232,45 @@ class XAICreativeProvider(MinimaxCreativeProvider):
             raise ProviderFailure(self.failure_provider_name, "missing xai api key")
         self.timeout_sec = settings.xai_timeout_sec
         self.model_name = settings.xai_model
+        self.reasoning_effort: Any = str(getattr(settings, "xai_reasoning_effort", "high") or "high").strip().lower()
         self.client = llm_facade.OpenAI(
             api_key=settings.xai_api_key,
             base_url=settings.xai_base_url,
             timeout=self.timeout_sec,
         )
+
+    def _json_completion(self, prompt: str) -> Any:
+        settings = llm_facade.get_settings()
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": "Return ONLY the final JSON object. No reasoning, prose, or markdown fences."},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                reasoning_effort=self.reasoning_effort,
+                max_tokens=int(getattr(settings, "llm_json_max_tokens", 4096) or 4096),
+                timeout=self.timeout_sec,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
+        raw = (response.choices[0].message.content or "").strip()
+        if not raw:
+            raise ProviderFailure(self.failure_provider_name, "empty text response")
+        raw = self._strip_think(raw)
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        try:
+            return json.loads(raw)
+        except Exception as exc:  # noqa: BLE001
+            extracted = self._extract_json(raw)
+            if extracted is not None:
+                try:
+                    return json.loads(extracted)
+                except Exception:
+                    pass
+            raise ProviderFailure(self.failure_provider_name, f"invalid json: {raw[:300]}") from exc
 
 
 class QwenCreativeProvider(MinimaxCreativeProvider):
