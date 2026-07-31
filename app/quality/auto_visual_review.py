@@ -96,17 +96,30 @@ class AutoVisualReviewService:
         modes: set[str],
         selected_asset_scores: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if self._has_real_visual_evidence(asset_summary, modes, selected_asset_scores):
-            return []
         if not selected_assets:
             return []
         scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job.job_id))
         if not scene_plan or not isinstance(scene_plan.scenes, list):
             return []
         scenes_by_id = {str(scene.get("scene_id") or ""): scene for scene in scene_plan.scenes if isinstance(scene, dict)}
+        critical_assets = self.critical_assets(selected_assets, scene_plan.scenes)
+        critical_scene_ids = [str(asset.scene_id) for asset in critical_assets]
+        asset_summary["asset_visual_critical_scene_ids"] = critical_scene_ids
+        verified_scene_ids = {
+            str(asset.scene_id)
+            for asset in critical_assets
+            if (asset.scores or {}).get("vision_aligned") is True
+            and not (asset.scores or {}).get("verification_fallback_reason")
+        }
+        asset_summary["asset_visual_verified_critical_scene_ids"] = sorted(verified_scene_ids)
+        if critical_scene_ids and set(critical_scene_ids) == verified_scene_ids:
+            asset_summary["asset_visual_real_vision_checked"] = True
+            return []
         verifier = SemanticVerifier()
         attempts: list[dict[str, Any]] = []
-        for asset in selected_assets:
+        for asset in critical_assets:
+            if str(asset.scene_id) in verified_scene_ids:
+                continue
             scene = scenes_by_id.get(str(asset.scene_id))
             if not scene:
                 attempts.append({"scene_id": asset.scene_id, "passed": False, "reason": "scene_missing"})
@@ -140,11 +153,51 @@ class AutoVisualReviewService:
                     "fallback_reason": scores.get("verification_fallback_reason"),
                 }
             )
-        if attempts and any(item.get("passed") for item in attempts):
+        verified_scene_ids.update(str(item["scene_id"]) for item in attempts if item.get("passed"))
+        asset_summary["asset_visual_verified_critical_scene_ids"] = sorted(verified_scene_ids)
+        if attempts:
             asset_summary["asset_visual_verification_modes"] = sorted(modes)
             asset_summary["asset_visual_real_vision_checked"] = self._has_real_visual_evidence(asset_summary, modes, selected_asset_scores)
             asset_summary["asset_visual_review_artifact"] = self.ARTIFACT_NAME
         return attempts
+
+    @staticmethod
+    def critical_assets(selected_assets: list[Any], scenes: list[dict[str, Any]]) -> list[Any]:
+        """Choose at most one hook, one proof and one payoff asset in story order."""
+        assets_by_scene_id = {str(asset.scene_id): asset for asset in selected_assets}
+        ordered = sorted(
+            (scene for scene in scenes if isinstance(scene, dict) and str(scene.get("scene_id") or "") in assets_by_scene_id),
+            key=lambda scene: int(scene.get("order", 0) or 0),
+        )
+        if not ordered:
+            return []
+
+        def first_with_roles(roles: set[str]) -> dict[str, Any] | None:
+            return next(
+                (scene for scene in ordered if str(scene.get("retention_role") or "").strip().lower() in roles),
+                None,
+            )
+
+        hook = first_with_roles({"visual_hook"}) or ordered[0]
+        proof = first_with_roles({"proof_or_tension"})
+        if proof is None:
+            middle_candidates = ordered[1:-1]
+            proof = middle_candidates[len(middle_candidates) // 2] if middle_candidates else ordered[len(ordered) // 2]
+        payoff_candidates = [
+            scene
+            for scene in ordered
+            if str(scene.get("retention_role") or "").strip().lower() in {"turn_or_payoff", "loop_close"}
+        ]
+        payoff = payoff_candidates[-1] if payoff_candidates else ordered[-1]
+
+        selected: list[Any] = []
+        seen: set[str] = set()
+        for scene in (hook, proof, payoff):
+            scene_id = str(scene.get("scene_id") or "")
+            if scene_id and scene_id not in seen:
+                selected.append(assets_by_scene_id[scene_id])
+                seen.add(scene_id)
+        return selected
 
     def _has_real_visual_evidence(
         self,
@@ -152,6 +205,10 @@ class AutoVisualReviewService:
         modes: set[str],
         selected_asset_scores: list[dict[str, Any]],
     ) -> bool:
+        critical_scene_ids = {str(item) for item in asset_summary.get("asset_visual_critical_scene_ids") or []}
+        if critical_scene_ids:
+            verified_scene_ids = {str(item) for item in asset_summary.get("asset_visual_verified_critical_scene_ids") or []}
+            return critical_scene_ids == verified_scene_ids
         return (
             asset_summary.get("asset_visual_real_vision_checked") is True
             or any(mode and mode != "prompt_heuristic" for mode in modes)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PIL import Image
@@ -74,7 +75,7 @@ def test_qwen_json_parser_accepts_fence_trailing_text_and_duplicate_object(monke
         "aligned_boolean": False,
         "alignment_score_0_to_1": 0.1,
     }
-    content = f"```json\n{__import__('json').dumps(first)}\n```\n{__import__('json').dumps({'ignored': True})}"
+    content = f"```json\n{json.dumps(first)}\n```\n{json.dumps({'ignored': True})}"
 
     assert verifier._parse_vision_json(content, provider="test") == first
 

@@ -31,3 +31,17 @@ def test_critical_visual_review_falls_back_to_middle_scene() -> None:
     selected = AutoVisualReviewService.critical_assets(assets, scenes)
 
     assert [asset.scene_id for asset in selected] == ["scene-1", "scene-2", "scene-3"]
+
+
+def test_real_visual_evidence_requires_every_critical_scene() -> None:
+    service = object.__new__(AutoVisualReviewService)
+    summary = {
+        "asset_visual_critical_scene_ids": ["scene-1", "scene-3", "scene-5"],
+        "asset_visual_verified_critical_scene_ids": ["scene-1", "scene-5"],
+    }
+
+    assert service._has_real_visual_evidence(summary, {"vision"}, [{"vision_aligned": True}]) is False
+
+    summary["asset_visual_verified_critical_scene_ids"].append("scene-3")
+
+    assert service._has_real_visual_evidence(summary, {"vision"}, [{"vision_aligned": True}]) is True

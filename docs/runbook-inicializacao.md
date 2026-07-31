@@ -67,7 +67,7 @@ SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>
 SHORTSFLOW_MINIMAX_IMAGE_API_KEY=<redigido>
 ```
 
-Politica LLM operacional: DeepSeek v4 Flash e o padrao barato para provider principal, rascunho de roteiro, reparo, planejamento de cenas e juiz comum dos gates. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e o padrao para evitar fallback caro e invisivel. Qwen e opcional para enriquecimento visual/referencias quando a chave estiver configurada. DeepSeek v4 Pro deve ficar restrito a excecoes premium/final/complexas via `SHORTSFLOW_LLM_PREMIUM_REVIEW_*`; nao configure Pro como fallback geral automatico.
+Politica LLM operacional: DeepSeek v4 Flash e o padrao barato para provider principal, rascunho de roteiro, reparo, planejamento de cenas e juiz comum dos gates. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e o padrao para evitar fallback caro e invisivel. Qwen remoto e opcional para enriquecimento visual/referencias quando a chave estiver configurada. O verificador visual local usa Qwen3-VL 2B Q4, sem custo de API, somente nas imagens selecionadas de hook, prova e payoff. DeepSeek v4 Pro deve ficar restrito a excecoes premium/final/complexas via `SHORTSFLOW_LLM_PREMIUM_REVIEW_*`; nao configure Pro como fallback geral automatico.
 
 Para imagem, a chave de texto MiniMax e usada primeiro. `SHORTSFLOW_MINIMAX_IMAGE_API_KEY` funciona como chave dedicada de imagem e entra apenas quando a chave de texto retorna quota, saldo, credito ou rate limit. Se a chave de texto estiver vazia, a dedicada de imagem e usada diretamente.
 
