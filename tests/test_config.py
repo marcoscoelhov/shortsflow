@@ -52,6 +52,7 @@ def test_local_vision_defaults_to_qwen_cpu_candidate(monkeypatch) -> None:
     settings = Settings(_env_file=None)
 
     assert settings.local_vision_model == "qwen3-vl-2b-instruct-q4-k-m"
+    assert settings.local_vision_release_approved is False
 
 
 def test_vision_verifier_provider_rejects_unknown_provider(monkeypatch) -> None:

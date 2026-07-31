@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from app.config import get_settings
 from app.quality.auto_visual_review import AutoVisualReviewService
 
 
@@ -33,7 +34,9 @@ def test_critical_visual_review_falls_back_to_middle_scene() -> None:
     assert [asset.scene_id for asset in selected] == ["scene-1", "scene-2", "scene-3"]
 
 
-def test_real_visual_evidence_requires_every_critical_scene() -> None:
+def test_real_visual_evidence_requires_every_critical_scene(monkeypatch) -> None:
+    monkeypatch.setenv("SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED", "true")
+    get_settings.cache_clear()
     service = object.__new__(AutoVisualReviewService)
     summary = {
         "asset_visual_critical_scene_ids": ["scene-1", "scene-3", "scene-5"],
@@ -45,3 +48,19 @@ def test_real_visual_evidence_requires_every_critical_scene() -> None:
     summary["asset_visual_verified_critical_scene_ids"].append("scene-3")
 
     assert service._has_real_visual_evidence(summary, {"vision"}, [{"vision_aligned": True}]) is True
+
+    get_settings.cache_clear()
+
+
+def test_qwen_cannot_authorize_publication_before_release_eval(monkeypatch) -> None:
+    monkeypatch.setenv("SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED", "false")
+    get_settings.cache_clear()
+    service = object.__new__(AutoVisualReviewService)
+    summary = {
+        "asset_visual_critical_scene_ids": ["scene-1", "scene-3", "scene-5"],
+        "asset_visual_verified_critical_scene_ids": ["scene-1", "scene-3", "scene-5"],
+    }
+
+    assert service._has_real_visual_evidence(summary, {"vision"}, [{"vision_aligned": True}]) is False
+
+    get_settings.cache_clear()
