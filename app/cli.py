@@ -5,13 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from app.automation import AutomationService
-from app.backlog_recovery import BacklogRecoveryService
-from app.db import init_db
-from app.operational_settings import apply_operational_settings
-from app.orchestrator import orchestrator
-from app.production_readiness import ProductionReadinessService
-from app.watchdog import AutomationWatchdog
+from app.survival_experiment import build_survival_cohort_plan
 
 
 def main() -> None:
@@ -56,7 +50,25 @@ def main() -> None:
     airtable_parser.add_argument("--dry-run", action="store_true", help="Lista elegíveis sem importar ou marcar no Airtable")
     airtable_parser.add_argument("--limit", type=int, default=None, help="Limite de registros elegíveis")
 
+    survival_parser = subparsers.add_parser(
+        "survival-cohort-plan",
+        help="Gera plano JSON seco de 6 cenários do experimento survival_decisions",
+    )
+    survival_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para seleção determinística")
+
     args = parser.parse_args()
+    if args.command == "survival-cohort-plan":
+        print(json.dumps(build_survival_cohort_plan(seed=args.seed), ensure_ascii=False, indent=2))
+        return
+
+    from app.automation import AutomationService
+    from app.backlog_recovery import BacklogRecoveryService
+    from app.db import init_db
+    from app.operational_settings import apply_operational_settings
+    from app.orchestrator import orchestrator
+    from app.production_readiness import ProductionReadinessService
+    from app.watchdog import AutomationWatchdog
+
     init_db()
     apply_operational_settings(orchestrator.settings)
     service = AutomationService(orchestrator)

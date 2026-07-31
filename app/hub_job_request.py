@@ -13,6 +13,7 @@ from app.job_origin import (
 from app.hub_prompt import build_viral_prompt_note
 from app.manual_script import build_ready_script_notes, parse_ready_script
 from app.schemas import TopicRequestCreate
+from app.survival_experiment import SURVIVAL_NICHE_ID
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,12 @@ def build_hub_job_request(
     angle = selected_angle(custom_angle, requested_angle)
     selected_niche = niche_id or default_niche_id
     trend_report: dict[str, object] | None = None
+
+    if selected_niche == SURVIVAL_NICHE_ID and normalized_mode != "script" and not seed_theme.strip():
+        raise ValueError(
+            "survival_decisions requires an explicit theme, title, or ready script; "
+            "it cannot fall back to automatic_topic"
+        )
 
     if normalized_mode == "script":
         ready_script = parse_ready_script(ready_script_text or "")

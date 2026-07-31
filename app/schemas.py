@@ -4,9 +4,9 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-SUPPORTED_NICHES = {"curiosidades"}
+SUPPORTED_NICHES = {"curiosidades", "survival_decisions"}
 SUPPORTED_LANGUAGES = {"pt-BR"}
 
 
@@ -21,6 +21,26 @@ class TopicRequestCreate(BaseModel):
     requested_angle: str | None = None
     job_origin: Literal["ready_script_bank", "manual_ready_script", "automatic_topic", "manual_theme", "manual_title", "unknown"] | None = None
     creation_via: Literal["hub", "daily_cycle", "cli", "api", "recreation", "unknown"] | None = None
+
+    @model_validator(mode="after")
+    def preserve_experiment_markers(self) -> TopicRequestCreate:
+        if self.niche_id != "survival_decisions":
+            return self
+        if self.job_origin == "automatic_topic":
+            raise ValueError(
+                "survival_decisions must be explicitly invoked and cannot enter the automatic_topic lane"
+            )
+        if self.job_origin == "ready_script_bank" or self.creation_via == "daily_cycle":
+            raise ValueError(
+                "survival_decisions cannot enter automated creation or publication lanes"
+            )
+        from app.survival_experiment import survival_policy_notes
+
+        existing_notes = str(self.notes or "").strip()
+        existing_lines = set(existing_notes.splitlines())
+        required_notes = [note for note in survival_policy_notes() if note not in existing_lines]
+        self.notes = "\n".join(part for part in [existing_notes, *required_notes] if part)
+        return self
 
     @field_validator("seed_theme")
     @classmethod
@@ -42,7 +62,9 @@ class TopicRequestCreate(BaseModel):
     def validate_niche_id(cls, value: str) -> str:
         normalized = value.strip()
         if normalized not in SUPPORTED_NICHES:
-            raise ValueError("unsupported niche_id: only 'curiosidades' is currently supported")
+            raise ValueError(
+                "unsupported niche_id: supported values are 'curiosidades' and 'survival_decisions'"
+            )
         return normalized
 
     @field_validator("language")

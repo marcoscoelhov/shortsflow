@@ -68,6 +68,7 @@ from app.models import (
 )
 from app.quality.auto_visual_review import AutoVisualReviewService
 from app.schemas import TopicRequestCreate
+from app.survival_experiment import SURVIVAL_NICHE_ID
 from app.topic_scout import TopicScout
 from app.utils import new_id, stable_hash, utcnow
 
@@ -1320,6 +1321,9 @@ class AutomationService:
             job = session.get(Job, job_id)
             if not job:
                 raise KeyError(job_id)
+            topic_request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job_id))
+            if topic_request and topic_request.niche_id == SURVIVAL_NICHE_ID:
+                raise RuntimeError("survival_decisions_requires_human_publication_decision")
             if job.status == JOB_STATUS_READY_FOR_UPLOAD:
                 pass
             elif job.status != JOB_STATUS_APPROVED_FOR_PUBLISH:

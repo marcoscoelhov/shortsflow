@@ -168,7 +168,14 @@
     <dialog id="create-job-modal" class="schedule-picker-modal create-job-modal" aria-labelledby="create-job-title">
       <form method="post" action="/jobs" class="schedule-picker-card create-job-card job-form">
         {{ ui.dialog_head("Entrada", "Criar vídeo", "create-job-title", "create-job", "Fechar criação", "modal-sticky-head") }}
-        <input type="hidden" name="niche_id" value="{{ hub_defaults.niche_id }}">
+        <div class="field full">
+          <label for="niche_id">Nicho editorial</label>
+          <select id="niche_id" name="niche_id" value="{{ hub_defaults.niche_id }}">
+            <option value="{{ hub_defaults.niche_id }}" selected>Astronomia e cosmos (padrão)</option>
+            <option value="survival_decisions">Sobrevivência e decisões impossíveis (experimento)</option>
+          </select>
+          <p class="field-help">O experimento é sempre ficcional, exige tema explícito e não entra na automação de publicação.</p>
+        </div>
         <div class="field full">
           <label for="input_mode">Tipo de entrada</label>
           <select id="input_mode" name="input_mode" aria-describedby="input_mode_help_theme input_mode_help_title input_mode_help_script">

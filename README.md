@@ -120,6 +120,22 @@ Exemplos curtos para astronomia:
 - Bom: `Abra com um paradoxo visual verificavel sobre planetas; crie 3 beats em escalada, sem numeros precisos se nao houver fonte; guarde a explicacao principal para o payoff final.`
 - Ruim: `Faca qualquer tema viral, use clickbait, diga que cientistas provaram algo chocante e publique mesmo se o gate reclamar.`
 
+## Experimento opt-in de sobrevivencia
+
+O nicho padrao e o `automatic_topic` continuam restritos a astronomia e cosmos. O nicho experimental
+`survival_decisions` ("Sobrevivencia e decisoes impossiveis") so pode ser escolhido explicitamente no
+formulario de criacao, com tema, titulo ou roteiro pronto preenchido. Seus jobs recebem marcadores de
+experimento, coorte e enquadramento hipotetico; eles nao entram no ciclo diario nem na publicacao automatica.
+
+Para revisar uma coorte deterministica de seis ideias sem criar jobs, chamar providers, publicar ou agendar:
+
+```bash
+python -m app.cli survival-cohort-plan --seed 20260730
+```
+
+O comando imprime JSON com titulo, hook, familia, risco ficcional, mecanica de decisao, payoff visual e
+enquadramento de seguranca de cada cenario.
+
 ## Estados principais
 
 ### Jobs
