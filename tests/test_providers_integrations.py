@@ -55,6 +55,22 @@ def test_llm_registry_does_not_mock_fallback_in_real_runs(monkeypatch) -> None:
     assert registry.fallback_provider() is None
 
 
+def test_llm_registry_does_not_build_configured_fallback_when_disabled(monkeypatch) -> None:
+    registry = object.__new__(LLMProviderRegistry)
+    registry.settings = SimpleNamespace(
+        use_mock_providers=False,
+        llm_enable_fallback=False,
+        llm_fallback_provider="deepseek",
+    )
+
+    def fail_if_built(*_args, **_kwargs):
+        raise AssertionError("disabled fallback must not be constructed")
+
+    monkeypatch.setattr(registry, "_build_provider", fail_if_built)
+
+    assert registry.fallback_provider() is None
+
+
 def test_script_generation_candidates_skip_duplicate_provider_model() -> None:
     class Provider:
         provider_name = "deepseek"

@@ -60,3 +60,9 @@ def test_vision_verifier_provider_rejects_unknown_provider(monkeypatch) -> None:
 
     with pytest.raises(ValidationError, match="vision_verifier_provider must be one of"):
         Settings(_env_file=None, vision_verifier_provider="gemma")
+
+
+@pytest.mark.parametrize("field", ["openai_reasoning_effort", "xai_reasoning_effort"])
+def test_reasoning_effort_rejects_unknown_values(field: str) -> None:
+    with pytest.raises(ValidationError, match="reasoning effort must be one of"):
+        Settings(_env_file=None, **{field: "turbo"})
