@@ -154,7 +154,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
         self.timeout_sec = settings.openai_timeout_sec
         self.model_name = settings.openai_model
         self.reasoning_effort: Any = str(getattr(settings, "openai_reasoning_effort", "medium") or "medium").strip().lower()
-        self.max_output_tokens = max(4096, int(getattr(settings, "llm_json_max_tokens", 4096) or 4096))
+        self.max_output_tokens = int(getattr(settings, "llm_json_max_tokens", 4096) or 4096)
         self.client = llm_facade.OpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,

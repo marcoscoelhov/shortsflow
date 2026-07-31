@@ -197,13 +197,14 @@ class ResilientCreativeProvider:
         ordered: list[tuple[str, Any]] = []
         if self._should_use_premium_review(gate_kind or "", payload or {}):
             ordered.append(("premium_review", getattr(self, "premium_review_provider", None)))
-        ordered.extend(
-            [
-                ("gate_judge", self.gate_judge_provider),
-                ("fallback", self.fallback),
-                ("repair", self.repair_provider),
-            ]
-        )
+        ordered.append(("gate_judge", self.gate_judge_provider))
+        if bool(getattr(self.settings, "llm_enable_fallback", True)):
+            ordered.extend(
+                [
+                    ("fallback", self.fallback),
+                    ("repair", self.repair_provider),
+                ]
+            )
         for role, provider in ordered:
             if provider is None or id(provider) in seen or not hasattr(provider, "judge_quality_gate"):
                 continue

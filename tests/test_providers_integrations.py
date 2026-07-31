@@ -1,4 +1,5 @@
 from tests.e2e_support import *  # noqa: F403
+from app.config import Settings
 from app.providers.llm_clients import XAICreativeProvider
 
 
@@ -14,6 +15,23 @@ def test_llm_facade_preserves_public_provider_imports() -> None:
     assert llm.OpenAICreativeProvider is llm_clients.OpenAICreativeProvider
     assert llm.QwenCreativeProvider is llm_clients.QwenCreativeProvider
     assert llm.ResilientCreativeProvider is llm_routing.ResilientCreativeProvider
+
+
+def test_llm_defaults_match_quality_first_routing_policy() -> None:
+    defaults = {name: field.default for name, field in Settings.model_fields.items()}
+
+    assert defaults["llm_primary_provider"] == "openai"
+    assert defaults["llm_script_draft_provider"] == "openai"
+    assert defaults["llm_repair_provider"] == "openai"
+    assert defaults["llm_scene_provider"] == "openai"
+    assert defaults["llm_fallback_provider"] == "disabled"
+    assert defaults["llm_enable_fallback"] is False
+    assert defaults["openai_model"] == "gpt-5.6-luna"
+    assert defaults["openai_reasoning_effort"] == "high"
+    assert defaults["llm_gate_judge_provider"] == "xai"
+    assert defaults["llm_gate_judge_model"] == "grok-4.5"
+    assert defaults["xai_model"] == "grok-4.5"
+    assert defaults["xai_reasoning_effort"] == "high"
 
 
 def test_llm_registry_uses_mock_when_mock_providers_enabled() -> None:
@@ -206,7 +224,7 @@ def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> Non
             openai_model="gpt-5.4",
             openai_reasoning_effort="max",
             openai_timeout_sec=120,
-            llm_json_max_tokens=4096,
+            llm_json_max_tokens=2048,
         ),
     )
     monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
@@ -217,6 +235,7 @@ def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> Non
     assert captured["client_kwargs"]["api_key"] == "openai-key"
     assert captured["model"] == "gpt-5.4"
     assert captured["reasoning"] == {"effort": "max"}
+    assert captured["max_output_tokens"] == 2048
     assert captured["text"] == {"format": {"type": "json_object"}}
     assert "cada valor textual de retention_map deve ser cópia literal" in str(captured["input"])
     assert "repetition_score usa escala 0.0 a 1.0" in str(captured["input"])
@@ -405,6 +424,39 @@ def test_quality_judge_candidates_prioritize_gate_judge_provider() -> None:
     roles = [role for role, _provider in resilient._quality_judge_candidates()]
 
     assert roles == ["gate_judge", "repair"]
+
+
+def test_quality_judge_candidates_fail_closed_when_fallback_disabled() -> None:
+    class Judge:
+        provider_name = "xai"
+
+        def judge_quality_gate(self, gate_kind: str, payload: dict) -> dict:
+            raise ProviderFailure("xai_text", "credits unavailable")
+
+    class Repair:
+        provider_name = "openai"
+
+        def judge_quality_gate(self, gate_kind: str, payload: dict) -> dict:
+            return {"passed": True, "confidence": 0.99, "provider": "openai"}
+
+    resilient = object.__new__(ResilientCreativeProvider)
+    object.__setattr__(
+        resilient,
+        "settings",
+        SimpleNamespace(
+            llm_gate_judge_timeout_sec=120.0,
+            llm_premium_review_enabled=False,
+            llm_enable_fallback=False,
+        ),
+    )
+    object.__setattr__(resilient, "gate_judge_provider", Judge())
+    object.__setattr__(resilient, "premium_review_provider", None)
+    object.__setattr__(resilient, "fallback", None)
+    object.__setattr__(resilient, "repair_provider", Repair())
+
+    roles = [role for role, _provider in resilient._quality_judge_candidates("editorial", {})]
+
+    assert roles == ["gate_judge"]
 
 
 def test_premium_review_provider_uses_deepseek_pro_model_for_exceptions(monkeypatch) -> None:
