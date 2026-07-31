@@ -459,6 +459,21 @@ def test_quality_judge_candidates_fail_closed_when_fallback_disabled() -> None:
     assert roles == ["gate_judge"]
 
 
+def test_quality_judge_does_not_retry_same_provider_and_model_as_premium() -> None:
+    premium = SimpleNamespace(provider_name="xai", model_name="grok-4.5", judge_quality_gate=lambda *_args: {})
+    gate = SimpleNamespace(provider_name="xai", model_name="grok-4.5", judge_quality_gate=lambda *_args: {})
+    resilient = object.__new__(ResilientCreativeProvider)
+    resilient.settings = SimpleNamespace(llm_enable_fallback=False, llm_premium_review_enabled=True)
+    resilient.premium_review_provider = premium
+    resilient.gate_judge_provider = gate
+    resilient.fallback = None
+    resilient.repair_provider = None
+
+    candidates = resilient._quality_judge_candidates("growth_score", {"review_tier": "premium"})
+
+    assert [(role, provider.model_name) for role, provider in candidates] == [("premium_review", "grok-4.5")]
+
+
 def test_premium_review_provider_uses_deepseek_pro_model_for_exceptions(monkeypatch) -> None:
     class FakeOpenAI:
         def __init__(self, **kwargs):
