@@ -115,6 +115,7 @@ def test_runtime_unit_uses_environment_state_as_working_directory(environment: s
     unit = Path(f"deploy/systemd/shortsflow-{environment}.service").read_text(encoding="utf-8")
 
     assert f"WorkingDirectory=/srv/shortsflow/{environment}" in unit
+    assert f"Environment=PYTHONPATH=/opt/shortsflow/{environment}/current" in unit
 
 
 def test_failed_health_restores_previous_release_and_revision(tmp_path: Path, monkeypatch) -> None:

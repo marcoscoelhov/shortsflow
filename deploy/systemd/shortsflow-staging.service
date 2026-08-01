@@ -8,6 +8,7 @@ Type=simple
 User=shortsflow-staging
 Group=shortsflow-staging
 WorkingDirectory=/srv/shortsflow/staging
+Environment=PYTHONPATH=/opt/shortsflow/staging/current
 EnvironmentFile=/etc/shortsflow/staging.env
 EnvironmentFile=/etc/shortsflow/staging-release.env
 Environment=SHORTSFLOW_RUNTIME_ENVIRONMENT=staging

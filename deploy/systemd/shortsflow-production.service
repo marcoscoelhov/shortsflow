@@ -8,6 +8,7 @@ Type=simple
 User=shortsflow-production
 Group=shortsflow-production
 WorkingDirectory=/srv/shortsflow/production
+Environment=PYTHONPATH=/opt/shortsflow/production/current
 EnvironmentFile=/etc/shortsflow/production.env
 EnvironmentFile=/etc/shortsflow/production-release.env
 Environment=SHORTSFLOW_RUNTIME_ENVIRONMENT=production
