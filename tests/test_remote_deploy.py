@@ -12,6 +12,7 @@ from scripts.remote_deploy import (
     DeploymentPlan,
     LegacyHandoff,
     _handoff_legacy_production,
+    _install_release,
     atomic_activate,
     deploy,
     prune_inactive_releases,
@@ -75,6 +76,20 @@ def test_release_pruning_preserves_active_and_three_previous(tmp_path: Path) -> 
     assert paths[0].exists()
     assert len([path for path in paths if path.exists()]) == 4
     assert len(removed) == 2
+
+
+def test_install_release_grants_runtime_group_traversal(tmp_path: Path, monkeypatch) -> None:
+    plan = DeploymentPlan.create("staging", "a" * 40, layout=DeploymentLayout.under(tmp_path))
+    (plan.release_dir / ".venv/bin").mkdir(parents=True)
+    (plan.release_dir / ".venv/bin/python").touch()
+    (plan.release_dir / "remotion/node_modules/.bin").mkdir(parents=True)
+    (plan.release_dir / "remotion/node_modules/.bin/remotion").touch()
+    plan.release_dir.chmod(0o700)
+    monkeypatch.setattr("scripts.remote_deploy._run", lambda *_args, **_kwargs: None)
+
+    _install_release(plan)
+
+    assert plan.release_dir.stat().st_mode & 0o050 == 0o050
 
 
 def test_failed_health_restores_previous_release_and_revision(tmp_path: Path, monkeypatch) -> None:

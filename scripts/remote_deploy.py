@@ -251,6 +251,7 @@ def _install_release(plan: DeploymentPlan) -> None:
     public_runtime.symlink_to(runtime_media)
     runtime_user = f"shortsflow-{plan.environment}"
     _run(["chown", "-R", f"root:{runtime_user}", str(plan.release_dir)])
+    plan.release_dir.chmod(plan.release_dir.stat().st_mode | 0o050)
     _run(["chown", "-R", f"{runtime_user}:{runtime_user}", str(plan.data_dir)])
 
 
