@@ -54,6 +54,7 @@ def test_remote_job_submission_returns_tailnet_job_url() -> None:
     assert transport.requests[0][0:2] == ("POST", "https://prod.example.ts.net/jobs")
     assert transport.requests[0][2]["Idempotency-Key"] == result.request_id
     assert b"seed_theme=Por+que+o+gelo+estala%3F" in (transport.requests[0][3] or b"")
+    assert b"cta_style=soft" in (transport.requests[0][3] or b"")
 
 
 def test_transport_failure_reports_reusable_idempotency_key() -> None:

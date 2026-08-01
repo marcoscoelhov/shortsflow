@@ -120,7 +120,7 @@ class RemoteRuntimeClient:
                 "language": "pt-BR",
                 "target_duration_sec": target_duration_sec,
                 "tone": "intrigante_direto",
-                "cta_style": "none",
+                "cta_style": "soft",
             }
         ).encode("utf-8")
         try:

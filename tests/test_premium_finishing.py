@@ -1141,6 +1141,15 @@ def test_premium_caption_highlight_uses_only_current_word() -> None:
     assert "wordHighlightProgress" in source
 
 
+def test_premium_scene_crossfade_never_fades_both_scenes_to_black() -> None:
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
+    scene_layer = source[source.index("const SceneLayer"):source.index("const SceneOverlays")]
+
+    assert "const opacityOut" not in scene_layer
+    assert "const opacity = opacityIn" in scene_layer
+    assert "durationInFrames={durationFrames + transitionFrames}" in scene_layer
+
+
 def test_premium_caption_component_keeps_lateral_breathing_room() -> None:
     source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
 

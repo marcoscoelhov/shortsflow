@@ -33,6 +33,7 @@ class ScriptPipeline(BasePipeline):
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
         assert topic_plan and request
+        resolved_cta_style = request.cta_style or "soft"
         editorial_mode = self._editorial_mode(topic_plan, request)
         research_brief = self._build_research_brief(topic_plan, request)
         plan_dict = {
@@ -41,6 +42,7 @@ class ScriptPipeline(BasePipeline):
             "hook_promise": topic_plan.hook_promise,
             "title_candidates": topic_plan.title_candidates,
             "tone": request.tone or "intrigante_direto",
+            "cta_style": resolved_cta_style,
             "requested_angle": request.requested_angle,
             "hub_notes": request.notes,
             "original_input": request.seed_theme,
@@ -134,7 +136,7 @@ class ScriptPipeline(BasePipeline):
         stage_timings_ms["generation_ms"] = generation_elapsed_ms
         validation_started = time.monotonic()
         try:
-            script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec, request.cta_style or "none", job.job_id)
+            script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec, resolved_cta_style, job.job_id)
             gate_decisions: dict[str, Any] = {}
             if structured_contract_file is not None:
                 gate_decisions["script_quality"] = {
@@ -200,7 +202,7 @@ class ScriptPipeline(BasePipeline):
                 audit=text_audit,
                 plan_dict=plan_dict,
                 target_duration_sec=job.target_duration_sec,
-                cta_style=request.cta_style or "none",
+                cta_style=resolved_cta_style,
                 topic_context=audit_topic_context,
             )
         stage_timings_ms["text_publish_audit_ms"] = round((time.monotonic() - audit_started) * 1000, 1)

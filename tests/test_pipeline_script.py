@@ -627,6 +627,33 @@ def test_script_quality_gate_blocks_generic_hook_opening() -> None:
     assert not result.passed
     assert "generic_hook_opening" in result.reasons
 
+
+def test_script_quality_gate_requires_cta_and_grounded_story_arc_for_soft_cta_jobs() -> None:
+    script = _base_script(
+        "O céu vermelho começa roubando o azul da paisagem. "
+        "A luz atravessa uma camada maior de ar perto do horizonte. "
+        "Nesse caminho, as cores azuis se espalham com mais facilidade. "
+        "O vermelho segue até os olhos e domina o pôr do sol. "
+        "Na próxima tarde, procure o azul que desapareceu primeiro."
+    )
+    script["cta"] = None
+    script["story_arc"] = {
+        "setup": "trecho que não existe na narração",
+        "tension": "",
+        "turn": "",
+        "consequence": "",
+    }
+
+    result = ScriptQualityGate().validate(
+        script,
+        target_duration_sec=45,
+        request={"cta_style": "soft"},
+    )
+
+    assert "missing_soft_cta" in result.reasons
+    assert "story_arc_incomplete" in result.reasons
+    assert "story_arc_not_grounded_in_narration" in result.reasons
+
 def test_script_quality_gate_blocks_mixed_language_markup_and_glued_words() -> None:
     script = {
         "title": "Polvo pensa com os braços",

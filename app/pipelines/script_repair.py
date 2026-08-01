@@ -27,6 +27,7 @@ class ScriptRepairDomain(BasePipeline):
             "seed_theme": plan_dict.get("original_input"),
             "notes": plan_dict.get("hub_notes"),
             "requested_angle": plan_dict.get("requested_angle"),
+            "cta_style": plan_dict.get("cta_style"),
         }
         return topic_plan, request
 
@@ -161,12 +162,25 @@ class ScriptRepairDomain(BasePipeline):
             processed = self._repair_script_loop_closure(processed, plan_dict)
         processed = self._split_long_script_sentences(processed)
         processed = self._normalize_script_visible_text(processed)
+        processed = self._sync_story_arc_to_script(processed)
         processed = self._sanitize_source_fact_ids(processed, fact_pack)
         processed = self._attach_claim_trace(processed, fact_pack)
         processed["estimated_duration_sec"] = round(max(35.0, min(55.0, len(word_tokens(str(processed.get("full_narration") or ""))) / 2.55)), 2)
         processed = self._sync_retention_map_to_script(processed)
         processed["token_count"] = len(tokenize(str(processed.get("full_narration") or "")))
         return processed
+
+    def _sync_story_arc_to_script(self, script: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(script.get("story_arc"), dict):
+            return script
+        updated = dict(script)
+        updated["story_arc"] = {
+            "setup": str(updated.get("hook") or "").strip(),
+            "tension": str(updated.get("loop") or "").strip(),
+            "turn": str(updated.get("payoff") or "").strip(),
+            "consequence": str(updated.get("ending") or "").strip(),
+        }
+        return updated
 
     def _sync_retention_map_to_script(self, script: dict[str, Any]) -> dict[str, Any]:
         updated = dict(script)
@@ -336,6 +350,7 @@ class ScriptRepairDomain(BasePipeline):
             *body_beats,
             str(normalized.get("payoff") or "").strip(),
             str(normalized.get("ending") or "").strip(),
+            str(normalized.get("cta") or "").strip(),
         ]
         expected_narration = " ".join(part.rstrip(".!?") + ("?" if part.endswith("?") else ".") for part in expected_parts if part).strip()
         missing_structured_part = bool(expected_narration and self.script_gate._normalize(expected_narration) not in self.script_gate._normalize(narration))

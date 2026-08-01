@@ -527,6 +527,17 @@ def test_render_gate_rejects_missing_file(tmp_path: Path) -> None:
     assert not result.passed
     assert "missing_render_file" in result.reasons
 
+
+def test_render_gate_parses_short_black_frame_leaks() -> None:
+    stderr = (
+        "[blackdetect @ 0x1] black_start:24.4333 black_end:24.5 black_duration:0.0666667\n"
+        "[blackdetect @ 0x1] black_start:30 black_end:30.02 black_duration:0.02\n"
+    )
+
+    intervals = RenderGate.black_intervals(stderr, minimum_duration_sec=0.04)
+
+    assert intervals == [{"start_sec": 24.4333, "end_sec": 24.5, "duration_sec": 0.0666667}]
+
 def test_minimax_scene_prompt_keeps_image_prompt_english_exception(monkeypatch) -> None:
     captured: dict[str, str] = {}
 

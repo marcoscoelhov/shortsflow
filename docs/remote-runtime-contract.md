@@ -31,6 +31,13 @@ slot disponível; um job de staging já iniciado nunca é interrompido.
 Nenhum comando pode usar CPU local como fallback. Indisponibilidade deve produzir
 erro acionável e preservar o estado remoto.
 
+Jobs novos enviados pelo Hub, por `shortsflow validate` ou pelo smoke real usam
+CTA suave por padrão. O roteiro precisa incluir esse CTA na narração e declarar
+um arco narrativo fundamentado em trechos reais (`setup`, `tension`, `turn` e
+`consequence`). O render final também é reprovado se a análise temporal detectar
+vazamento de quadros pretos com duração igual ou superior a 40 ms. Jobs que
+pedem explicitamente `cta_style=none` continuam suportados.
+
 ## Admissão e retenção
 
 Staging não inicia um job quando:

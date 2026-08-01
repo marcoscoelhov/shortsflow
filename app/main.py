@@ -516,7 +516,7 @@ def create_job(
     language: str = Form(default="pt-BR"),
     target_duration_sec: int = Form(default=HUB_RETENTION_OPTIMIZED_DURATION_SEC),
     tone: str = Form(default="intrigante_direto"),
-    cta_style: str = Form(default="none"),
+    cta_style: str = Form(default="soft"),
     notes: str | None = Form(default=None),
     requested_angle: str | None = Form(default=None),
     custom_angle: str | None = Form(default=None),

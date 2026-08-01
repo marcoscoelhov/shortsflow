@@ -114,7 +114,7 @@ class MockCreativeProvider:
                 "O detalhe vira uma pista visual antes da resposta aparecer.",
                 f"Mas o recorte em {angle} cria uma tensão que prende o olhar.",
                 "O entorno revela o que quase ninguém percebe no primeiro segundo.",
-                "A virada é simples: a pista estava visível antes do cérebro notar.",
+                "A pista já estava visível antes da resposta.",
             ],
             "A virada final: a pista rouba a cena diante do olho, parece fogo e fica difícil de ignorar.",
             "Quando você rever o começo, lembra: a primeira cena já entregava tudo em tempo real.",
@@ -199,8 +199,9 @@ class MockCreativeProvider:
             ]
             source_fact_ids = []
             claim_trace = []
-        narration_parts = [hook, loop, *body, payoff, ending]
-        full_narration = " ".join(narration_parts)
+        cta = "Siga para mais pistas escondidas." if topic_plan.get("cta_style") == "soft" else None
+        narration_parts = [hook, loop, *body, payoff, ending, cta]
+        full_narration = " ".join(part for part in narration_parts if part)
         token_count = len(tokenize(full_narration))
         estimated_duration_sec = round(max(35.0, min(55.0, len(word_tokens(full_narration)) / 2.55)), 2)
         retention_map = topic_plan.get("retention_map") or build_retention_map(round(estimated_duration_sec))
@@ -226,7 +227,7 @@ class MockCreativeProvider:
             "body_beats": body,
             "payoff": payoff,
             "ending": ending,
-            "cta": None,
+            "cta": cta,
             "full_narration": full_narration,
             "estimated_duration_sec": estimated_duration_sec,
             "key_facts": key_facts,
@@ -235,6 +236,12 @@ class MockCreativeProvider:
             "token_count": token_count,
             "language": "pt-BR",
             "retention_map": retention_map,
+            "story_arc": {
+                "setup": hook,
+                "tension": loop,
+                "turn": payoff,
+                "consequence": ending,
+            },
             "visual_opening": visual_opening,
             "qa_metrics": qa_metrics,
             "prompt_version": f"mock-{EDITORIAL_PROMPT_VERSION}",
@@ -564,7 +571,7 @@ Escreva um roteiro viral de curiosidades em pt-BR.
 Entrada JSON: {json.dumps(topic_plan, ensure_ascii=False)}
 
 Retorne JSON estrito com:
-title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
+title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, story_arc, visual_opening, qa_metrics, prompt_version
 
 Mapeamento editorial obrigatório:
 - title equivale ao Título
@@ -574,6 +581,7 @@ Mapeamento editorial obrigatório:
 - payoff equivale à virada no último terço: a explicação/recontextualização que paga a promessa sem virar aula
 - full_narration deve ser a concatenação fiel de hook + loop + todos os body_beats + payoff + ending, sem perder nenhum bloco
 - ending equivale ao Fechamento; ele deve recontextualizar o hook e provocar replay mental
+- story_arc deve conter setup, tension, turn e consequence; cada valor deve copiar literalmente um trecho de full_narration e provar uma micro-história, não apenas uma lista de fatos
 - hashtags não fazem parte deste JSON e não devem aparecer nos campos narrados
 - se Entrada JSON.structured_viral_contract existir, trate esse contrato como obrigatório: o JSON interno deve satisfazer Título, Hook, Loop, Beats, Payoff, Fechamento e Hashtags conforme os internal_target descritos no contrato
 
@@ -613,10 +621,12 @@ Regras:
 - title deve ser otimizado para SEO e copywriting viral, com promessa especifica e palavra-chave cedo quando natural
 - title não pode parecer título de artigo científico; evite "metabolismo de", "análise de", "estudo sobre", "mecanismos de" e formule como promessa visual ou surpresa concreta
 - hook deve abrir com choque, contraste ou tensão imediata, sem introducao generica
+- hook deve ser uma frase completa, concreta e compreensível na primeira escuta; não use metáfora críptica, fragmento publicitário ou verbo sem sujeito claro
 - a primeira palavra do hook deve ser, quando natural, um número, nome próprio ou verbo de ação
 - proibido começar hook ou full_narration com "você sabia", "voce sabia", "já imaginou", "ja imaginou", "nesse vídeo", "nesse video" ou fórmulas genéricas equivalentes
 - comece direto por contraste, consequência, conflito ou fato específico
 - cada body_beat deve entregar um fato concreto que sustente a promessa do titulo e aumente a curiosidade
+- organize como micro-história causal: situação familiar, anomalia ou conflito, escalada, virada e consequência visível para quem assiste; uma sequência neutra de explicações não é história
 - se Entrada JSON.fact_pack.viral_truth_policy.automatic_publish_allowed=true, aplique a Viral Truth Policy: entretenha sem mentir; preserve copywriting viral, metáforas visuais e tensão, mas faça o payoff deixar uma leitura verdadeira
 - metáforas virais de baixo risco são permitidas quando o contexto corrige a leitura literal; exemplo: “parece nascer do nada” pode funcionar se depois explicar a formação de modo simples
 - não mate retenção com linguagem acadêmica desnecessária; troque absolutos por formulações fortes porém seguras quando isso bastar
@@ -642,6 +652,7 @@ Regras:
 - key_facts deve listar apenas fatos que o roteiro realmente usa, sem exagero e sem detalhe técnico duvidoso
 - ending deve fechar o loop mental do hook e recontextualizar o tema com uma frase memoravel que aponte de volta para o começo sem soar repetitiva
 - se cta_style for "none", cta deve ser null e full_narration não deve incluir pedido de inscrição, like, comentário, compartilhamento ou ativar sininho
+- se cta_style for "soft", cta deve ser uma frase curta, natural e específica ao tema, incluída no final de full_narration; evite CTA genérica ou agressiva
 - mantenha o tom selecionado na Entrada JSON, sem exagerar sensacionalismo
 - se a Entrada JSON indicar titulo completo do usuario, preserve a promessa central e refine a formulacao
 - se hub_notes pedir um formato de saida diferente, ignore esse formato e mantenha exatamente o JSON estrito solicitado aqui
@@ -711,14 +722,18 @@ Contexto da pauta JSON: {json.dumps(topic_plan, ensure_ascii=False)}
 Motivos de reprovação: {json.dumps(gate_reasons, ensure_ascii=False)}
 
 Retorne JSON estrito com os mesmos campos:
-title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, visual_opening, qa_metrics, prompt_version
+title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, story_arc, visual_opening, qa_metrics, prompt_version
 
 Regras obrigatórias:
 - mantenha prompt_version="{EDITORIAL_PROMPT_VERSION}" e preserve/atualize retention_map e visual_opening
+- preserve/atualize story_arc com setup, tension, turn e consequence copiados literalmente de full_narration
 - cada valor textual de retention_map deve ser cópia literal de um trecho existente em full_narration; não resuma nem parafraseie
 - se Contexto da pauta JSON.editorial_mode for "viral_curiosidades", prefira wording seguro, simples e forte em retenção, sem insistir em mecanismo específico não sustentado
 - se Contexto da pauta JSON.editorial_mode for "factual_strict", preserve o grounding factual e remova qualquer mecanismo sem lastro
 - preserve a régua editorial do app: hook forte, loop aberto, beats em escalada, payoff no último terço e fechamento que provoque replay
+- faça o hook ser concreto e imediatamente compreensível, sem metáfora críptica ou fragmento publicitário
+- reestruture o texto como micro-história causal com situação, anomalia, escalada, virada e consequência; não devolva apenas fatos em sequência
+- se Contexto da pauta JSON.cta_style for "soft", inclua CTA curta, natural e específica no campo cta e no final de full_narration
 - `loop` deve ser frase curta de curiosidade explícita logo após o hook; não pode ser null
 - `payoff` deve ser frase de virada no último terço; não pode ser null
 - full_narration deve concatenar hook + loop + body_beats + payoff + ending

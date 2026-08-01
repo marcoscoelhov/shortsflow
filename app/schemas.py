@@ -16,7 +16,7 @@ class TopicRequestCreate(BaseModel):
     language: str = "pt-BR"
     target_duration_sec: int = 45
     tone: str = "intrigante_direto"
-    cta_style: Literal["none", "soft"] = "none"
+    cta_style: Literal["none", "soft"] = "soft"
     notes: str | None = None
     requested_angle: str | None = None
     job_origin: Literal["ready_script_bank", "manual_ready_script", "automatic_topic", "manual_theme", "manual_title", "unknown"] | None = None

@@ -164,11 +164,10 @@ const SceneLayer: React.FC<{
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
   });
-  const opacityOut = interpolate(localFrame, [durationFrames - transitionFrames, durationFrames], [1, 0], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp'
-  });
-  const opacity = Math.min(opacityIn, opacityOut);
+  // The outgoing Sequence extends through the incoming transition and stays
+  // opaque underneath it. Fading both layers exposes the composition's black
+  // background for one or two frames at scene boundaries.
+  const opacity = opacityIn;
   const enter = spring({
     frame: Math.max(0, localFrame),
     fps,
