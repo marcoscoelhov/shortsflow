@@ -30,7 +30,6 @@ jobs:
       - name: Run canonical test suite
         env:
           SHORTSFLOW_USE_MOCK_PROVIDERS: "true"
-          SHORTSFLOW_RENDER_PRIMARY_BACKEND: ffmpeg
         run: pytest -q
 
   deploy:
