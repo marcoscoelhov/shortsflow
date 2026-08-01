@@ -240,6 +240,7 @@ def _install_release(plan: DeploymentPlan) -> None:
     remotion_binary = plan.release_dir / "remotion/node_modules/.bin/remotion"
     if not remotion_binary.exists():
         _run(["npm", "ci"], cwd=plan.release_dir / "remotion")
+    _run([str(remotion_binary), "browser", "ensure"], cwd=plan.release_dir / "remotion")
     runtime_media = plan.data_dir / "remotion-runtime"
     runtime_media.mkdir(parents=True, exist_ok=True)
     public_runtime = plan.release_dir / "remotion/public/shortsflow-runtime"

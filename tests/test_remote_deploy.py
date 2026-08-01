@@ -86,11 +86,20 @@ def test_install_release_grants_runtime_group_traversal(tmp_path: Path, monkeypa
     (plan.release_dir / "remotion/node_modules/.bin").mkdir(parents=True)
     (plan.release_dir / "remotion/node_modules/.bin/remotion").touch()
     plan.release_dir.chmod(0o700)
-    monkeypatch.setattr("scripts.remote_deploy._run", lambda *_args, **_kwargs: None)
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        "scripts.remote_deploy._run",
+        lambda args, **_kwargs: commands.append([str(item) for item in args]),
+    )
 
     _install_release(plan)
 
     assert plan.release_dir.stat().st_mode & 0o050 == 0o050
+    assert [
+        str(plan.release_dir / "remotion/node_modules/.bin/remotion"),
+        "browser",
+        "ensure",
+    ] in commands
 
 
 def test_release_environment_overrides_legacy_runtime_paths(tmp_path: Path, monkeypatch) -> None:
