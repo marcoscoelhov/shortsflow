@@ -13,6 +13,7 @@ from scripts.remote_deploy import (
     LegacyHandoff,
     _handoff_legacy_production,
     _install_release,
+    _write_release_environment,
     atomic_activate,
     deploy,
     prune_inactive_releases,
@@ -90,6 +91,23 @@ def test_install_release_grants_runtime_group_traversal(tmp_path: Path, monkeypa
     _install_release(plan)
 
     assert plan.release_dir.stat().st_mode & 0o050 == 0o050
+
+
+def test_release_environment_overrides_legacy_runtime_paths(tmp_path: Path, monkeypatch) -> None:
+    plan = DeploymentPlan.create("staging", "a" * 40, layout=DeploymentLayout.under(tmp_path))
+    monkeypatch.setattr("scripts.remote_deploy.shutil.chown", lambda *_args, **_kwargs: None)
+
+    _write_release_environment(plan)
+
+    values = dict(
+        line.split("=", 1)
+        for line in plan.release_environment_file.read_text(encoding="utf-8").splitlines()
+    )
+    assert values["SHORTSFLOW_RUNTIME_ENVIRONMENT"] == "staging"
+    assert values["SHORTSFLOW_APP_PORT"] == "8082"
+    assert values["SHORTSFLOW_DATA_DIR"] == str(plan.data_dir)
+    assert values["SHORTSFLOW_DATABASE_URL"] == f"sqlite:///{plan.database_path}"
+    assert values["SHORTSFLOW_DEPLOYMENT_REVISION"] == plan.revision
 
 
 def test_failed_health_restores_previous_release_and_revision(tmp_path: Path, monkeypatch) -> None:

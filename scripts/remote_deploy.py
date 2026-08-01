@@ -362,9 +362,25 @@ def _backup(plan: DeploymentPlan) -> Path:
 
 
 def _write_release_environment(plan: DeploymentPlan, *, revision: str | None = None) -> None:
+    public_url = "https://srv769897.tailc97b69.ts.net"
+    if plan.environment == "staging":
+        public_url += ":8443"
     plan.release_environment_file.parent.mkdir(parents=True, exist_ok=True)
     plan.release_environment_file.write_text(
-        f"SHORTSFLOW_DEPLOYMENT_REVISION={revision or plan.revision}\n",
+        "\n".join(
+            (
+                f"SHORTSFLOW_RUNTIME_ENVIRONMENT={plan.environment}",
+                f"SHORTSFLOW_APP_NAME=ShortsFlow {plan.environment.title()}",
+                f"SHORTSFLOW_APP_URL={public_url}",
+                "SHORTSFLOW_APP_HOST=127.0.0.1",
+                f"SHORTSFLOW_APP_PORT={plan.port}",
+                f"SHORTSFLOW_DATA_DIR={plan.data_dir}",
+                f"SHORTSFLOW_DATABASE_URL=sqlite:///{plan.database_path}",
+                f"SHORTSFLOW_RUNTIME_DRAIN_PATH={plan.drain_path}",
+                f"SHORTSFLOW_DEPLOYMENT_REVISION={revision or plan.revision}",
+                "",
+            )
+        ),
         encoding="utf-8",
     )
     os.chmod(plan.release_environment_file, 0o640)
