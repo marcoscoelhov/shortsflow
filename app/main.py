@@ -6,13 +6,15 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 import secrets
+import uuid
 from urllib.parse import quote, urlencode
 
-from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, Form, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.automation import AutomationService
 from app.config import get_settings
@@ -41,6 +43,7 @@ from app.ready_script_import import MAX_READY_SCRIPT_IMPORT_BODY_BYTES, MAX_READ
 from app.hub_context import COMMON_SCHEDULE_TIMEZONES, HubContext
 from app.publication_routes import create_publication_router
 from app.routes.health import router as health_router
+from app.runtime_execution import assert_real_execution_location
 from pydantic import ValidationError
 
 from app.topic_scout import TopicScout
@@ -162,12 +165,18 @@ templates.env.globals["creation_via_display"] = _creation_via_display
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    assert_real_execution_location(
+        environment=settings.runtime_environment,
+        use_mock_providers=settings.use_mock_providers,
+    )
     init_db()
     apply_operational_settings(settings)
     _log_render_startup_preflight()
-    orchestrator.start_worker()
+    if settings.worker_enabled:
+        orchestrator.start_worker()
     yield
-    orchestrator.stop_worker()
+    if settings.worker_enabled:
+        orchestrator.stop_worker()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -177,6 +186,11 @@ app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="stat
 
 
 def _authorized_request(request: Request) -> bool:
+    # Tailscale Serve strips spoofed identity headers before adding the verified
+    # user identity. The app listens on loopback in staging/production, so this
+    # is the passwordless path for authenticated tailnet users.
+    if request.headers.get("tailscale-user-login"):
+        return True
     if not settings.hub_auth_token:
         return True
     supplied = request.headers.get("x-shortsflow-hub-token")
@@ -507,6 +521,7 @@ def create_job(
     requested_angle: str | None = Form(default=None),
     custom_angle: str | None = Form(default=None),
     ready_script_text: str | None = Form(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 
 ):
     def resolve_trend_seed(selected_niche: str) -> HubTrendSeed:
@@ -538,7 +553,27 @@ def create_job(
             viral_prompt_template=load_viral_prompt_template(hub_settings_path(settings.data_dir)),
             trend_seed_resolver=resolve_trend_seed,
         )
-        job_id = orchestrator.create_job(result.payload.model_dump())
+        requested_job_id = None
+        if idempotency_key:
+            requested_job_id = str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"shortsflow:{settings.runtime_environment}:{idempotency_key}",
+                )
+            )
+            with SessionLocal() as session:
+                if session.get(Job, requested_job_id):
+                    return RedirectResponse(url=f"/jobs/{requested_job_id}", status_code=303)
+        if requested_job_id:
+            try:
+                job_id = orchestrator.create_job(result.payload.model_dump(), job_id=requested_job_id)
+            except IntegrityError:
+                with SessionLocal() as session:
+                    if session.get(Job, requested_job_id):
+                        return RedirectResponse(url=f"/jobs/{requested_job_id}", status_code=303)
+                raise
+        else:
+            job_id = orchestrator.create_job(result.payload.model_dump())
         if result.trend_report is not None:
             orchestrator.storage.persist_json(job_id, ARTIFACT_TREND_RESEARCH, result.trend_report)
     except ValidationError as exc:

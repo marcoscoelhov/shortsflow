@@ -12,7 +12,7 @@
     <p class="eyebrow">Lição 0001 · 5 minutos</p>
     <h1>Staging protege a produção sem trazer o trabalho pesado para o seu PC</h1>
     <p class="lede">Staging é uma segunda instalação do ShortsFlow na mesma VPS. Ela imita as condições reais, mas usa banco, artefatos, processo e endereço separados.</p>
-    <p class="notice"><strong>Estado atual:</strong> este desenho foi aprovado na entrevista, mas o ambiente de staging ainda não foi implantado.</p>
+    <p class="notice"><strong>Estado atual:</strong> o contrato e a automação foram implementados e testados. A ativação do staging real é o próximo gate; produção continua intacta até a aprovação visual.</p>
 
     <section>
       <h2>O caminho de uma mudança</h2>
@@ -46,7 +46,7 @@
           <tr><td>Código</td><td>Branch <code>staging</code></td><td>Branch <code>main</code></td></tr>
           <tr><td>Processo</td><td>Worker remoto de validação</td><td>Worker remoto operacional</td></tr>
           <tr><td>Banco</td><td>SQLite próprio</td><td>SQLite atual da operação</td></tr>
-          <tr><td>Artefatos</td><td>Diretório próprio</td><td><code>/root/shortsflow/data</code></td></tr>
+          <tr><td>Artefatos</td><td><code>/srv/shortsflow/staging/data</code></td><td><code>/srv/shortsflow/production/data</code> após promoção</td></tr>
           <tr><td>Providers</td><td>Reais, acionados explicitamente</td><td>Reais, usados pelos jobs aprovados</td></tr>
         </tbody>
       </table>
@@ -74,6 +74,7 @@
       <h2>Leve com você</h2>
       <p>Local escreve. Staging prova. Produção opera.</p>
       <div class="next-links">
+        <a href="0002-o-sistema-remoto-inteiro.html">Ver o sistema inteiro</a>
         <a href="../reference/staging-cheatsheet.html">Abrir a referência rápida</a>
         <a href="https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments">Ver regras de ambientes no GitHub</a>
       </div>

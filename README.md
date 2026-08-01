@@ -69,6 +69,41 @@ Validacao minima:
 curl http://127.0.0.1:8080/healthz
 ```
 
+## Desenvolvimento local com execucao remota
+
+O GitHub e a fonte de verdade do codigo e a VPS e o unico runtime para jobs
+reais. Um checkout local serve para editar, rodar testes baratos com providers
+mock e enviar commits; renderizacao, providers reais e E2E pesado ficam na VPS.
+
+Em um computador novo:
+
+```bash
+git clone https://github.com/marcoscoelhov/shortsflow.git
+cd shortsflow
+scripts/bootstrap_remote_client.sh
+```
+
+O bootstrap instala a CLI local e valida as duas identidades remotas. Ele usa a
+sessao Tailscale do computador, sem copiar uma chave SSH privada. Os comandos
+normais sao:
+
+```bash
+shortsflow job --theme "tema para producao"
+shortsflow validate --theme "tema para validar este commit"
+shortsflow resume staging
+```
+
+`job` envia trabalho para producao. `validate` envia para staging somente se o
+SHA local for exatamente o SHA implantado. `resume` cria ou atualiza o branch
+local correspondente ao SHA ativo na VPS. Alteracoes locais chegam ao runtime
+por commit, push e deploy atomico; diretorios de trabalho nao sao sincronizados
+diretamente, evitando estado divergente e deploys parciais.
+
+O contrato completo, incluindo prioridade, capacidade, backup e rollback, esta
+em [docs/remote-runtime-contract.md](docs/remote-runtime-contract.md).
+O procedimento de snapshots, restauração e rollback está em
+[docs/reconciliation-and-recovery.md](docs/reconciliation-and-recovery.md).
+
 ## Fluxo do produto
 
 1. `POST /jobs` cria um job.

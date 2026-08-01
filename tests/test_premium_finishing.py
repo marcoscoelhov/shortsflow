@@ -325,6 +325,7 @@ def test_premium_finishing_reprocesses_from_tts_when_current_narration_is_not_pr
     _create_rendered_job(job_id)
     _add_premium_generation_inputs(job_id)
     monkeypatch.setattr(orchestrator.settings, "use_mock_providers", False)
+    monkeypatch.setattr(orchestrator.settings, "runtime_environment", "staging")
     monkeypatch.setattr(orchestrator.settings, "tts_primary_provider", "gemini_tts")
     monkeypatch.setattr(orchestrator.premium_finishing, "renderer", FakePremiumRenderer())
     monkeypatch.setattr(orchestrator.premium_finishing, "gate", FakePremiumGate())

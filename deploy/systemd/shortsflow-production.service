@@ -1,0 +1,40 @@
+[Unit]
+Description=ShortsFlow production runtime
+After=network-online.target tailscaled.service shortsflow-vision.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=shortsflow-production
+Group=shortsflow-production
+WorkingDirectory=/opt/shortsflow/production/current
+EnvironmentFile=/etc/shortsflow/production.env
+EnvironmentFile=/etc/shortsflow/production-release.env
+Environment=SHORTSFLOW_RUNTIME_ENVIRONMENT=production
+Environment=SHORTSFLOW_APP_NAME=ShortsFlow
+Environment=SHORTSFLOW_APP_URL=https://srv769897.tailc97b69.ts.net
+Environment=SHORTSFLOW_APP_HOST=127.0.0.1
+Environment=SHORTSFLOW_APP_PORT=8080
+Environment=SHORTSFLOW_DATA_DIR=/srv/shortsflow/production/data
+Environment=SHORTSFLOW_DATABASE_URL=sqlite:////srv/shortsflow/production/data/shortsflow.db
+Environment=SHORTSFLOW_RUNTIME_DRAIN_PATH=/run/shortsflow/production/drain
+Environment=SHORTSFLOW_HEAVY_JOB_LOCK_ENABLED=true
+Environment=SHORTSFLOW_HEAVY_JOB_LOCK_PATH=/run/shortsflow/shared/heavy-job.lock
+Environment=SHORTSFLOW_REMOTE_PRODUCTION_URL=https://srv769897.tailc97b69.ts.net
+Environment=SHORTSFLOW_REMOTE_STAGING_URL=https://srv769897.tailc97b69.ts.net:8443
+ExecStartPre=/usr/bin/rm -f /run/shortsflow/shared/heavy-job.lock.production-waiting
+ExecStartPre=/opt/shortsflow/production/current/.venv/bin/python /opt/shortsflow/production/current/scripts/shortsflow_port_guard.py --host 127.0.0.1 --port 8080 --repo-root /opt/shortsflow/production/current --timeout-sec 20
+ExecStart=/opt/shortsflow/production/current/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8080
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=7200
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+Nice=0
+CPUWeight=100
+IOWeight=100
+
+[Install]
+WantedBy=multi-user.target

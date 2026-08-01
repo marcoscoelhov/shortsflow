@@ -1,0 +1,51 @@
+[Unit]
+Description=ShortsFlow staging runtime
+After=network-online.target tailscaled.service shortsflow-vision.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=shortsflow-staging
+Group=shortsflow-staging
+WorkingDirectory=/opt/shortsflow/staging/current
+EnvironmentFile=/etc/shortsflow/staging.env
+EnvironmentFile=/etc/shortsflow/staging-release.env
+Environment=SHORTSFLOW_RUNTIME_ENVIRONMENT=staging
+Environment="SHORTSFLOW_APP_NAME=ShortsFlow Staging"
+Environment=SHORTSFLOW_APP_URL=https://srv769897.tailc97b69.ts.net:8443
+Environment=SHORTSFLOW_APP_HOST=127.0.0.1
+Environment=SHORTSFLOW_APP_PORT=8082
+Environment=SHORTSFLOW_DATA_DIR=/srv/shortsflow/staging/data
+Environment=SHORTSFLOW_DATABASE_URL=sqlite:////srv/shortsflow/staging/data/shortsflow.db
+Environment=SHORTSFLOW_RUNTIME_DRAIN_PATH=/run/shortsflow/staging/drain
+Environment=SHORTSFLOW_HEAVY_JOB_LOCK_ENABLED=true
+Environment=SHORTSFLOW_HEAVY_JOB_LOCK_PATH=/run/shortsflow/shared/heavy-job.lock
+Environment=SHORTSFLOW_STAGING_MIN_FREE_DISK_GB=15
+Environment=SHORTSFLOW_STAGING_MIN_AVAILABLE_MEMORY_GB=2
+Environment=SHORTSFLOW_STAGING_MAX_ARTIFACTS_GB=5
+Environment=SHORTSFLOW_ARTIFACT_TTL_HARD_FAILURE_HOURS=168
+Environment=SHORTSFLOW_ARTIFACT_TTL_RECOVERABLE_HOURS=168
+Environment=SHORTSFLOW_ARTIFACT_TTL_PUBLISHABLE_HOURS=168
+Environment=SHORTSFLOW_AUTOMATION_ENABLED=false
+Environment=SHORTSFLOW_WATCHDOG_ENABLED=false
+Environment=SHORTSFLOW_YOUTUBE_PUBLISH_MODE=manual
+Environment=SHORTSFLOW_TIKTOK_AUTO_PUBLISH_ENABLED=false
+Environment=SHORTSFLOW_REMOTE_PRODUCTION_URL=https://srv769897.tailc97b69.ts.net
+Environment=SHORTSFLOW_REMOTE_STAGING_URL=https://srv769897.tailc97b69.ts.net:8443
+ExecStartPre=/opt/shortsflow/staging/current/.venv/bin/python /opt/shortsflow/staging/current/scripts/shortsflow_port_guard.py --host 127.0.0.1 --port 8082 --repo-root /opt/shortsflow/staging/current --timeout-sec 20
+ExecStart=/opt/shortsflow/staging/current/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8082
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=7200
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+Nice=10
+CPUWeight=20
+IOWeight=20
+MemoryHigh=3G
+MemoryMax=4G
+
+[Install]
+WantedBy=multi-user.target

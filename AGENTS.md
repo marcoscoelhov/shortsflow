@@ -46,6 +46,24 @@ Copy `.env.example` to `.env` for local setup. Keep secrets, generated artifacts
 ## Source & Fact-Checking Policy
 Do not use Wikipedia as a reliable factual source for generated scripts, especially for scientific, medical, engineering, historical, or technical claims. Prefer scientific articles, scholarly indexes, primary sources, official documentation, or institutional sources. If no reliable source is retrieved, keep the fact pack limited and force conservative wording instead of filling gaps with Wikipedia.
 
+## Remote Runtime Policy
+
+GitHub is the source of truth for code and the VPS is the only runtime for real
+Jobs de Video. Never call real providers, render media, or run heavy E2E jobs on
+a local workstation. Use `shortsflow job` for production content and
+`shortsflow validate` for an explicit staging validation. If the VPS, GitHub, or
+Tailscale is unavailable, fail closed; never fall back to local CPU.
+
+Keep `.env`, SQLite, models, provider outputs, and artifacts on the VPS. Do not
+sync runtime state through Git, rsync, shared filesystems, or a local fallback.
+Fast deterministic tests may run locally; run the canonical full suite through
+the remote workflow before deployment. When developing directly on the VPS,
+use a separate development worktree and never edit the active production
+release. Only the human operator may approve a production deployment.
+
+See `docs/remote-runtime-contract.md` for the complete deployment and recovery
+contract.
+
 ## Agent skills
 
 ### Issue tracker

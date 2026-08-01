@@ -104,6 +104,7 @@ def test_hub_auth_token_protects_pages_and_artifacts(monkeypatch) -> None:
     assert login.status_code == 200
     assert "Informe o token" in login.text
     assert client.get("/", headers={"x-shortsflow-hub-token": "secret-token"}).status_code == 200
+    assert client.get("/", headers={"tailscale-user-login": "operator@example.com"}).status_code == 200
     assert authed_client.get("/").status_code == 200
     assert client.get("/artifacts/missing.mp4").status_code == 401
     assert authed_client.get("/artifacts/missing.mp4").status_code == 404

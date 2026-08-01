@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remote VPS Runtime"
+  short_description: "Padroniza apps com código no GitHub e jobs reais na VPS"
+  default_prompt: "Use $remote-vps-runtime to design or implement a GitHub-driven remote VPS runtime with staging, production, Tailscale access, atomic deploys, and local thin clients."

@@ -38,6 +38,17 @@ def test_render_primary_backend_rejects_unknown_backend(monkeypatch) -> None:
         Settings(_env_file=None, render_primary_backend="browser")
 
 
+def test_runtime_environment_is_normalized() -> None:
+    settings = Settings(_env_file=None, runtime_environment="STAGING")
+
+    assert settings.runtime_environment == "staging"
+
+
+def test_runtime_environment_rejects_unknown_value() -> None:
+    with pytest.raises(ValidationError, match="runtime_environment must be one of"):
+        Settings(_env_file=None, runtime_environment="laptop")
+
+
 def test_vision_verifier_provider_accepts_local_openai(monkeypatch) -> None:
     monkeypatch.delenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", raising=False)
 

@@ -10,12 +10,16 @@
   Referência técnica sobre revisores, restrições de branch e momento em que secrets ficam disponíveis.
 - [Tailscale Docs: Tailscale SSH](https://tailscale.com/docs/features/tailscale-ssh)
   Explica como autorizar acesso SSH pela identidade da tailnet sem copiar uma chave privada entre computadores.
+- [Tailscale Docs: Serve e identity headers](https://tailscale.com/docs/features/tailscale-serve)
+  Documenta o proxy privado, os headers de identidade verificados e a exigência de manter o backend em loopback.
 
 ## Wisdom (Communities)
 
 - [GitHub Community: Actions](https://github.com/orgs/community/discussions/categories/actions)
   Use para comparar soluções de deployment e investigar limitações encontradas em workflows reais.
 
-## Gaps
+## Implementação local
 
-- A estratégia concreta de deploy do ShortsFlow ainda depende das próximas decisões da entrevista de arquitetura.
+- [Contrato remoto](docs/remote-runtime-contract.md)
+- [Reconciliação e recuperação](docs/reconciliation-and-recovery.md)
+- [Skill reutilizável](.agents/skills/remote-vps-runtime/SKILL.md)
