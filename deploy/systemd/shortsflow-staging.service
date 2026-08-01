@@ -7,7 +7,7 @@ Wants=network-online.target tailscaled.service
 Type=simple
 User=shortsflow-staging
 Group=shortsflow-staging
-WorkingDirectory=/opt/shortsflow/staging/current
+WorkingDirectory=/srv/shortsflow/staging
 EnvironmentFile=/etc/shortsflow/staging.env
 EnvironmentFile=/etc/shortsflow/staging-release.env
 Environment=SHORTSFLOW_RUNTIME_ENVIRONMENT=staging

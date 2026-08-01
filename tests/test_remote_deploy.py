@@ -110,6 +110,13 @@ def test_release_environment_overrides_legacy_runtime_paths(tmp_path: Path, monk
     assert values["SHORTSFLOW_DEPLOYMENT_REVISION"] == plan.revision
 
 
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_runtime_unit_uses_environment_state_as_working_directory(environment: str) -> None:
+    unit = Path(f"deploy/systemd/shortsflow-{environment}.service").read_text(encoding="utf-8")
+
+    assert f"WorkingDirectory=/srv/shortsflow/{environment}" in unit
+
+
 def test_failed_health_restores_previous_release_and_revision(tmp_path: Path, monkeypatch) -> None:
     previous_revision = "b" * 40
     plan = DeploymentPlan.create("staging", "a" * 40, layout=DeploymentLayout.under(tmp_path))

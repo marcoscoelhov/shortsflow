@@ -7,7 +7,7 @@ Wants=network-online.target tailscaled.service
 Type=simple
 User=shortsflow-production
 Group=shortsflow-production
-WorkingDirectory=/opt/shortsflow/production/current
+WorkingDirectory=/srv/shortsflow/production
 EnvironmentFile=/etc/shortsflow/production.env
 EnvironmentFile=/etc/shortsflow/production-release.env
 Environment=SHORTSFLOW_RUNTIME_ENVIRONMENT=production
