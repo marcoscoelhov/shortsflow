@@ -78,6 +78,48 @@ class MockCreativeProvider:
             "a comparacao inesperada que muda a perspectiva",
         ]
 
+    def _target_duration_sec(self, topic_plan: dict[str, Any]) -> int:
+        retention_map = topic_plan.get("retention_map")
+        configured_target = retention_map.get("target_duration_sec") if isinstance(retention_map, dict) else None
+        target = configured_target or getattr(self.settings, "target_duration_sec", 45)
+        return max(35, min(55, int(target)))
+
+    def _concise_subject(self, subject: str) -> str:
+        if subject.strip().endswith("?"):
+            return "esse fenômeno"
+        words = word_tokens(subject)[:3]
+        return " ".join(words) or "o tema"
+
+    def _duration_profile(self, angle: str, target_duration_sec: int) -> tuple[bool, str, list[str], str, str]:
+        if target_duration_sec >= 45:
+            angle_label = " ".join(word_tokens(angle)[:3]) or "outro ângulo"
+            return (
+                True,
+                "Se parecem tão conhecidos, por que o primeiro detalhe muda tudo? "
+                "A resposta só aparece quando a imagem final devolve sentido completo à pista mostrada no começo.",
+                [
+                    "O detalhe surge como pista discreta antes da resposta aparecer claramente na tela.",
+                    f"O recorte em {angle_label} transforma a pista visual em tensão sem antecipar a resposta.",
+                    "O entorno muda a cena e revela uma consequência maior que parecia no começo.",
+                    "A comparação confirma o mecanismo e transforma a dúvida inicial em imagem concreta.",
+                    "A última evidência aproxima a virada e preserva o detalhe decisivo para o final.",
+                ],
+                "A virada final chega. A pista rouba a cena diante do olho, parece fogo e fica difícil de ignorar.",
+                "Quando você rever o começo, observe de novo. A primeira cena já entregava tudo em tempo real.",
+            )
+        return (
+            False,
+            "Se parecem tão conhecidos, por que o primeiro detalhe muda tudo?",
+            [
+                "O detalhe vira uma pista visual antes da resposta aparecer.",
+                f"Mas o recorte em {angle} cria uma tensão que prende o olhar.",
+                "O entorno revela o que quase ninguém percebe no primeiro segundo.",
+                "A virada é simples: a pista estava visível antes do cérebro notar.",
+            ],
+            "A virada final: a pista rouba a cena diante do olho, parece fogo e fica difícil de ignorar.",
+            "Quando você rever o começo, lembra: a primeira cena já entregava tudo em tempo real.",
+        )
+
     def plan_topic(
         self,
         seed_theme: str,
@@ -112,21 +154,32 @@ class MockCreativeProvider:
 
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         subject = topic_plan["canonical_topic"]
+        subject_label = self._concise_subject(subject)
+        target_duration_sec = self._target_duration_sec(topic_plan)
         angle = topic_plan["angle"]
         fact_pack = topic_plan.get("fact_pack") if isinstance(topic_plan.get("fact_pack"), dict) else {}
         verified_facts = fact_pack.get("facts") or [] if fact_pack.get("status") == "verified" else []
         grounded_claims = [str(fact.get("claim") or "").strip() for fact in verified_facts if str(fact.get("claim") or "").strip()]
         source_fact_ids = [str(fact.get("fact_id")) for fact in verified_facts if fact.get("fact_id")][:2]
-        hook = f"{subject.capitalize()} parecem comuns; então uma pista escondida rouba a cena e deixa tudo estranho."
-        loop = f"Se parecem tão conhecidos, por que o primeiro detalhe muda tudo?"
+        hook = f"{subject_label.capitalize()} parece comum; então uma pista escondida rouba a cena e deixa tudo estranho."
+        is_long_profile, loop, default_body, payoff, ending = self._duration_profile(angle, target_duration_sec)
         if grounded_claims:
-            body = [
-                grounded_claims[0],
-                grounded_claims[1] if len(grounded_claims) > 1 else f"Mas esse detalhe vira tensão quando entra em {angle}.",
-                grounded_claims[2] if len(grounded_claims) > 2 else f"O que parecia pequeno começa a revelar uma consequência visual maior.",
-                f"Quando esses fatos entram na mesma sequência, {subject} parece quase impossível por alguns segundos.",
-                f"A pista final é o que sobra depois que o detalhe escondido aparece em cena.",
-            ]
+            if is_long_profile:
+                body = [
+                    grounded_claims[0],
+                    grounded_claims[1] if len(grounded_claims) > 1 else default_body[1],
+                    grounded_claims[2] if len(grounded_claims) > 2 else default_body[2],
+                    "Juntas, essas evidências mudam a leitura da cena sem antecipar a resposta guardada para o final.",
+                    "Uma última imagem conecta o mecanismo observado à pista inicial e prepara a conclusão completa da história.",
+                ]
+            else:
+                body = [
+                    grounded_claims[0],
+                    grounded_claims[1] if len(grounded_claims) > 1 else default_body[1],
+                    grounded_claims[2] if len(grounded_claims) > 2 else default_body[2],
+                    "Juntas, essas evidências mudam a leitura da cena.",
+                    "A última imagem prepara a conclusão sem revelar tudo cedo.",
+                ]
             key_facts = grounded_claims[:3]
             claim_trace = [
                 {
@@ -138,12 +191,7 @@ class MockCreativeProvider:
                 if fact.get("fact_id")
             ]
         else:
-            body = [
-                f"O detalhe vira uma pista visual antes da resposta aparecer.",
-                f"Mas o recorte em {angle} cria uma tensão que prende o olhar.",
-                f"O entorno revela o que quase ninguém percebe no primeiro segundo.",
-                f"A virada é simples: a pista estava visível antes do cérebro notar.",
-            ]
+            body = default_body
             key_facts = [
                 f"{subject.capitalize()} pode ser apresentado por um detalhe visual central.",
                 f"O tema fica mais claro quando o roteiro mostra contexto e função.",
@@ -151,8 +199,6 @@ class MockCreativeProvider:
             ]
             source_fact_ids = []
             claim_trace = []
-        payoff = f"A virada final: a pista rouba a cena diante do olho, parece fogo e fica difícil de ignorar."
-        ending = f"Quando você rever o começo, lembra: a primeira cena já entregava tudo em tempo real."
         narration_parts = [hook, loop, *body, payoff, ending]
         full_narration = " ".join(narration_parts)
         token_count = len(tokenize(full_narration))
@@ -196,6 +242,30 @@ class MockCreativeProvider:
 
     def repair_script(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any]:
         repaired = dict(script)
+        duration_reasons = {
+            "estimated_duration_outside_absolute_range",
+            "estimated_duration_outside_target_window",
+            "word_count_too_low_for_natural_pace",
+            "word_count_too_high_for_natural_pace",
+        }
+        safe_structural_reasons = duration_reasons | {
+            "avg_sentence_too_long",
+            "sentence_too_long",
+            "body_beat_count_invalid",
+            "weak_ending",
+            "fact_pack_source_ids_missing",
+            "high_risk_claims_need_fact_pack_grounding",
+        }
+        if duration_reasons.intersection(gate_reasons) and set(gate_reasons).issubset(safe_structural_reasons):
+            duration_plan = dict(topic_plan)
+            duration_plan.setdefault("canonical_topic", str(repaired.get("title") or "o tema"))
+            duration_plan.setdefault("angle", "o mecanismo visual que explica o fenomeno")
+            duration_plan.setdefault("title_candidates", [str(repaired.get("title") or "O detalhe que muda tudo")])
+            duration_repair = self.generate_script(duration_plan)
+            duration_metrics = dict(duration_repair.get("qa_metrics") or {})
+            duration_metrics.update({"repair_provider": self.provider_name, "repair_reasons": gate_reasons})
+            duration_repair["qa_metrics"] = duration_metrics
+            return duration_repair
         fact_pack = topic_plan.get("fact_pack") if isinstance(topic_plan.get("fact_pack"), dict) else {}
         verified_facts = fact_pack.get("facts") or [] if fact_pack.get("status") == "verified" else []
         grounded_claims = [str(fact.get("claim") or "").strip() for fact in verified_facts if str(fact.get("claim") or "").strip()]

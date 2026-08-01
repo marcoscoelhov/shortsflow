@@ -945,6 +945,116 @@ def test_mock_generate_script_includes_retention_map_and_visual_opening() -> Non
     assert script["visual_opening"]["first_frame_goal"]
     assert script["qa_metrics"]["editorial_prompt_version"] == EDITORIAL_PROMPT_VERSION
 
+
+@pytest.mark.parametrize(
+    ("canonical_topic", "target_duration_sec", "has_verified_facts"),
+    [
+        (canonical_topic, target_duration_sec, has_verified_facts)
+        for target_duration_sec in range(35, 56)
+        for canonical_topic in ("polvos", "Por que o gelo estala dentro do copo?")
+        for has_verified_facts in (False, True)
+    ],
+)
+def test_mock_generate_script_honors_supported_target_durations(
+    canonical_topic: str,
+    target_duration_sec: int,
+    has_verified_facts: bool,
+) -> None:
+    provider = MockCreativeProvider()
+    topic_plan = {
+        "canonical_topic": canonical_topic,
+        "angle": "o mecanismo visual que explica o fenômeno",
+        "title_candidates": [f"{canonical_topic}: o detalhe que muda tudo"],
+        "retention_map": build_retention_map(target_duration_sec),
+    }
+    if has_verified_facts:
+        topic_plan["fact_pack"] = {
+            "status": "verified",
+            "facts": [
+                {"fact_id": "F1", "claim": "Os polvos são moluscos marinhos da classe Cephalopoda."},
+                {"fact_id": "F2", "claim": "O polvo possui oito braços fortes cobertos por ventosas sensíveis."},
+                {"fact_id": "F3", "claim": "Polvos podem mudar de cor e liberar tinta como mecanismo de defesa."},
+            ],
+        }
+    script = provider.generate_script(topic_plan)
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=target_duration_sec)
+
+    assert "estimated_duration_outside_target_window" not in result.reasons
+    assert "word_count_too_low_for_natural_pace" not in result.reasons
+    assert "word_count_too_high_for_natural_pace" not in result.reasons
+    assert "avg_sentence_too_long" not in result.reasons
+    assert "sentence_too_long" not in result.reasons
+    assert script["full_narration"] == " ".join(
+        [
+            script["hook"],
+            script["loop"],
+            *script["body_beats"],
+            script["payoff"],
+            script["ending"],
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "gate_reasons",
+    [
+        ["word_count_too_low_for_natural_pace"],
+        ["word_count_too_low_for_natural_pace", "weak_ending"],
+    ],
+)
+def test_mock_repair_script_regenerates_coherent_structure_for_long_target(gate_reasons: list[str]) -> None:
+    provider = MockCreativeProvider()
+    ending = "No fim, a última imagem conecta a resposta ao começo."
+    repaired = provider.repair_script(
+        {
+            "title": "Polvos escondem uma pista visual",
+            "hook": "Polvos mudam antes que o olhar perceba.",
+            "body_beats": [
+                "A primeira imagem mostra o contraste.",
+                "A segunda aproxima a resposta.",
+                "A terceira prepara a virada.",
+            ],
+            "ending": ending,
+            "full_narration": (
+                "Polvos mudam antes que o olhar perceba. "
+                "A primeira imagem mostra o contraste. "
+                "A segunda aproxima a resposta. "
+                "A terceira prepara a virada. "
+                f"{ending}"
+            ),
+            "qa_metrics": {},
+        },
+        gate_reasons,
+        {
+            "canonical_topic": "polvos",
+            "retention_map": build_retention_map(55),
+            "fact_pack": {
+                "status": "verified",
+                "facts": [
+                    {"fact_id": "F1", "claim": "Os polvos são moluscos marinhos da classe Cephalopoda."},
+                    {"fact_id": "F2", "claim": "O polvo possui oito braços fortes cobertos por ventosas sensíveis."},
+                    {"fact_id": "F3", "claim": "Polvos podem mudar de cor e liberar tinta como mecanismo de defesa."},
+                ],
+            },
+        },
+    )
+
+    expected_narration = " ".join(
+        [
+            repaired["hook"],
+            repaired["loop"],
+            *repaired["body_beats"],
+            repaired["payoff"],
+            repaired["ending"],
+        ]
+    )
+    assert repaired["full_narration"] == expected_narration
+    assert repaired["full_narration"].endswith(repaired["ending"])
+    assert len(word_tokens(repaired["full_narration"])) >= 138
+    assert repaired["source_fact_ids"] == ["F1", "F2"]
+
+
 def test_mock_repair_script_uses_fact_pack_and_shortens_long_sentences() -> None:
     provider = MockCreativeProvider()
     repaired = provider.repair_script(

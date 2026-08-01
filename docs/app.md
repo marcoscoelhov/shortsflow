@@ -516,6 +516,14 @@ Comando padrao:
 .venv/bin/python -m pytest -q
 ```
 
+Com `SHORTSFLOW_USE_MOCK_PROVIDERS=true`, o provider criativo gera roteiros
+deterministicos compativeis com toda a faixa aceita de `target_duration_sec`
+(35 a 55 segundos). Temas longos sao resumidos apenas na frase de abertura do
+mock, e alvos de 45 segundos ou mais recebem narracao adicional suficiente para
+passar a mesma janela de ritmo natural usada pelo pipeline real. Testes diretos
+de providers externos devem injetar credenciais falsas no seam de configuracao;
+eles nao podem depender de segredos presentes no `.env` local.
+
 ## Onde alterar
 
 Para mudar UX do hub:
