@@ -96,7 +96,8 @@ class Settings(BaseSettings):
     vision_verifier_provider: str = "local_openai"
     auto_visual_review_enabled: bool = False
     local_vision_base_url: str = "http://127.0.0.1:8081/v1"
-    local_vision_model: str = "minicpm-v-4.6-q4"
+    local_vision_model: str = "qwen3-vl-2b-instruct-q4-k-m"
+    local_vision_release_approved: bool = False
     vision_verifier_timeout_sec: float = 240.0
     background_music_enabled: bool = True
     background_music_provider: str = "local_bank"
@@ -309,6 +310,15 @@ class Settings(BaseSettings):
         allowed = {"auto", "enabled", "disabled"}
         if normalized not in allowed:
             raise ValueError("minimax_text_thinking must be one of: auto, enabled, disabled")
+        return normalized
+
+    @field_validator("openai_reasoning_effort", "xai_reasoning_effort")
+    @classmethod
+    def validate_reasoning_effort(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+        if normalized not in allowed:
+            raise ValueError("reasoning effort must be one of: none, minimal, low, medium, high, xhigh, max")
         return normalized
 
     @field_validator("asset_generation_parallelism")

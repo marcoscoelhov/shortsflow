@@ -175,8 +175,6 @@ class ReviewOperations:
         self,
         job_id: str,
         reviewer_identity: str = "tailscale:local-reviewer",
-        *,
-        score_override_confirmed: bool = False,
     ) -> None:
         with session_scope() as session:
             job = session.get(Job, job_id)
@@ -194,18 +192,11 @@ class ReviewOperations:
             if not premium_report or not bool(premium_report.get("passed")):
                 raise FatalStepError("versao premium nao passou no gate de acabamento")
             confirmations = {"premium_version_selected", "visual_review_confirmed"}
-            if score_override_confirmed:
-                confirmations.add("premium_publish_score_accepted")
             payload = {
                 "reviewer_identity": reviewer_identity,
                 "action": "approve_premium",
                 "reason_codes": sorted(confirmations),
-                "notes": (
-                    "Versao premium selecionada como arquivo final para publicacao; "
-                    "score premium abaixo do alvo aceito por revisao humana explicita."
-                    if score_override_confirmed
-                    else "Versao premium selecionada como arquivo final para publicacao."
-                ),
+                "notes": "Versao premium selecionada como arquivo final para publicacao.",
             }
             job_dir = self.storage.job_dir(job_id, create=False)
             artifact_index, original_video_uri = promote_render_output_to_file(

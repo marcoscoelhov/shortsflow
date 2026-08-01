@@ -333,10 +333,10 @@ class MonetizationPipeline(BasePipeline):
             confirmations=confirmations,
             visual_review_required=visual_review_required,
         )
-        # Final human review happens in YouTube Studio. Internal manual_required
-        # entries remain as diagnostics, but they do not block ShortsFlow readiness.
-        passed = not hard_blockers
-        final_status = JOB_STATUS_READY_FOR_UPLOAD if passed else (JOB_STATUS_BLOCKED_FOR_MONETIZATION if hard_blockers else JOB_STATUS_MONETIZATION_REVIEW)
+        passed, final_status = self.resolve_monetization_status(
+            hard_blockers=hard_blockers,
+            manual_required=manual_required,
+        )
         return {
             "schema_version": self.settings.schema_version,
             "job_id": job.job_id,
@@ -363,6 +363,20 @@ class MonetizationPipeline(BasePipeline):
                 else "standard_publish_readiness"
             ),
         }
+
+    def resolve_monetization_status(
+        self,
+        *,
+        hard_blockers: list[str],
+        manual_required: list[str],
+    ) -> tuple[bool, str]:
+        if hard_blockers:
+            return False, JOB_STATUS_BLOCKED_FOR_MONETIZATION
+        if REASON_VISUAL_REVIEW_REQUIRED in manual_required:
+            return False, JOB_STATUS_MONETIZATION_REVIEW
+        # Other manual items are completed in YouTube Studio and remain
+        # operational diagnostics rather than internal upload blockers.
+        return True, JOB_STATUS_READY_FOR_UPLOAD
 
     def automatic_publish_blockers(self, publish_readiness: dict[str, Any], *, ready_script_bank_input: bool = False) -> list[str]:
         automatic_reasons = {

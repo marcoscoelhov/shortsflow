@@ -17,7 +17,7 @@ O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipelin
 - Arquitetura modularizada para manutencao local: `JobOrchestrator` coordena lifecycle, lease, retry, eventos e worker; pipelines, providers, contexto do hub e publicacao ficam em modulos donos.
 - Testes divididos por dominio para reduzir o custo de regressao e evitar depender de uma suite e2e monolitica para mudancas locais.
 - Roteiros agora usam explicitamente `hook`, `loop`, `body_beats`, `payoff` e `ending`; o `full_narration` deve concatenar esses blocos sem perder a tensao nem o fechamento.
-- A revisao visual automatica roda por padrao no gate de monetizacao quando aparece `visual_review_required`; se a IA visual confirmar os assets, o relatorio e reconstruido com `visual_review_confirmed`.
+- A revisao visual automatica roda por padrao no gate de monetizacao quando aparece `visual_review_required`; ela so pode remover a pendencia com autoridade local explicitamente aprovada e proveniencia local valida. No piloto de tracao, o Qwen exato substitui a revisao humana visual somente durante a execucao autorizada e nunca autoriza publicacao.
 - A mesma revisao visual pode remover divida visual de jobs em backlog; se ainda restar revisao factual/editorial, o job fica pendente e o ciclo tenta outro candidato para o mesmo slot.
 
 ## Comeco rapido
@@ -136,6 +136,25 @@ python -m app.cli survival-cohort-plan --seed 20260730
 O comando imprime JSON com titulo, hook, familia, risco ficcional, mecanica de decisao, payoff visual e
 enquadramento de seguranca de cada cenario.
 
+O piloto de tracao A/B/C persiste os 18 assignments e cria os tres canarios sem publicar:
+
+```bash
+python -m app.cli pilot-10k-start --seed 20260731
+```
+
+O alvo editorial é 40 segundos e a faixa aceita é 30–50 segundos; o pipeline não
+deve regenerar um conteúdo aprovado apenas por variar dentro dessa janela.
+
+Para tambem gerar e renderizar os tres, com autoaprovacao visual estrita pelo Qwen local:
+
+```bash
+python -m app.cli pilot-10k-start --seed 20260731 --process --qwen-autoapprove
+```
+
+O dry-run legado nao e o experimento persistente. O piloto novo ainda nao implementa promocao/rollback ou
+painel de coortes. A politica operacional reconciliada esta em
+[`docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`](docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md).
+
 ## Estados principais
 
 ### Jobs
@@ -153,6 +172,11 @@ enquadramento de seguranca de cada cenario.
 | `failed` | Falha geral no pipeline. |
 
 Tambem existem falhas especificas por etapa, como `script_quality_failed`, `scene_plan_quality_failed`, `asset_quality_failed`, `subtitle_quality_failed` e `render_quality_failed`.
+
+O score da auditoria premium e diagnostico editorial; o Score de Autoaprovacao composto (`0.82`) e um gate
+separado da automacao. Hard blockers tecnicos continuam bloqueantes. Ha um gap conhecido: agenda/publicacao
+YouTube ainda precisa executar novamente o gate premium imediatamente antes da acao externa; ate a correcao,
+o fluxo nao deve ser considerado pronto para autopublicacao segura.
 
 ### Agenda de publicacao
 

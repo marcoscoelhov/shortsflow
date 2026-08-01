@@ -75,7 +75,7 @@ OPERATIONAL_SETTING_SPECS = (
         "LLM",
         "select",
         PROVIDER_OPTIONS,
-        description="Provider para juiz editorial (viral, metadata, visual, growth). Recomendado: DeepSeek v4 Flash; use modelos premium só por exceção.",
+        description="Provider para juiz editorial (viral, metadata, visual, growth). Operacao atual: xAI com Grok 4.5.",
     ),
     OperationalSettingSpec(
         "llm_gate_judge_model",
@@ -89,7 +89,7 @@ OPERATIONAL_SETTING_SPECS = (
         "Usar LLM Pro em exceções",
         "LLM",
         "checkbox",
-        description="Permite DeepSeek V4 Pro apenas em revisão premium/final, temas complexos ou escalonamento explícito.",
+        description="Permite Grok 4.5 em revisão premium/final, temas complexos ou escalonamento explícito.",
     ),
     OperationalSettingSpec("llm_premium_review_provider", "LLM Pro excepcional", "LLM", "select", PROVIDER_OPTIONS),
     OperationalSettingSpec("llm_premium_review_model", "Modelo Pro excepcional", "LLM", "text"),
@@ -125,6 +125,13 @@ OPERATIONAL_SETTING_SPECS = (
     ),
     OperationalSettingSpec("local_vision_base_url", "URL da visao local", "Visao local", "text"),
     OperationalSettingSpec("local_vision_model", "Modelo da visao local", "Visao local", "text"),
+    OperationalSettingSpec(
+        "local_vision_release_approved",
+        "Eval local de 20 imagens aprovado",
+        "Visao local",
+        "checkbox",
+        description="Libera o modelo local para remover a pendencia visual da autopublicacao.",
+    ),
     OperationalSettingSpec(
         "vision_verifier_timeout_sec",
         "Timeout da visao",

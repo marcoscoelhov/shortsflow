@@ -322,6 +322,42 @@ class YouTubeAnalyticsSnapshot(Base):
     raw_response: Mapped[dict] = mapped_column(JSON)
 
 
+class RetentionExperiment(Base):
+    __tablename__ = "retention_experiments"
+
+    experiment_id: Mapped[str] = mapped_column(String, primary_key=True)
+    profile_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    schema_version: Mapped[str] = mapped_column(String, default="1.0.0")
+    content_hash: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    status: Mapped[str] = mapped_column(String, default="planned", index=True)
+    line_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    target_job_count: Mapped[int] = mapped_column(Integer, default=18)
+    decision: Mapped[str | None] = mapped_column(String, nullable=True)
+    result_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class RetentionExperimentAssignment(Base):
+    __tablename__ = "retention_experiment_assignments"
+    __table_args__ = (
+        UniqueConstraint("experiment_id", "position", name="uq_retention_assignment_position"),
+        UniqueConstraint("experiment_id", "concept_id", name="uq_retention_assignment_concept"),
+    )
+
+    assignment_id: Mapped[str] = mapped_column(String, primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(ForeignKey("retention_experiments.experiment_id"), index=True)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.job_id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    position: Mapped[int] = mapped_column(Integer)
+    arm: Mapped[str] = mapped_column(String, index=True)
+    concept_id: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="planned", index=True)
+    assignment_metadata: Mapped[dict] = mapped_column(JSON)
+
+
 class ReadyScriptItem(Base):
     __tablename__ = "ready_script_items"
 

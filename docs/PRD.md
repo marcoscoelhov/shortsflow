@@ -467,12 +467,18 @@ O app deve suportar providers substituíveis para:
 
 Providers reais atuais esperados:
 
-- DeepSeek para texto/gates baratos;
+- GPT-5.6 Luna `high` para pauta, roteiro, reparo e planejamento de cenas;
+- Grok 4.5 `high` como juiz independente dos gates e revisoes premium;
+- DeepSeek como provider disponivel para benchmark de custo, sem fallback silencioso;
 - MiniMax para imagem quando configurado;
 - Edge TTS como opção barata publicável;
 - Gemini/ElevenLabs como opções de TTS quando configuradas;
 - banco local de música como padrão;
 - YouTube Data API para publicação.
+
+O score da auditoria premium e diagnostico editorial e nao substitui hard blockers. O Score de
+Autoaprovacao composto e um gate separado da automacao. A decisao e os gaps conhecidos de implementacao
+estao em `docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`.
 
 Modo de teste deve conseguir rodar com mocks determinísticos e sem custo de API.
 

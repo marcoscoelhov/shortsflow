@@ -20,6 +20,31 @@ from app.utils import word_tokens
 
 
 class SemanticVerifier:
+    VISION_RESPONSE_SCHEMA: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "description": {"type": "string"},
+            "aligned_boolean": {"type": "boolean"},
+            "alignment_score_0_to_1": {"type": "number", "minimum": 0, "maximum": 1},
+            "subject_visibility_score_0_to_1": {"type": "number", "minimum": 0, "maximum": 1},
+            "style_match_score_0_to_1": {"type": "number", "minimum": 0, "maximum": 1},
+            "text_or_watermark_penalty_0_to_1": {"type": "number", "minimum": 0, "maximum": 1},
+            "artifact_penalty_0_to_1": {"type": "number", "minimum": 0, "maximum": 1},
+            "reasons": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [
+            "description",
+            "aligned_boolean",
+            "alignment_score_0_to_1",
+            "subject_visibility_score_0_to_1",
+            "style_match_score_0_to_1",
+            "text_or_watermark_penalty_0_to_1",
+            "artifact_penalty_0_to_1",
+            "reasons",
+        ],
+        "additionalProperties": False,
+    }
+
     def __init__(self) -> None:
         settings = get_settings()
         self.use_mock_providers = settings.use_mock_providers
@@ -68,6 +93,18 @@ class SemanticVerifier:
             return self._verification_failed_score(scene, heuristic, self._vision_disabled_reason)
         except Exception as exc:  # noqa: BLE001
             return self._verification_failed_score(scene, heuristic, str(exc))
+
+    def score_candidate(self, scene: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
+        """Score generation candidates without invoking the CPU-heavy vision model."""
+        if self.use_mock_providers:
+            return self.score(scene, asset)
+        heuristic = self._heuristic_score(scene, asset)
+        reason = (
+            "pixel verification unavailable for local semantic fallback"
+            if asset.get("provider") == "local_semantic"
+            else "selected asset pending critical-scene pixel verification"
+        )
+        return self._verification_failed_score(scene, heuristic, reason)
 
     def _heuristic_score(self, scene: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
         expected_terms = self._keywords(
@@ -213,8 +250,16 @@ class SemanticVerifier:
                 }
             ],
             "temperature": 0,
-            "max_tokens": 1000,
-            "response_format": {"type": "json_object"},
+            "max_tokens": 512,
+            "chat_template_kwargs": {"enable_thinking": False},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "vision_review",
+                    "strict": True,
+                    "schema": self.VISION_RESPONSE_SCHEMA,
+                },
+            },
         }
         deadline = time.monotonic() + max(self.timeout_sec, 1.0)
         last_error: Exception | None = None
@@ -288,14 +333,11 @@ class SemanticVerifier:
         return parsed
 
     def _parse_vision_json(self, content: str, *, provider: str) -> dict[str, Any]:
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         first_json = content.find("{")
-        last_json = content.rfind("}")
-        if first_json != -1 and last_json != -1:
-            content = content[first_json : last_json + 1]
+        if first_json == -1:
+            raise ProviderFailure(provider, f"invalid vision output: {content[:200]}")
         try:
-            data = json.loads(content)
+            data, _ = json.JSONDecoder().raw_decode(content[first_json:])
         except json.JSONDecodeError as exc:
             raise ProviderFailure(provider, f"invalid vision output: {content[:200]}") from exc
         if not isinstance(data, dict):

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.editorial.retention import enrich_plan_for_script_generation
 from app.editorial.visual_contract import normalize_visual_contract_payload
+from app.editorial.visual_style import public_visual_style_profile
 from app.hub_prompt import extract_viral_prompt_contract
 from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
 from app.manual_script import extract_ready_script_from_notes
@@ -235,7 +236,11 @@ class ScriptPipeline(BasePipeline):
             raise RecoverableStepError(f"text publish audit failed: {', '.join(audit_reasons)}")
         visual_contract_started = time.monotonic()
         try:
-            visual_contract, visual_contract_metrics = self._generate_and_validate_visual_contract(job.job_id, script)
+            visual_contract, visual_contract_metrics = self._generate_and_validate_visual_contract(
+                job.job_id,
+                script,
+                request_notes=request.notes,
+            )
         except Exception as exc:  # noqa: BLE001
             stage_timings_ms["visual_contract_ms"] = round((time.monotonic() - visual_contract_started) * 1000, 1)
             self._persist_script_generation_debug(
@@ -581,12 +586,21 @@ class ScriptPipeline(BasePipeline):
             "output_rule": "O provider retorna JSON interno do app, mas deve satisfazer semanticamente estes campos.",
         }
 
-    def _generate_and_validate_visual_contract(self, job_id: str, script: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    def _generate_and_validate_visual_contract(
+        self,
+        job_id: str,
+        script: dict[str, Any],
+        *,
+        request_notes: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         self._remove_stale_quality_report(job_id, "visual_contract_gate.json")
         raw_contract = self.providers.creative.generate_visual_contract(script)
-        raw_dict = raw_contract if isinstance(raw_contract, dict) else {}
+        raw_dict = dict(raw_contract) if isinstance(raw_contract, dict) else {}
+        requested_style = self._visual_style_profile_from_notes(request_notes)
+        if requested_style is not None:
+            raw_dict["visual_style_profile"] = requested_style
         contract = normalize_visual_contract_payload(
-            raw_contract,
+            raw_dict,
             script=script,
             schema_version=self.settings.schema_version,
             source_provider=str(raw_dict.get("source_provider") or raw_dict.get("provider") or ""),
@@ -601,6 +615,13 @@ class ScriptPipeline(BasePipeline):
             )
             raise RecoverableStepError(f"visual contract quality gate failed: {', '.join(gate.reasons[:6])}")
         return contract, metrics
+
+    def _visual_style_profile_from_notes(self, notes: str | None) -> dict[str, Any] | None:
+        for raw_line in str(notes or "").splitlines():
+            key, separator, value = raw_line.partition("=")
+            if separator and key.strip() == "visual_style_profile":
+                return public_visual_style_profile(value.strip())
+        return None
 
     def _requires_verified_fact_pack(self, *args: Any, **kwargs: Any) -> Any:
         return self.fact_pack_domain._requires_verified_fact_pack(*args, **kwargs)

@@ -55,6 +55,22 @@ def test_llm_registry_does_not_mock_fallback_in_real_runs(monkeypatch) -> None:
     assert registry.fallback_provider() is None
 
 
+def test_llm_registry_does_not_build_configured_fallback_when_disabled(monkeypatch) -> None:
+    registry = object.__new__(LLMProviderRegistry)
+    registry.settings = SimpleNamespace(
+        use_mock_providers=False,
+        llm_enable_fallback=False,
+        llm_fallback_provider="deepseek",
+    )
+
+    def fail_if_built(*_args, **_kwargs):
+        raise AssertionError("disabled fallback must not be constructed")
+
+    monkeypatch.setattr(registry, "_build_provider", fail_if_built)
+
+    assert registry.fallback_provider() is None
+
+
 def test_script_generation_candidates_skip_duplicate_provider_model() -> None:
     class Provider:
         provider_name = "deepseek"
@@ -457,6 +473,21 @@ def test_quality_judge_candidates_fail_closed_when_fallback_disabled() -> None:
     roles = [role for role, _provider in resilient._quality_judge_candidates("editorial", {})]
 
     assert roles == ["gate_judge"]
+
+
+def test_quality_judge_does_not_retry_same_provider_and_model_as_premium() -> None:
+    premium = SimpleNamespace(provider_name="xai", model_name="grok-4.5", judge_quality_gate=lambda *_args: {})
+    gate = SimpleNamespace(provider_name="xai", model_name="grok-4.5", judge_quality_gate=lambda *_args: {})
+    resilient = object.__new__(ResilientCreativeProvider)
+    resilient.settings = SimpleNamespace(llm_enable_fallback=False, llm_premium_review_enabled=True)
+    resilient.premium_review_provider = premium
+    resilient.gate_judge_provider = gate
+    resilient.fallback = None
+    resilient.repair_provider = None
+
+    candidates = resilient._quality_judge_candidates("growth_score", {"review_tier": "premium"})
+
+    assert [(role, provider.model_name) for role, provider in candidates] == [("premium_review", "grok-4.5")]
 
 
 def test_premium_review_provider_uses_deepseek_pro_model_for_exceptions(monkeypatch) -> None:

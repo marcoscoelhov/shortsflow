@@ -48,26 +48,34 @@ SHORTSFLOW_DATA_DIR=data
 
 ```env
 SHORTSFLOW_USE_MOCK_PROVIDERS=false
-SHORTSFLOW_LLM_PRIMARY_PROVIDER=deepseek
-SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=deepseek
-SHORTSFLOW_LLM_REPAIR_PROVIDER=deepseek
-SHORTSFLOW_LLM_SCENE_PROVIDER=deepseek
-SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=deepseek
-SHORTSFLOW_LLM_GATE_JUDGE_MODEL=deepseek-v4-flash
+SHORTSFLOW_LLM_PRIMARY_PROVIDER=openai
+SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=openai
+SHORTSFLOW_LLM_REPAIR_PROVIDER=openai
+SHORTSFLOW_LLM_SCENE_PROVIDER=openai
+SHORTSFLOW_OPENAI_MODEL=gpt-5.6-luna
+SHORTSFLOW_OPENAI_REASONING_EFFORT=high
+SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=xai
+SHORTSFLOW_LLM_GATE_JUDGE_MODEL=grok-4.5
 SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled
-SHORTSFLOW_DEEPSEEK_API_KEY=<redigido>
-SHORTSFLOW_DEEPSEEK_MODEL=deepseek-v4-flash
+SHORTSFLOW_LLM_ENABLE_FALLBACK=false
+SHORTSFLOW_OPENAI_API_KEY=<redigido>
+SHORTSFLOW_XAI_API_KEY=<redigido>
+SHORTSFLOW_XAI_REASONING_EFFORT=high
 SHORTSFLOW_LLM_JSON_MAX_TOKENS=4096
 SHORTSFLOW_LLM_PREMIUM_REVIEW_ENABLED=true
-SHORTSFLOW_LLM_PREMIUM_REVIEW_PROVIDER=deepseek
-SHORTSFLOW_LLM_PREMIUM_REVIEW_MODEL=deepseek-v4-pro
+SHORTSFLOW_LLM_PREMIUM_REVIEW_PROVIDER=xai
+SHORTSFLOW_LLM_PREMIUM_REVIEW_MODEL=grok-4.5
 # Opcional: enriquecimento visual/referencias quando configurado.
 SHORTSFLOW_QWEN_API_KEY=<redigido-ou-vazio>
 SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>
 SHORTSFLOW_MINIMAX_IMAGE_API_KEY=<redigido>
 ```
 
-Politica LLM operacional: DeepSeek v4 Flash e o padrao barato para provider principal, rascunho de roteiro, reparo, planejamento de cenas e juiz comum dos gates. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e o padrao para evitar fallback caro e invisivel. Qwen e opcional para enriquecimento visual/referencias quando a chave estiver configurada. DeepSeek v4 Pro deve ficar restrito a excecoes premium/final/complexas via `SHORTSFLOW_LLM_PREMIUM_REVIEW_*`; nao configure Pro como fallback geral automatico.
+Politica LLM operacional: GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho, reparo e planejamento de cenas. Grok 4.5 com `reasoning_effort=high` atua como juiz independente nos gates comuns e revisoes premium. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e `SHORTSFLOW_LLM_ENABLE_FALLBACK=false` evitam retorno silencioso ao DeepSeek. Qwen remoto continua opcional para enriquecimento visual/referencias. O verificador visual local usa Qwen3-VL 2B Q4, sem custo de API, somente nas imagens selecionadas de hook, prova e payoff. A proveniência de tentativas novas já exige provider/modelo exatos e ausência de fallback. Mantenha `SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED=false` para uso geral até o eval local de 20 imagens; o comando `pilot-10k-start --process --qwen-autoapprove` concede autoridade visual somente à execução explícita dos canários e não publica.
+
+A politica completa, incluindo a separacao entre score premium diagnostico e Score de Autoaprovacao, esta em
+`docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`. Enquanto o gate premium nao for
+reexecutado nos caminhos YouTube de agenda/publicacao, trate autopublicacao segura como bloqueada.
 
 Para imagem, a chave de texto MiniMax e usada primeiro. `SHORTSFLOW_MINIMAX_IMAGE_API_KEY` funciona como chave dedicada de imagem e entra apenas quando a chave de texto retorna quota, saldo, credito ou rate limit. Se a chave de texto estiver vazia, a dedicada de imagem e usada diretamente.
 
@@ -127,7 +135,7 @@ curl http://127.0.0.1:8080/healthz
 Resposta esperada:
 
 ```json
-{"status":"ok","app":"ShortsFlow","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","providers":{"mode":"production","llm_primary":"deepseek","llm_gate_judge":"deepseek","llm_gate_judge_model":"deepseek-v4-flash","tts_primary":"gemini_tts","render_backend":"remotion"},"render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
+{"status":"ok","app":"ShortsFlow","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","providers":{"mode":"production","llm_primary":"openai","llm_gate_judge":"xai","llm_gate_judge_model":"grok-4.5","tts_primary":"gemini_tts","render_backend":"remotion"},"render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
 ```
 
 Se estiver usando outra porta, ajuste a URL do `curl`.

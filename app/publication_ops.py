@@ -243,8 +243,6 @@ class PublicationOperations:
         if self.premium_publish_gate is None:
             raise FatalStepError("premium publish gate unavailable")
         confirmations = self._premium_publish_confirmations(session, job.job_id, extra_confirmations)
-        if job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK:
-            confirmations.update({"visual_review_confirmed", "premium_publish_score_accepted"})
         result = self.premium_publish_gate.evaluate(
             job,
             confirmations=confirmations,
@@ -309,13 +307,10 @@ class PublicationOperations:
         self,
         job_id: str,
         reviewer_identity: str = "tailscale:local-reviewer",
-        *,
-        score_override_confirmed: bool = False,
     ) -> None:
         self.review_ops.approve_premium_for_publish(
             job_id,
             reviewer_identity=reviewer_identity,
-            score_override_confirmed=score_override_confirmed,
         )
 
     def publish_job(

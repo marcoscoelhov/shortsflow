@@ -1,5 +1,6 @@
 import asyncio
 
+from app.editorial.visual_contract import build_mock_visual_contract
 from tests.e2e_support import *  # noqa: F403
 
 
@@ -2226,6 +2227,16 @@ def test_visual_review_not_required_after_real_vision_check() -> None:
 
     assert orchestrator.monetization_pipeline.visual_review_required_for_assets(job) is False
 
+
+def test_pending_visual_review_uses_review_status_instead_of_ready_for_upload() -> None:
+    passed, final_status = orchestrator.monetization_pipeline.resolve_monetization_status(
+        hard_blockers=[],
+        manual_required=["visual_review_required"],
+    )
+
+    assert passed is False
+    assert final_status == "monetization_review"
+
 def test_publish_readiness_does_not_block_factual_topic_without_fact_pack_policy() -> None:
     readiness = orchestrator.monetization_pipeline.publish_readiness_report(
         None,
@@ -4020,6 +4031,22 @@ def test_structured_viral_contract_preserves_topic_niche_quality_metrics() -> No
     assert niche_contract["subniche"] == "planetas"
     assert niche_contract["source"] == "astronomy_keyword_contract"
     assert contract["viral_prompt"]["source"] == "hub_settings"
+
+
+def test_explicit_visual_style_note_overrides_provider_contract(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    script = _base_script("A cúpula fecha enquanto o sinal continua no céu.")
+    provider_contract = build_mock_visual_contract(script, "1.0.0")
+    monkeypatch.setattr(orchestrator.providers.creative, "generate_visual_contract", lambda _script: provider_contract)
+
+    contract, _metrics = pipeline._generate_and_validate_visual_contract(
+        "visual-style-note-job",
+        script,
+        request_notes="experimental=true\nvisual_style_profile=high_contrast_comic",
+    )
+
+    assert contract["visual_style_profile"]["id"] == "high_contrast_comic"
+    assert contract["visual_style_profile"]["version"] == "visual-style-v1"
 
 
 def test_resilient_script_generation_does_not_use_deterministic_safety_net() -> None:

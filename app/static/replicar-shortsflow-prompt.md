@@ -263,25 +263,28 @@ Implemente providers:
 - MiniMax text
 - DeepSeek V4 Flash via API OpenAI-compatible
 - Qwen opcional para enriquecimento visual/referencias quando configurado
-- OpenAI via Responses ou Chat Completions apenas como adaptador opcional, nao como provider real principal do caminho operacional
+- OpenAI via Responses como provider principal do caminho operacional, usando GPT-5.6 Luna com effort high
 - Mock apenas para testes
 
 Tenha registry configuravel por env:
 
 ```env
-SHORTSFLOW_LLM_PRIMARY_PROVIDER=deepseek
-SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=deepseek
-SHORTSFLOW_LLM_REPAIR_PROVIDER=deepseek
-SHORTSFLOW_LLM_SCENE_PROVIDER=deepseek
-SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=deepseek
-SHORTSFLOW_LLM_GATE_JUDGE_MODEL=deepseek-v4-flash
+SHORTSFLOW_LLM_PRIMARY_PROVIDER=openai
+SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=openai
+SHORTSFLOW_LLM_REPAIR_PROVIDER=openai
+SHORTSFLOW_LLM_SCENE_PROVIDER=openai
+SHORTSFLOW_OPENAI_MODEL=gpt-5.6-luna
+SHORTSFLOW_OPENAI_REASONING_EFFORT=high
+SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=xai
+SHORTSFLOW_LLM_GATE_JUDGE_MODEL=grok-4.5
 SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled
+SHORTSFLOW_LLM_ENABLE_FALLBACK=false
 SHORTSFLOW_LLM_PREMIUM_REVIEW_ENABLED=true
-SHORTSFLOW_LLM_PREMIUM_REVIEW_PROVIDER=deepseek
-SHORTSFLOW_LLM_PREMIUM_REVIEW_MODEL=deepseek-v4-pro
+SHORTSFLOW_LLM_PREMIUM_REVIEW_PROVIDER=xai
+SHORTSFLOW_LLM_PREMIUM_REVIEW_MODEL=grok-4.5
 ```
 
-Use DeepSeek v4 Flash como padrao barato para provider principal, rascunho, reparo, planejamento de cenas e juiz comum dos gates. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` deve ser o padrao operacional: nao crie fallback geral caro e invisivel. `SHORTSFLOW_LLM_SCENE_PROVIDER` e uma rota especializada de cenas, nao autorizacao para substituir silenciosamente o fluxo principal. Qwen pode existir como provider opcional para enriquecimento visual/referencias quando configurado. DeepSeek v4 Pro fica restrito a sinais explicitos de excecao premium/final/complexa via `SHORTSFLOW_LLM_PREMIUM_REVIEW_*`; nunca como fallback geral automatico.
+Use GPT-5.6 Luna com effort high como provider principal, rascunho, reparo e planejamento de cenas. Use Grok 4.5 high como juiz independente dos gates comuns e revisoes premium. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e `SHORTSFLOW_LLM_ENABLE_FALLBACK=false` devem permanecer como padrao operacional para impedir fallback geral caro e invisivel. Qwen pode existir como provider opcional para enriquecimento visual/referencias quando configurado.
 
 ## Regras de roteiro
 
@@ -523,6 +526,18 @@ Estados:
 
 Nao confunda render valido com video publicavel.
 
+Separe os scores: o score da auditoria premium e diagnostico editorial; o Score
+de Autoaprovacao composto (default `0.82`) decide elegibilidade automatizada.
+Artefato ausente, auditoria invalida e hard blocker tecnico falham fechado. Rode
+o preflight premium imediatamente antes de aprovar, agendar ou publicar tanto no
+YouTube quanto no TikTok; status persistido antigo nao substitui essa checagem.
+
+Revisao visual por `prompt_heuristic` nunca confirma pixels. Um modelo local so
+pode remover pendencia depois de release explicito, com provider/modelo exatos,
+sem fallback e cobrindo cenas criticas. `survival_decisions` normalmente exige
+revisao humana; uma excecao de piloto deve ser identificada, limitada ao Qwen
+local exato e continuar fora da publicacao automatica.
+
 ## Hub web
 
 Crie rotas:
@@ -607,17 +622,20 @@ SHORTSFLOW_USE_MOCK_PROVIDERS=false
 SHORTSFLOW_DATABASE_URL=sqlite:///data/shortsflow.db
 SHORTSFLOW_DATA_DIR=data
 
-SHORTSFLOW_LLM_PRIMARY_PROVIDER=deepseek
-SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=deepseek
-SHORTSFLOW_LLM_REPAIR_PROVIDER=deepseek
-SHORTSFLOW_LLM_SCENE_PROVIDER=deepseek
-SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=deepseek
-SHORTSFLOW_LLM_GATE_JUDGE_MODEL=deepseek-v4-flash
+SHORTSFLOW_LLM_PRIMARY_PROVIDER=openai
+SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=openai
+SHORTSFLOW_LLM_REPAIR_PROVIDER=openai
+SHORTSFLOW_LLM_SCENE_PROVIDER=openai
+SHORTSFLOW_OPENAI_MODEL=gpt-5.6-luna
+SHORTSFLOW_OPENAI_REASONING_EFFORT=high
+SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=xai
+SHORTSFLOW_LLM_GATE_JUDGE_MODEL=grok-4.5
 SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled
+SHORTSFLOW_LLM_ENABLE_FALLBACK=false
 SHORTSFLOW_LLM_JSON_MAX_TOKENS=4096
 SHORTSFLOW_LLM_PREMIUM_REVIEW_ENABLED=true
-SHORTSFLOW_LLM_PREMIUM_REVIEW_PROVIDER=deepseek
-SHORTSFLOW_LLM_PREMIUM_REVIEW_MODEL=deepseek-v4-pro
+SHORTSFLOW_LLM_PREMIUM_REVIEW_PROVIDER=xai
+SHORTSFLOW_LLM_PREMIUM_REVIEW_MODEL=grok-4.5
 
 SHORTSFLOW_MINIMAX_API_KEY=<redigido-ou-vazio>
 SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>

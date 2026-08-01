@@ -1,5 +1,5 @@
 [Unit]
-Description=ShortsFlow local vision verifier (MiniCPM-V 4.6 via llama.cpp)
+Description=ShortsFlow local vision verifier (Qwen3-VL 2B via llama.cpp)
 After=network-online.target
 Wants=network-online.target
 
@@ -9,13 +9,18 @@ WorkingDirectory=__REPO_ROOT__
 Environment=SHORTSFLOW_REPO_ROOT=__REPO_ROOT__
 Environment=LD_LIBRARY_PATH=__REPO_ROOT__/data/vendor/llama.cpp/build/bin
 ExecStart=__REPO_ROOT__/data/vendor/llama.cpp/build/bin/llama-server \
-  -m __REPO_ROOT__/data/models/minicpm-v-4.6/MiniCPM-V-4_6-Q4_K_M.gguf \
-  --mmproj __REPO_ROOT__/data/models/minicpm-v-4.6/mmproj-model-f16.gguf \
+  -m __REPO_ROOT__/data/models/qwen3-vl-2b/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
+  --mmproj __REPO_ROOT__/data/models/qwen3-vl-2b/mmproj-Qwen3VL-2B-Instruct-F16.gguf \
   --host 127.0.0.1 \
   --port 8081 \
   --threads 2 \
   --threads-batch 2 \
-  --ctx-size 4096
+  --ctx-size 2048 \
+  --parallel 1 \
+  --flash-attn on \
+  --image-min-tokens 1024 \
+  --image-max-tokens 1024 \
+  --cache-ram 0
 Restart=always
 RestartSec=5
 KillSignal=SIGINT
