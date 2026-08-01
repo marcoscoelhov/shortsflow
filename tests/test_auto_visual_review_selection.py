@@ -55,6 +55,25 @@ def test_real_visual_evidence_requires_every_critical_scene(monkeypatch) -> None
 def test_qwen_cannot_authorize_publication_before_release_eval(monkeypatch) -> None:
     monkeypatch.setenv("SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED", "false")
     get_settings.cache_clear()
+
+
+def test_explicit_pilot_authority_accepts_complete_exact_qwen_evidence(monkeypatch) -> None:
+    monkeypatch.setenv("SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED", "false")
+    get_settings.cache_clear()
+    service = object.__new__(AutoVisualReviewService)
+    summary = {
+        "asset_visual_critical_scene_ids": ["scene-1", "scene-3", "scene-5"],
+        "asset_visual_verified_critical_scene_ids": ["scene-1", "scene-3", "scene-5"],
+    }
+
+    assert service._has_real_visual_evidence(
+        summary,
+        {"vision"},
+        [{"vision_aligned": True}],
+        authority_approved=True,
+    ) is True
+
+    get_settings.cache_clear()
     service = object.__new__(AutoVisualReviewService)
     summary = {
         "asset_visual_critical_scene_ids": ["scene-1", "scene-3", "scene-5"],

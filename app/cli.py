@@ -5,7 +5,9 @@ import json
 import sys
 from pathlib import Path
 
+from app.config import get_settings
 from app.survival_experiment import build_survival_cohort_plan
+from app.traction_pilot import start_traction_pilot
 
 
 def main() -> None:
@@ -56,6 +58,18 @@ def main() -> None:
     )
     survival_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para seleção determinística")
 
+    pilot_parser = subparsers.add_parser(
+        "pilot-10k-start",
+        help="Persiste o piloto A/B/C e cria os três canários sem publicar",
+    )
+    pilot_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para ordem determinística")
+    pilot_parser.add_argument("--process", action="store_true", help="Gera e renderiza os três canários")
+    pilot_parser.add_argument(
+        "--qwen-autoapprove",
+        action="store_true",
+        help="Autoriza nesta execução somente o Qwen local exato, sem fallback, como revisor visual",
+    )
+
     args = parser.parse_args()
     if args.command == "survival-cohort-plan":
         print(json.dumps(build_survival_cohort_plan(seed=args.seed), ensure_ascii=False, indent=2))
@@ -72,6 +86,30 @@ def main() -> None:
     init_db()
     apply_operational_settings(orchestrator.settings)
     service = AutomationService(orchestrator)
+
+    if args.command == "pilot-10k-start":
+        if args.process and not args.qwen_autoapprove:
+            parser.error("--process exige --qwen-autoapprove")
+        result = start_traction_pilot(orchestrator, seed=args.seed, canary_count=3)
+        processed = 0
+        if args.process:
+            settings = get_settings()
+            expected_model = "qwen3-vl-2b-instruct-q4-k-m"
+            if settings.use_mock_providers:
+                parser.error("o piloto real não aceita mock providers")
+            if settings.vision_verifier_provider != "local_openai" or settings.local_vision_model != expected_model:
+                parser.error(
+                    "Qwen autoapproval exige vision_verifier_provider=local_openai e "
+                    f"local_vision_model={expected_model}"
+                )
+            settings.local_vision_release_approved = True
+            orchestrator.settings.local_vision_release_approved = True
+            for canary in result["canaries"]:
+                orchestrator.process_job(str(canary["job_id"]))
+                processed += 1
+        result["processed_job_count"] = processed
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
 
     if args.command == "automation-run":
         result = service.run_daily_cycle(force=args.force)

@@ -45,3 +45,17 @@ Copy `.env.example` to `.env` for local setup. Keep secrets, generated artifacts
 
 ## Source & Fact-Checking Policy
 Do not use Wikipedia as a reliable factual source for generated scripts, especially for scientific, medical, engineering, historical, or technical claims. Prefer scientific articles, scholarly indexes, primary sources, official documentation, or institutional sources. If no reliable source is retrieved, keep the fact pack limited and force conservative wording instead of filling gaps with Wikipedia.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues; external pull requests are not a triage surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The canonical labels are `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repository uses a single-context domain documentation layout. See `docs/agents/domain.md`.

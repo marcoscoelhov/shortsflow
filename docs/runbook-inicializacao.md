@@ -71,7 +71,11 @@ SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>
 SHORTSFLOW_MINIMAX_IMAGE_API_KEY=<redigido>
 ```
 
-Politica LLM operacional: GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho, reparo e planejamento de cenas. Grok 4.5 com `reasoning_effort=high` atua como juiz independente nos gates comuns e revisoes premium. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e `SHORTSFLOW_LLM_ENABLE_FALLBACK=false` evitam retorno silencioso ao DeepSeek. Qwen remoto continua opcional para enriquecimento visual/referencias. O verificador visual local usa Qwen3-VL 2B Q4, sem custo de API, somente nas imagens selecionadas de hook, prova e payoff. Mantenha `SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED=false` ate o modelo passar e registrar o eval local de 20 imagens; antes disso ele coleta resultados, mas nao remove a pendencia que protege a autopublicacao.
+Politica LLM operacional: GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho, reparo e planejamento de cenas. Grok 4.5 com `reasoning_effort=high` atua como juiz independente nos gates comuns e revisoes premium. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e `SHORTSFLOW_LLM_ENABLE_FALLBACK=false` evitam retorno silencioso ao DeepSeek. Qwen remoto continua opcional para enriquecimento visual/referencias. O verificador visual local usa Qwen3-VL 2B Q4, sem custo de API, somente nas imagens selecionadas de hook, prova e payoff. A proveniência de tentativas novas já exige provider/modelo exatos e ausência de fallback. Mantenha `SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED=false` para uso geral até o eval local de 20 imagens; o comando `pilot-10k-start --process --qwen-autoapprove` concede autoridade visual somente à execução explícita dos canários e não publica.
+
+A politica completa, incluindo a separacao entre score premium diagnostico e Score de Autoaprovacao, esta em
+`docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`. Enquanto o gate premium nao for
+reexecutado nos caminhos YouTube de agenda/publicacao, trate autopublicacao segura como bloqueada.
 
 Para imagem, a chave de texto MiniMax e usada primeiro. `SHORTSFLOW_MINIMAX_IMAGE_API_KEY` funciona como chave dedicada de imagem e entra apenas quando a chave de texto retorna quota, saldo, credito ou rate limit. Se a chave de texto estiver vazia, a dedicada de imagem e usada diretamente.
 

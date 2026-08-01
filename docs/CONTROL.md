@@ -1,6 +1,6 @@
 # ShortsFlow Control
 
-Last updated: 2026-07-10T18:02:08+00:00
+Last updated: 2026-07-31T21:25:28+00:00
 
 ## Product North Star
 
@@ -14,7 +14,7 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 
 - Minimum proof: 1 video reaches viral breakout status.
 - Working viral definition until Marcos overrides it: `10,000+ views` or `10x current mature median`, whichever is higher.
-- Current mature median: 506 views from real YouTube Analytics snapshots on 2026-07-10.
+- Current mature median: 396 views from 39 reliable real YouTube Analytics snapshots on 2026-07-31.
 - Secondary health target: 600+ mature median views.
 - Cadence: 1 strong cosmos/astronomy video/day.
 - Scope now: one YouTube Shorts channel, winner-model visual/extreme cosmos topics.
@@ -40,12 +40,21 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 
 ## Current Evidence
 
-- Analytics refreshed on 2026-07-10: 50 videos, 28 reliable mature snapshots, 13,517 total views.
-- Breakout not reached: best video has 853 views; current target is 10,000 views.
-- Mature median is 506 views, still below the 600+ secondary health target.
+- Analytics refreshed on 2026-07-31: 79 videos, 39 reliable mature snapshots, 17,717 total views.
+- Breakout not reached: best video has 882 views; current target is 10,000 views.
+- Mature median is 396 views, still below the 600+ secondary health target.
 - Current top repeat pattern: concrete cosmic paradox + visual object — Lua no horizonte, Vênus mais quente que Mercúrio, Marte vermelho/ferrugem, anéis de Saturno e som de buraco negro/NASA.
-- Rendering can reach `ready_for_upload`, but the latest automatic run exhausted four attempts: two `gate_rejected` candidates and one final premium score of 6.5/9.4 left future coverage at 2 of 3 slots.
+- Rendering can reach `ready_for_upload`; automatic generation still shows repeated `gate_rejected` and premium-audit gaps, but the latest watchdog reports 4 future scheduled slots and no recovery needed. Premium audit score below target is diagnostic; technical blockers are not.
 - CEO/operator brief loop exists weekly on Discord and must read this file first.
+
+## Policy Reconciliation — 2026-07-31
+
+- Luna `high` generates/plans; Grok 4.5 `high` judges gates; general fallback remains disabled.
+- Premium audit score is diagnostic and distinct from the `0.82` autoapproval score.
+- Premium preflight must fail closed and run before approval, scheduling or publication on every platform.
+- Local Qwen is not publication authority. `survival_decisions` normalmente exige revisão humana; somente o piloto `niche_traction_minimax_fit_20260731_*`, marcado explicitamente, permite autoaprovação visual pelo Qwen exato sem fallback. Essa exceção nunca agenda nem publica.
+- The survival dry-run is not the persistent experiment/feedback loop from Plan 009.
+- Canonical record: `docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`.
 
 ## Last Production Run
 
@@ -89,16 +98,19 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 
 ## Current Bottleneck
 
-Restore reliable scheduled coverage, then performance learning. The engine has enough mature Analytics to repeat winners, but no breakout yet.
+Publication safety hardening is the immediate bottleneck before the next automated pilot: YouTube schedule/publish paths still bypass premium preflight, the premium audit does not yet convert every technical blocker into a reason, and fresh visual attempts do not fully validate local provider/model provenance. Performance learning remains the business bottleneck after these safety gaps close.
 
 ## Next Task
 
-Single next task: run reactive backlog recovery once to restore the third future slot; then keep one strong cosmos video/day and let the daily growth loop compare mature winners/losers before changing prompts.
+Single next task: close and regression-test the three publication-safety gaps above without changing niche or editorial strategy; then let the 4-slot scheduled cosmos queue mature and rerun the weekly Analytics sync/report.
 
 Acceptance:
 
 - maintain 1 strong cosmos/astronomy scheduled or published video/day;
-- restore at least 3 future scheduled slots before another forced generation run;
+- keep at least 3 future scheduled slots; do not force generation while coverage remains healthy;
+- execute premium preflight in YouTube approval/schedule/publish paths;
+- reject audit-reported hard blockers even when the premium score is diagnostic;
+- require approved local provider/model provenance with no fallback before automatic visual confirmation;
 - do not change niche/strategy before mature evidence exists;
 - check YouTube performance for scheduled videos after they mature;
 - update baseline/median only from real performance evidence;

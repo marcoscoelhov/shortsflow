@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Job, RenderOutput, SceneAsset, ScenePlan
+from app.models import Job, RenderOutput, SceneAsset, ScenePlan, TopicRequest
 from app.providers.image import SemanticVerifier
 from app.storage import StorageManager
 from app.utils import utcnow
@@ -28,6 +28,9 @@ class AutoVisualReviewService:
         render_exists = session.scalar(select(RenderOutput.render_id).where(RenderOutput.job_id == job.job_id)) is not None
         modes = {str(item) for item in asset_summary.get("asset_visual_verification_modes") or []}
         selected_asset_scores = [dict(asset.scores or {}) for asset in selected_assets]
+        request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
+        pilot_qwen_authorized = self._pilot_qwen_authorized(str(request.notes or "") if request else "")
+        authority_approved = get_settings().local_vision_release_approved or pilot_qwen_authorized
         verification_attempts = self._verify_prompt_heuristic_assets(
             session,
             job,
@@ -35,8 +38,14 @@ class AutoVisualReviewService:
             asset_summary,
             modes,
             selected_asset_scores,
+            authority_approved,
         )
-        real_visual_evidence = self._has_real_visual_evidence(asset_summary, modes, selected_asset_scores)
+        real_visual_evidence = self._has_real_visual_evidence(
+            asset_summary,
+            modes,
+            selected_asset_scores,
+            authority_approved=authority_approved,
+        )
 
         reasons: list[str] = []
         if asset_summary.get("asset_visual_gate_pass") is not True:
@@ -66,6 +75,7 @@ class AutoVisualReviewService:
                 "verification_modes": sorted(modes),
                 "real_visual_evidence": real_visual_evidence,
                 "local_vision_release_approved": get_settings().local_vision_release_approved,
+                "pilot_qwen_authorized": pilot_qwen_authorized,
                 "verification_attempts": verification_attempts,
             },
         }
@@ -97,6 +107,7 @@ class AutoVisualReviewService:
         asset_summary: dict[str, Any],
         modes: set[str],
         selected_asset_scores: list[dict[str, Any]],
+        authority_approved: bool,
     ) -> list[dict[str, Any]]:
         if not selected_assets:
             return []
@@ -111,10 +122,7 @@ class AutoVisualReviewService:
         verified_scene_ids = {
             str(asset.scene_id)
             for asset in critical_assets
-            if (asset.scores or {}).get("vision_aligned") is True
-            and not (asset.scores or {}).get("verification_fallback_reason")
-            and (asset.scores or {}).get("vision_provider") == "local_openai"
-            and (asset.scores or {}).get("vision_model") == verifier.local_model
+            if self._matches_local_verifier(asset.scores or {}, verifier)
         }
         asset_summary["asset_visual_verified_critical_scene_ids"] = sorted(verified_scene_ids)
         if critical_scene_ids and set(critical_scene_ids) == verified_scene_ids:
@@ -122,6 +130,7 @@ class AutoVisualReviewService:
                 asset_summary,
                 modes,
                 selected_asset_scores,
+                authority_approved=authority_approved,
             )
             return []
         attempts: list[dict[str, Any]] = []
@@ -152,7 +161,7 @@ class AutoVisualReviewService:
             attempts.append(
                 {
                     "scene_id": asset.scene_id,
-                    "passed": mode == "vision" and scores.get("vision_aligned") is True,
+                    "passed": self._matches_local_verifier(scores, verifier),
                     "verification_mode": mode,
                     "vision_provider": scores.get("vision_provider"),
                     "vision_model": scores.get("vision_model"),
@@ -165,9 +174,24 @@ class AutoVisualReviewService:
         asset_summary["asset_visual_verified_critical_scene_ids"] = sorted(verified_scene_ids)
         if attempts:
             asset_summary["asset_visual_verification_modes"] = sorted(modes)
-            asset_summary["asset_visual_real_vision_checked"] = self._has_real_visual_evidence(asset_summary, modes, selected_asset_scores)
+            asset_summary["asset_visual_real_vision_checked"] = self._has_real_visual_evidence(
+                asset_summary,
+                modes,
+                selected_asset_scores,
+                authority_approved=authority_approved,
+            )
             asset_summary["asset_visual_review_artifact"] = self.ARTIFACT_NAME
         return attempts
+
+    @staticmethod
+    def _matches_local_verifier(scores: dict[str, Any], verifier: SemanticVerifier) -> bool:
+        return (
+            scores.get("verification_mode") == "vision"
+            and scores.get("vision_aligned") is True
+            and not scores.get("verification_fallback_reason")
+            and scores.get("vision_provider") == "local_openai"
+            and scores.get("vision_model") == verifier.local_model
+        )
 
     @staticmethod
     def critical_assets(selected_assets: list[Any], scenes: list[dict[str, Any]]) -> list[Any]:
@@ -212,11 +236,18 @@ class AutoVisualReviewService:
         asset_summary: dict[str, Any],
         modes: set[str],
         selected_asset_scores: list[dict[str, Any]],
+        *,
+        authority_approved: bool | None = None,
     ) -> bool:
+        authority_approved = (
+            get_settings().local_vision_release_approved
+            if authority_approved is None
+            else authority_approved
+        )
         critical_scene_ids = {str(item) for item in asset_summary.get("asset_visual_critical_scene_ids") or []}
         if critical_scene_ids:
             verified_scene_ids = {str(item) for item in asset_summary.get("asset_visual_verified_critical_scene_ids") or []}
-            return get_settings().local_vision_release_approved and critical_scene_ids == verified_scene_ids
+            return authority_approved and critical_scene_ids == verified_scene_ids
         return (
             asset_summary.get("asset_visual_real_vision_checked") is True
             or any(mode and mode != "prompt_heuristic" for mode in modes)
@@ -224,4 +255,14 @@ class AutoVisualReviewService:
                 scores.get("vision_aligned") is True and not scores.get("verification_fallback_reason")
                 for scores in selected_asset_scores
             )
+        )
+
+    @staticmethod
+    def _pilot_qwen_authorized(notes: str) -> bool:
+        lines = set(notes.splitlines())
+        return (
+            any(line.startswith("experiment_id=niche_traction_minimax_fit_20260731_") for line in lines)
+            and "pilot_qwen_autoapproval=true" in lines
+            and "vision_policy=qwen_local_exact_no_fallback" in lines
+            and "automatic_publication_allowed=false" in lines
         )

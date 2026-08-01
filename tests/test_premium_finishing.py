@@ -29,6 +29,7 @@ from app.pipelines.common import FatalStepError
 from app.pipelines.finish_plan import build_finish_plan, public_finish_plan
 from app.premium_finishing import RemotionCliRenderer
 from app.quality.premium_finishing_gate import PremiumFinishingGate
+from app.quality.premium_publish_gate import PREMIUM_PUBLISH_AUDIT_STAGES
 from app.quality.render_gate import RenderGateResult
 from app.utils import file_sha256, stable_hash, utcnow
 
@@ -62,12 +63,13 @@ def _audit_result(score: float) -> dict:
         "passed_target": score >= 9.4,
         "stages": [
             {
-                "stage": "publish_readiness",
+                "stage": stage,
                 "score": score,
                 "target_pass": score >= 9.4,
                 "evidence": ["test double audit"],
                 "gaps": [] if score >= 9.4 else ["test score below target"],
             }
+            for stage in PREMIUM_PUBLISH_AUDIT_STAGES
         ],
     }
 
@@ -849,6 +851,54 @@ def test_survival_finish_plan_tells_the_binary_choice_through_scene_overlays() -
     assert [scene["overlays"] for scene in first["scenes"]] == [scene["overlays"] for scene in second["scenes"]]
 
 
+@pytest.mark.parametrize(
+    ("topic_summary", "expected_marker"),
+    [
+        ("No observatório, você fecha a cúpula ou mantém o sinal?", "SINAL ANÔMALO"),
+        ("No hotel submerso, você sela o corredor ou libera a cápsula?", "PRESSÃO AUMENTANDO"),
+        ("No farol isolado, você usa a bateria no rádio ou na luz?", "TEMPESTADE AUMENTANDO"),
+        ("No museu parado no tempo, você gira o relógio para frente ou para trás?", "TEMPO CONGELADO"),
+    ],
+)
+def test_survival_finish_plan_uses_scenario_specific_hazard_marker(
+    topic_summary: str,
+    expected_marker: str,
+) -> None:
+    scene = {
+        "scene_id": "scene-1",
+        "order": 1,
+        "actual_start_ms": 0,
+        "actual_end_ms": 4_000,
+        "retention_role": "visual_hook",
+        "narration_text": topic_summary,
+    }
+
+    plan = build_finish_plan(
+        schema_version="1.0.0",
+        job=SimpleNamespace(
+            job_id="scenario-specific-hazard",
+            niche_id="survival_decisions",
+            topic_summary=topic_summary,
+        ),
+        scene_plan=SimpleNamespace(scenes=[scene], content_hash="scene-plan"),
+        selected_assets=[SimpleNamespace(scene_id="scene-1", uri="scene.png", content_hash="asset")],
+        narration=SimpleNamespace(
+            duration_ms=4_000,
+            content_hash="narration",
+            normalized_audio_uri=None,
+            audio_uri="narration.wav",
+        ),
+        subtitles=SimpleNamespace(items=[], content_hash="subtitles"),
+        background_music=None,
+        render=None,
+        visual_contract={},
+    )
+
+    hazard_marker = plan["scenes"][0]["overlays"][-1]
+    assert hazard_marker["variant"] == "hazard_progress"
+    assert hazard_marker["text"] == expected_marker
+
+
 def test_survival_finish_plan_completes_binary_payoff_from_one_confident_outcome() -> None:
     payoff_narration = (
         "então o teto se ilumina o livro desenha a planta e a chave abre a porta errada quando seu amigo escolher a "
@@ -1016,7 +1066,7 @@ def test_remotion_survival_overlay_variants_are_frame_driven() -> None:
 
     assert "<SceneOverlays" in source
     assert "overlay.variant === 'choice_label'" in source
-    assert "overlay.variant === 'sand_progress'" in source
+    assert "overlay.variant === 'sand_progress' || overlay.variant === 'hazard_progress'" in source
     assert "overlay.variant === 'choice_state'" in source
     assert "overlay.variant === 'outcome_comparison'" in source
     assert "overlay.variant === 'comment_prompt'" in source
@@ -1076,7 +1126,7 @@ def test_survival_overlay_labels_fall_back_neutrally_without_changing_generic_pl
     assert [overlay["text"] for overlay in survival["scenes"][0]["overlays"]] == [
         "OPÇÃO A",
         "OPÇÃO B",
-        "AREIA SUBINDO",
+        "PERIGO AUMENTANDO",
     ]
     assert generic["scenes"][0]["overlays"] == []
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ def build_finish_plan(
     contract = visual_contract if isinstance(visual_contract, dict) else {}
     visual_style_profile = public_visual_style_profile(contract.get("visual_style_profile"))
     survival_choices = _survival_choice_labels(job, scene_segments, contract)
+    survival_hazard_marker = _survival_hazard_marker(job, scene_segments, contract)
     scenes = []
     for index, scene in enumerate(scene_segments):
         asset = assets_by_scene.get(str(scene.get("scene_id")))
@@ -66,6 +68,7 @@ def build_finish_plan(
                     contract,
                     duration_ms=duration_ms,
                     survival_choices=survival_choices,
+                    survival_hazard_marker=survival_hazard_marker,
                 ),
                 "visual_events": _visual_events_for_scene(index, len(scene_segments), scene, duration_ms),
                 **(
@@ -269,10 +272,12 @@ def _overlays_for_scene(
     *,
     duration_ms: int,
     survival_choices: tuple[str, str] | None,
+    survival_hazard_marker: tuple[str, str] | None,
 ) -> list[dict[str, Any]]:
     if survival_choices is None:
         return []
     left_choice, right_choice = survival_choices
+    hazard_variant, hazard_text = survival_hazard_marker or ("hazard_progress", "PERIGO AUMENTANDO")
     if index == 0:
         choice_overlays = [
             {
@@ -289,8 +294,8 @@ def _overlays_for_scene(
             *choice_overlays,
             {
                 "kind": "evidence_marker",
-                "variant": "sand_progress",
-                "text": "AREIA SUBINDO",
+                "variant": hazard_variant,
+                "text": hazard_text,
                 "progress": 0.25,
                 "start_ms": 0,
                 "duration_ms": duration_ms,
@@ -346,8 +351,8 @@ def _overlays_for_scene(
     return [
         {
             "kind": "evidence_marker",
-            "variant": "sand_progress",
-            "text": "AREIA SUBINDO",
+            "variant": hazard_variant,
+            "text": hazard_text,
             "progress": round(index / decision_count, 3),
             "start_ms": overlay_start_ms,
             "duration_ms": overlay_duration_ms,
@@ -368,6 +373,47 @@ def _survival_choice_labels(
         str(visual_contract.get("visual_thesis") or ""),
     ]
     return extract_survival_choice_labels(*candidates) or ("OPÇÃO A", "OPÇÃO B")
+
+
+def _survival_hazard_marker(
+    job: Job,
+    scenes: list[dict[str, Any]],
+    visual_contract: dict[str, Any],
+) -> tuple[str, str] | None:
+    if str(getattr(job, "niche_id", "") or "") != "survival_decisions":
+        return None
+    raw_context = " ".join(
+        [
+            str(getattr(job, "topic_summary", "") or ""),
+            *(str(scene.get("narration_text") or "") for scene in scenes),
+            str(visual_contract.get("visual_thesis") or ""),
+            str(visual_contract.get("visual_domain") or ""),
+            str(visual_contract.get("visual_world") or ""),
+        ]
+    )
+    context = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", raw_context.casefold())
+        if not unicodedata.combining(character)
+    )
+    marker_rules = (
+        (("areia", "biblioteca"), "sand_progress", "AREIA SUBINDO"),
+        (("observatorio", "telescopio", "cupula"), "hazard_progress", "SINAL ANÔMALO"),
+        (("submers", "pressao oceanica"), "hazard_progress", "PRESSÃO AUMENTANDO"),
+        (("farol", "tempestade"), "hazard_progress", "TEMPESTADE AUMENTANDO"),
+        (("museu", "relogio", "tempo congelado"), "hazard_progress", "TEMPO CONGELADO"),
+        (("elevador", "falha de energia"), "hazard_progress", "ENERGIA CAINDO"),
+        (("ponte", "estrutura instavel"), "hazard_progress", "ESTRUTURA CEDENDO"),
+        (("trem", "sem freio"), "hazard_progress", "FIM DA LINHA"),
+        (("estufa", "frio impossivel"), "hazard_progress", "TEMPERATURA CAINDO"),
+        (("teleferico", "suspensao"), "hazard_progress", "EQUILÍBRIO INSTÁVEL"),
+        (("shopping", "apagao"), "hazard_progress", "ROTAS SUMINDO"),
+        (("jardim", "gravidade"), "hazard_progress", "GRAVIDADE FALHANDO"),
+    )
+    for keywords, variant, label in marker_rules:
+        if any(keyword in context for keyword in keywords):
+            return variant, label
+    return "hazard_progress", "PERIGO AUMENTANDO"
 
 
 def _safe_payoff_choices(

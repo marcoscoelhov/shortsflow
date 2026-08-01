@@ -184,7 +184,7 @@ Comportamento atual:
 - `manual`: o formulario de publish exige `youtube_video_id` ou `youtube_url` e apenas registra a publicacao no hub.
 - `api`: o hub pode subir o video direto pela YouTube Data API.
 - agenda automatica: so e consumida pelo worker quando o modo efetivo e `api`.
-- automacao diaria: um CLI pode gerar ate tres tentativas, autoaprovar apenas `ready_for_upload` com score suficiente e agendar nativamente no YouTube para o primeiro dia vago.
+- automacao diaria: um CLI pode gerar ate tres tentativas, autoaprovar apenas `ready_for_upload` com Score de Autoaprovacao composto suficiente e agendar nativamente no YouTube para o primeiro dia vago. Esse score nao e o score diagnostico da auditoria premium.
 
 Fluxo OAuth:
 
@@ -451,9 +451,9 @@ Conteudo tecnico, erros e artefatos ficam colapsados em paines secundarios.
 
 Quando existir `visual_review_report.json`, o detalhe do job mostra a **Revisao visual auxiliar** dentro de "Qualidade e monetizacao". Esse relatorio e evidencia para a pessoa revisora; ele nao muda sozinho agenda ou aprovacao.
 
-A etapa `monetization_readiness_gate` roda revisao visual auxiliar por padrao quando o primeiro relatorio aponta `visual_review_required`. Se a IA visual consegue confirmar os assets, o relatorio de monetizacao e reconstruido com `visual_review_confirmed` antes de gravar o status final. Se o verificador visual estiver indisponivel, falhar ou devolver apenas heuristica de prompt, o job continua pedindo revisao visual humana.
+A etapa `monetization_readiness_gate` roda revisao visual auxiliar por padrao quando o primeiro relatorio aponta `visual_review_required`. O Qwen local coleta evidencia com o release flag desligado; somente um release explicitamente aprovado, com provider/modelo local corretos e sem fallback, pode remover a pendencia em conteudo generico. Se o verificador estiver indisponivel, falhar ou devolver apenas heuristica de prompt, o job continua pedindo revisao visual humana. `survival_decisions` normalmente exige revisão humana; a exceção explícita são os assignments do piloto `niche_traction_minimax_fit_20260731_*`, que aceitam o Qwen local exato para revisão visual, sem conceder permissão de publicação.
 
-Na automacao, a mesma revisao visual auxiliar tambem pode ser usada para backlog. Ela pode confirmar `visual_review_confirmed` e reconstruir o relatorio de monetizacao. Se a unica pendencia era visual, o job pode avancar para autoaprovacao. Se ainda restar `fact_review_required`, publish audit ou outra revisao manual, o job permanece em `monetization_review` e o ciclo diario tenta o proximo candidato do mesmo slot, em vez de desperdicancar a janela de publicacao.
+Na automacao, a mesma revisao visual auxiliar tambem pode ser usada para backlog generico. Ela pode confirmar `visual_review_confirmed` somente sob a autoridade local liberada acima e reconstruir o relatorio de monetizacao. Se ainda restar `fact_review_required`, publish audit ou outra revisao manual, o job permanece em `monetization_review` e o ciclo diario tenta o proximo candidato do mesmo slot. A proveniência de tentativas novas é validada por provider, modelo e ausência de fallback antes de uma cena ser contada como aprovada.
 
 `/jobs` e uma rota de navegacao direta e precisa entregar o shell completo do **Console Operacional**. O mesmo endpoint tambem serve `jobs_table.html` para atualizacoes HTMX da fila quando a requisicao carrega `HX-Request=true`; sem esse header, retornar apenas o fragmento e regressao visual.
 
@@ -479,6 +479,11 @@ O backlog e avaliado por candidato, nao apenas por slot. Quando um candidato par
 Falhas e reparos parciais relevantes entram em `AutomationRun.metadata.automation_notifications` e aparecem pelo icone de notificacoes da topbar. A fila de jobs permanece limpa; o operador deve abrir a notificacao para ver o candidato, a pendencia restante e o link do job.
 
 Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` no horario do slot em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
+
+Politica decidida: o gate premium deve rodar novamente antes de aprovar, agendar ou publicar em qualquer
+plataforma. Estado atual: os caminhos YouTube ainda contornam essa chamada e constituem gap bloqueante para
+declarar autopublicacao segura. O score premium baixo, isoladamente, e diagnostico; auditoria ausente,
+malformada ou incompleta e hard blocker tecnico devem falhar fechado. Veja o ADR 0002.
 
 O lease do worker tem piso de uma hora e heartbeat menos agressivo. Passos reais de imagem, TTS e Remotion/ffmpeg podem segurar SQLite por minutos; esse piso evita que outro worker recupere o mesmo job por heartbeat pulado enquanto a etapa ainda esta legitimamente em execucao.
 

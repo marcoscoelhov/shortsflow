@@ -779,13 +779,10 @@ class JobOrchestrator:
         self,
         job_id: str,
         reviewer_identity: str = "tailscale:local-reviewer",
-        *,
-        score_override_confirmed: bool = False,
     ) -> None:
         self.publication_ops.approve_premium_for_publish(
             job_id,
             reviewer_identity=reviewer_identity,
-            score_override_confirmed=score_override_confirmed,
         )
 
     def publish_job(

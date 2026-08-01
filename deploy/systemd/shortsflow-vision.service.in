@@ -18,8 +18,8 @@ ExecStart=__REPO_ROOT__/data/vendor/llama.cpp/build/bin/llama-server \
   --ctx-size 2048 \
   --parallel 1 \
   --flash-attn on \
-  --image-min-tokens 512 \
-  --image-max-tokens 512 \
+  --image-min-tokens 1024 \
+  --image-max-tokens 1024 \
   --cache-ram 0
 Restart=always
 RestartSec=5
