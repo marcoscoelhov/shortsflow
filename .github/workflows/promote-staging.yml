@@ -1,0 +1,49 @@
+name: Promote validated staging revision
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full staging SHA approved after real and human validation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate-promotion:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Refresh protected branch refs
+        run: git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main refs/heads/staging:refs/remotes/origin/staging
+      - name: Require staged fast-forward revision
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: python scripts/check_staging_promotion.py "${REVISION}"
+
+  promote:
+    needs: validate-promotion
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Revalidate immediately before promotion
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main refs/heads/staging:refs/remotes/origin/staging
+          python scripts/check_staging_promotion.py "${REVISION}"
+      - name: Fast-forward main to the approved SHA
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: git push origin "${REVISION}:refs/heads/main"

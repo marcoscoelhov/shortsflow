@@ -16,6 +16,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  promotion-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Require main revision to have passed through staging
+        env:
+          CANDIDATE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          TARGET_BRANCH: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
+        run: |
+          if [[ "${TARGET_BRANCH}" != "main" ]]; then
+            echo "staging workflow: production promotion guard is not applicable"
+            exit 0
+          fi
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main refs/heads/staging:refs/remotes/origin/staging
+          python scripts/check_staging_promotion.py "${CANDIDATE_SHA}"
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -58,7 +77,7 @@ jobs:
 
   deploy:
     if: github.event_name != 'pull_request'
-    needs: test
+    needs: [test, promotion-guard]
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
