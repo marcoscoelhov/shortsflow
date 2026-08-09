@@ -64,7 +64,8 @@ teste regressivo cobre um resultado MiniMax que declara `verification_mode=visio
 ### Routing LLM
 
 - Default operacional vigente: GPT-5.6 Luna com effort `high` para pauta,
-  roteiro, reparo e cenas.
+  roteiro, reparo e cenas, transportado pela Responses API no endpoint padrão
+  da conta OpenCode Go (`https://opencode.ai/zen/go/v1`).
 - Juiz independente vigente: Grok 4.5 com effort `high` para gates comuns e
   revisão premium.
 - Fallback geral continua desabilitado. DeepSeek permanece provider disponível
