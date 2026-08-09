@@ -14,23 +14,49 @@ permissions:
 jobs:
   validate-promotion:
     runs-on: ubuntu-latest
+    environment: staging
     steps:
       - name: Checkout repository history
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - name: Require exact staging workflow revision
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          if [[ "${GITHUB_REF_NAME}" != "staging" ]]; then
+            echo "promotion workflow must run with ref staging" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_SHA}" != "${REVISION}" ]]; then
+            echo "requested revision ${REVISION} does not match staging workflow revision ${GITHUB_SHA}" >&2
+            exit 1
+          fi
       - name: Refresh protected branch refs
         run: git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main refs/heads/staging:refs/remotes/origin/staging
       - name: Require staged fast-forward revision
         env:
           REVISION: ${{ inputs.revision }}
         run: python scripts/check_staging_promotion.py "${REVISION}"
+      - name: Join staging deployment tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci-staging
+      - name: Require healthy staging at the exact revision
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          curl --fail --silent --show-error "https://srv769897.tailc97b69.ts.net:8443/healthz" \
+            | python -c 'import json,os,sys; p=json.load(sys.stdin); r=p["runtime"]; assert r["environment"] == "staging"; assert r["revision"] == os.environ["REVISION"]'
 
   promote:
     needs: validate-promotion
     runs-on: ubuntu-latest
-    environment: production
+    environment: production-promotion
     permissions:
+      actions: write
       contents: write
     steps:
       - name: Checkout repository history
@@ -47,3 +73,8 @@ jobs:
         env:
           REVISION: ${{ inputs.revision }}
         run: git push origin "${REVISION}:refs/heads/main"
+      - name: Dispatch production deploy for the exact SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ inputs.revision }}
+        run: gh workflow run deploy-remote-runtime.yml --ref main -f expected_revision="${REVISION}"

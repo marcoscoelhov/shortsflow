@@ -59,12 +59,21 @@ O único fluxo de promoção suportado é:
 Uma feature nunca segue diretamente para `main`. Depois que o SHA exato estiver
 alcançável por `origin/staging`, implantado em staging, validado com providers
 reais e aprovado visualmente pelo operador, o workflow manual **Promote
-validated staging revision** recebe esse SHA completo. Um job sem acesso ao
-environment de produção verifica que o commit pertence ao histórico de staging
-e que avança `main` por fast-forward. Somente então o job protegido pelo
-environment `production` executa `git push <SHA>:refs/heads/main`, sem rebuild,
-squash, merge commit novo ou force-push. Se `main` mudar entre a verificação e o
-push, o próprio fast-forward é recusado e a promoção precisa ser reavaliada.
+validated staging revision** deve ser executado com o ref `staging` e recebe
+esse SHA completo. O primeiro job usa apenas o environment `staging`: verifica
+o histórico, exige que o input seja o próprio SHA do run e confirma pelo health
+check privado que staging está saudável nessa revisão exata. O segundo job usa
+o environment sem secrets `production-promotion`, exige aprovação humana e
+executa `git push <SHA>:refs/heads/main` por fast-forward, sem rebuild, squash,
+merge commit novo ou force-push. Se `main` mudar entre a verificação e o push, o
+próprio fast-forward é recusado e a promoção precisa ser reavaliada.
+
+O push feito pelo `GITHUB_TOKEN` não é usado como gatilho implícito. A promoção
+dispara explicitamente **Deploy remote runtime** em `main`, informando o SHA
+esperado. Esse workflow rejeita qualquer checkout diferente antes de acessar o
+environment `production`, onde uma segunda aprovação humana autoriza o deploy
+do release imutável. Assim, a primeira aprovação permite mover o branch e a
+segunda permite alterar o runtime de produção.
 
 Pushes e pull requests para `main` passam pelo mesmo controle antes de qualquer
 job associado ao environment `production`. O deploy de produção continua
