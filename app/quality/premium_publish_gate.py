@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from app.domain_contracts import JOB_STATUS_READY_FOR_UPLOAD
 from app.models import Job
 from app.utils import iso_now, stable_hash
 from scripts.audit_system_quality import audit
@@ -81,12 +82,15 @@ class PremiumPublishGate:
             }
             reasons.append("premium_publish_artifacts_missing")
         else:
+            audit_semantics_available = False
             try:
                 audit_payload = self.audit_func(root)
                 if not _audit_contract_valid(audit_payload):
                     reasons.append("premium_publish_audit_failed")
                 elif _audit_reports_missing_artifacts(audit_payload):
                     reasons.append("premium_publish_artifacts_missing")
+                else:
+                    audit_semantics_available = True
             except Exception as exc:  # noqa: BLE001
                 audit_payload = {
                     "job_id": job.job_id,
@@ -97,6 +101,9 @@ class PremiumPublishGate:
                     "error": str(exc),
                 }
                 reasons.append("premium_publish_audit_failed")
+            monetization_report = _load_json(root / "monetization_report.json")
+            if audit_semantics_available and not _publishable_monetization_semantics(monetization_report):
+                reasons.append("premium_publish_final_status_not_publishable")
         score = _float(audit_payload.get("overall_min_score"), 0.0)
         target_score = _float(audit_payload.get("target_score"), 0.0)
         # ponytail: audit score is diagnostic; publication blocks only on real review requirements.
@@ -174,6 +181,25 @@ def _audit_contract_valid(audit_payload: Any) -> bool:
         if not isinstance(stage.get("evidence"), list) or not isinstance(stage.get("gaps"), list):
             return False
     return set(stage_names) == set(PREMIUM_PUBLISH_AUDIT_STAGES)
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    try:
+        import json
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _publishable_monetization_semantics(report: dict[str, Any]) -> bool:
+    """Require persisted, authoritative publish semantics; audit scores are diagnostic."""
+    return (
+        report.get("passed") is True
+        and report.get("final_status") == JOB_STATUS_READY_FOR_UPLOAD
+        and not report.get("hard_blockers")
+    )
 
 
 def _number(value: Any) -> bool:

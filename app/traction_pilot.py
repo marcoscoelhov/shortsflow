@@ -75,7 +75,7 @@ def build_traction_pilot_plan(*, seed: int) -> dict[str, Any]:
                     "target_duration_sec": PILOT_DURATION_SEC,
                     "language": "pt-BR",
                     "vision_policy": PILOT_VISION_POLICY,
-                    "human_review_required": False,
+                    "human_review_required": True,
                 }
             )
             items.append(item)
@@ -273,9 +273,8 @@ def _pilot_job_notes(experiment_id: str, assignment_id: str, item: dict[str, Any
         f"experiment_assignment_id={assignment_id}",
         f"experiment_arm={item['arm']}",
         f"experiment_concept_id={item['concept_id']}",
-        "pilot_qwen_autoapproval=true",
         f"vision_policy={PILOT_VISION_POLICY}",
-        "human_review_required=false",
+        "human_review_required=true",
         "automatic_publication_allowed=false",
         "Duração alvo: 40 segundos; faixa aceitável: 30 a 50 segundos. Manter voz, ritmo, seis cenas e intensidade de CTA constantes.",
         str(item["requested_angle"]),

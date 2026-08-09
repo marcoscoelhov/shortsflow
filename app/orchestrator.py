@@ -93,7 +93,7 @@ from app.quality.metadata_ctr_gate import MetadataCTRGate
 from app.quality.viral_intensity_gate import ViralIntensityGate
 from app.quality.visual_impact_gate import VisualImpactGate
 from app.quality.visual_contract_gate import VisualContractGate
-from app.runtime_execution import RuntimeExecutionCoordinator, assert_real_execution_location
+from app.runtime_execution import RuntimeAdmissionRefused, RuntimeExecutionCoordinator, assert_real_execution_location
 from app.schemas import PublicationSchedulePayload, SUPPORTED_LANGUAGES, SUPPORTED_NICHES, TopicRequestCreate
 from app.storage import StorageManager
 from app.utils import (
@@ -386,8 +386,12 @@ class JobOrchestrator:
         return job_id
 
     def process_job(self, job_id: str) -> str:
-        with self._heavy_execution():
-            return self._process_job_under_slot(job_id)
+        try:
+            with self._heavy_execution():
+                return self._process_job_under_slot(job_id)
+        except RuntimeAdmissionRefused:
+            self.worker_ops.release_refused_claim(job_id)
+            raise
 
     @contextmanager
     def _heavy_execution(self):  # noqa: ANN202
@@ -405,11 +409,11 @@ class JobOrchestrator:
         )
         admission = self.runtime_execution.admission()
         if not admission.allowed:
-            raise RuntimeError(f"runtime refused heavy job: {', '.join(admission.reasons)}")
+            raise RuntimeAdmissionRefused(admission.reasons)
         with self.runtime_execution.job_slot():
             admission = self.runtime_execution.admission(fresh=True)
             if not admission.allowed:
-                raise RuntimeError(f"runtime refused heavy job after waiting: {', '.join(admission.reasons)}")
+                raise RuntimeAdmissionRefused(admission.reasons, after_wait=True)
             self._heavy_execution_context.depth = 1
             try:
                 yield

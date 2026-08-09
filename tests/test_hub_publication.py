@@ -3169,7 +3169,8 @@ def test_retention_sweep_skips_published_jobs() -> None:
     assert job is not None
     assert (job.quality_summary or {}).get("retention") is None
 
-def test_manual_publish_syncs_stale_monetization_report_when_quality_summary_passed() -> None:
+def test_manual_publish_syncs_stale_monetization_report_when_quality_summary_passed(monkeypatch) -> None:
+    _allow_premium_publish_gate(monkeypatch)
     client = TestClient(app)
     job_id = "stale-monetization-publish-job"
     topic_request_id = "stale-monetization-publish-job-request"

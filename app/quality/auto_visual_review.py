@@ -29,8 +29,8 @@ class AutoVisualReviewService:
         modes = {str(item) for item in asset_summary.get("asset_visual_verification_modes") or []}
         selected_asset_scores = [dict(asset.scores or {}) for asset in selected_assets]
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
-        pilot_qwen_authorized = self._pilot_qwen_authorized(str(request.notes or "") if request else "")
-        authority_approved = get_settings().local_vision_release_approved or pilot_qwen_authorized
+        forged_qwen_authority = self._contains_qwen_authority_claim(str(request.notes or "") if request else "")
+        authority_approved = self._local_model_has_publication_authority()
         verification_attempts = self._verify_prompt_heuristic_assets(
             session,
             job,
@@ -75,7 +75,7 @@ class AutoVisualReviewService:
                 "verification_modes": sorted(modes),
                 "real_visual_evidence": real_visual_evidence,
                 "local_vision_release_approved": get_settings().local_vision_release_approved,
-                "pilot_qwen_authorized": pilot_qwen_authorized,
+                "qwen_authority_claim_ignored": forged_qwen_authority,
                 "verification_attempts": verification_attempts,
             },
         }
@@ -258,11 +258,12 @@ class AutoVisualReviewService:
         )
 
     @staticmethod
-    def _pilot_qwen_authorized(notes: str) -> bool:
-        lines = set(notes.splitlines())
-        return (
-            any(line.startswith("experiment_id=niche_traction_minimax_fit_20260731_") for line in lines)
-            and "pilot_qwen_autoapproval=true" in lines
-            and "vision_policy=qwen_local_exact_no_fallback" in lines
-            and "automatic_publication_allowed=false" in lines
-        )
+    def _local_model_has_publication_authority() -> bool:
+        settings = get_settings()
+        model = str(settings.local_vision_model or "").casefold()
+        return bool(settings.local_vision_release_approved and "qwen" not in model)
+
+    @staticmethod
+    def _contains_qwen_authority_claim(notes: str) -> bool:
+        normalized = str(notes or "").casefold()
+        return "qwen" in normalized and any(token in normalized for token in ("autoapprov", "authority", "autoridade"))

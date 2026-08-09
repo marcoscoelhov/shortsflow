@@ -37,6 +37,9 @@ class DeploymentLayout:
     backup_root: Path
     config_root: Path
     runtime_root: Path
+    systemd_root: Path
+    sbin_root: Path
+    tmpfiles_root: Path
 
     @classmethod
     def system(cls) -> "DeploymentLayout":
@@ -46,6 +49,9 @@ class DeploymentLayout:
             backup_root=Path("/var/backups/shortsflow"),
             config_root=Path("/etc/shortsflow"),
             runtime_root=Path("/run/shortsflow"),
+            systemd_root=Path("/etc/systemd/system"),
+            sbin_root=Path("/usr/local/sbin"),
+            tmpfiles_root=Path("/usr/lib/tmpfiles.d"),
         )
 
     @classmethod
@@ -56,6 +62,9 @@ class DeploymentLayout:
             backup_root=root / "backups",
             config_root=root / "etc",
             runtime_root=root / "run",
+            systemd_root=root / "etc/systemd/system",
+            sbin_root=root / "usr/local/sbin",
+            tmpfiles_root=root / "usr/lib/tmpfiles.d",
         )
 
 
@@ -77,6 +86,9 @@ class DeploymentPlan:
     health_url: str
     repository_mirror: Path
     deployment_lock: Path
+    systemd_root: Path
+    sbin_root: Path
+    tmpfiles_root: Path
 
     @classmethod
     def create(cls, environment: str, revision: str, *, layout: DeploymentLayout) -> "DeploymentPlan":
@@ -105,6 +117,9 @@ class DeploymentPlan:
             health_url=f"http://127.0.0.1:{port}/healthz",
             repository_mirror=layout.install_root / "repository.git",
             deployment_lock=layout.runtime_root / "deploy.lock",
+            systemd_root=layout.systemd_root,
+            sbin_root=layout.sbin_root,
+            tmpfiles_root=layout.tmpfiles_root,
         )
 
     def public_dict(self) -> dict[str, object]:
@@ -119,6 +134,12 @@ class LegacyHandoff:
     @property
     def performed(self) -> bool:
         return self.state_copied
+
+
+@dataclass(frozen=True)
+class RuntimeFileState:
+    content: bytes | None
+    mode: int | None
 
 
 def _run(args: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -254,6 +275,65 @@ def _install_release(plan: DeploymentPlan) -> None:
     _run(["chown", "-R", f"root:{runtime_user}", str(plan.release_dir)])
     plan.release_dir.chmod(plan.release_dir.stat().st_mode | 0o050)
     _run(["chown", "-R", f"{runtime_user}:{runtime_user}", str(plan.data_dir)])
+
+
+def _runtime_file_manifest(plan: DeploymentPlan) -> tuple[tuple[Path, Path, int], ...]:
+    return (
+        (plan.release_dir / "scripts/remote_deploy.py", plan.sbin_root / "shortsflow-deploy", 0o755),
+        (plan.release_dir / "scripts/runtime_backup.py", plan.sbin_root / "shortsflow-backup", 0o755),
+        *(
+            (plan.release_dir / "deploy/systemd" / name, plan.systemd_root / name, 0o644)
+            for name in (
+                "shortsflow-production.service",
+                "shortsflow-staging.service",
+                "shortsflow-backup@.service",
+                "shortsflow-backup@.timer",
+                "shortsflow-backup-weekly@.service",
+                "shortsflow-backup-weekly@.timer",
+            )
+        ),
+        (
+            plan.release_dir / "deploy/systemd/shortsflow-tmpfiles.conf",
+            plan.tmpfiles_root / "shortsflow.conf",
+            0o644,
+        ),
+    )
+
+
+def _sync_runtime_files(plan: DeploymentPlan) -> dict[Path, RuntimeFileState]:
+    snapshot: dict[Path, RuntimeFileState] = {}
+    manifest = _runtime_file_manifest(plan)
+    for source, destination, _mode in manifest:
+        if not source.is_file():
+            raise RuntimeError(f"release runtime file missing: {source}")
+        snapshot[destination] = RuntimeFileState(
+            content=destination.read_bytes() if destination.exists() else None,
+            mode=(destination.stat().st_mode & 0o7777) if destination.exists() else None,
+        )
+    try:
+        for source, destination, mode in manifest:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if not destination.exists() or destination.read_bytes() != source.read_bytes() or destination.stat().st_mode & 0o7777 != mode:
+                shutil.copyfile(source, destination)
+                os.chmod(destination, mode)
+        _run(["systemctl", "daemon-reload"])
+        _run(["systemd-tmpfiles", "--create", str(plan.tmpfiles_root / "shortsflow.conf")])
+    except Exception:
+        _restore_runtime_files(snapshot)
+        raise
+    return snapshot
+
+
+def _restore_runtime_files(snapshot: dict[Path, RuntimeFileState]) -> None:
+    for destination, state in snapshot.items():
+        if state.content is None:
+            destination.unlink(missing_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(state.content)
+        if state.mode is not None:
+            os.chmod(destination, state.mode)
+    _run(["systemctl", "daemon-reload"], check=False)
 
 
 def _running_job_count(database_path: Path) -> int:
@@ -414,16 +494,18 @@ def deploy(plan: DeploymentPlan) -> dict[str, object]:
         _prepare_repository(plan)
         _extract_release(plan)
         _install_release(plan)
-        _drain(plan)
+        runtime_file_snapshot = _sync_runtime_files(plan)
         previous = plan.current_link.resolve() if plan.current_link.is_symlink() else None
         previous_revision = None
-        if previous:
-            marker = previous / ".shortsflow-revision"
-            if not marker.exists():
-                raise RuntimeError(f"previous release has no revision marker: {previous}")
-            previous_revision = marker.read_text(encoding="utf-8").strip()
-        legacy_handoff = _handoff_legacy_production(plan)
+        legacy_handoff = LegacyHandoff()
         try:
+            _drain(plan)
+            if previous:
+                marker = previous / ".shortsflow-revision"
+                if not marker.exists():
+                    raise RuntimeError(f"previous release has no revision marker: {previous}")
+                previous_revision = marker.read_text(encoding="utf-8").strip()
+            legacy_handoff = _handoff_legacy_production(plan)
             backup = _backup(plan)
             _run(["systemctl", "stop", plan.service_name], check=False)
             _write_release_environment(plan)
@@ -431,6 +513,7 @@ def deploy(plan: DeploymentPlan) -> dict[str, object]:
             _run(["systemctl", "restart", plan.service_name])
             health = _wait_for_health(plan)
         except Exception:
+            _restore_runtime_files(runtime_file_snapshot)
             if previous and previous.exists():
                 atomic_activate(plan.current_link, previous)
                 if previous_revision:
@@ -455,7 +538,16 @@ def deploy(plan: DeploymentPlan) -> dict[str, object]:
         )
         if legacy_handoff.performed:
             _run(["systemctl", "disable", "--now", *LEGACY_RUNTIME_UNITS], check=False)
-            _run(["systemctl", "enable", plan.service_name])
+        _run(["systemctl", "enable", plan.service_name])
+        _run(
+            [
+                "systemctl",
+                "enable",
+                "--now",
+                f"shortsflow-backup@{plan.environment}.timer",
+                f"shortsflow-backup-weekly@{plan.environment}.timer",
+            ]
+        )
         return {
             "status": "deployed",
             "environment": plan.environment,

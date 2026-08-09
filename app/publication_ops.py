@@ -273,6 +273,15 @@ class PublicationOperations:
         job.failure_reason = message
         return message
 
+    def _ensure_premium_publish_preflight(self, session: Session, job: Job, *, context: str) -> Any:
+        result = self._run_premium_publish_gate(session, job, context=context)
+        if result.passed:
+            return result
+        message = self._block_job_for_premium_publish_gate(job, result)
+        self._refresh_retention_state(session, job)
+        session.commit()
+        raise FatalStepError(message)
+
     def _upload_publish_package(self, package: dict[str, Any], visibility: str) -> dict[str, Any]:
         return self.youtube_ops.upload_publish_package(package, visibility)
 

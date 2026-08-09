@@ -92,9 +92,9 @@ _Avoid_: drift temporal, quebra puramente por caractere, legenda tecnicamente al
 A avaliacao feita por uma pessoa antes de aprovar, rejeitar, agendar ou publicar um **Job de Video**.
 _Avoid_: aprovado, publicavel, upload pronto
 
-**Autoridade Visual Qwen do Piloto**:
-A excecao explicitamente marcada que permite ao Qwen local exato, sem fallback e cobrindo todas as cenas criticas, decidir o gate visual do piloto de tracao sem **Revisao Humana**. Nao concede autoridade para agendar ou publicar.
-_Avoid_: release global, qualquer modelo local, prompt_heuristic, permissao de publicacao
+**Evidencia Visual Qwen**:
+Uma avaliacao diagnostica produzida pelo Qwen para auxiliar a **Revisao Humana**. Ela nunca decide gates, confirma revisao, agenda ou publica um **Job de Video**.
+_Avoid_: autoridade visual, autoaprovacao, substituto da revisao humana, permissao de publicacao
 
 **Hub de Revisao**:
 A superficie operacional onde uma pessoa acompanha, assiste e decide sobre **Jobs de Video**.

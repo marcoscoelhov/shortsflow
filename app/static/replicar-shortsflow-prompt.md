@@ -532,11 +532,10 @@ Artefato ausente, auditoria invalida e hard blocker tecnico falham fechado. Rode
 o preflight premium imediatamente antes de aprovar, agendar ou publicar tanto no
 YouTube quanto no TikTok; status persistido antigo nao substitui essa checagem.
 
-Revisao visual por `prompt_heuristic` nunca confirma pixels. Um modelo local so
-pode remover pendencia depois de release explicito, com provider/modelo exatos,
-sem fallback e cobrindo cenas criticas. `survival_decisions` normalmente exige
-revisao humana; uma excecao de piloto deve ser identificada, limitada ao Qwen
-local exato e continuar fora da publicacao automatica.
+Revisao visual por `prompt_heuristic` nunca confirma pixels. Qwen local ou remoto
+pode produzir evidencia diagnostica, mas nunca remove pendencia, aprova gates,
+confirma revisao humana, agenda ou publica. `survival_decisions` sempre exige
+revisao humana, inclusive em pilotos.
 
 ## Hub web
 

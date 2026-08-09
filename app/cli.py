@@ -66,11 +66,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     pilot_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para ordem determinística")
     pilot_parser.add_argument("--process", action="store_true", help="Gera e renderiza os três canários")
-    pilot_parser.add_argument(
-        "--qwen-autoapprove",
-        action="store_true",
-        help="Autoriza nesta execução somente o Qwen local exato, sem fallback, como revisor visual",
-    )
 
     for command, help_text in (
         ("job", "Cria um job real na producao remota"),
@@ -144,22 +139,11 @@ def main(argv: list[str] | None = None) -> None:
     service = AutomationService(orchestrator)
 
     if args.command == "pilot-10k-start":
-        if args.process and not args.qwen_autoapprove:
-            parser.error("--process exige --qwen-autoapprove")
         result = start_traction_pilot(orchestrator, seed=args.seed, canary_count=3)
         processed = 0
         if args.process:
-            settings = get_settings()
-            expected_model = "qwen3-vl-2b-instruct-q4-k-m"
-            if settings.use_mock_providers:
+            if runtime_settings.use_mock_providers:
                 parser.error("o piloto real não aceita mock providers")
-            if settings.vision_verifier_provider != "local_openai" or settings.local_vision_model != expected_model:
-                parser.error(
-                    "Qwen autoapproval exige vision_verifier_provider=local_openai e "
-                    f"local_vision_model={expected_model}"
-                )
-            settings.local_vision_release_approved = True
-            orchestrator.settings.local_vision_release_approved = True
             for canary in result["canaries"]:
                 orchestrator.process_job(str(canary["job_id"]))
                 processed += 1

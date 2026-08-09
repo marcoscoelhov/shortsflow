@@ -108,7 +108,10 @@ class OrchestratorWorkerOperations:
         if self.owner.publication_ops._tiktok_auto_publish_enabled():
             self.owner._run_worker_task("tiktok_status_sync", self.owner.publication_ops._sync_tiktok_publication_statuses)
             self.owner._run_worker_task("tiktok_crosspost_queue_sync", self.owner.publication_ops._sync_tiktok_crosspost_queue)
-        claimed_job_id = self.owner._run_worker_task("job_claim", self.owner._claim_next_job_with_retry)
+        admission = self.owner.runtime_execution.admission(fresh=True)
+        claimed_job_id = None
+        if admission.allowed:
+            claimed_job_id = self.owner._run_worker_task("job_claim", self.owner._claim_next_job_with_retry)
         if claimed_job_id:
             self.owner._run_worker_task("job_process", lambda: self.owner.process_job(claimed_job_id))
             return True
@@ -124,6 +127,20 @@ class OrchestratorWorkerOperations:
             )
             return True
         return False
+
+    def release_refused_claim(self, job_id: str) -> bool:
+        """Undo only this worker's lease when admission/drain races with a claim."""
+        def release(session: Session) -> bool:
+            result = session.execute(
+                update(Job)
+                .where(Job.job_id == job_id)
+                .where(Job.status == "running")
+                .where(Job.lease_owner == self.owner.worker_id)
+                .values(status="queued", lease_owner=None, lease_expires_at=None)
+            )
+            return bool(result.rowcount)
+
+        return bool(run_transaction_with_lock_retry(release))
 
     def claim_next_job(self, session: Session) -> str | None:
         now = utcnow()

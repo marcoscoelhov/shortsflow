@@ -52,7 +52,7 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 - Luna `high` generates/plans; Grok 4.5 `high` judges gates; general fallback remains disabled.
 - Premium audit score is diagnostic and distinct from the `0.82` autoapproval score.
 - Premium preflight must fail closed and run before approval, scheduling or publication on every platform.
-- Local Qwen is not publication authority. `survival_decisions` normalmente exige revisão humana; somente o piloto `niche_traction_minimax_fit_20260731_*`, marcado explicitamente, permite autoaprovação visual pelo Qwen exato sem fallback. Essa exceção nunca agenda nem publica.
+- Local or remote Qwen is diagnostic-only: it cannot approve gates, confirm human review, schedule, or publish. `survival_decisions` always requires human review, including pilots.
 - The survival dry-run is not the persistent experiment/feedback loop from Plan 009.
 - Canonical record: `docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`.
 

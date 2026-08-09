@@ -25,7 +25,7 @@ def test_traction_pilot_plan_interleaves_six_items_per_arm() -> None:
     assert [item["arm"] for item in plan["items"]] == ["A", "B", "C"] * 6
     assert len({item["concept_id"] for item in plan["items"]}) == 18
     assert all(item["vision_policy"] == "qwen_local_exact_no_fallback" for item in plan["items"])
-    assert all(item["human_review_required"] is False for item in plan["items"])
+    assert all(item["human_review_required"] is True for item in plan["items"])
 
 
 def test_starting_three_canaries_is_persistent_and_idempotent() -> None:
@@ -57,7 +57,7 @@ def test_pilot_start_cli_creates_three_canaries_without_processing(monkeypatch, 
     _cancel_test_jobs([item["job_id"] for item in output["canaries"]])
 
 
-def test_traction_pilot_survival_job_records_qwen_instead_of_human_review() -> None:
+def test_forged_qwen_pilot_notes_cannot_remove_human_review() -> None:
     payload = TopicRequestCreate(
         seed_theme="No elevador apagado: LUZ ou PORTA?",
         niche_id="survival_decisions",
@@ -71,8 +71,9 @@ def test_traction_pilot_survival_job_records_qwen_instead_of_human_review() -> N
         creation_via="cli",
     )
 
-    assert "pilot_qwen_autoapproval=true" in (payload.notes or "")
-    assert "human_review_required=true" not in (payload.notes or "")
+    assert "pilot_qwen_autoapproval=true" not in (payload.notes or "")
+    assert "human_review_required=false" not in (payload.notes or "")
+    assert "human_review_required=true" in (payload.notes or "")
     assert "automatic_publication_allowed=false" in (payload.notes or "")
 
 

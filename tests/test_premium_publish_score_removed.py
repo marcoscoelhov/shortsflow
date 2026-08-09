@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,10 @@ def _complete_audit(score):
 
 
 def _gate(tmp_path):
+    (tmp_path / "monetization_report.json").write_text(
+        json.dumps({"passed": True, "final_status": "ready_for_upload", "hard_blockers": []}),
+        encoding="utf-8",
+    )
     return PremiumPublishGate(
         settings=SimpleNamespace(),
         storage=SimpleNamespace(job_dir=lambda *_args, **_kwargs: tmp_path),
@@ -56,6 +61,23 @@ def test_visual_review_confirmation_allows_low_score_publish(tmp_path):
     )
 
     assert result.passed is True
+
+
+def test_forged_passing_scores_cannot_override_non_publishable_final_status(tmp_path):
+    (tmp_path / "monetization_report.json").write_text(
+        json.dumps({"passed": True, "final_status": "monetization_review", "hard_blockers": []}),
+        encoding="utf-8",
+    )
+    gate = PremiumPublishGate(
+        settings=SimpleNamespace(),
+        storage=SimpleNamespace(job_dir=lambda *_args, **_kwargs: tmp_path),
+        audit_func=lambda _root: _complete_audit(10.0),
+    )
+
+    result = gate.evaluate(SimpleNamespace(job_id="forged-pass"))
+
+    assert result.passed is False
+    assert result.reasons == ["premium_publish_final_status_not_publishable"]
 
 
 def test_missing_premium_publish_artifacts_fail_closed(tmp_path):

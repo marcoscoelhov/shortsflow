@@ -3,6 +3,7 @@ import sqlite3
 from sqlalchemy.exc import OperationalError
 from app.models import ScenePlan, StepExecution
 from app.utils import stable_hash
+from app.runtime_execution import AdmissionDecision, RuntimeAdmissionRefused
 
 
 def _create_direct_pipeline_job(seed_theme: str = "polvos") -> str:
@@ -1515,6 +1516,53 @@ def test_claim_next_job_retries_transient_sqlite_lock(monkeypatch) -> None:
 
     assert test_orchestrator._claim_next_job_with_retry() == "job-claimed"
     assert attempts["count"] == 2
+
+
+def test_worker_does_not_claim_queued_job_while_runtime_is_draining(monkeypatch) -> None:
+    test_orchestrator = JobOrchestrator()
+    monkeypatch.setattr(
+        test_orchestrator.runtime_execution,
+        "admission",
+        lambda **_kwargs: AdmissionDecision(False, ("runtime_draining",)),
+    )
+    monkeypatch.setattr(
+        test_orchestrator,
+        "_claim_next_job_with_retry",
+        lambda: (_ for _ in ()).throw(AssertionError("claim must not run after refusal")),
+    )
+    monkeypatch.setattr(test_orchestrator.settings, "artifact_retention_enabled", False)
+    monkeypatch.setattr(test_orchestrator.settings, "youtube_api_enabled", False)
+    monkeypatch.setattr(test_orchestrator.settings, "tiktok_auto_publish_enabled", False)
+
+    assert test_orchestrator._worker_iteration() is False
+
+
+def test_admission_race_after_claim_requeues_and_clears_lease(monkeypatch) -> None:
+    test_orchestrator = JobOrchestrator()
+    job_id = f"admission-race-{time.time_ns()}"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="running", seed_theme="drain race")
+        session.flush()
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.lease_owner = test_orchestrator.worker_id
+        job.lease_expires_at = utcnow() + timedelta(minutes=5)
+        session.commit()
+    monkeypatch.setattr(
+        test_orchestrator.runtime_execution,
+        "admission",
+        lambda **_kwargs: AdmissionDecision(False, ("runtime_draining",)),
+    )
+
+    with pytest.raises(RuntimeAdmissionRefused, match="runtime_draining"):
+        test_orchestrator.process_job(job_id)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == "queued"
+        assert job.lease_owner is None
+        assert job.lease_expires_at is None
 
 def test_worker_can_restart_after_stop(monkeypatch) -> None:
     test_orchestrator = JobOrchestrator()

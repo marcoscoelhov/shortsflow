@@ -133,37 +133,39 @@ class ResilientCreativeProvider:
         raise ProviderFailure("llm_registry", f"visual contract generation failed across providers: {'; '.join(failures)}")
 
     def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.primary:
+        primary = self.primary if self._provider_can_decide_publication(self.primary) else None
+        fallback = self.fallback if self._provider_can_decide_publication(self.fallback) else None
+        if primary:
             timeout_sec = float(getattr(self.settings, "llm_publish_audit_timeout_sec", self.settings.minimax_text_timeout_sec))
             try:
                 return self._run_primary_with_timeout(
-                    lambda: self.primary.audit_publish_package(payload),
+                    lambda: primary.audit_publish_package(payload),
                     timeout_sec=timeout_sec,
                 )
             except concurrent.futures.TimeoutError as exc:
                 if self.strict_minimax_validation:
-                    raise ProviderFailure(self._provider_failure_name(self.primary), f"publish audit timed out after {timeout_sec}s") from exc
-                if not self.fallback:
+                    raise ProviderFailure(self._provider_failure_name(primary), f"publish audit timed out after {timeout_sec}s") from exc
+                if not fallback:
                     raise ProviderFailure("llm_registry", f"publish audit timed out after {timeout_sec}s and no fallback provider is available") from exc
-                audit = self.fallback.audit_publish_package(payload)
-                audit["fallback_reason"] = f"{self._provider_failure_name(self.primary)} publish audit timed out after {timeout_sec}s"
+                audit = fallback.audit_publish_package(payload)
+                audit["fallback_reason"] = f"{self._provider_failure_name(primary)} publish audit timed out after {timeout_sec}s"
                 audit["fallback_used"] = True
                 audit["fallback_stage"] = "publish_audit_timeout"
                 return audit
             except ProviderFailure as exc:
                 if self.strict_minimax_validation:
                     raise
-                if not self.fallback:
+                if not fallback:
                     raise
-                audit = self.fallback.audit_publish_package(payload)
+                audit = fallback.audit_publish_package(payload)
                 audit["fallback_reason"] = str(exc)
                 audit["fallback_used"] = True
                 return audit
         if self.strict_minimax_validation:
             raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
-        if not self.fallback:
+        if not fallback:
             raise ProviderFailure("llm_registry", "no publish audit llm provider is available")
-        return self.fallback.audit_publish_package(payload)
+        return fallback.audit_publish_package(payload)
 
     def judge_quality_gate(self, gate_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         candidates = self._quality_judge_candidates(gate_kind, payload)
@@ -206,7 +208,7 @@ class ResilientCreativeProvider:
                 ]
             )
         for role, provider in ordered:
-            if provider is None or not hasattr(provider, "judge_quality_gate"):
+            if not self._provider_can_decide_publication(provider) or not hasattr(provider, "judge_quality_gate"):
                 continue
             provider_name = str(getattr(provider, "provider_name", "") or "")
             model_name = str(getattr(provider, "model_name", "") or "")
@@ -216,6 +218,10 @@ class ResilientCreativeProvider:
             seen.add(key)
             candidates.append((role, provider))
         return candidates
+
+    @staticmethod
+    def _provider_can_decide_publication(provider: Any) -> bool:
+        return provider is not None and str(getattr(provider, "provider_name", "")).casefold() != "qwen"
 
     def _should_use_premium_review(self, gate_kind: str, payload: dict[str, Any]) -> bool:
         if not bool(getattr(self.settings, "llm_premium_review_enabled", True)):
