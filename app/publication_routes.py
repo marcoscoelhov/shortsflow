@@ -1,53 +1,46 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Awaitable, Callable
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
+from app.automation import AutomationService
+from app.config import Settings
 from app.hub_forms import build_performance_metric_payload
-from app.orchestrator import FatalStepError
+from app.orchestrator import FatalStepError, JobOrchestrator
 from app.schemas import PublicationSchedulePayload
 from app.youtube_api import YouTubeIntegrationError
 
 
-@dataclass(frozen=True)
-class PublicationRouteHandlers:
-    toggle_automation: Any
-    run_automation_now: Any
-    import_ready_scripts: Any
-    connect_youtube: Any
-    youtube_oauth_callback: Any
-    disconnect_youtube: Any
-    publication_calendar: Any
-    schedule_publication_from_calendar: Any
-    update_publish_metadata: Any
-    publish_job: Any
-    schedule_job_publication: Any
-    reopen_job_publication: Any
-    record_performance: Any
-    sync_job_youtube_analytics: Any
-    sync_due_youtube_analytics: Any
-
-
-def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHandlers]:
+def create_publication_router(
+    *,
+    settings: Settings,
+    templates: Jinja2Templates,
+    orchestrator: JobOrchestrator,
+    automation_service: AutomationService,
+    redirect_back: Callable[..., RedirectResponse],
+    ready_script_import_text: Callable[..., Awaitable[str]],
+    effective_youtube_redirect_uri: Callable[[Request], str],
+    calendar_context: Callable[[str | None], dict[str, object]],
+) -> APIRouter:
     router = APIRouter()
 
     @router.post("/automation/toggle")
     def toggle_automation(enabled: bool = Form(default=False), return_to: str | None = Form(default=None)):
-        deps.automation_service.set_automation_enabled(enabled)
-        return deps.redirect_back(return_to, default="/publication-hub")
+        automation_service.set_automation_enabled(enabled)
+        return redirect_back(return_to, default="/publication-hub")
 
     @router.post("/automation/run")
     def run_automation_now(force: bool = Form(default=False), return_to: str | None = Form(default=None)):
-        result = deps.automation_service.run_daily_cycle(force=force)
+        result = automation_service.run_daily_cycle(force=force)
         if result and result.get("status") == "failed":
-            return deps.redirect_back(return_to, {"automation_error": result.get("error") or "failed"}, default="/publication-hub")
-        return deps.redirect_back(return_to, default="/publication-hub")
+            return redirect_back(return_to, {"automation_error": result.get("error") or "failed"}, default="/publication-hub")
+        return redirect_back(return_to, default="/publication-hub")
 
     @router.post("/automation/ready-scripts/import")
     async def import_ready_scripts(
@@ -56,17 +49,17 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
 
         return_to: str | None = Form(default=None),
     ):
-        raw_text = await deps.ready_script_import_text(ready_script_batch, ready_script_file)
-        result = deps.automation_service.import_ready_script_batch(raw_text)
+        raw_text = await ready_script_import_text(ready_script_batch, ready_script_file)
+        result = automation_service.import_ready_script_batch(raw_text)
         params = {"imported": str(result.imported)}
         if result.errors:
             params["errors"] = str(len(result.errors))
-        return deps.redirect_back(return_to, params=params)
+        return redirect_back(return_to, params=params)
 
     @router.get("/youtube/connect")
     def connect_youtube(request: Request):
         try:
-            authorization_url = deps.orchestrator.youtube.authorization_url(deps.effective_youtube_redirect_uri(request))
+            authorization_url = orchestrator.youtube.authorization_url(effective_youtube_redirect_uri(request))
         except FatalStepError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
@@ -85,24 +78,24 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
         if not code or not state:
             raise HTTPException(status_code=400, detail="youtube oauth callback missing code/state")
         try:
-            deps.orchestrator.youtube.exchange_code(code=code, state=state)
+            orchestrator.youtube.exchange_code(code=code, state=state)
         except Exception as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return RedirectResponse(url="/", status_code=303)
 
     @router.post("/youtube/disconnect")
     def disconnect_youtube():
-        deps.orchestrator.youtube.disconnect()
+        orchestrator.youtube.disconnect()
         return RedirectResponse(url="/", status_code=303)
 
     @router.get("/calendar", response_class=HTMLResponse)
     def publication_calendar(request: Request, month: str | None = Query(default=None)):
-        return deps.templates.TemplateResponse(
+        return templates.TemplateResponse(
             request,
             "calendar.html",
             {
-                **deps.calendar_context(month),
-                "settings": deps.settings,
+                **calendar_context(month),
+                "settings": settings,
             },
         )
 
@@ -124,7 +117,7 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
                 youtube_visibility=youtube_visibility,
                 notes=notes,
             )
-            deps.orchestrator.schedule_publication(job_id, payload.model_dump())
+            orchestrator.schedule_publication(job_id, payload.model_dump())
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="scheduled_date must use YYYY-MM-DD") from exc
         except ValidationError as exc:
@@ -144,7 +137,7 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
         hashtags: str = Form(default=""),
     ):
         try:
-            deps.orchestrator.update_publish_metadata(
+            orchestrator.update_publish_metadata(
                 job_id,
                 {
                     "title": title,
@@ -166,7 +159,7 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
         youtube_url: str | None = Form(default=None),
     ):
         try:
-            deps.orchestrator.publish_job(job_id, youtube_video_id=youtube_video_id, youtube_url=youtube_url)
+            orchestrator.publish_job(job_id, youtube_video_id=youtube_video_id, youtube_url=youtube_url)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
         except FatalStepError as exc:
@@ -185,7 +178,7 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
     ):
         try:
             if action == "clear":
-                deps.orchestrator.clear_publication_schedule(job_id)
+                orchestrator.clear_publication_schedule(job_id)
             else:
                 payload = PublicationSchedulePayload(
                     scheduled_for_local=scheduled_for_local or "",
@@ -193,7 +186,7 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
                     youtube_visibility=youtube_visibility,
                     notes=notes,
                 )
-                deps.orchestrator.schedule_publication(job_id, payload.model_dump())
+                orchestrator.schedule_publication(job_id, payload.model_dump())
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=exc.errors()) from exc
         except KeyError as exc:
@@ -205,7 +198,7 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
     @router.post("/jobs/{job_id}/reopen-publication")
     def reopen_job_publication(job_id: str):
         try:
-            deps.orchestrator.reopen_publication_for_republish(job_id)
+            orchestrator.reopen_publication_for_republish(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
         except FatalStepError as exc:
@@ -239,7 +232,7 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
                 monetization_status=monetization_status,
                 notes=notes,
             )
-            deps.orchestrator.record_performance_metrics(job_id, payload.model_dump())
+            orchestrator.record_performance_metrics(job_id, payload.model_dump())
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=exc.errors()) from exc
         except ValueError as exc:
@@ -255,12 +248,12 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
         return_to: str | None = Form(default=None),
     ):
         try:
-            deps.orchestrator.sync_youtube_analytics_snapshot(job_id, days=days)
+            orchestrator.sync_youtube_analytics_snapshot(job_id, days=days)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
         except YouTubeIntegrationError as exc:
-            return deps.redirect_back(return_to, {"analytics_error": str(exc)}, default=f"/jobs/{job_id}")
-        return deps.redirect_back(return_to, {"analytics_synced": "1"}, default=f"/jobs/{job_id}")
+            return redirect_back(return_to, {"analytics_error": str(exc)}, default=f"/jobs/{job_id}")
+        return redirect_back(return_to, {"analytics_synced": "1"}, default=f"/jobs/{job_id}")
 
     @router.post("/youtube-analytics/sync-due")
     def sync_due_youtube_analytics(
@@ -268,26 +261,9 @@ def create_publication_router(deps: Any) -> tuple[APIRouter, PublicationRouteHan
         limit: int | None = Form(default=None),
         return_to: str | None = Form(default=None),
     ):
-        result = deps.orchestrator.sync_due_youtube_analytics_snapshots(days=days, limit=limit)
+        result = orchestrator.sync_due_youtube_analytics_snapshots(days=days, limit=limit)
         if result.get("status") == "skipped":
-            return deps.redirect_back(return_to, {"analytics_error": result.get("reason") or "sync_skipped"}, default="/publication-hub")
-        return deps.redirect_back(return_to, {"analytics_synced": str(len(result.get("synced") or []))}, default="/publication-hub")
+            return redirect_back(return_to, {"analytics_error": result.get("reason") or "sync_skipped"}, default="/publication-hub")
+        return redirect_back(return_to, {"analytics_synced": str(len(result.get("synced") or []))}, default="/publication-hub")
 
-    handlers = PublicationRouteHandlers(
-        toggle_automation=toggle_automation,
-        run_automation_now=run_automation_now,
-        import_ready_scripts=import_ready_scripts,
-        connect_youtube=connect_youtube,
-        youtube_oauth_callback=youtube_oauth_callback,
-        disconnect_youtube=disconnect_youtube,
-        publication_calendar=publication_calendar,
-        schedule_publication_from_calendar=schedule_publication_from_calendar,
-        update_publish_metadata=update_publish_metadata,
-        publish_job=publish_job,
-        schedule_job_publication=schedule_job_publication,
-        reopen_job_publication=reopen_job_publication,
-        record_performance=record_performance,
-        sync_job_youtube_analytics=sync_job_youtube_analytics,
-        sync_due_youtube_analytics=sync_due_youtube_analytics,
-    )
-    return router, handlers
+    return router

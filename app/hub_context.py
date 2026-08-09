@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
-from zoneinfo import ZoneInfo
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request
-from sqlalchemy import or_, select
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.domain_contracts import (
@@ -41,7 +42,12 @@ from app.job_origin import (
     resolve_creation_via,
     resolve_job_origin,
 )
-from app.models import Job, PublicationSchedule, Script, TopicRequest
+from app.models import Job, PublicationSchedule, TopicRequest
+
+if TYPE_CHECKING:
+    from app.automation import AutomationService
+    from app.config import Settings
+    from app.orchestrator import JobOrchestrator
 
 FAILURE_REASON_GUIDES = {
     "fact_pack_missing_for_factual_topic": {
@@ -241,16 +247,91 @@ FAILURE_REASON_GUIDES = {
     },
 }
 
-HUB_JOBS_PER_PAGE = 4
-
 class HubContext:
-    def __init__(self, settings: Any, orchestrator: Any, automation_service: Any) -> None:
+    def __init__(self, settings: Settings, orchestrator: JobOrchestrator, automation_service: AutomationService) -> None:
         self.settings = settings
         self.orchestrator = orchestrator
         self.automation_service = automation_service
-        self.calendar_context = HubCalendarContext(self)
-        self.jobs_context = HubJobsContext(self)
-        self.publication_context = HubPublicationContext(self)
+        self._jobs = HubJobsContext(self._job_queue_action_summary)
+        self._publication = HubPublicationContext(
+            settings=settings,
+            orchestrator=orchestrator,
+            automation_service=automation_service,
+        )
+        self._calendar = HubCalendarContext(settings, self._publication.ready_to_schedule_entries)
+
+    def register_template_globals(self, templates: Jinja2Templates) -> None:
+        templates.env.globals.update(
+            {
+                "job_status_label": self._job_status_label,
+                "schedule_status_label": self._schedule_status_label,
+                "job_flow_stage": self._job_flow_stage,
+                "job_next_action": self._job_next_action,
+                "publication_operational_status": self._publication_operational_status,
+                "job_progress_snapshot": self._job_progress_snapshot,
+                "failure_diagnosis": self._failure_diagnosis,
+                "job_origin_display": self._job_origin_display,
+                "creation_via_display": self._creation_via_display,
+            }
+        )
+
+    def job_list_context(
+        self,
+        *,
+        status: str | None,
+        search: str | None,
+        fallback: str | None,
+        review: str | None,
+        origin: str | None,
+        via: str | None,
+        page: int,
+        per_page: int,
+    ) -> dict[str, object]:
+        return self._jobs.job_list_context(
+            status=status,
+            search=search,
+            fallback=fallback,
+            review=review,
+            origin=origin,
+            via=via,
+            page=page,
+            per_page=per_page,
+        )
+
+    def publication_dashboard_context(self, request: Request, *, limit: int = 6) -> dict[str, object]:
+        return self._publication.dashboard_context(request, limit=limit)
+
+    def calendar_page_context(self, month: str | None) -> dict[str, object]:
+        return self._calendar.context(month)
+
+    def effective_youtube_redirect_uri(self, request: Request) -> str:
+        return self._publication.effective_youtube_redirect_uri(request)
+
+    def job_detail_page_context(self, request: Request, details: dict[str, Any]) -> dict[str, object]:
+        youtube_integration = self._publication.youtube_integration_context(request)
+        schedule_display = self._publication.schedule_display(details.get("publication_schedule"))
+        return {
+            "youtube_integration": youtube_integration,
+            "publication_schedule_display": schedule_display,
+            "action_guide": self._job_action_guide(
+                details["job"],
+                details.get("monetization_report"),
+                schedule_display,
+                youtube_integration,
+            ),
+        }
+
+    def resolve_job_id(self, session: Session, job_id: str) -> str:
+        if session.get(Job, job_id):
+            return job_id
+        matches = session.scalars(
+            select(Job.job_id).where(Job.job_id.like(f"{job_id}%")).order_by(Job.created_at.desc()).limit(2)
+        ).all()
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise HTTPException(status_code=409, detail="job id prefix is ambiguous")
+        raise KeyError(job_id)
 
     def _job_status_label(self, status: str | None) -> str:
         return JOB_STATUS_LABELS.get(str(status or ""), str(status or "-"))
@@ -664,165 +745,3 @@ class HubContext:
             "title": "Acompanhe o próximo passo",
             "body": self._job_next_action(job_status, schedule_status or None),
         }
-
-    def _clamp_page(self, value: int | None) -> int:
-        return self.jobs_context.clamp_page(value)
-
-    def _clamp_per_page(self, value: int | None) -> int:
-        return self.jobs_context.clamp_per_page(value)
-
-    def _query_jobs(
-        self,
-        status: str | None,
-        search: str | None,
-        fallback: str | None,
-        review: str | None,
-        origin: str | None,
-        via: str | None,
-        page: int = 1,
-        per_page: int = HUB_JOBS_PER_PAGE,
-    ):
-        return self.jobs_context.query_jobs(
-            status=status,
-            search=search,
-            fallback=fallback,
-            review=review,
-            origin=origin,
-            via=via,
-            page=page,
-            per_page=per_page,
-        )
-
-    def _jobs_query_string(self, filters: dict[str, str], page: int, per_page: int) -> str:
-        return self.jobs_context.jobs_query_string(filters, page, per_page)
-
-    def _job_list_context(
-        self,
-        *,
-        status: str | None,
-        search: str | None,
-        fallback: str | None,
-        review: str | None,
-        origin: str | None,
-        via: str | None,
-        page: int,
-        per_page: int,
-    ) -> dict[str, object]:
-        return self.jobs_context.job_list_context(
-            status=status,
-            search=search,
-            fallback=fallback,
-            review=review,
-            origin=origin,
-            via=via,
-            page=page,
-            per_page=per_page,
-        )
-
-    def _schedule_display(self, schedule: PublicationSchedule | None) -> dict[str, str | None] | None:
-        if schedule is None:
-            return None
-        scheduled_for_utc = schedule.scheduled_for_utc if schedule.scheduled_for_utc.tzinfo else schedule.scheduled_for_utc.replace(tzinfo=UTC)
-        published_at = schedule.published_at if schedule.published_at and schedule.published_at.tzinfo else (
-            schedule.published_at.replace(tzinfo=UTC) if schedule.published_at else None
-        )
-        local_dt = scheduled_for_utc.astimezone(ZoneInfo(schedule.timezone))
-        published_local = published_at.astimezone(ZoneInfo(schedule.timezone)) if published_at else None
-        return {
-            "status": schedule.status,
-            "scheduled_for_utc": scheduled_for_utc.isoformat(),
-            "scheduled_for_local": local_dt.isoformat(),
-            "scheduled_for_local_form": local_dt.strftime("%Y-%m-%dT%H:%M"),
-            "local_date": local_dt.date().isoformat(),
-            "local_time": local_dt.strftime("%H:%M"),
-            "timezone": schedule.timezone,
-            "youtube_visibility": schedule.youtube_visibility,
-            "notes": schedule.notes,
-            "published_at": published_local.isoformat() if published_local else None,
-            "published_local_label": published_local.strftime("%d/%m/%Y %H:%M") if published_local else None,
-            "youtube_video_id": schedule.youtube_video_id,
-            "youtube_url": schedule.youtube_url,
-        }
-
-    def _publication_title(self, job: Job, topic_request: TopicRequest | None, script: Script | None) -> str:
-        return (
-            (script.title if script else None)
-            or job.topic_summary
-            or (topic_request.seed_theme if topic_request else None)
-            or job.job_id
-        )
-
-    def _ready_to_schedule_entries(self, session, limit: int | None = None) -> list[dict[str, object]]:
-        stmt = (
-            select(Job, TopicRequest, Script, PublicationSchedule)
-            .join(TopicRequest, TopicRequest.job_id == Job.job_id)
-            .join(Script, Script.job_id == Job.job_id, isouter=True)
-            .join(PublicationSchedule, PublicationSchedule.job_id == Job.job_id, isouter=True)
-            .where(Job.status == JOB_STATUS_APPROVED_FOR_PUBLISH)
-            .where(or_(PublicationSchedule.schedule_id.is_(None), PublicationSchedule.status == "cancelled"))
-            .order_by(Job.created_at.asc())
-        )
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        rows = session.execute(stmt).all()
-        return [
-            {
-                "job_id": job.job_id,
-                "title": self._publication_title(job, topic_request, script),
-                "seed_theme": topic_request.seed_theme if topic_request else None,
-                "created_at": job.created_at.isoformat() if job.created_at else None,
-                "job_status": job.status,
-                "schedule": self._schedule_display(schedule) if schedule else None,
-            }
-            for job, topic_request, script, schedule in rows
-        ]
-
-    def _effective_youtube_redirect_uri(self, request: Request) -> str:
-        return self.publication_context.effective_youtube_redirect_uri(request)
-
-    def _youtube_integration_context(self, request: Request) -> dict[str, object]:
-        return self.publication_context.youtube_integration_context(request)
-
-    def _tiktok_integration_context(self) -> dict[str, object]:
-        return self.publication_context.tiktok_integration_context()
-
-    def _publication_dashboard_context(self, request: Request, limit: int = 6) -> dict[str, object]:
-        return self.publication_context.dashboard_context(request, limit=limit)
-
-    def _growth_quick_recommendations(
-        self,
-        *,
-        top_performers: list[dict[str, object]],
-        jobs_missing_analytics: int,
-        reliable_snapshot_count: int,
-        low_confidence_count: int,
-        stale_snapshot_count: int,
-        sync_candidates_count: int,
-    ) -> list[dict[str, object]]:
-        return self.publication_context.growth_quick_recommendations(
-            top_performers=top_performers,
-            jobs_missing_analytics=jobs_missing_analytics,
-            reliable_snapshot_count=reliable_snapshot_count,
-            low_confidence_count=low_confidence_count,
-            stale_snapshot_count=stale_snapshot_count,
-            sync_candidates_count=sync_candidates_count,
-        )
-
-    def _parse_calendar_month(self, month: str | None):
-        return self.calendar_context.parse_month(month)
-
-    def _shift_month(self, month_start, delta: int):
-        return self.calendar_context.shift_month(month_start, delta)
-
-    def _calendar_context(self, month: str | None) -> dict[str, object]:
-        return self.calendar_context.context(month)
-
-    def _resolve_job_id(self, session, job_id: str) -> str:
-        if session.get(Job, job_id):
-            return job_id
-        matches = session.scalars(select(Job.job_id).where(Job.job_id.like(f"{job_id}%")).order_by(Job.created_at.desc()).limit(2)).all()
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            raise HTTPException(status_code=409, detail="job id prefix is ambiguous")
-        raise KeyError(job_id)

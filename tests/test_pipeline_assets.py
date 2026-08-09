@@ -1653,9 +1653,9 @@ def test_pipelines_use_explicit_base_dependencies_and_asset_helpers() -> None:
     assert test_orchestrator.publication_ops.review_ops.review_job.__self__ is test_orchestrator.publication_ops.review_ops
     assert test_orchestrator.publication_ops.workflow_ops.publish_job.__self__ is test_orchestrator.publication_ops.workflow_ops
     assert test_orchestrator.worker_ops.worker_iteration.__self__ is test_orchestrator.worker_ops
-    assert main_module.hub_context.calendar_context.context.__self__ is main_module.hub_context.calendar_context
-    assert main_module.hub_context.jobs_context.job_list_context.__self__ is main_module.hub_context.jobs_context
-    assert main_module.hub_context.publication_context.dashboard_context.__self__ is main_module.hub_context.publication_context
+    assert main_module.hub_context.calendar_page_context.__self__ is main_module.hub_context
+    assert main_module.hub_context.job_list_context.__self__ is main_module.hub_context
+    assert main_module.hub_context.publication_dashboard_context.__self__ is main_module.hub_context
     assert JOB_STATUS_LABELS["ready_for_upload"] == "Pronto para aprovar"
     assert SCHEDULE_STATUS_LABELS["publish_failed"] == "Falhou no upload"
     assert "ready_for_upload" in NEEDS_ACTION_JOB_STATUSES

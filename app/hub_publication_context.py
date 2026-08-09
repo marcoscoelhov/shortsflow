@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from fastapi import Request
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import Session
 
 from app.backlog_recovery import BacklogRecoveryService
+from app.config import Settings
 from app.db import SessionLocal
+from app.domain_contracts import JOB_STATUS_APPROVED_FOR_PUBLISH
 from app.growth_metrics import build_growth_score
 from app.hub_status import NEEDS_ACTION_JOB_STATUSES
 from app.models import (
@@ -22,21 +26,22 @@ from app.models import (
     YouTubeAnalyticsSnapshot,
 )
 
+if TYPE_CHECKING:
+    from app.automation import AutomationService
+    from app.orchestrator import JobOrchestrator
+
+
 class HubPublicationContext:
-    def __init__(self, owner: Any) -> None:
-        self.owner = owner
-
-    @property
-    def settings(self) -> Any:
-        return self.owner.settings
-
-    @property
-    def orchestrator(self) -> Any:
-        return self.owner.orchestrator
-
-    @property
-    def automation_service(self) -> Any:
-        return self.owner.automation_service
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        orchestrator: JobOrchestrator,
+        automation_service: AutomationService,
+    ) -> None:
+        self.settings = settings
+        self.orchestrator = orchestrator
+        self.automation_service = automation_service
 
     def effective_youtube_redirect_uri(self, request: Request) -> str:
         return self.settings.youtube_oauth_redirect_uri or f"{str(request.base_url).rstrip('/')}/youtube/oauth/callback"
@@ -141,10 +146,68 @@ class HubPublicationContext:
         except Exception:  # noqa: BLE001
             return {}
 
+    def schedule_display(self, schedule: PublicationSchedule | None) -> dict[str, str | None] | None:
+        if schedule is None:
+            return None
+        scheduled_for_utc = schedule.scheduled_for_utc if schedule.scheduled_for_utc.tzinfo else schedule.scheduled_for_utc.replace(tzinfo=UTC)
+        published_at = schedule.published_at if schedule.published_at and schedule.published_at.tzinfo else (
+            schedule.published_at.replace(tzinfo=UTC) if schedule.published_at else None
+        )
+        local_dt = scheduled_for_utc.astimezone(ZoneInfo(schedule.timezone))
+        published_local = published_at.astimezone(ZoneInfo(schedule.timezone)) if published_at else None
+        return {
+            "status": schedule.status,
+            "scheduled_for_utc": scheduled_for_utc.isoformat(),
+            "scheduled_for_local": local_dt.isoformat(),
+            "scheduled_for_local_form": local_dt.strftime("%Y-%m-%dT%H:%M"),
+            "local_date": local_dt.date().isoformat(),
+            "local_time": local_dt.strftime("%H:%M"),
+            "timezone": schedule.timezone,
+            "youtube_visibility": schedule.youtube_visibility,
+            "notes": schedule.notes,
+            "published_at": published_local.isoformat() if published_local else None,
+            "published_local_label": published_local.strftime("%d/%m/%Y %H:%M") if published_local else None,
+            "youtube_video_id": schedule.youtube_video_id,
+            "youtube_url": schedule.youtube_url,
+        }
+
+    def publication_title(self, job: Job, topic_request: TopicRequest | None, script: Script | None) -> str:
+        return (
+            (script.title if script else None)
+            or job.topic_summary
+            or (topic_request.seed_theme if topic_request else None)
+            or job.job_id
+        )
+
+    def ready_to_schedule_entries(self, session: Session, limit: int | None = None) -> list[dict[str, object]]:
+        stmt = (
+            select(Job, TopicRequest, Script, PublicationSchedule)
+            .join(TopicRequest, TopicRequest.job_id == Job.job_id)
+            .join(Script, Script.job_id == Job.job_id, isouter=True)
+            .join(PublicationSchedule, PublicationSchedule.job_id == Job.job_id, isouter=True)
+            .where(Job.status == JOB_STATUS_APPROVED_FOR_PUBLISH)
+            .where(or_(PublicationSchedule.schedule_id.is_(None), PublicationSchedule.status == "cancelled"))
+            .order_by(Job.created_at.asc())
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = session.execute(stmt).all()
+        return [
+            {
+                "job_id": job.job_id,
+                "title": self.publication_title(job, topic_request, script),
+                "seed_theme": topic_request.seed_theme if topic_request else None,
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "job_status": job.status,
+                "schedule": self.schedule_display(schedule) if schedule else None,
+            }
+            for job, topic_request, script, schedule in rows
+        ]
+
     def dashboard_context(self, request: Request, limit: int = 6) -> dict[str, object]:
         refreshed_at = datetime.now(UTC)
         with SessionLocal() as session:
-            ready_to_schedule = self.owner._ready_to_schedule_entries(session, limit=limit)
+            ready_to_schedule = self.ready_to_schedule_entries(session, limit)
             schedule_rows = session.execute(
                 select(PublicationSchedule, Job, TopicRequest, Script)
                 .join(Job, Job.job_id == PublicationSchedule.job_id)
@@ -225,10 +288,10 @@ class HubPublicationContext:
         upcoming_schedule = [
             {
                 "job_id": job.job_id,
-                "title": self.owner._publication_title(job, topic_request, script),
+                "title": self.publication_title(job, topic_request, script),
                 "seed_theme": topic_request.seed_theme if topic_request else None,
                 "job_status": job.status,
-                "schedule": self.owner._schedule_display(schedule),
+                "schedule": self.schedule_display(schedule),
             }
             for schedule, job, topic_request, script in schedule_rows
         ]
@@ -236,10 +299,10 @@ class HubPublicationContext:
         recent_publications = [
             {
                 "job_id": job.job_id,
-                "title": self.owner._publication_title(job, topic_request, script),
+                "title": self.publication_title(job, topic_request, script),
                 "seed_theme": topic_request.seed_theme if topic_request else None,
                 "job_status": job.status,
-                "schedule": self.owner._schedule_display(schedule),
+                "schedule": self.schedule_display(schedule),
             }
             for schedule, job, topic_request, script in published_rows
         ]
@@ -272,7 +335,7 @@ class HubPublicationContext:
             score = build_growth_score(summary, fetched_at=snapshot.fetched_at)
             latest_snapshots[job.job_id] = {
                 "job_id": job.job_id,
-                "title": self.owner._publication_title(job, topic_request, script),
+                "title": self.publication_title(job, topic_request, script),
                 "canonical_topic": topic_plan.canonical_topic if topic_plan else topic_request.seed_theme if topic_request else None,
                 "hook": script.hook if script else None,
                 "fetched_at": snapshot.fetched_at.isoformat() if snapshot.fetched_at else None,

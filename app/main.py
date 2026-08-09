@@ -115,25 +115,6 @@ HUB_JOBS_PER_PAGE = 4
 
 
 hub_context = HubContext(settings, orchestrator, automation_service)
-_job_status_label = hub_context._job_status_label
-_schedule_status_label = hub_context._schedule_status_label
-_job_flow_stage = hub_context._job_flow_stage
-_job_next_action = hub_context._job_next_action
-_publication_operational_status = hub_context._publication_operational_status
-_job_progress_snapshot = hub_context._job_progress_snapshot
-_failure_diagnosis = hub_context._failure_diagnosis
-_job_origin_display = hub_context._job_origin_display
-_creation_via_display = hub_context._creation_via_display
-_job_action_guide = hub_context._job_action_guide
-_job_list_context = hub_context._job_list_context
-_schedule_display = hub_context._schedule_display
-_ready_to_schedule_entries = hub_context._ready_to_schedule_entries
-_effective_youtube_redirect_uri = hub_context._effective_youtube_redirect_uri
-_youtube_integration_context = hub_context._youtube_integration_context
-_tiktok_integration_context = hub_context._tiktok_integration_context
-_publication_dashboard_context = hub_context._publication_dashboard_context
-_calendar_context = hub_context._calendar_context
-_resolve_job_id = hub_context._resolve_job_id
 
 
 def artifact_url(uri: str | None) -> str:
@@ -152,15 +133,7 @@ def artifact_url(uri: str | None) -> str:
 
 
 templates.env.globals["artifact_url"] = artifact_url
-templates.env.globals["job_status_label"] = _job_status_label
-templates.env.globals["schedule_status_label"] = _schedule_status_label
-templates.env.globals["job_flow_stage"] = _job_flow_stage
-templates.env.globals["job_next_action"] = _job_next_action
-templates.env.globals["publication_operational_status"] = _publication_operational_status
-templates.env.globals["job_progress_snapshot"] = _job_progress_snapshot
-templates.env.globals["failure_diagnosis"] = _failure_diagnosis
-templates.env.globals["job_origin_display"] = _job_origin_display
-templates.env.globals["creation_via_display"] = _creation_via_display
+hub_context.register_template_globals(templates)
 
 
 @asynccontextmanager
@@ -310,61 +283,21 @@ def _trend_seed_theme(niche_id: str) -> tuple[str, str | None, str | None, dict[
     return trend.topic, trend.requested_angle, trend.as_notes(), report
 
 
-class _PublicationRouteDeps:
-    @property
-    def settings(self):
-        return settings
-
-    @property
-    def templates(self):
-        return templates
-
-    @property
-    def orchestrator(self):
-        return orchestrator
-
-    @property
-    def automation_service(self):
-        return automation_service
-
-    @staticmethod
-    def redirect_back(return_to, params=None, *, default="/"):
-        return _redirect_back(return_to, params=params, default=default)
-
-    @staticmethod
-    async def ready_script_import_text(ready_script_batch, ready_script_file):
-        return await ready_script_import_text(ready_script_batch, ready_script_file)
-
-    @staticmethod
-    def effective_youtube_redirect_uri(request: Request) -> str:
-        return _effective_youtube_redirect_uri(request)
-
-    @staticmethod
-    def calendar_context(month: str | None):
-        return _calendar_context(month)
-
-
-publication_router, _publication_route_handlers = create_publication_router(_PublicationRouteDeps())
+publication_router = create_publication_router(
+    settings=settings,
+    templates=templates,
+    orchestrator=orchestrator,
+    automation_service=automation_service,
+    redirect_back=_redirect_back,
+    ready_script_import_text=ready_script_import_text,
+    effective_youtube_redirect_uri=hub_context.effective_youtube_redirect_uri,
+    calendar_context=hub_context.calendar_page_context,
+)
 app.include_router(publication_router)
-toggle_automation = _publication_route_handlers.toggle_automation
-run_automation_now = _publication_route_handlers.run_automation_now
-import_ready_scripts = _publication_route_handlers.import_ready_scripts
-connect_youtube = _publication_route_handlers.connect_youtube
-youtube_oauth_callback = _publication_route_handlers.youtube_oauth_callback
-disconnect_youtube = _publication_route_handlers.disconnect_youtube
-publication_calendar = _publication_route_handlers.publication_calendar
-schedule_publication_from_calendar = _publication_route_handlers.schedule_publication_from_calendar
-update_publish_metadata = _publication_route_handlers.update_publish_metadata
-publish_job = _publication_route_handlers.publish_job
-schedule_job_publication = _publication_route_handlers.schedule_job_publication
-reopen_job_publication = _publication_route_handlers.reopen_job_publication
-record_performance = _publication_route_handlers.record_performance
-sync_job_youtube_analytics = _publication_route_handlers.sync_job_youtube_analytics
-sync_due_youtube_analytics = _publication_route_handlers.sync_due_youtube_analytics
 
 
 def _jobs_listing_page_context(request: Request, *, deleted_job: str | None, list_context: dict[str, object]) -> dict[str, object]:
-    publication_context = _publication_dashboard_context(request, limit=4)
+    publication_context = hub_context.publication_dashboard_context(request, limit=4)
     return {
         **list_context,
         "workflow_summary": publication_context["metrics"],
@@ -396,7 +329,16 @@ def jobs_page(
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
     deleted_job: str | None = Query(default=None),
 ):
-    list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
+    list_context = hub_context.job_list_context(
+        status=status,
+        search=search,
+        fallback=fallback,
+        review=review,
+        origin=origin,
+        via=via,
+        page=page,
+        per_page=per_page,
+    )
     return templates.TemplateResponse(
         request,
         "jobs.html",
@@ -445,7 +387,16 @@ def jobs_route(
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
     deleted_job: str | None = Query(default=None),
 ):
-    list_context = _job_list_context(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
+    list_context = hub_context.job_list_context(
+        status=status,
+        search=search,
+        fallback=fallback,
+        review=review,
+        origin=origin,
+        via=via,
+        page=page,
+        per_page=per_page,
+    )
     if request.headers.get("hx-request", "").lower() != "true":
         return templates.TemplateResponse(
             request,
@@ -465,7 +416,7 @@ def publication_dashboard_page(request: Request):
         request,
         "growth.html",
         {
-            **_publication_dashboard_context(request),
+            **hub_context.publication_dashboard_context(request),
             "growth_return_to": "/publication-hub",
             "show_maintenance": True,
             "settings": settings,
@@ -479,7 +430,7 @@ def publication_dashboard_fragment(request: Request):
         request,
         "publication_dashboard.html",
         {
-            **_publication_dashboard_context(request),
+            **hub_context.publication_dashboard_context(request),
             "growth_return_to": "/publication-hub",
             "settings": settings,
         },
@@ -596,7 +547,7 @@ def create_job(
 @app.get("/api/jobs/{job_id}")
 def job_json(job_id: str):
     with SessionLocal() as session:
-        resolved_job_id = _resolve_job_id(session, job_id)
+        resolved_job_id = hub_context.resolve_job_id(session, job_id)
         details = orchestrator.get_job_details(session, resolved_job_id)
         return {
             "job": {
@@ -621,31 +572,23 @@ def job_json(job_id: str):
 def job_detail(request: Request, job_id: str):
     with SessionLocal() as session:
         try:
-            resolved_job_id = _resolve_job_id(session, job_id)
+            resolved_job_id = hub_context.resolve_job_id(session, job_id)
             details = orchestrator.get_job_details(session, resolved_job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
-    youtube_integration = _youtube_integration_context(request)
-    publication_schedule_display = _schedule_display(details.get("publication_schedule"))
+    page_context = hub_context.job_detail_page_context(request, details)
     return templates.TemplateResponse(
         request,
         "job_detail.html",
         {
             "details": details,
             "settings": settings,
-            "publication_schedule_display": publication_schedule_display,
+            **page_context,
             "common_schedule_timezones": COMMON_SCHEDULE_TIMEZONES,
-            "youtube_integration": youtube_integration,
             "review_error": request.query_params.get("review_error"),
             "publish_error": request.query_params.get("publish_error"),
             "reprocess_error": request.query_params.get("reprocess_error"),
             "premium_error": request.query_params.get("premium_error"),
-            "action_guide": _job_action_guide(
-                details["job"],
-                details.get("monetization_report"),
-                publication_schedule_display,
-                youtube_integration,
-            ),
         },
     )
 
@@ -654,7 +597,7 @@ def job_detail(request: Request, job_id: str):
 def delete_job(job_id: str):
     try:
         with SessionLocal() as session:
-            resolved_job_id = _resolve_job_id(session, job_id)
+            resolved_job_id = hub_context.resolve_job_id(session, job_id)
         orchestrator.delete_job(resolved_job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
@@ -668,7 +611,7 @@ def delete_job(job_id: str):
 def generate_premium_finish(job_id: str, background_tasks: BackgroundTasks):
     try:
         with SessionLocal() as session:
-            resolved_job_id = _resolve_job_id(session, job_id)
+            resolved_job_id = hub_context.resolve_job_id(session, job_id)
         orchestrator.request_premium_finishing(resolved_job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc

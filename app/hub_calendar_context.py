@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import calendar
+from collections.abc import Callable
 from datetime import UTC, date, datetime
-from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.db import SessionLocal
 from app.models import Job, PublicationSchedule, Script, TopicRequest
 
@@ -35,12 +37,13 @@ MONTH_NAMES_PT_BR = [
 
 
 class HubCalendarContext:
-    def __init__(self, owner: Any) -> None:
-        self.owner = owner
-
-    @property
-    def settings(self) -> Any:
-        return self.owner.settings
+    def __init__(
+        self,
+        settings: Settings,
+        ready_to_schedule_entries: Callable[[Session, int | None], list[dict[str, object]]],
+    ) -> None:
+        self.settings = settings
+        self.ready_to_schedule_entries = ready_to_schedule_entries
 
     def parse_month(self, month: str | None) -> date:
         normalized = str(month or "").strip()
@@ -65,7 +68,7 @@ class HubCalendarContext:
         next_month = self.shift_month(month_start, 1)
         month_weeks = calendar.Calendar(firstweekday=0).monthdatescalendar(month_start.year, month_start.month)
         with SessionLocal() as session:
-            ready_to_schedule = self.owner._ready_to_schedule_entries(session)
+            ready_to_schedule = self.ready_to_schedule_entries(session, None)
             schedule_rows = session.execute(
                 select(PublicationSchedule, Job, TopicRequest, Script)
                 .join(Job, Job.job_id == PublicationSchedule.job_id)

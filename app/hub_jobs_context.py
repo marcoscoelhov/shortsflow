@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from collections.abc import Callable
 from urllib.parse import urlencode
 
 from sqlalchemy import and_, case, func, or_, select
@@ -20,9 +20,13 @@ from app.models import AutomationAttempt, FallbackEvent, Job, PublicationSchedul
 
 HUB_JOBS_PER_PAGE = 4
 
+
 class HubJobsContext:
-    def __init__(self, owner: Any) -> None:
-        self.owner = owner
+    def __init__(
+        self,
+        job_queue_action_summary: Callable[[Job, PublicationSchedule | None], dict[str, str]],
+    ) -> None:
+        self.job_queue_action_summary = job_queue_action_summary
 
     def clamp_page(self, value: int | None) -> int:
         return max(1, int(value or 1))
@@ -139,7 +143,7 @@ class HubJobsContext:
                         "publication_schedule": publication_schedule,
                         "job_origin": origin_display,
                         "creation_via": via_display,
-                        "action_summary": self.owner._job_queue_action_summary(job, publication_schedule),
+                        "action_summary": self.job_queue_action_summary(job, publication_schedule),
                     }
                 )
             total = len(all_rows)

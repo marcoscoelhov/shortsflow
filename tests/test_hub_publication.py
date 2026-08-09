@@ -161,7 +161,7 @@ def test_failure_diagnosis_explains_text_publish_audit_codes() -> None:
         failure_reason="script: text publish audit failed: unsupported_claim, invented_source_fact_ids, low_retention",
     )
 
-    diagnosis = main_module._failure_diagnosis(job)
+    diagnosis = main_module.hub_context._failure_diagnosis(job)
 
     assert diagnosis["visible"] is True
     assert diagnosis["code"] == "unsupported_claim"
@@ -179,7 +179,7 @@ def test_failure_diagnosis_explains_tts_duration_failure() -> None:
         failure_reason="tts: tts duration outside allowed range",
     )
 
-    diagnosis = main_module._failure_diagnosis(job)
+    diagnosis = main_module.hub_context._failure_diagnosis(job)
 
     assert diagnosis["visible"] is True
     assert diagnosis["code"] == "tts_duration_outside_allowed_range"
@@ -224,7 +224,7 @@ def test_failure_diagnosis_includes_tts_fallback_chain_for_technical_provider_bl
         },
     )
 
-    diagnosis = main_module._failure_diagnosis(
+    diagnosis = main_module.hub_context._failure_diagnosis(
         job,
         {"hard_blockers": ["technical_tts_provider_not_publishable"], "manual_required": ["visual_review_required"]},
         narration,
@@ -262,7 +262,7 @@ def test_job_detail_explains_specific_monetization_blockers_in_plain_language() 
         },
     )
 
-    diagnosis = main_module._failure_diagnosis(
+    diagnosis = main_module.hub_context._failure_diagnosis(
         Job(
             job_id=job_id,
             schema_version="1.0.0",
