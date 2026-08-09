@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Microlição sobre o papel do staging no fluxo remoto do ShortsFlow.">
+  <title>O papel do staging no ShortsFlow</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Lição 0001 · 5 minutos</p>
+    <h1>Staging protege a produção sem trazer o trabalho pesado para o seu PC</h1>
+    <p class="lede">Staging é uma segunda instalação do ShortsFlow na mesma VPS. Ela imita as condições reais, mas usa banco, artefatos, processo e endereço separados.</p>
+    <p class="notice"><strong>Estado atual:</strong> o staging está ativo na VPS e já concluiu um vídeo com providers e renderização reais. Produção continua intacta até a aprovação visual.</p>
+
+    <section>
+      <h2>O caminho de uma mudança</h2>
+      <div class="flow" aria-label="Fluxo da alteração até produção">
+        <div>
+          <strong>1. PC local</strong>
+          <span>Você edita, executa testes rápidos e envia commits ao GitHub.</span>
+        </div>
+        <div>
+          <strong>2. GitHub</strong>
+          <span>A branch registra exatamente qual versão deve ser implantada.</span>
+        </div>
+        <div class="safe">
+          <strong>3. Staging na VPS</strong>
+          <span>Providers e renderização reais validam a mudança sem tocar na produção.</span>
+        </div>
+        <div>
+          <strong>4. Produção na VPS</strong>
+          <span>Recebe somente a versão que já passou pela validação e promoção.</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>O que realmente fica isolado</h2>
+      <table class="comparison">
+        <thead>
+          <tr><th>Recurso</th><th>Staging</th><th>Produção</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Código</td><td>Branch <code>staging</code></td><td>Branch <code>main</code></td></tr>
+          <tr><td>Processo</td><td>Worker remoto de validação</td><td>Worker remoto operacional</td></tr>
+          <tr><td>Banco</td><td>SQLite próprio</td><td>SQLite atual da operação</td></tr>
+          <tr><td>Artefatos</td><td><code>/srv/shortsflow/staging/data</code></td><td><code>/srv/shortsflow/production/data</code> após promoção</td></tr>
+          <tr><td>Providers</td><td>Reais, acionados explicitamente</td><td>Reais, usados pelos jobs aprovados</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>A ideia que evita o erro mais caro</h2>
+      <p class="rule"><strong>Staging não é um mock.</strong> Ele pode usar OpenAI, xAI, TTS e Remotion reais. A segurança vem do isolamento do estado, não de fingir que o pipeline funciona.</p>
+      <p>O GitHub documenta ambientes como destinos distintos, como <code>staging</code> e <code>production</code>, que podem ter branches, secrets e regras de proteção próprios. A produção também pode exigir aprovação antes que o job de deployment acesse seus secrets.</p>
+      <p><a href="https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments">Fonte primária recomendada: Deploying with GitHub Actions</a></p>
+    </section>
+
+    <section id="pratica">
+      <p class="eyebrow">Recuperação ativa</p>
+      <h2>Você alterou a renderização. Onde deve validar primeiro?</h2>
+      <div class="quiz-options">
+        <button type="button" data-answer="correct">Enviar primeiro ao staging remoto isolado.</button>
+        <button type="button" data-answer="incorrect">Enviar primeiro à produção remota principal.</button>
+        <button type="button" data-answer="incorrect">Renderizar primeiro no computador local disponível.</button>
+      </div>
+      <p class="feedback" aria-live="polite"></p>
+    </section>
+
+    <section>
+      <h2>Leve com você</h2>
+      <p>Local escreve. Staging prova. Produção opera.</p>
+      <div class="next-links">
+        <a href="0002-o-sistema-remoto-inteiro.html">Ver o sistema inteiro</a>
+        <a href="../reference/staging-cheatsheet.html">Abrir a referência rápida</a>
+        <a href="https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments">Ver regras de ambientes no GitHub</a>
+      </div>
+      <p class="status">Se algo ficar pouco claro, pergunte ao agente. Ele é seu professor neste workspace.</p>
+    </section>
+  </main>
+
+  <script>
+    const options = document.querySelectorAll('[data-answer]');
+    const feedback = document.querySelector('.feedback');
+
+    options.forEach((option) => {
+      option.addEventListener('click', () => {
+        options.forEach((item) => item.removeAttribute('data-state'));
+        const correct = option.dataset.answer === 'correct';
+        option.dataset.state = correct ? 'correct' : 'incorrect';
+        feedback.textContent = correct
+          ? 'Correto. Você usa recursos reais, mas mantém a produção intacta.'
+          : 'Ainda não. A mudança precisa provar seu comportamento no staging remoto.';
+      });
+    });
+  </script>
+</body>
+</html>

@@ -55,6 +55,11 @@ class PublicationWorkflowOperations:
                 self.owner._ensure_youtube_api_ready()
             elif not (str(youtube_video_id or "").strip() or str(youtube_url or "").strip()):
                 raise FatalStepError("manual publish requires youtube_video_id or youtube_url")
+            self.owner._ensure_premium_publish_preflight(
+                session,
+                job,
+                context=f"youtube_publish:{trigger}",
+            )
             package = self.monetization_pipeline.build_publish_package(session, job)
             published_at = utcnow()
             if schedule is None:
@@ -263,6 +268,7 @@ class PublicationWorkflowOperations:
                 raise KeyError(job_id)
             if job.status != "approved_for_publish":
                 raise FatalStepError("job must be approved_for_publish before entering the publication schedule")
+            self.owner._ensure_premium_publish_preflight(session, job, context="youtube_schedule")
             schedule = session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job_id))
             package = self.monetization_pipeline.build_publish_package(session, job) if self.owner._youtube_api_mode_enabled() and (schedule is None or not schedule.youtube_video_id) else None
             if schedule is not None:

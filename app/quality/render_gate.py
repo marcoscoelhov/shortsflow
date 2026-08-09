@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -79,8 +80,50 @@ class RenderGate:
             reasons.append("render_file_too_small")
         if bitrate and bitrate < self.min_bitrate:
             reasons.append("bitrate_below_minimum")
-        decode = subprocess.run([ffmpeg, "-v", "error", "-i", str(video_path), "-f", "null", "-"], capture_output=True, text=True, check=False)
+        decode = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-nostats",
+                "-v",
+                "info",
+                "-i",
+                str(video_path),
+                "-vf",
+                "blackdetect=d=0.04:pix_th=0.10",
+                "-an",
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         if decode.returncode != 0:
             reasons.append("ffmpeg_decode_failed")
             metrics["decode_stderr"] = decode.stderr[-1000:]
+        black_intervals = self.black_intervals(decode.stderr, minimum_duration_sec=0.04)
+        metrics["black_frame_intervals"] = black_intervals
+        if black_intervals:
+            reasons.append("black_frame_leak_detected")
         return RenderGateResult(passed=not reasons, reasons=reasons, metrics=metrics)
+
+    @staticmethod
+    def black_intervals(stderr: str, *, minimum_duration_sec: float) -> list[dict[str, float]]:
+        pattern = re.compile(
+            r"black_start:(?P<start>[0-9.]+)\s+black_end:(?P<end>[0-9.]+)\s+black_duration:(?P<duration>[0-9.]+)"
+        )
+        intervals: list[dict[str, float]] = []
+        for match in pattern.finditer(stderr):
+            duration = float(match.group("duration"))
+            if duration + 1e-9 < minimum_duration_sec:
+                continue
+            intervals.append(
+                {
+                    "start_sec": float(match.group("start")),
+                    "end_sec": float(match.group("end")),
+                    "duration_sec": duration,
+                }
+            )
+        return intervals

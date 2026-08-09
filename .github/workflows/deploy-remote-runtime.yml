@@ -1,0 +1,87 @@
+name: Deploy remote runtime
+
+on:
+  pull_request:
+  push:
+    branches:
+      - staging
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shortsflow-deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            remotion/package-lock.json
+      - name: Install media tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          ffprobe -version
+      - name: Install application
+        run: python -m pip install -e '.[dev]'
+      - name: Install JavaScript dependencies
+        run: |
+          npm ci
+          npm ci --prefix remotion
+      - name: Typecheck Remotion
+        run: npm run typecheck --prefix remotion
+      - name: Audit JavaScript dependencies
+        run: |
+          npm audit --audit-level=high
+          npm audit --prefix remotion --audit-level=high
+      - name: Run canonical test suite
+        env:
+          SHORTSFLOW_USE_MOCK_PROVIDERS: "true"
+        run: pytest -q
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      url: ${{ github.ref_name == 'main' && 'https://srv769897.tailc97b69.ts.net' || 'https://srv769897.tailc97b69.ts.net:8443' }}
+    env:
+      DEPLOY_ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      DEPLOY_USER: ${{ github.ref_name == 'main' && 'deploy' || 'deploy-staging' }}
+      TS_TAG: ${{ github.ref_name == 'main' && 'tag:ci-production' || 'tag:ci-staging' }}
+    steps:
+      - name: Join deployment tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: ${{ env.TS_TAG }}
+      - name: Deploy immutable revision
+        run: >-
+          tailscale ssh
+          "${DEPLOY_USER}@srv769897"
+          "sudo /usr/local/sbin/shortsflow-deploy ${DEPLOY_ENVIRONMENT} ${GITHUB_SHA}"
+      - name: Verify deployed revision
+        run: |
+          port=""
+          if [[ "${DEPLOY_ENVIRONMENT}" == "staging" ]]; then port=":8443"; fi
+          curl --fail --silent --show-error "https://srv769897.tailc97b69.ts.net${port}/healthz" \
+            | python -c 'import json,os,sys; p=json.load(sys.stdin); r=p["runtime"]; assert r["environment"] == os.environ["DEPLOY_ENVIRONMENT"]; assert r["revision"] == os.environ["GITHUB_SHA"]'

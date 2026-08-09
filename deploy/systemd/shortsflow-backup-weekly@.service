@@ -1,0 +1,6 @@
+[Unit]
+Description=ShortsFlow weekly verified backup for %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/shortsflow-backup create %i weekly

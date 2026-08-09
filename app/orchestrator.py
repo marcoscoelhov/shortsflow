@@ -14,6 +14,7 @@ import wave
 import ast
 import httpx
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -92,6 +93,7 @@ from app.quality.metadata_ctr_gate import MetadataCTRGate
 from app.quality.viral_intensity_gate import ViralIntensityGate
 from app.quality.visual_impact_gate import VisualImpactGate
 from app.quality.visual_contract_gate import VisualContractGate
+from app.runtime_execution import RuntimeAdmissionRefused, RuntimeExecutionCoordinator, assert_real_execution_location
 from app.schemas import PublicationSchedulePayload, SUPPORTED_LANGUAGES, SUPPORTED_NICHES, TopicRequestCreate
 from app.storage import StorageManager
 from app.utils import (
@@ -214,6 +216,8 @@ class StepDefinition:
 class JobOrchestrator:
     def __init__(self) -> None:
         self.settings = get_settings()
+        self.runtime_execution = RuntimeExecutionCoordinator(self.settings)
+        self._heavy_execution_context = threading.local()
         self.storage = StorageManager()
         self.providers = ProviderRegistry()
         self.youtube = YouTubePublisher(self.settings)
@@ -304,7 +308,13 @@ class JobOrchestrator:
         payload["notes"] = "\n".join(part for part in [notes, viral_note] if part)
         return payload
 
-    def create_job(self, payload: dict[str, Any], retry_of_job_id: str | None = None) -> str:
+    def create_job(
+        self,
+        payload: dict[str, Any],
+        retry_of_job_id: str | None = None,
+        *,
+        job_id: str | None = None,
+    ) -> str:
         payload = TopicRequestCreate.model_validate(payload).model_dump()
         requested_job_origin = payload.pop("job_origin", None)
         requested_creation_via = payload.pop("creation_via", None)
@@ -317,7 +327,7 @@ class JobOrchestrator:
         )
         now = utcnow()
         inline_processing_claimed = creation_via == CREATION_VIA_DAILY_CYCLE
-        job_id = new_id()
+        job_id = job_id or new_id()
         topic_request_id = new_id()
         request_data = {
             "schema_version": self.settings.schema_version,
@@ -376,6 +386,41 @@ class JobOrchestrator:
         return job_id
 
     def process_job(self, job_id: str) -> str:
+        try:
+            with self._heavy_execution():
+                return self._process_job_under_slot(job_id)
+        except RuntimeAdmissionRefused:
+            self.worker_ops.release_refused_claim(job_id)
+            raise
+
+    @contextmanager
+    def _heavy_execution(self):  # noqa: ANN202
+        depth = int(getattr(self._heavy_execution_context, "depth", 0))
+        if depth:
+            self._heavy_execution_context.depth = depth + 1
+            try:
+                yield
+            finally:
+                self._heavy_execution_context.depth = depth
+            return
+        assert_real_execution_location(
+            environment=self.settings.runtime_environment,
+            use_mock_providers=self.settings.use_mock_providers,
+        )
+        admission = self.runtime_execution.admission()
+        if not admission.allowed:
+            raise RuntimeAdmissionRefused(admission.reasons)
+        with self.runtime_execution.job_slot():
+            admission = self.runtime_execution.admission(fresh=True)
+            if not admission.allowed:
+                raise RuntimeAdmissionRefused(admission.reasons, after_wait=True)
+            self._heavy_execution_context.depth = 1
+            try:
+                yield
+            finally:
+                self._heavy_execution_context.depth = 0
+
+    def _process_job_under_slot(self, job_id: str) -> str:
         with session_scope() as session:
             job = session.get(Job, job_id)
             if not job:
@@ -432,6 +477,10 @@ class JobOrchestrator:
         return job.status
 
     def reprocess_job_from_step(self, job_id: str, step_name: str) -> str:
+        with self._heavy_execution():
+            return self._reprocess_job_from_step_under_slot(job_id, step_name)
+
+    def _reprocess_job_from_step_under_slot(self, job_id: str, step_name: str) -> str:
         steps = self._steps()
         step_names = [step.name for step in steps]
         if step_name not in step_names:
@@ -477,6 +526,15 @@ class JobOrchestrator:
         return job.status
 
     def regenerate_scene_and_rerender(self, job_id: str, scene_id: str, operator_instruction: str | None = None) -> str:
+        with self._heavy_execution():
+            return self._regenerate_scene_and_rerender_under_slot(job_id, scene_id, operator_instruction)
+
+    def _regenerate_scene_and_rerender_under_slot(
+        self,
+        job_id: str,
+        scene_id: str,
+        operator_instruction: str | None = None,
+    ) -> str:
         scene_id = str(scene_id or "").strip()
         if not scene_id:
             raise ValueError("scene_id is required")
@@ -779,13 +837,10 @@ class JobOrchestrator:
         self,
         job_id: str,
         reviewer_identity: str = "tailscale:local-reviewer",
-        *,
-        score_override_confirmed: bool = False,
     ) -> None:
         self.publication_ops.approve_premium_for_publish(
             job_id,
             reviewer_identity=reviewer_identity,
-            score_override_confirmed=score_override_confirmed,
         )
 
     def publish_job(
@@ -804,6 +859,10 @@ class JobOrchestrator:
         )
 
     def generate_premium_finishing(self, job_id: str) -> dict[str, Any]:
+        with self._heavy_execution():
+            return self._generate_premium_finishing_under_slot(job_id)
+
+    def _generate_premium_finishing_under_slot(self, job_id: str) -> dict[str, Any]:
         with session_scope() as session:
             refresh_needed = self.premium_finishing.primary_tts_refresh_needed(session, job_id)
             narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job_id)) if refresh_needed else None

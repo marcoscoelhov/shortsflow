@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.config import get_settings
 from app.remotion_renderer import RemotionCliRenderer
+from app.runtime_execution import RuntimeExecutionCoordinator
 
 
 router = APIRouter()
@@ -15,10 +16,13 @@ router = APIRouter()
 def healthcheck() -> dict[str, Any]:
     settings = get_settings()
     remotion = RemotionCliRenderer(allowed_media_root=settings.artifacts_dir).preflight_environment()
+    runtime = RuntimeExecutionCoordinator(settings).status()
+    runtime["worker_enabled"] = settings.worker_enabled
     return {
         "status": "ok",
         "app": settings.app_name,
         "bind": f"{settings.app_host}:{settings.app_port}",
+        "runtime": runtime,
         "tailnet_url": f"https://{settings.tailscale_hostname}.{settings.tailnet_domain}",
         "providers": {
             "mode": "mock" if settings.use_mock_providers else "production",

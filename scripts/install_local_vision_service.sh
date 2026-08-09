@@ -4,9 +4,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LLAMA_DIR="${REPO_ROOT}/data/vendor/llama.cpp"
 LLAMA_SERVER="${LLAMA_DIR}/build/bin/llama-server"
-MODEL_DIR="${REPO_ROOT}/data/models/minicpm-v-4.6"
-MODEL_FILE="${MODEL_DIR}/MiniCPM-V-4_6-Q4_K_M.gguf"
-MMPROJ_FILE="${MODEL_DIR}/mmproj-model-f16.gguf"
+MODEL_DIR="${REPO_ROOT}/data/models/qwen3-vl-2b"
+MODEL_FILE="${MODEL_DIR}/Qwen3VL-2B-Instruct-Q4_K_M.gguf"
+MMPROJ_FILE="${MODEL_DIR}/mmproj-Qwen3VL-2B-Instruct-F16.gguf"
 SERVICE_NAME="shortsflow-vision.service"
 SERVICE_TEMPLATE="${REPO_ROOT}/deploy/systemd/${SERVICE_NAME}.in"
 SERVICE_DST="/etc/systemd/system/${SERVICE_NAME}"
@@ -31,13 +31,20 @@ fi
 
 mkdir -p "${REPO_ROOT}/data/vendor" "${MODEL_DIR}"
 
-if [[ ! -x "${LLAMA_SERVER}" ]]; then
+needs_build=false
+if [[ ! -x "${LLAMA_SERVER}" ]] || ! grep -q '^GGML_NATIVE:BOOL=ON$' "${LLAMA_DIR}/build/CMakeCache.txt" 2>/dev/null; then
+  needs_build=true
+fi
+if [[ "${needs_build}" == "true" ]]; then
   if [[ ! -d "${LLAMA_DIR}/.git" ]]; then
-    rm -rf "${LLAMA_DIR}"
+    if [[ -e "${LLAMA_DIR}" ]]; then
+      echo "llama.cpp path exists but is not a git checkout: ${LLAMA_DIR}" >&2
+      exit 1
+    fi
     git clone --depth 1 https://github.com/ggml-org/llama.cpp "${LLAMA_DIR}"
   fi
   cmake -S "${LLAMA_DIR}" -B "${LLAMA_DIR}/build" \
-    -DGGML_NATIVE=OFF \
+    -DGGML_NATIVE=ON \
     -DGGML_CUDA=OFF \
     -DGGML_VULKAN=OFF \
     -DCMAKE_BUILD_TYPE=Release
@@ -45,12 +52,14 @@ if [[ ! -x "${LLAMA_SERVER}" ]]; then
 fi
 
 if [[ ! -s "${MODEL_FILE}" ]]; then
-  curl -L -sS --retry 3 --fail -o "${MODEL_FILE}" \
-    "https://huggingface.co/openbmb/MiniCPM-V-4.6-GGUF/resolve/main/MiniCPM-V-4_6-Q4_K_M.gguf"
+  curl -L -sS --retry 3 --fail -o "${MODEL_FILE}.part" \
+    "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3VL-2B-Instruct-Q4_K_M.gguf"
+  mv "${MODEL_FILE}.part" "${MODEL_FILE}"
 fi
 if [[ ! -s "${MMPROJ_FILE}" ]]; then
-  curl -L -sS --retry 3 --fail -o "${MMPROJ_FILE}" \
-    "https://huggingface.co/openbmb/MiniCPM-V-4.6-GGUF/resolve/main/mmproj-model-f16.gguf"
+  curl -L -sS --retry 3 --fail -o "${MMPROJ_FILE}.part" \
+    "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-2B-Instruct-F16.gguf"
+  mv "${MMPROJ_FILE}.part" "${MMPROJ_FILE}"
 fi
 
 rendered_service="$(mktemp --suffix=.service)"

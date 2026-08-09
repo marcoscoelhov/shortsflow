@@ -1,5 +1,10 @@
 # ShortsFlow Architecture Cleanup Implementation Plan
 
+> **Status de defaults:** este plano preserva o baseline historico DeepSeek vigente em 2026-06-29. Os defaults
+> operacionais de LLM foram superseded em 2026-07-31 pelo ADR 0002 (Luna para geracao/planejamento e Grok para
+> julgamento). As tarefas arquiteturais continuam historicas; nao copie os blocos de configuracao deste plano
+> como configuracao atual.
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task. Use Codex CLI as preferred executor for implementation where useful, but Hermes must independently review diffs and run verification.
 
 **Goal:** Align ShortsFlow architecture with Marcos's decisions: isolated automatic-topic lane, Edge TTS as primary publishable voice, no active fact-pack policy, final human review in YouTube Studio, reduced god-files, centralized contracts, and smaller Hub routers.

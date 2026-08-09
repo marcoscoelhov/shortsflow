@@ -16,7 +16,7 @@ class TopicRequestCreate(BaseModel):
     language: str = "pt-BR"
     target_duration_sec: int = 45
     tone: str = "intrigante_direto"
-    cta_style: Literal["none", "soft"] = "none"
+    cta_style: Literal["none", "soft"] = "soft"
     notes: str | None = None
     requested_angle: str | None = None
     job_origin: Literal["ready_script_bank", "manual_ready_script", "automatic_topic", "manual_theme", "manual_title", "unknown"] | None = None
@@ -36,9 +36,18 @@ class TopicRequestCreate(BaseModel):
             )
         from app.survival_experiment import survival_policy_notes
 
-        existing_notes = str(self.notes or "").strip()
+        existing_notes = "\n".join(
+            line
+            for line in str(self.notes or "").strip().splitlines()
+            if not (
+                line.startswith("human_review_required=")
+                or line == "pilot_qwen_autoapproval=true"
+                or line.startswith("visual_review_authority=qwen")
+            )
+        ).strip()
+        policy_notes = survival_policy_notes()
         existing_lines = set(existing_notes.splitlines())
-        required_notes = [note for note in survival_policy_notes() if note not in existing_lines]
+        required_notes = [note for note in policy_notes if note not in existing_lines]
         self.notes = "\n".join(part for part in [existing_notes, *required_notes] if part)
         return self
 

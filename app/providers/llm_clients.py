@@ -288,3 +288,9 @@ class QwenCreativeProvider(MinimaxCreativeProvider):
             base_url=settings.qwen_base_url,
             timeout=self.timeout_sec,
         )
+
+    def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raise ProviderFailure(self.failure_provider_name, "qwen is not a publication authority")
+
+    def judge_quality_gate(self, gate_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        raise ProviderFailure(self.failure_provider_name, "qwen is not a quality-gate authority")

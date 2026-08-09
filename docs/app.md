@@ -184,7 +184,7 @@ Comportamento atual:
 - `manual`: o formulario de publish exige `youtube_video_id` ou `youtube_url` e apenas registra a publicacao no hub.
 - `api`: o hub pode subir o video direto pela YouTube Data API.
 - agenda automatica: so e consumida pelo worker quando o modo efetivo e `api`.
-- automacao diaria: um CLI pode gerar ate tres tentativas, autoaprovar apenas `ready_for_upload` com score suficiente e agendar nativamente no YouTube para o primeiro dia vago.
+- automacao diaria: um CLI pode gerar ate tres tentativas, autoaprovar apenas `ready_for_upload` com Score de Autoaprovacao composto suficiente e agendar nativamente no YouTube para o primeiro dia vago. Esse score nao e o score diagnostico da auditoria premium.
 
 Fluxo OAuth:
 
@@ -284,13 +284,13 @@ Defaults importantes:
 - `niche_id=curiosidades`
 - `language=pt-BR`
 - `target_duration_sec=50`
-- `llm_primary_provider=deepseek`
+- `llm_primary_provider=openai` com `openai_model=gpt-5.6-luna` e `openai_reasoning_effort=high`
 - `llm_fallback_provider=disabled`
-- `llm_gate_judge_provider=deepseek`
-- `llm_gate_judge_model=deepseek-v4-flash`
+- `llm_gate_judge_provider=xai`
+- `llm_gate_judge_model=grok-4.5` com `xai_reasoning_effort=high`
 - `llm_premium_review_enabled=true`
-- `llm_premium_review_provider=deepseek`
-- `llm_premium_review_model=deepseek-v4-pro` apenas para exceções: revisão premium/final, tema complexo ou sinal explícito de escalonamento.
+- `llm_premium_review_provider=xai`
+- `llm_premium_review_model=grok-4.5` apenas para exceções: revisão premium/final, tema complexo ou sinal explícito de escalonamento.
 - `llm_json_max_tokens=4096`
 - `youtube_publish_mode=manual`
 - `youtube_api_enabled=false`
@@ -451,9 +451,9 @@ Conteudo tecnico, erros e artefatos ficam colapsados em paines secundarios.
 
 Quando existir `visual_review_report.json`, o detalhe do job mostra a **Revisao visual auxiliar** dentro de "Qualidade e monetizacao". Esse relatorio e evidencia para a pessoa revisora; ele nao muda sozinho agenda ou aprovacao.
 
-A etapa `monetization_readiness_gate` roda revisao visual auxiliar por padrao quando o primeiro relatorio aponta `visual_review_required`. Se a IA visual consegue confirmar os assets, o relatorio de monetizacao e reconstruido com `visual_review_confirmed` antes de gravar o status final. Se o verificador visual estiver indisponivel, falhar ou devolver apenas heuristica de prompt, o job continua pedindo revisao visual humana.
+A etapa `monetization_readiness_gate` pode rodar revisão visual auxiliar quando o primeiro relatório aponta `visual_review_required`. O Qwen local coleta somente evidência diagnóstica: suas notas e scores nunca removem a pendência, confirmam revisão humana, aprovam gates, agendam ou publicam. Se o verificador estiver indisponível, falhar ou devolver apenas heurística de prompt, o job continua pedindo revisão visual humana. `survival_decisions` exige revisão humana também nos assignments de piloto.
 
-Na automacao, a mesma revisao visual auxiliar tambem pode ser usada para backlog. Ela pode confirmar `visual_review_confirmed` e reconstruir o relatorio de monetizacao. Se a unica pendencia era visual, o job pode avancar para autoaprovacao. Se ainda restar `fact_review_required`, publish audit ou outra revisao manual, o job permanece em `monetization_review` e o ciclo diario tenta o proximo candidato do mesmo slot, em vez de desperdicancar a janela de publicacao.
+Na automação, a mesma revisão visual auxiliar pode enriquecer o diagnóstico do backlog, mas Qwen não pode emitir `visual_review_confirmed`. Se restar `visual_review_required`, `fact_review_required`, publish audit ou outra revisão manual, o job permanece em `monetization_review` e o ciclo diário tenta o próximo candidato do mesmo slot.
 
 `/jobs` e uma rota de navegacao direta e precisa entregar o shell completo do **Console Operacional**. O mesmo endpoint tambem serve `jobs_table.html` para atualizacoes HTMX da fila quando a requisicao carrega `HX-Request=true`; sem esse header, retornar apenas o fragmento e regressao visual.
 
@@ -479,6 +479,11 @@ O backlog e avaliado por candidato, nao apenas por slot. Quando um candidato par
 Falhas e reparos parciais relevantes entram em `AutomationRun.metadata.automation_notifications` e aparecem pelo icone de notificacoes da topbar. A fila de jobs permanece limpa; o operador deve abrir a notificacao para ver o candidato, a pendencia restante e o link do job.
 
 Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` no horario do slot em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
+
+Politica decidida: o gate premium deve rodar novamente antes de aprovar, agendar ou publicar em qualquer
+plataforma. Estado atual: os caminhos YouTube ainda contornam essa chamada e constituem gap bloqueante para
+declarar autopublicacao segura. O score premium baixo, isoladamente, e diagnostico; auditoria ausente,
+malformada ou incompleta e hard blocker tecnico devem falhar fechado. Veja o ADR 0002.
 
 O lease do worker tem piso de uma hora e heartbeat menos agressivo. Passos reais de imagem, TTS e Remotion/ffmpeg podem segurar SQLite por minutos; esse piso evita que outro worker recupere o mesmo job por heartbeat pulado enquanto a etapa ainda esta legitimamente em execucao.
 
@@ -515,6 +520,14 @@ Comando padrao:
 ```bash
 .venv/bin/python -m pytest -q
 ```
+
+Com `SHORTSFLOW_USE_MOCK_PROVIDERS=true`, o provider criativo gera roteiros
+deterministicos compativeis com toda a faixa aceita de `target_duration_sec`
+(35 a 55 segundos). Temas longos sao resumidos apenas na frase de abertura do
+mock, e alvos de 45 segundos ou mais recebem narracao adicional suficiente para
+passar a mesma janela de ritmo natural usada pelo pipeline real. Testes diretos
+de providers externos devem injetar credenciais falsas no seam de configuracao;
+eles nao podem depender de segredos presentes no `.env` local.
 
 ## Onde alterar
 

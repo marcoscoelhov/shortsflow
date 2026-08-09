@@ -20,7 +20,7 @@ type SceneOverlay = {
   text: string;
   start_ms: number;
   duration_ms: number;
-  variant?: 'choice_label' | 'sand_progress' | 'choice_state' | 'outcome_comparison' | 'comment_prompt';
+  variant?: 'choice_label' | 'sand_progress' | 'hazard_progress' | 'choice_state' | 'outcome_comparison' | 'comment_prompt';
   side?: 'left' | 'right';
   progress?: number;
   secondary_text?: string;
@@ -164,11 +164,10 @@ const SceneLayer: React.FC<{
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
   });
-  const opacityOut = interpolate(localFrame, [durationFrames - transitionFrames, durationFrames], [1, 0], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp'
-  });
-  const opacity = Math.min(opacityIn, opacityOut);
+  // The outgoing Sequence extends through the incoming transition and stays
+  // opaque underneath it. Fading both layers exposes the composition's black
+  // background for one or two frames at scene boundaries.
+  const opacity = opacityIn;
   const enter = spring({
     frame: Math.max(0, localFrame),
     fps,
@@ -279,7 +278,7 @@ const SceneOverlays: React.FC<{
           );
         }
 
-        if (overlay.variant === 'sand_progress') {
+        if (overlay.variant === 'sand_progress' || overlay.variant === 'hazard_progress') {
           const target = Math.min(1, Math.max(0, Number(overlay.progress ?? 0)));
           const progress = interpolate(activeFrame, [0, durationFrames], [0, target], {
             extrapolateLeft: 'clamp',

@@ -527,6 +527,17 @@ def test_render_gate_rejects_missing_file(tmp_path: Path) -> None:
     assert not result.passed
     assert "missing_render_file" in result.reasons
 
+
+def test_render_gate_parses_short_black_frame_leaks() -> None:
+    stderr = (
+        "[blackdetect @ 0x1] black_start:24.4333 black_end:24.5 black_duration:0.0666667\n"
+        "[blackdetect @ 0x1] black_start:30 black_end:30.02 black_duration:0.02\n"
+    )
+
+    intervals = RenderGate.black_intervals(stderr, minimum_duration_sec=0.04)
+
+    assert intervals == [{"start_sec": 24.4333, "end_sec": 24.5, "duration_sec": 0.0666667}]
+
 def test_minimax_scene_prompt_keeps_image_prompt_english_exception(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
@@ -2702,8 +2713,23 @@ def test_step_background_music_persists_debug_on_provider_failure(monkeypatch) -
     assert debug["provider_details"]["request_payload"]["model"] == "music-2.6"
     assert debug["provider_details"]["query"] == "polvos documentary"
 
-def test_minimax_background_music_provider_uses_output_url(monkeypatch, tmp_path: Path) -> None:
-    provider = MiniMaxBackgroundMusicProvider()
+@pytest.fixture
+def minimax_music_provider(monkeypatch) -> MiniMaxBackgroundMusicProvider:
+    settings = SimpleNamespace(
+        resolved_minimax_music_api_key="test-music-key",
+        minimax_music_base_url="https://api.minimax.test/v1",
+        minimax_music_timeout_sec=240.0,
+    )
+    monkeypatch.setattr("app.providers.music.get_settings", lambda: settings)
+    return MiniMaxBackgroundMusicProvider()
+
+
+def test_minimax_background_music_provider_uses_output_url(
+    monkeypatch,
+    tmp_path: Path,
+    minimax_music_provider: MiniMaxBackgroundMusicProvider,
+) -> None:
+    provider = minimax_music_provider
 
     class FakeResponse:
         def __init__(self, payload: dict[str, object]) -> None:
@@ -2763,7 +2789,7 @@ def test_minimax_background_music_provider_uses_output_url(monkeypatch, tmp_path
             "source_trim_applied": True,
         }
 
-    monkeypatch.setattr("app.providers.image.httpx.post", fake_post)
+    monkeypatch.setattr("app.providers.music.httpx.post", fake_post)
     monkeypatch.setattr("app.providers.music.httpx.get", fake_get)
     monkeypatch.setattr(provider, "_convert_audio_file_to_wav", fake_convert)
     monkeypatch.setattr(provider, "_trim_wav_to_target_duration", fake_trim)
@@ -2784,8 +2810,12 @@ def test_minimax_background_music_provider_uses_output_url(monkeypatch, tmp_path
     assert trimmed == {"path": tmp_path / "background.wav", "target_duration_ms": 32000}
     assert Path(result["audio_uri"].removeprefix("file://")).exists()
 
-def test_minimax_background_music_provider_surfaces_usage_limit(monkeypatch, tmp_path: Path) -> None:
-    provider = MiniMaxBackgroundMusicProvider()
+def test_minimax_background_music_provider_surfaces_usage_limit(
+    monkeypatch,
+    tmp_path: Path,
+    minimax_music_provider: MiniMaxBackgroundMusicProvider,
+) -> None:
+    provider = minimax_music_provider
 
     class FakeResponse:
         status_code = 200
@@ -2809,8 +2839,10 @@ def test_minimax_background_music_provider_surfaces_usage_limit(monkeypatch, tmp
     assert "provider limit: usage limit exceeded" in str(exc_info.value)
     assert exc_info.value.details["base_resp"]["status_code"] == 2056
 
-def test_minimax_background_music_prompt_is_compact_and_duration_aware() -> None:
-    provider = MiniMaxBackgroundMusicProvider()
+def test_minimax_background_music_prompt_is_compact_and_duration_aware(
+    minimax_music_provider: MiniMaxBackgroundMusicProvider,
+) -> None:
+    provider = minimax_music_provider
 
     prompt = provider._build_prompt(
         {"canonical_topic": "Polvos - curiosidades científicas sobre o cefalópode mais inteligente do oceano", "angle": "fatos_científicos_absurdos"},

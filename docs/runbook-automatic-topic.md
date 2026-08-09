@@ -2,7 +2,9 @@
 
 **Lane isolada**: `automatic_topic` roda no slot ~18:00 BRT (fixo). Não cai silenciosamente para `ready_script_bank` nem fallback determinístico. Se não houver pauta válida no nicho, o slot fica vazio (agenda hole reportável via watchdog). Nicho-alvo: astronomia/universo/planetas (cosmos_curiosity_pool).
 
-DeepSeek v4 Flash é o padrão barato para draft/gate. Fallback/pro só por exceção explícita (premium_review).
+Default vigente: GPT-5.6 Luna `high` gera pauta, roteiro, reparo e cenas; Grok 4.5 `high` julga gates comuns e
+revisoes premium. DeepSeek permanece disponivel para benchmark/custo, mas nao e fallback silencioso. Veja a
+decisao reconciliada em `docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`.
 
 Não documenta credenciais cruas. Validado com smoke E2E (t_8c8e2606) + observabilidade (t_7ac0dfae).
 
@@ -170,7 +172,7 @@ Testes focados pós-edits:
 
 ## 5. Onde NÃO mexer
 
-- Não ative fallback_provider geral (deve ficar disabled). DeepSeek v4 Flash default para tudo normal; v4-pro só via SHORTSFLOW_LLM_PREMIUM_REVIEW_* para casos premium explícitos.
+- Nao ative `fallback_provider` geral: ele deve ficar `disabled`. Luna `high` e o default de geracao/planejamento e Grok 4.5 `high` e o juiz independente atual. Trocar gates comuns para DeepSeek exige benchmark e nova decisao explicita.
 
 - Não remova checagens em `app/automation.py`: _automatic_topic_payload_rejection_reason, job_origin guard, AUTOMATION_REASON_FALLBACK_PREVENTED.
 

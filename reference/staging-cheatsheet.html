@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Referência rápida: staging</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Referência rápida</p>
+    <h1>Staging sem confusão</h1>
+    <p class="lede">Use esta folha para decidir onde uma mudança ou job deve rodar.</p>
+
+    <section>
+      <h2>Três lugares, três responsabilidades</h2>
+      <table class="comparison">
+        <thead>
+          <tr><th>Lugar</th><th>Serve para</th><th>Não deve</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Local</td><td>Editar, revisar e executar testes rápidos.</td><td>Renderizar ou guardar segredos.</td></tr>
+          <tr><td>Staging</td><td>Validar na VPS com isolamento e providers reais.</td><td>Usar banco ou artefatos da produção.</td></tr>
+          <tr><td>Produção</td><td>Executar jobs aprovados e preservar continuidade operacional.</td><td>Receber código experimental diretamente.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Algoritmo de decisão</h2>
+      <ol>
+        <li>É apenas edição, lint ou teste rápido? Use o computador local.</li>
+        <li>Usa provider real, mídia ou comportamento ainda não promovido? Use staging.</li>
+        <li>O código passou pelas verificações e está aprovado? Promova para produção.</li>
+        <li>A VPS está indisponível? Pare e mostre o erro. Não use CPU local silenciosamente.</li>
+      </ol>
+    </section>
+
+    <section>
+      <p class="rule"><strong>Frase para lembrar:</strong> staging ensaia com condições reais; produção apresenta para o público.</p>
+      <p><a href="../lessons/0001-o-papel-do-staging.html">Voltar à lição</a></p>
+    </section>
+  </main>
+</body>
+</html>

@@ -243,8 +243,6 @@ class PublicationOperations:
         if self.premium_publish_gate is None:
             raise FatalStepError("premium publish gate unavailable")
         confirmations = self._premium_publish_confirmations(session, job.job_id, extra_confirmations)
-        if job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK:
-            confirmations.update({"visual_review_confirmed", "premium_publish_score_accepted"})
         result = self.premium_publish_gate.evaluate(
             job,
             confirmations=confirmations,
@@ -274,6 +272,15 @@ class PublicationOperations:
         job.review_state = "blocked"
         job.failure_reason = message
         return message
+
+    def _ensure_premium_publish_preflight(self, session: Session, job: Job, *, context: str) -> Any:
+        result = self._run_premium_publish_gate(session, job, context=context)
+        if result.passed:
+            return result
+        message = self._block_job_for_premium_publish_gate(job, result)
+        self._refresh_retention_state(session, job)
+        session.commit()
+        raise FatalStepError(message)
 
     def _upload_publish_package(self, package: dict[str, Any], visibility: str) -> dict[str, Any]:
         return self.youtube_ops.upload_publish_package(package, visibility)
@@ -309,13 +316,10 @@ class PublicationOperations:
         self,
         job_id: str,
         reviewer_identity: str = "tailscale:local-reviewer",
-        *,
-        score_override_confirmed: bool = False,
     ) -> None:
         self.review_ops.approve_premium_for_publish(
             job_id,
             reviewer_identity=reviewer_identity,
-            score_override_confirmed=score_override_confirmed,
         )
 
     def publish_job(

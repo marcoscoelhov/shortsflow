@@ -58,7 +58,7 @@ def main() -> int:
     parser.add_argument("--seed-theme", default="curiosidades", help="Seed theme for the generated Short.")
     parser.add_argument("--target-duration-sec", type=int, default=35)
     parser.add_argument("--tone", default="intrigante_direto")
-    parser.add_argument("--cta-style", default="none")
+    parser.add_argument("--cta-style", default="soft")
     parser.add_argument("--timeout-sec", type=int, default=1800)
     parser.add_argument("--data-dir", type=Path, default=None)
     args = parser.parse_args()

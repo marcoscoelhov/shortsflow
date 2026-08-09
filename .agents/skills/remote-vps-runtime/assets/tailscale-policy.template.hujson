@@ -1,0 +1,39 @@
+{
+  "tagOwners": {
+    "tag:runtime": ["autogroup:admin"],
+    "tag:ci-staging": ["autogroup:admin"],
+    "tag:ci-production": ["autogroup:admin"]
+  },
+  "grants": [
+    {
+      "src": ["autogroup:member"],
+      "dst": ["tag:runtime"],
+      "ip": ["tcp:443", "tcp:8443"]
+    },
+    {
+      "src": ["tag:ci-staging", "tag:ci-production"],
+      "dst": ["tag:runtime"],
+      "ip": ["tcp:22"]
+    }
+  ],
+  "ssh": [
+    {
+      "action": "check",
+      "src": ["autogroup:member"],
+      "dst": ["tag:runtime"],
+      "users": ["autogroup:nonroot"]
+    },
+    {
+      "action": "accept",
+      "src": ["tag:ci-staging"],
+      "dst": ["tag:runtime"],
+      "users": ["deploy-staging"]
+    },
+    {
+      "action": "accept",
+      "src": ["tag:ci-production"],
+      "dst": ["tag:runtime"],
+      "users": ["deploy"]
+    }
+  ]
+}

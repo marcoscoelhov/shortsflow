@@ -3,6 +3,8 @@ from tests.e2e_support import _create_basic_job
 from app.automation import PublishPlan, SAFE_AUTOMATION_TOPIC_POOL
 from app.growth_metrics import build_channel_growth_report, build_growth_score
 from app.quality.premium_publish_gate import PremiumPublishGateResult
+from app.models import ScenePlan
+from app.config import get_settings
 
 
 def _premium_publish_audit_result(score: float = 9.5) -> dict:
@@ -39,7 +41,7 @@ def _allow_premium_publish_gate(monkeypatch, score: float = 9.5) -> None:
     )
 
 
-def test_ready_script_bank_premium_publish_gate_auto_confirms_editorial_score_and_visual_review(monkeypatch) -> None:
+def test_ready_script_bank_premium_publish_gate_does_not_fake_visual_confirmation(monkeypatch) -> None:
     job_id = "ready-script-bank-premium-policy"
     captured = {}
 
@@ -66,9 +68,10 @@ def test_ready_script_bank_premium_publish_gate_auto_confirms_editorial_score_an
         result = orchestrator.publication_ops._run_premium_publish_gate(session, job, context="test_ready_script_bank_policy")
 
     assert result.passed is True
+    assert result.visual_review_confirmed is False
     assert captured["visual_review_required"] is True
-    assert "visual_review_confirmed" in captured["confirmations"]
-    assert "premium_publish_score_accepted" in captured["confirmations"]
+    assert "visual_review_confirmed" not in captured["confirmations"]
+    assert "premium_publish_score_accepted" not in captured["confirmations"]
 
 
 def test_artifact_url_maps_file_uri_to_static_route() -> None:
@@ -101,6 +104,7 @@ def test_hub_auth_token_protects_pages_and_artifacts(monkeypatch) -> None:
     assert login.status_code == 200
     assert "Informe o token" in login.text
     assert client.get("/", headers={"x-shortsflow-hub-token": "secret-token"}).status_code == 200
+    assert client.get("/", headers={"tailscale-user-login": "operator@example.com"}).status_code == 200
     assert authed_client.get("/").status_code == 200
     assert client.get("/artifacts/missing.mp4").status_code == 401
     assert authed_client.get("/artifacts/missing.mp4").status_code == 404
@@ -1232,6 +1236,100 @@ def test_auto_visual_review_rejects_prompt_heuristic_only_assets() -> None:
         job = session.get(Job, job_id)
     assert job is not None
     assert "asset_visual_real_vision_checked" not in job.quality_summary["assets"]
+
+
+def test_auto_visual_review_rejects_fresh_non_qwen_fallback(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SHORTSFLOW_USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", "local_openai")
+    monkeypatch.setenv("SHORTSFLOW_LOCAL_VISION_MODEL", "qwen3-vl-2b-instruct-q4-k-m")
+    monkeypatch.setenv("SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED", "true")
+    get_settings.cache_clear()
+    job_id = "automation-auto-visual-fresh-wrong-provider"
+    image_path = tmp_path / "scene.png"
+    image_path.write_bytes(b"not-inspected-by-boundary-double")
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="monetization_review",
+            quality_summary={
+                "assets": {
+                    "semantic_threshold_pass": True,
+                    "asset_visual_gate_pass": True,
+                    "asset_visual_gate_checked": True,
+                    "asset_visual_verification_modes": ["prompt_heuristic"],
+                }
+            },
+        )
+        session.add(
+            ScenePlan(
+                scene_plan_id=f"{job_id}-plan",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-plan",
+                scenes=[
+                    {
+                        "scene_id": "scene-1",
+                        "order": 1,
+                        "retention_role": "visual_hook",
+                        "primary_subject": "Lua",
+                        "narration_text": "Uma base lunar perde energia.",
+                        "image_prompt": "base lunar com duas escolhas visíveis",
+                    }
+                    ],
+                    scene_count=1,
+                )
+        )
+        session.add(
+            SceneAsset(
+                asset_id=f"{job_id}-asset",
+                job_id=job_id,
+                scene_id="scene-1",
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-asset",
+                provider="minimax",
+                kind="image",
+                uri=image_path.as_uri(),
+                width=1080,
+                height=1920,
+                selected=True,
+                scores={"verification_mode": "prompt_heuristic"},
+            )
+        )
+        session.add(
+            RenderOutput(
+                render_id=f"{job_id}-render",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-render",
+                video_uri=(tmp_path / "final.mp4").as_uri(),
+                duration_ms=30_000,
+                resolution="1080x1920",
+                video_codec="h264",
+                audio_codec="aac",
+                filesize_bytes=1024,
+                ffmpeg_log_uri=(tmp_path / "render.log").as_uri(),
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(
+        "app.quality.auto_visual_review.SemanticVerifier.score",
+        lambda *args, **kwargs: {
+            "verification_mode": "vision",
+            "vision_provider": "minimax_mmx",
+            "vision_model": "MiniMax-VL-01",
+            "vision_aligned": True,
+            "total_score": 0.99,
+        },
+    )
+
+    result = AutomationService(orchestrator)._run_auto_visual_review(job_id)
+
+    assert result["passed"] is False
+    assert "real_visual_evidence_missing" in result["reasons"]
+    assert result["signals"]["verification_attempts"][0]["passed"] is False
+    get_settings.cache_clear()
 
 
 def test_publishable_backlog_allows_cancelled_schedule() -> None:
@@ -3071,7 +3169,8 @@ def test_retention_sweep_skips_published_jobs() -> None:
     assert job is not None
     assert (job.quality_summary or {}).get("retention") is None
 
-def test_manual_publish_syncs_stale_monetization_report_when_quality_summary_passed() -> None:
+def test_manual_publish_syncs_stale_monetization_report_when_quality_summary_passed(monkeypatch) -> None:
+    _allow_premium_publish_gate(monkeypatch)
     client = TestClient(app)
     job_id = "stale-monetization-publish-job"
     topic_request_id = "stale-monetization-publish-job-request"
@@ -3381,8 +3480,13 @@ def test_publish_package_description_uses_metadata_review_hashtags(monkeypatch) 
     )
     orchestrator.storage.persist_json(job_id, "fact_pack.json", {"status": "verified", "facts": [{"fact_id": "F1"}]})
     orchestrator.storage.persist_json(job_id, "script.json", {"title": "Polvos tem tres coracoes"})
+    orchestrator.storage.persist_json(
+        job_id,
+        "premium_publish_audit.json",
+        {"passed": False, "reasons": ["premium_publish_score_below_threshold"]},
+    )
     monkeypatch.setattr(orchestrator.monetization_pipeline, "provider_publish_audit", lambda *args, **kwargs: {"passed": True, "reasons": []})
-    monkeypatch.setattr(orchestrator.monetization_pipeline, "publish_readiness_report", lambda *args, **kwargs: {"passed": False, "reasons": []})
+    monkeypatch.setattr(orchestrator.monetization_pipeline, "publish_readiness_report", lambda *args, **kwargs: {"passed": True, "reasons": []})
 
     with SessionLocal() as session:
         job = session.get(Job, job_id)
@@ -3390,6 +3494,7 @@ def test_publish_package_description_uses_metadata_review_hashtags(monkeypatch) 
         package = orchestrator.monetization_pipeline.build_publish_package(session, job)
 
     assert package["hashtags"] == metadata_tags
+    assert package["publish_readiness"]["passed"] is True
     assert "#shorts #polvos #biologia #oceano" in package["description"]
 
 def test_schedule_publication_requires_connected_youtube_in_api_mode(monkeypatch) -> None:

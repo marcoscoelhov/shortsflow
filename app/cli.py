@@ -5,10 +5,14 @@ import json
 import sys
 from pathlib import Path
 
+from app.config import get_settings
+from app.remote_runtime import RemoteRuntimeClient, current_revision, resume_deployed_revision
+from app.runtime_execution import assert_real_execution_location
 from app.survival_experiment import build_survival_cohort_plan
+from app.traction_pilot import start_traction_pilot
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="shortsflow")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -56,10 +60,71 @@ def main() -> None:
     )
     survival_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para seleção determinística")
 
-    args = parser.parse_args()
+    pilot_parser = subparsers.add_parser(
+        "pilot-10k-start",
+        help="Persiste o piloto A/B/C e cria os três canários sem publicar",
+    )
+    pilot_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para ordem determinística")
+    pilot_parser.add_argument("--process", action="store_true", help="Gera e renderiza os três canários")
+
+    for command, help_text in (
+        ("job", "Cria um job real na producao remota"),
+        ("validate", "Valida a revisao implantada no staging com um job real"),
+    ):
+        remote_parser = subparsers.add_parser(command, help=help_text)
+        remote_parser.add_argument("--theme", required=True, help="Tema do video")
+        remote_parser.add_argument("--duration", type=int, default=45, choices=range(35, 56))
+        remote_parser.add_argument("--wait", action="store_true", help="Aguarda o estado terminal do job")
+        remote_parser.add_argument("--request-id", default=None, help="Reutilize após timeout para evitar job duplicado")
+
+    resume_parser = subparsers.add_parser("resume", help="Retoma o SHA implantado em checkout limpo")
+    resume_parser.add_argument("environment", choices=["staging", "production"], help="Runtime remoto")
+    resume_parser.add_argument("--repo", type=Path, default=Path.cwd(), help="Checkout Git local")
+
+    args = parser.parse_args(argv)
+
+    if args.command in {"job", "validate"}:
+        settings = get_settings()
+        is_validation = args.command == "validate"
+        base_url = settings.remote_staging_url if is_validation else settings.remote_production_url
+        client = RemoteRuntimeClient(base_url)
+        if is_validation:
+            client.require_revision(current_revision(), environment="staging")
+        submitted = client.submit_job(
+            theme=args.theme,
+            target_duration_sec=args.duration,
+            request_id=args.request_id,
+        )
+        payload: dict[str, object] = {
+            "environment": "staging" if is_validation else "production",
+            "job_id": submitted.job_id,
+            "job_url": submitted.job_url,
+            "request_id": submitted.request_id,
+        }
+        if args.wait:
+            payload["result"] = client.wait_for_job(submitted.job_id)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "resume":
+        settings = get_settings()
+        base_url = settings.remote_staging_url if args.environment == "staging" else settings.remote_production_url
+        branch = resume_deployed_revision(
+            args.environment,
+            client=RemoteRuntimeClient(base_url),
+            repo_path=args.repo.resolve(),
+        )
+        print(json.dumps({"branch": branch, "repo": str(args.repo.resolve()), "status": "ready"}, indent=2))
+        return
     if args.command == "survival-cohort-plan":
         print(json.dumps(build_survival_cohort_plan(seed=args.seed), ensure_ascii=False, indent=2))
         return
+
+    runtime_settings = get_settings()
+    assert_real_execution_location(
+        environment=runtime_settings.runtime_environment,
+        use_mock_providers=runtime_settings.use_mock_providers,
+    )
 
     from app.automation import AutomationService
     from app.backlog_recovery import BacklogRecoveryService
@@ -72,6 +137,19 @@ def main() -> None:
     init_db()
     apply_operational_settings(orchestrator.settings)
     service = AutomationService(orchestrator)
+
+    if args.command == "pilot-10k-start":
+        result = start_traction_pilot(orchestrator, seed=args.seed, canary_count=3)
+        processed = 0
+        if args.process:
+            if runtime_settings.use_mock_providers:
+                parser.error("o piloto real não aceita mock providers")
+            for canary in result["canaries"]:
+                orchestrator.process_job(str(canary["job_id"]))
+                processed += 1
+        result["processed_job_count"] = processed
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
 
     if args.command == "automation-run":
         result = service.run_daily_cycle(force=args.force)

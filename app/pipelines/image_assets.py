@@ -194,7 +194,7 @@ class ImageAssetDomain:
         return updated
 
     def score_asset(self, scene: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
-        return self.pipeline.providers.semantic.score(scene, asset)
+        return self.pipeline.providers.semantic.score_candidate(scene, asset)
 
     def asset_scores_pass(self, scores: dict[str, Any]) -> bool:
         return (

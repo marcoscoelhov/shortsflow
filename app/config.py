@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     app_host: str = "127.0.0.1"
     app_port: int = 8080
     hub_auth_token: str | None = None
+    remote_production_url: str = "https://srv769897.tailc97b69.ts.net"
+    remote_staging_url: str = "https://srv769897.tailc97b69.ts.net:8443"
 
     data_dir: Path = Path("data")
     database_url: str = "sqlite:///data/shortsflow.db"
@@ -96,7 +98,8 @@ class Settings(BaseSettings):
     vision_verifier_provider: str = "local_openai"
     auto_visual_review_enabled: bool = False
     local_vision_base_url: str = "http://127.0.0.1:8081/v1"
-    local_vision_model: str = "minicpm-v-4.6-q4"
+    local_vision_model: str = "qwen3-vl-2b-instruct-q4-k-m"
+    local_vision_release_approved: bool = False
     vision_verifier_timeout_sec: float = 240.0
     background_music_enabled: bool = True
     background_music_provider: str = "local_bank"
@@ -239,6 +242,15 @@ class Settings(BaseSettings):
 
     worker_poll_seconds: float = 1.0
     job_lease_seconds: int = 60
+    worker_enabled: bool = True
+    runtime_environment: str = "development"
+    deployment_revision: str = "development"
+    runtime_drain_path: Path = Path("data/runtime-drain")
+    heavy_job_lock_enabled: bool = False
+    heavy_job_lock_path: Path = Path("data/heavy-job.lock")
+    staging_min_free_disk_gb: float = 15.0
+    staging_min_available_memory_gb: float = 2.0
+    staging_max_artifacts_gb: float = 5.0
     artifact_retention_enabled: bool = True
     artifact_retention_sweep_seconds: int = 60
     artifact_ttl_hard_failure_hours: int = 24
@@ -311,6 +323,15 @@ class Settings(BaseSettings):
             raise ValueError("minimax_text_thinking must be one of: auto, enabled, disabled")
         return normalized
 
+    @field_validator("openai_reasoning_effort", "xai_reasoning_effort")
+    @classmethod
+    def validate_reasoning_effort(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+        if normalized not in allowed:
+            raise ValueError("reasoning effort must be one of: none, minimal, low, medium, high, xhigh, max")
+        return normalized
+
     @field_validator("asset_generation_parallelism")
     @classmethod
     def validate_asset_generation_parallelism(cls, value: int) -> int:
@@ -344,6 +365,26 @@ class Settings(BaseSettings):
         if normalized not in allowed:
             raise ValueError("render_primary_backend must be one of: ffmpeg, remotion")
         return normalized
+
+    @field_validator("runtime_environment")
+    @classmethod
+    def validate_runtime_environment(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"development", "staging", "production"}
+        if normalized not in allowed:
+            raise ValueError("runtime_environment must be one of: development, staging, production")
+        return normalized
+
+    @field_validator(
+        "staging_min_free_disk_gb",
+        "staging_min_available_memory_gb",
+        "staging_max_artifacts_gb",
+    )
+    @classmethod
+    def validate_runtime_capacity_threshold(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("runtime capacity thresholds must be non-negative")
+        return value
 
     @field_validator(
         "artifact_retention_sweep_seconds",

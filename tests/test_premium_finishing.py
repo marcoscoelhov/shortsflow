@@ -29,6 +29,7 @@ from app.pipelines.common import FatalStepError
 from app.pipelines.finish_plan import build_finish_plan, public_finish_plan
 from app.premium_finishing import RemotionCliRenderer
 from app.quality.premium_finishing_gate import PremiumFinishingGate
+from app.quality.premium_publish_gate import PREMIUM_PUBLISH_AUDIT_STAGES
 from app.quality.render_gate import RenderGateResult
 from app.utils import file_sha256, stable_hash, utcnow
 
@@ -62,12 +63,13 @@ def _audit_result(score: float) -> dict:
         "passed_target": score >= 9.4,
         "stages": [
             {
-                "stage": "publish_readiness",
+                "stage": stage,
                 "score": score,
                 "target_pass": score >= 9.4,
                 "evidence": ["test double audit"],
                 "gaps": [] if score >= 9.4 else ["test score below target"],
             }
+            for stage in PREMIUM_PUBLISH_AUDIT_STAGES
         ],
     }
 
@@ -323,6 +325,7 @@ def test_premium_finishing_reprocesses_from_tts_when_current_narration_is_not_pr
     _create_rendered_job(job_id)
     _add_premium_generation_inputs(job_id)
     monkeypatch.setattr(orchestrator.settings, "use_mock_providers", False)
+    monkeypatch.setattr(orchestrator.settings, "runtime_environment", "staging")
     monkeypatch.setattr(orchestrator.settings, "tts_primary_provider", "gemini_tts")
     monkeypatch.setattr(orchestrator.premium_finishing, "renderer", FakePremiumRenderer())
     monkeypatch.setattr(orchestrator.premium_finishing, "gate", FakePremiumGate())
@@ -849,6 +852,54 @@ def test_survival_finish_plan_tells_the_binary_choice_through_scene_overlays() -
     assert [scene["overlays"] for scene in first["scenes"]] == [scene["overlays"] for scene in second["scenes"]]
 
 
+@pytest.mark.parametrize(
+    ("topic_summary", "expected_marker"),
+    [
+        ("No observatório, você fecha a cúpula ou mantém o sinal?", "SINAL ANÔMALO"),
+        ("No hotel submerso, você sela o corredor ou libera a cápsula?", "PRESSÃO AUMENTANDO"),
+        ("No farol isolado, você usa a bateria no rádio ou na luz?", "TEMPESTADE AUMENTANDO"),
+        ("No museu parado no tempo, você gira o relógio para frente ou para trás?", "TEMPO CONGELADO"),
+    ],
+)
+def test_survival_finish_plan_uses_scenario_specific_hazard_marker(
+    topic_summary: str,
+    expected_marker: str,
+) -> None:
+    scene = {
+        "scene_id": "scene-1",
+        "order": 1,
+        "actual_start_ms": 0,
+        "actual_end_ms": 4_000,
+        "retention_role": "visual_hook",
+        "narration_text": topic_summary,
+    }
+
+    plan = build_finish_plan(
+        schema_version="1.0.0",
+        job=SimpleNamespace(
+            job_id="scenario-specific-hazard",
+            niche_id="survival_decisions",
+            topic_summary=topic_summary,
+        ),
+        scene_plan=SimpleNamespace(scenes=[scene], content_hash="scene-plan"),
+        selected_assets=[SimpleNamespace(scene_id="scene-1", uri="scene.png", content_hash="asset")],
+        narration=SimpleNamespace(
+            duration_ms=4_000,
+            content_hash="narration",
+            normalized_audio_uri=None,
+            audio_uri="narration.wav",
+        ),
+        subtitles=SimpleNamespace(items=[], content_hash="subtitles"),
+        background_music=None,
+        render=None,
+        visual_contract={},
+    )
+
+    hazard_marker = plan["scenes"][0]["overlays"][-1]
+    assert hazard_marker["variant"] == "hazard_progress"
+    assert hazard_marker["text"] == expected_marker
+
+
 def test_survival_finish_plan_completes_binary_payoff_from_one_confident_outcome() -> None:
     payoff_narration = (
         "então o teto se ilumina o livro desenha a planta e a chave abre a porta errada quando seu amigo escolher a "
@@ -1016,7 +1067,7 @@ def test_remotion_survival_overlay_variants_are_frame_driven() -> None:
 
     assert "<SceneOverlays" in source
     assert "overlay.variant === 'choice_label'" in source
-    assert "overlay.variant === 'sand_progress'" in source
+    assert "overlay.variant === 'sand_progress' || overlay.variant === 'hazard_progress'" in source
     assert "overlay.variant === 'choice_state'" in source
     assert "overlay.variant === 'outcome_comparison'" in source
     assert "overlay.variant === 'comment_prompt'" in source
@@ -1076,7 +1127,7 @@ def test_survival_overlay_labels_fall_back_neutrally_without_changing_generic_pl
     assert [overlay["text"] for overlay in survival["scenes"][0]["overlays"]] == [
         "OPÇÃO A",
         "OPÇÃO B",
-        "AREIA SUBINDO",
+        "PERIGO AUMENTANDO",
     ]
     assert generic["scenes"][0]["overlays"] == []
 
@@ -1088,6 +1139,15 @@ def test_premium_caption_highlight_uses_only_current_word() -> None:
     assert "index === activeWordIndex" in source
     assert "transition: 'transform" not in source
     assert "wordHighlightProgress" in source
+
+
+def test_premium_scene_crossfade_never_fades_both_scenes_to_black() -> None:
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
+    scene_layer = source[source.index("const SceneLayer"):source.index("const SceneOverlays")]
+
+    assert "const opacityOut" not in scene_layer
+    assert "const opacity = opacityIn" in scene_layer
+    assert "durationInFrames={durationFrames + transitionFrames}" in scene_layer
 
 
 def test_premium_caption_component_keeps_lateral_breathing_room() -> None:
@@ -1359,6 +1419,11 @@ def test_ready_job_schedules_when_premium_audit_is_below_threshold(monkeypatch) 
     job_id = "premium-publish-gate-schedule-block"
     _create_rendered_job(job_id)
     _set_premium_publish_audit(monkeypatch, 8.9)
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {"passed": True, "final_status": "ready_for_upload", "hard_blockers": [], "manual_required": []},
+    )
     with SessionLocal() as session:
         job = session.get(Job, job_id)
         assert job
@@ -1421,3 +1486,47 @@ def test_ready_job_manual_publishes_when_premium_audit_is_below_threshold(monkey
         assert job.status == "published"
         assert schedule is not None
         assert schedule.status == "published"
+
+
+@pytest.mark.parametrize("flow", ["immediate", "scheduled", "recovery"])
+def test_every_youtube_flow_fails_preflight_for_non_publishable_final_status(monkeypatch, flow: str) -> None:
+    job_id = f"youtube-semantic-preflight-{flow}"
+    _create_rendered_job(job_id)
+    _set_premium_publish_audit(monkeypatch, 10.0)
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {"passed": True, "final_status": "monetization_review", "hard_blockers": [], "manual_required": []},
+    )
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job
+        job.status = "approved_for_publish"
+        job.review_state = "approved"
+        session.commit()
+
+    if flow == "scheduled":
+        response = TestClient(app).post(
+            f"/jobs/{job_id}/schedule",
+            data={
+                "scheduled_for_local": "2099-06-10T14:30",
+                "timezone": "America/Sao_Paulo",
+                "youtube_visibility": "private",
+                "notes": "",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 409
+    else:
+        with pytest.raises(FatalStepError, match="premium_publish_final_status_not_publishable"):
+            orchestrator.publish_job(
+                job_id,
+                youtube_video_id="yt-preflight",
+                trigger="schedule_worker" if flow == "recovery" else "manual",
+            )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        schedule = session.query(PublicationSchedule).filter_by(job_id=job_id).one_or_none()
+        assert job and job.status == "blocked_for_monetization"
+        assert schedule is None

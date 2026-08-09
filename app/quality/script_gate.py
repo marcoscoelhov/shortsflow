@@ -132,6 +132,7 @@ WEAK_HOOK_FIRST_WORDS = {
     "imagine",
 }
 RETENTION_MAP_REQUIRED_KEYS = {"visual_hook", "proof_or_tension", "escalation", "turn_or_payoff", "loop_close"}
+STORY_ARC_REQUIRED_KEYS = {"setup", "tension", "turn", "consequence"}
 GENERIC_LOOP_ENDING_PATTERN = re.compile(
     r"\b(?:fecha o ciclo|agora tudo faz sentido|parece inevit[aá]vel|isso muda como voc[eê] olha|essa curiosidade muda como voc[eê] olha)\b",
     re.IGNORECASE,
@@ -276,6 +277,17 @@ class ScriptQualityGate:
             reasons.append("retention_map_incomplete")
         if structured_report["retention_map_ungrounded_keys"]:
             reasons.append("retention_map_not_grounded_in_narration")
+        cta_style = self._request_value(request, "cta_style")
+        if cta_style == "soft":
+            cta = str(script.get("cta") or "").strip()
+            if not cta:
+                reasons.append("missing_soft_cta")
+            elif self._normalize(cta) not in self._normalize(full_narration):
+                reasons.append("soft_cta_not_in_narration")
+            if not structured_report["story_arc_complete"]:
+                reasons.append("story_arc_incomplete")
+            if structured_report["story_arc_ungrounded_keys"]:
+                reasons.append("story_arc_not_grounded_in_narration")
         fact_risk = self._fact_risk_report(script)
         trace_report = self._claim_trace_report(script, fact_risk)
         viral_space = is_viral_space_entertainment_context(topic_plan, request)
@@ -393,12 +405,20 @@ class ScriptQualityGate:
         body_beats = script.get("body_beats") if isinstance(script.get("body_beats"), list) else []
         retention_map = script.get("retention_map") if isinstance(script.get("retention_map"), dict) else {}
         full_narration = self._normalize(str(script.get("full_narration") or ""))
+        normalized_story_narration = self._normalize_story_excerpt(full_narration)
         retention_map_entries = self._retention_map_entries(retention_map)
+        story_arc = script.get("story_arc") if isinstance(script.get("story_arc"), dict) else {}
         ungrounded_keys: list[str] = []
         for key in RETENTION_MAP_REQUIRED_KEYS & set(retention_map_entries):
             texts = retention_map_entries[key]
             if any(self._normalize(text) not in full_narration for text in texts if text):
                 ungrounded_keys.append(key)
+        story_arc_ungrounded_keys = [
+            key
+            for key in STORY_ARC_REQUIRED_KEYS & set(story_arc)
+            if str(story_arc.get(key) or "").strip()
+            and self._normalize_story_excerpt(str(story_arc.get(key))) not in normalized_story_narration
+        ]
         return {
             "hook_first_word": first_word,
             "hook_first_word_weak": first_word in WEAK_HOOK_FIRST_WORDS,
@@ -407,7 +427,18 @@ class ScriptQualityGate:
             "retention_map_complete": RETENTION_MAP_REQUIRED_KEYS.issubset(set(retention_map_entries))
             and all(retention_map_entries.get(key) for key in RETENTION_MAP_REQUIRED_KEYS),
             "retention_map_ungrounded_keys": sorted(ungrounded_keys),
+            "story_arc_complete": STORY_ARC_REQUIRED_KEYS.issubset(story_arc)
+            and all(str(story_arc.get(key) or "").strip() for key in STORY_ARC_REQUIRED_KEYS),
+            "story_arc_ungrounded_keys": sorted(story_arc_ungrounded_keys),
         }
+
+    def _request_value(self, request: Any | None, key: str) -> str:
+        if isinstance(request, dict):
+            return str(request.get(key) or "").strip().lower()
+        return str(getattr(request, key, "") or "").strip().lower()
+
+    def _normalize_story_excerpt(self, text: str) -> str:
+        return " ".join(word_tokens(self._normalize(text)))
 
     def _retention_map_entries(self, retention_map: dict[str, Any]) -> dict[str, list[str]]:
         entries: dict[str, list[str]] = {}

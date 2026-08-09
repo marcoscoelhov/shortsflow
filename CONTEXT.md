@@ -44,6 +44,14 @@ _Avoid_: substituir final.mp4 durante prova, publicacao acidental, versao invisi
 A validacao automatica minima de uma **Versao Premium Paralela** antes de ela participar de uma **Prova Comparativa de Acabamento**.
 _Avoid_: comparar arquivo quebrado, julgamento estetico sem sanidade tecnica, aprovar efeito que viola narrativa
 
+**Score da Auditoria Premium**:
+A pontuacao diagnostica do pacote final, usada para expor gaps editoriais sem transformar nota baixa isolada em hard blocker.
+_Avoid_: Score de Autoaprovacao, permissao de publicar, override de artefato ausente
+
+**Preflight Premium de Publicacao**:
+A revalidacao fail-closed de artefatos, contrato de auditoria, hard blockers e revisao visual imediatamente antes de aprovar, agendar ou publicar em qualquer plataforma.
+_Avoid_: score estetico isolado, checagem apenas no TikTok, confiar somente no status antigo do job
+
 **Acao de Prova Premium**:
 O comando humano no **Hub de Revisao** que gera uma **Versao Premium Paralela** para avaliar **Acabamento Editorial Premium** sem mudar o fluxo normal do **Job de Video**.
 _Avoid_: etapa obrigatoria do pipeline, publicacao automatica, aprovacao invisivel, experimento global
@@ -83,6 +91,10 @@ _Avoid_: drift temporal, quebra puramente por caractere, legenda tecnicamente al
 **Revisao Humana**:
 A avaliacao feita por uma pessoa antes de aprovar, rejeitar, agendar ou publicar um **Job de Video**.
 _Avoid_: aprovado, publicavel, upload pronto
+
+**Evidencia Visual Qwen**:
+Uma avaliacao diagnostica produzida pelo Qwen para auxiliar a **Revisao Humana**. Ela nunca decide gates, confirma revisao, agenda ou publica um **Job de Video**.
+_Avoid_: autoridade visual, autoaprovacao, substituto da revisao humana, permissao de publicacao
 
 **Hub de Revisao**:
 A superficie operacional onde uma pessoa acompanha, assiste e decide sobre **Jobs de Video**.
@@ -247,6 +259,26 @@ _Avoid_: ranking por views, nota de vaidade, score de monetizacao
 **Objetivo Primario de Crescimento**:
 A meta editorial do **Assistente de Crescimento do Canal**, priorizando retencao e replay em Shorts antes de alcance bruto ou monetizacao.
 _Avoid_: crescer por views isoladas, perseguir RPM primeiro, otimizar para vaidade
+
+**Marco de Breakout 10k**:
+O resultado em que pelo menos um **Job de Video** alcanca 10.000 visualizacoes organicas no YouTube em ate sete dias depois da publicacao.
+_Avoid_: total acumulado do canal, media de views, trafego pago, video antigo que chega a 10k sem prazo
+
+**Piloto de Formato 10k**:
+Um experimento editorial com publicacao controlada e revisao humana no canal atual, em pt-BR, composto por dezoito **Jobs de Video** divididos igualmente entre **Astronomia Visualmente Ancorada**, **Dilema Ficcional Visual** e **Hibrido Especulativo Cientifico**, para comparar formato antes de idioma.
+_Avoid_: publicacao automatica de survival_decisions, pivot definitivo de nicho, teste simultaneo de idioma, canais com historicos diferentes, lote sem bracos comparaveis
+
+**Astronomia Visualmente Ancorada**:
+O braco factual do **Piloto de Formato 10k** em que a prova visual central vem de fonte oficial, licenciada ou composicao programatica, enquanto imagem gerada pode oferecer apenas atmosfera ou escala emocional.
+_Avoid_: usar imagem gerada como prova cientifica, planeta inventado, slideshow astronomico generico
+
+**Dilema Ficcional Visual**:
+O braco ficcional do **Piloto de Formato 10k** que apresenta duas escolhas legiveis no primeiro quadro e revela uma consequencia narrativa, sempre identificado como cenario inventado.
+_Avoid_: curiosidade factual, historia real inventada, gore, instrucao de sobrevivencia
+
+**Hibrido Especulativo Cientifico**:
+O braco do **Piloto de Formato 10k** que combina uma regra cientifica sustentada por evidencia com um cenario e uma decisao explicitamente hipoteticos.
+_Avoid_: apresentar ficcao como fato, usar imagem gerada como evidência, esconder a natureza hipotetica
 
 **Volume Minimo de Confianca**:
 O patamar minimo de visualizacoes usado antes de tratar um resultado de performance como evidência confiavel.
@@ -524,6 +556,9 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - O **Hub de Revisao** oferece **Roteiro Pronto** como modo de entrada distinto de tema e titulo.
 - Um **Horario de Publicacao** so deve ser escolhido depois da aprovacao do **Job de Video**.
 - **Publicacao Automatizada** pode aprovar, agendar e publicar um **Job de Video** sem **Revisao Humana** previa quando os criterios de score e bloqueio forem satisfeitos.
+- **Preflight Premium de Publicacao** deve passar antes de aprovar, agendar ou publicar em qualquer plataforma; status antigo nao substitui essa revalidacao.
+- **Score da Auditoria Premium** abaixo da meta e diagnostico; artefato ausente, auditoria invalida e hard blocker tecnico continuam fail-closed.
+- **Score de Autoaprovacao** e **Score da Auditoria Premium** sao conceitos distintos.
 - **Elegibilidade Automatizada** exige status `ready_for_upload`; **Jobs de Video** em `monetization_review` ou `blocked_for_monetization` nao podem entrar em **Publicacao Automatizada**.
 - **Tema Automatico** pode chegar a **Publicacao Automatizada**, mas nao possui **Validacao Humana de Roteiro Pronto** e deve passar pelo caminho rigoroso de factualidade, auditoria textual, metadados, repeticao, visual, direitos, disclosure, duracao, audio, render e YouTube.
 - **Validacao Humana de Roteiro Pronto** transforma bloqueios editoriais automatizados em warnings, mas nao dispensa etapas tecnicas, visuais, direitos, disclosure, duracao, audio, render ou YouTube.
@@ -571,6 +606,8 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Uma **Proposta de Crescimento** pode produzir um **Roteiro Sugerido por Crescimento**.
 - Um **Roteiro Sugerido por Crescimento** exige revisao humana antes de entrar no **Banco de Roteiros Prontos** ou virar **Job de Video**.
 - Uma **Proposta de Crescimento** nao deve criar **Job de Video** diretamente.
+- O **Piloto de Formato 10k** usa o canal atual e exige **Revisao Humana** antes de publicar; `survival_decisions` permanece fora da **Publicacao Automatizada**.
+- A geracao controlada do **Piloto de Formato 10k** deve bloquear imagem ambigua ou contraditoria e tentar no maximo tres regeneracoes antes de enviar o job para **Revisao Humana** ou registrar uma **Lacuna de Lane Automatizada**.
 
 ## Example dialogue
 
