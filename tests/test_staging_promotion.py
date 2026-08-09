@@ -74,12 +74,21 @@ def test_deploy_workflow_guards_main_before_production_environment() -> None:
     assert "needs: [test, promotion-guard]" in workflow
     assert workflow.index("promotion-guard:") < workflow.index("environment:")
     assert "scripts/check_staging_promotion.py" in workflow
+    assert "expected_revision:" in workflow
+    assert '"${CANDIDATE_SHA}" != "${EXPECTED_REVISION}"' in workflow
 
 
 def test_promotion_workflow_pushes_exact_sha_without_force() -> None:
     workflow = Path(".github/workflows/promote-staging.yml").read_text(encoding="utf-8")
 
-    assert "environment: production" in workflow
+    assert "environment: staging" in workflow
+    assert "environment: production-promotion" in workflow
+    assert "tailscale/github-action@v4" in workflow
+    assert "https://srv769897.tailc97b69.ts.net:8443/healthz" in workflow
+    assert 'r["environment"] == "staging"' in workflow
+    assert 'r["revision"] == os.environ["REVISION"]' in workflow
     assert 'git push origin "${REVISION}:refs/heads/main"' in workflow
+    assert "actions: write" in workflow
+    assert 'gh workflow run deploy-remote-runtime.yml --ref main -f expected_revision="${REVISION}"' in workflow
     assert "--force" not in workflow
     assert "scripts/check_staging_promotion.py" in workflow

@@ -7,6 +7,11 @@ on:
       - staging
       - main
   workflow_dispatch:
+    inputs:
+      expected_revision:
+        description: Exact staged SHA requested by the promotion workflow
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -26,11 +31,16 @@ jobs:
       - name: Require main revision to have passed through staging
         env:
           CANDIDATE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_REVISION: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_revision || '' }}
           TARGET_BRANCH: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
         run: |
           if [[ "${TARGET_BRANCH}" != "main" ]]; then
             echo "staging workflow: production promotion guard is not applicable"
             exit 0
+          fi
+          if [[ -n "${EXPECTED_REVISION}" && "${CANDIDATE_SHA}" != "${EXPECTED_REVISION}" ]]; then
+            echo "requested revision ${EXPECTED_REVISION} does not match checked-out revision ${CANDIDATE_SHA}" >&2
+            exit 1
           fi
           git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main refs/heads/staging:refs/remotes/origin/staging
           python scripts/check_staging_promotion.py "${CANDIDATE_SHA}"
