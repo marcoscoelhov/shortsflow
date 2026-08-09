@@ -49,13 +49,6 @@ TTS_PROVIDER_OPTIONS = (
     ("edge_tts", "Edge TTS"),
 )
 
-VISION_VERIFIER_OPTIONS = (
-    ("local_openai", "Local OpenAI-compatible"),
-    ("minimax_mmx", "MiniMax mmx"),
-    ("auto", "Auto"),
-    ("disabled", "Desativado"),
-)
-
 OPERATIONAL_SETTING_SPECS = (
     OperationalSettingSpec("llm_primary_provider", "LLM principal", "LLM", "select", PROVIDER_OPTIONS),
     OperationalSettingSpec("llm_fallback_provider", "LLM fallback", "LLM", "select", PROVIDER_OPTIONS),
@@ -108,39 +101,6 @@ OPERATIONAL_SETTING_SPECS = (
     OperationalSettingSpec("background_music_enabled", "Trilha ativa", "Musica", "checkbox"),
     OperationalSettingSpec("music_bank_auto_populate", "Popular banco local", "Musica", "checkbox"),
     OperationalSettingSpec("allow_music_api_fallback", "Fallback para API", "Musica", "checkbox"),
-    OperationalSettingSpec(
-        "vision_verifier_provider",
-        "Verificador visual",
-        "Visao local",
-        "select",
-        VISION_VERIFIER_OPTIONS,
-        description="Use local_openai com o servico shortsflow-vision para liberar revisao visual automatica.",
-    ),
-    OperationalSettingSpec(
-        "auto_visual_review_enabled",
-        "Revisao visual IA automatica",
-        "Visao local",
-        "checkbox",
-        description="Quando desligado, a IA visual nao bloqueia autopublicacao nem roda dentro do ciclo automatico.",
-    ),
-    OperationalSettingSpec("local_vision_base_url", "URL da visao local", "Visao local", "text"),
-    OperationalSettingSpec("local_vision_model", "Modelo da visao local", "Visao local", "text"),
-    OperationalSettingSpec(
-        "local_vision_release_approved",
-        "Eval local de 20 imagens aprovado",
-        "Visao local",
-        "checkbox",
-        description="Libera o modelo local para remover a pendencia visual da autopublicacao.",
-    ),
-    OperationalSettingSpec(
-        "vision_verifier_timeout_sec",
-        "Timeout da visao",
-        "Visao local",
-        "number",
-        min_value=10,
-        max_value=600,
-        step="1",
-    ),
     OperationalSettingSpec(
         "tts_primary_provider",
         "TTS primario",

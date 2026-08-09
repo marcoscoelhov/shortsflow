@@ -25,7 +25,6 @@ from app.editorial.topic_mode import resolve_editorial_mode
 from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
 from app.models import BackgroundMusicAsset, Job, NarrationAsset, PerformanceMetric, PublicationSchedule, RenderOutput, ReviewRecord, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRequest
 from app.pipelines.base import BasePipeline
-from app.quality.auto_visual_review import AutoVisualReviewService
 from app.quality.llm_judge import (
     build_editorial_judge_payload,
     build_growth_judge_payload,
@@ -68,12 +67,6 @@ class MonetizationPipeline(BasePipeline):
 
     def step_monetization_readiness(self, session: Session, job: Job, attempt: int) -> list[str]:
         report = self.build_monetization_report(session, job)
-        auto_visual_review_ran = False
-        if REASON_VISUAL_REVIEW_REQUIRED in report.get("manual_required", []):
-            auto_visual_review_ran = True
-            visual_result = AutoVisualReviewService(self.storage).review(session, job)
-            if visual_result.get("passed") is True:
-                report = self.build_monetization_report(session, job, {"visual_review_confirmed"})
         self.storage.persist_json(job.job_id, "rights_registry.json", self._serialize_for_json(report["rights_registry"]))
         self.storage.persist_json(job.job_id, "ai_disclosure.json", self._serialize_for_json(report["ai_disclosure"]))
         self.storage.persist_json(job.job_id, "fact_claims_report.json", self._serialize_for_json(report["fact_claims_report"]))
@@ -110,7 +103,6 @@ class MonetizationPipeline(BasePipeline):
             "metadata_ctr_gate.json",
             "growth_score_report.json",
             ARTIFACT_MONETIZATION_REPORT,
-            *([AutoVisualReviewService.ARTIFACT_NAME] if auto_visual_review_ran else []),
         ]
 
     def build_monetization_report(self, session: Session, job: Job, extra_confirmations: set[str] | None = None) -> dict[str, Any]:

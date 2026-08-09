@@ -451,9 +451,9 @@ Conteudo tecnico, erros e artefatos ficam colapsados em paines secundarios.
 
 Quando existir `visual_review_report.json`, o detalhe do job mostra a **Revisao visual auxiliar** dentro de "Qualidade e monetizacao". Esse relatorio e evidencia para a pessoa revisora; ele nao muda sozinho agenda ou aprovacao.
 
-A etapa `monetization_readiness_gate` pode rodar revisão visual auxiliar quando o primeiro relatório aponta `visual_review_required`. O Qwen local coleta somente evidência diagnóstica: suas notas e scores nunca removem a pendência, confirmam revisão humana, aprovam gates, agendam ou publicam. Se o verificador estiver indisponível, falhar ou devolver apenas heurística de prompt, o job continua pedindo revisão visual humana. `survival_decisions` exige revisão humana também nos assignments de piloto.
+A etapa `monetization_readiness_gate` não executa revisão visual local. Quando falta evidência visual real, o job permanece em `monetization_review` com `visual_review_required` até uma pessoa confirmar a revisão.
 
-Na automação, a mesma revisão visual auxiliar pode enriquecer o diagnóstico do backlog, mas Qwen não pode emitir `visual_review_confirmed`. Se restar `visual_review_required`, `fact_review_required`, publish audit ou outra revisão manual, o job permanece em `monetization_review` e o ciclo diário tenta o próximo candidato do mesmo slot.
+Na automação, jobs com revisão visual humana pendente não são agendados. O ciclo diário preserva a pendência e tenta o próximo candidato elegível do mesmo slot.
 
 `/jobs` e uma rota de navegacao direta e precisa entregar o shell completo do **Console Operacional**. O mesmo endpoint tambem serve `jobs_table.html` para atualizacoes HTMX da fila quando a requisicao carrega `HX-Request=true`; sem esse header, retornar apenas o fragmento e regressao visual.
 

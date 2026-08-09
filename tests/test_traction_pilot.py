@@ -24,7 +24,7 @@ def test_traction_pilot_plan_interleaves_six_items_per_arm() -> None:
     assert plan["publishes_or_schedules"] is False
     assert [item["arm"] for item in plan["items"]] == ["A", "B", "C"] * 6
     assert len({item["concept_id"] for item in plan["items"]}) == 18
-    assert all(item["vision_policy"] == "qwen_local_exact_no_fallback" for item in plan["items"])
+    assert all(item["vision_policy"] == "human_visual_review_required" for item in plan["items"])
     assert all(item["human_review_required"] is True for item in plan["items"])
 
 

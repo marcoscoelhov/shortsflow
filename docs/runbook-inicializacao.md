@@ -72,7 +72,7 @@ SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>
 SHORTSFLOW_MINIMAX_IMAGE_API_KEY=<redigido>
 ```
 
-Politica LLM operacional: a conta OpenCode Go em `https://opencode.ai/zen/go/v1` transporta as chamadas Luna pela Responses API. GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho, reparo e planejamento de cenas. Grok 4.5 com `reasoning_effort=high` continua no provider xAI como juiz independente dos gates comuns e revisoes premium. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e `SHORTSFLOW_LLM_ENABLE_FALLBACK=false` evitam retorno silencioso ao DeepSeek. Qwen remoto continua opcional para enriquecimento visual/referencias, e o Qwen3-VL local produz somente evidência diagnóstica de hook, prova e payoff. Nenhum Qwen pode aprovar gate, confirmar revisão humana, agendar ou publicar; `pilot-10k-start --process` apenas gera/renderiza canários para revisão humana.
+Politica LLM operacional: a conta OpenCode Go em `https://opencode.ai/zen/go/v1` transporta as chamadas Luna pela Responses API. GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho, reparo e planejamento de cenas. Grok 4.5 com `reasoning_effort=high` continua no provider xAI como juiz independente dos gates comuns e revisoes premium. `SHORTSFLOW_LLM_FALLBACK_PROVIDER=disabled` e `SHORTSFLOW_LLM_ENABLE_FALLBACK=false` evitam retorno silencioso ao DeepSeek. Qwen remoto permanece apenas como provider textual opcional; o serviço visual Qwen local foi removido. A revisão visual de publicação é humana.
 
 A politica completa, incluindo a separacao entre score premium diagnostico e Score de Autoaprovacao, esta em
 `docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`. Enquanto o gate premium nao for

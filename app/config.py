@@ -95,11 +95,7 @@ class Settings(BaseSettings):
     asset_generation_timeout_sec: float = 75.0
     asset_generation_regeneration_rounds: int = 2
     asset_generation_parallelism: int = 4
-    vision_verifier_provider: str = "local_openai"
-    auto_visual_review_enabled: bool = False
-    local_vision_base_url: str = "http://127.0.0.1:8081/v1"
-    local_vision_model: str = "qwen3-vl-2b-instruct-q4-k-m"
-    local_vision_release_approved: bool = False
+    vision_verifier_provider: str = "disabled"
     vision_verifier_timeout_sec: float = 240.0
     background_music_enabled: bool = True
     background_music_provider: str = "local_bank"
@@ -343,9 +339,9 @@ class Settings(BaseSettings):
     @classmethod
     def validate_vision_verifier_provider(cls, value: str) -> str:
         normalized = value.strip().lower()
-        allowed = {"minimax_mmx", "local_openai", "auto", "disabled"}
+        allowed = {"minimax_mmx", "disabled"}
         if normalized not in allowed:
-            raise ValueError("vision_verifier_provider must be one of: minimax_mmx, local_openai, auto, disabled")
+            raise ValueError("vision_verifier_provider must be one of: minimax_mmx, disabled")
         return normalized
 
     @field_validator("background_music_provider")

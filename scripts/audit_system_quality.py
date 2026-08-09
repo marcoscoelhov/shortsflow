@@ -244,19 +244,11 @@ def score_image_semantics(root: Path) -> StageScore:
         human_review.get("action") == "approve"
         and "visual_review_confirmed" in {str(item) for item in (human_review.get("reason_codes") or [])}
     )
-    vision_disabled = str(getattr(settings, "vision_verifier_provider", "disabled") or "disabled").lower() == "disabled"
-    auto_visual_disabled = not bool(getattr(settings, "auto_visual_review_enabled", False))
-    if (vision_disabled or auto_visual_disabled) and metrics.get("asset_visual_gate_pass") and metrics.get("checked"):
-        score = max(score, TARGET_SCORE)
-        evidence.append("asset visual gate accepted without real vision by cost-first policy")
     if human_visual_confirmed:
         score = max(score, 9.4)
         evidence.append("visual review confirmed by human review")
     if "prompt_heuristic" in verification_modes or not selected:
-        if vision_disabled or auto_visual_disabled:
-            score = max(score, TARGET_SCORE)
-            evidence.append("prompt heuristic accepted because automatic visual review is disabled")
-        elif visual_review.get("passed") and str(visual_review.get("reviewer") or "").lower() in {"codex_vision", "human_vision"}:
+        if visual_review.get("passed") and str(visual_review.get("reviewer") or "").lower() in {"codex_vision", "human_vision"}:
             score = max(score, 9.4)
             evidence.append(f"visual review passed by {visual_review.get('reviewer')}")
         elif human_visual_confirmed:

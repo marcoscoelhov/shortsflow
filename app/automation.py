@@ -31,10 +31,7 @@ from app.automation_recovery import (
     SCENE_PLAN_REPAIR_REASONS,
     SUBTITLE_REPAIR_REASONS,
     TEXTUAL_REPAIR_REASONS,
-    VISUAL_REVIEW_REQUIREMENTS,
     classify_failure,
-    only_safe_visual_review_remains,
-    visual_review_can_be_attempted,
 )
 from app.automation_topics import COSMOS_CURIOSITY_POOL, cosmos_policy_notes, has_recognizable_hook_object, select_cosmos_topic
 from app.airtable_ready_scripts import AirtableReadyScriptClient, AirtableReadyScriptSyncResult
@@ -66,7 +63,6 @@ from app.models import (
     SceneAsset,
     TopicRequest,
 )
-from app.quality.auto_visual_review import AutoVisualReviewService
 from app.schemas import TopicRequestCreate
 from app.survival_experiment import SURVIVAL_NICHE_ID
 from app.topic_scout import TopicScout
@@ -97,7 +93,6 @@ class AutomationService:
     def __init__(self, orchestrator: Any) -> None:
         self.orchestrator = orchestrator
         self.settings = orchestrator.settings
-        self.auto_visual_review = AutoVisualReviewService(orchestrator.storage)
 
     def automation_enabled(self, session: Session) -> bool:
         row = session.get(AutomationSetting, AUTOMATION_ENABLED_KEY)
@@ -547,35 +542,6 @@ class AutomationService:
                     )
                     try:
                         status = candidate["status"]
-                        confirmation_codes: list[str] = []
-                        if status == JOB_STATUS_MONETIZATION_REVIEW:
-                            before_report = self._monetization_report_for_job_id(job_id)
-                            self._merge_attempt_report(attempt.attempt_id, {"monetization_before": self._automation_report_summary(before_report)})
-                            visual_result = self._run_auto_visual_review(job_id)
-                            self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
-                            if not visual_result["passed"]:
-                                self._merge_attempt_report(
-                                    attempt.attempt_id,
-                                    {"decision": "skip_visual_review_failed", "eligible_after_visual_review": False},
-                                )
-                                self._finish_attempt(
-                                    attempt.attempt_id,
-                                    status="not_eligible",
-                                    error="automatic_visual_review_failed: " + ", ".join(visual_result["reasons"]),
-                                )
-                                continue
-                            refreshed_report = self._refresh_monetization_after_visual_review(job_id)
-                            refreshed_summary = self._automation_report_summary(refreshed_report)
-                            self._merge_attempt_report(
-                                attempt.attempt_id,
-                                {
-                                    "monetization_after": refreshed_summary,
-                                    "eligible_after_visual_review": refreshed_summary["final_status"] == JOB_STATUS_READY_FOR_UPLOAD,
-                                },
-                            )
-                            status = self._job_status(job_id)
-                            confirmation_codes.append("visual_review_confirmed")
-
                         if status == JOB_STATUS_READY_FOR_UPLOAD:
                             self._merge_attempt_report(attempt.attempt_id, {"decision": "score_autoapproval"})
                             score_report = self.evaluate_autoapproval(job_id)
@@ -591,21 +557,9 @@ class AutomationService:
                                     error=self._automation_score_error(AUTOMATION_SOURCE_BACKLOG, score_report["reasons"]),
                                 )
                                 continue
-                        elif status != JOB_STATUS_APPROVED_FOR_PUBLISH:
-                            current_report = self._monetization_report_for_job_id(job_id)
-                            self._merge_attempt_report(
-                                attempt.attempt_id,
-                                {
-                                    "decision": "skip_remaining_blockers",
-                                    "eligible_after_visual_review": False,
-                                    "monetization_after": self._automation_report_summary(current_report),
-                                },
-                            )
-                            self._finish_attempt(attempt.attempt_id, status="not_eligible", error=f"job_status={status}")
-                            continue
 
                         self._merge_attempt_report(attempt.attempt_id, {"decision": "schedule_candidate"})
-                        schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
+                        schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=[])
                     except Exception as exc:  # noqa: BLE001
                         self._merge_attempt_report(attempt.attempt_id, {"decision": "publish_attempt_failed"})
                         self._finish_attempt(attempt.attempt_id, status="publish_failed", error=str(exc))
@@ -659,58 +613,7 @@ class AutomationService:
                     if not report.get("hard_blockers"):
                         candidates.append({"job_id": job.job_id, "status": job.status, "job_origin": job.job_origin, "classification": classification})
                     continue
-                if self._visual_review_can_be_attempted(report):
-                    candidates.append({"job_id": job.job_id, "status": job.status, "job_origin": job.job_origin, "classification": classification})
             return candidates
-
-    def _visual_review_can_be_attempted(self, report: dict[str, Any]) -> bool:
-        """Return True when local vision can remove visual-review debt safely.
-
-        This is intentionally broader than publish eligibility: a job may also need
-        fact/metadata/publish-audit review, but we should still run the automated
-        vision check and rebuild monetization so the visual blocker does not stay
-        stale in backlog. Scheduling still requires the refreshed report to reach
-        ready_for_upload.
-        """
-        return visual_review_can_be_attempted(report)
-
-    def _only_safe_visual_review_remains(self, report: dict[str, Any]) -> bool:
-        return only_safe_visual_review_remains(report)
-
-    def _run_auto_visual_review(self, job_id: str) -> dict[str, Any]:
-        with session_scope() as session:
-            job = session.get(Job, job_id)
-            if not job:
-                raise KeyError(job_id)
-            return self.auto_visual_review.review(session, job)
-
-    def _refresh_monetization_after_visual_review(self, job_id: str) -> dict[str, Any]:
-        with session_scope() as session:
-            job = session.get(Job, job_id)
-            if not job:
-                raise KeyError(job_id)
-            report = self.orchestrator.monetization_pipeline.build_monetization_report(
-                session,
-                job,
-                {"visual_review_confirmed"},
-            )
-            self.orchestrator.storage.persist_json(
-                job_id,
-                ARTIFACT_MONETIZATION_REPORT,
-                self.orchestrator._serialize_for_json(report),
-            )
-            quality_summary = dict(job.quality_summary or {})
-            quality_summary["monetization"] = {
-                "passed": report["passed"],
-                "final_status": report["final_status"],
-                "hard_blockers": report["hard_blockers"],
-                "manual_required": report["manual_required"],
-                "warnings": report.get("warnings", []),
-                "content_hash": stable_hash(report),
-            }
-            job.quality_summary = quality_summary
-            job.status = str(report["final_status"])
-            return report
 
     def _run_generation_attempt(
         self,
@@ -787,15 +690,11 @@ class AutomationService:
                     "retry": retry_report,
                 },
             )
-            if status == JOB_STATUS_MONETIZATION_REVIEW and classification["classification"] in {
-                "visual_review_repairable",
-                "visual_review_partial_repairable",
-            }:
-                visual_result = self._run_auto_visual_review(job_id)
-                self._merge_attempt_report(attempt.attempt_id, {"visual_review": visual_result})
-                if visual_result["passed"]:
-                    self._refresh_monetization_after_visual_review(job_id)
-                    status = self._job_status(job_id)
+            if status == JOB_STATUS_MONETIZATION_REVIEW and classification["classification"] == "human_visual_review_required":
+                self._merge_attempt_report(
+                    attempt.attempt_id,
+                    {"decision": "skip_human_visual_review_required"},
+                )
             if status != JOB_STATUS_READY_FOR_UPLOAD:
                 reason_code = self._automation_failure_reason_code(source, status, classification)
                 error = self._format_automation_reason(self._automation_attempt_error(job_id, status, source), reason_code)
@@ -818,13 +717,7 @@ class AutomationService:
                         error,
                     )
                 return {"scheduled": False}
-            confirmation_codes: list[str] = []
-            if status == JOB_STATUS_READY_FOR_UPLOAD and classification["classification"] in {
-                "visual_review_repairable",
-                "visual_review_partial_repairable",
-            }:
-                confirmation_codes.append("visual_review_confirmed")
-            schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=confirmation_codes)
+            schedule_id = self._approve_and_schedule(job_id, target_slot, confirmation_codes=[])
         except Exception as exc:  # noqa: BLE001
             reason_code = AUTOMATION_REASON_GENERATION_FAILED
             error = self._format_automation_reason(str(exc), reason_code)
@@ -987,27 +880,6 @@ class AutomationService:
                 .where(AutomationAttempt.run_id == run_id)
                 .order_by(AutomationAttempt.attempt_number.asc(), AutomationAttempt.created_at.asc())
             ).all()
-            partial_repairs = []
-            for attempt in attempts:
-                report = dict(attempt.score_report or {})
-                visual_review = dict(report.get("visual_review") or {})
-                monetization_after = dict(report.get("monetization_after") or {})
-                if report.get("classification") != "visual_review_partial_repairable" or not visual_review.get("passed"):
-                    continue
-                partial_repairs.append(
-                    {
-                        "attempt_number": attempt.attempt_number,
-                        "source": attempt.source,
-                        "source_label": self._automation_source_label(attempt.source),
-                        "job_id": attempt.job_id,
-                        "status": attempt.status,
-                        "reason": attempt.error or "Revisão visual automática aprovada, mas ainda há bloqueios manuais.",
-                        "decision": report.get("decision"),
-                        "remaining_manual_required": list(monetization_after.get("manual_required") or []),
-                        "remaining_hard_blockers": list(monetization_after.get("hard_blockers") or []),
-                        "scheduled_for_local": (report.get("slot") or {}).get("scheduled_for_local"),
-                    }
-                )
             blockers = [
                 {
                     "attempt_number": attempt.attempt_number,
@@ -1021,27 +893,17 @@ class AutomationService:
                 for attempt in attempts
                 if attempt.status not in {"scheduled"} or attempt.error
             ]
-        partial_attempt_numbers = {repair["attempt_number"] for repair in partial_repairs}
         notifications = [
-            {
-                "kind": "partial_repair",
-                "title": "Candidato reparado parcialmente",
-                **repair,
-            }
-            for repair in partial_repairs
-        ]
-        notifications.extend(
             {
                 "kind": "publish_blocker",
                 "title": "Candidato não agendado",
                 **blocker,
             }
             for blocker in blockers
-            if blocker.get("reason") and blocker.get("attempt_number") not in partial_attempt_numbers
-        )
+            if blocker.get("reason")
+        ]
         return {
             "publish_blockers": blockers,
-            "partial_repairs": partial_repairs,
             "automation_notifications": notifications[:10],
         }
 

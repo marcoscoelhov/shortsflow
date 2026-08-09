@@ -1,6 +1,6 @@
 [Unit]
 Description=ShortsFlow staging runtime
-After=network-online.target tailscaled.service shortsflow-vision.service
+After=network-online.target tailscaled.service
 Wants=network-online.target tailscaled.service
 
 [Service]

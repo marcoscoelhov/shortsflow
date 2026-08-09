@@ -42,20 +42,14 @@ nota.
 
 ### Autoridade da revisão visual
 
-Atualização de 2026-08-09: a exceção Qwen descrita originalmente abaixo foi
-revogada. Qwen local ou remoto é somente diagnóstico e não pode aprovar gates,
-confirmar revisão humana, agendar ou publicar; notas de piloto não concedem
-autoridade. `survival_decisions` exige revisão humana inclusive nos pilotos.
+Atualização de 2026-08-09: o serviço e a revisão visual local por Qwen foram
+removidos. Qwen remoto permanece apenas como provider textual opcional e não
+pode julgar gates de publicação. Quando a evidência visual real não existe, o
+Job de Video segue para Revisão Humana.
 
 - `prompt_heuristic` nunca constitui evidência visual real.
-- O Qwen local pode coletar evidência com
-  `SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED=false`, mas não pode remover a
-  pendência visual nesse estado.
-- Para conteúdo cosmos genérico, o eval local, provider/modelo exatos, ausência
-  de fallback e cobertura de cenas críticas qualificam a evidência diagnóstica,
-  mas não concedem autoridade automática ao Qwen.
-- A lane `survival_decisions` exige vision verifier funcional e **revisão
-  humana**, inclusive no piloto persistido `niche_traction_minimax_fit_20260731_*`.
+- A lane `survival_decisions` exige **revisão humana**, inclusive no piloto
+  persistido `niche_traction_minimax_fit_20260731_*`.
 
 Resolvido em 2026-07-31: tentativas visuais novas agora validam provider, modelo,
 alinhamento e ausência de fallback antes de contar uma cena como verificada. O
@@ -81,8 +75,7 @@ schema estrito já está ativo.
 ### Escopo do piloto de retenção
 
 - `survival_decisions` é uma lane editorial opt-in, hipotética e sem publicação
-  automática. No piloto de tração, Qwen fornece apenas evidência diagnóstica e
-  não substitui a revisão humana visual.
+  automática. No piloto de tração, a revisão visual é humana.
 - `pilot-10k-start --seed <n>` persiste 18 assignments em ordem A/B/C e cria os
   três canários. `--process` gera/renderiza somente esses três, sem aprovar ou
   publicar.

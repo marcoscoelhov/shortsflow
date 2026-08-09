@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import colorsys
 import json
-import mimetypes
 import shutil
 import subprocess
 import threading
@@ -52,12 +51,9 @@ class SemanticVerifier:
         text_api_key = settings.resolved_minimax_text_api_key
         self.api_key = text_api_key or ""
         self.mmx_path = shutil.which("mmx")
-        self.local_base_url = settings.local_vision_base_url.rstrip("/")
-        self.local_model = settings.local_vision_model
         self.timeout_sec = float(settings.vision_verifier_timeout_sec)
-        self.local_enabled = self.provider in {"local_openai", "auto"}
-        self.mmx_enabled = self.provider in {"minimax_mmx", "auto"} and bool(text_api_key) and bool(self.mmx_path)
-        self.enabled = not settings.use_mock_providers and self.provider != "disabled" and (self.local_enabled or self.mmx_enabled)
+        self.mmx_enabled = self.provider == "minimax_mmx" and bool(text_api_key) and bool(self.mmx_path)
+        self.enabled = not settings.use_mock_providers and self.mmx_enabled
         self._cache: dict[str, dict[str, Any]] = {}
         self._vision_disabled_reason: str | None = None
 
@@ -207,21 +203,12 @@ class SemanticVerifier:
     def _vision_score(self, scene: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
         asset_path = Path(asset["uri"][7:]) if str(asset.get("uri", "")).startswith("file://") else Path(asset["uri"])
         prompt = self._vision_prompt(scene)
-        errors: list[str] = []
-        if self.provider in {"local_openai", "auto"}:
-            try:
-                return self._local_openai_vision_score(asset_path, prompt)
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"local_openai: {exc}")
-                if self.provider == "local_openai":
-                    raise
-        if self.provider in {"minimax_mmx", "auto"} and self.mmx_enabled:
+        if self.mmx_enabled:
             try:
                 return self._minimax_mmx_vision_score(asset_path, prompt)
             except Exception as exc:  # noqa: BLE001
-                errors.append(f"minimax_mmx: {exc}")
-                raise
-        raise ProviderFailure("vision_verifier", "; ".join(errors) or "vision verifier unavailable")
+                raise ProviderFailure("minimax_vision", str(exc)) from exc
+        raise ProviderFailure("vision_verifier", "vision verifier unavailable")
 
     def _vision_prompt(self, scene: dict[str, Any]) -> str:
         return (
@@ -234,65 +221,6 @@ class SemanticVerifier:
             f"Narracao da cena: {scene.get('narration_text')}. "
             f"Prompt de imagem esperado: {scene.get('image_prompt')}."
         )
-
-    def _local_openai_vision_score(self, asset_path: Path, prompt: str) -> dict[str, Any]:
-        mime_type = mimetypes.guess_type(asset_path.name)[0] or "image/png"
-        image_data = base64.b64encode(asset_path.read_bytes()).decode("ascii")
-        request_payload = {
-            "model": self.local_model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}},
-                        {"type": "text", "text": prompt},
-                    ],
-                }
-            ],
-            "temperature": 0,
-            "max_tokens": 512,
-            "chat_template_kwargs": {"enable_thinking": False},
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "vision_review",
-                    "strict": True,
-                    "schema": self.VISION_RESPONSE_SCHEMA,
-                },
-            },
-        }
-        deadline = time.monotonic() + max(self.timeout_sec, 1.0)
-        last_error: Exception | None = None
-        response: httpx.Response | None = None
-        while time.monotonic() < deadline:
-            try:
-                response = httpx.post(
-                    f"{self.local_base_url}/chat/completions",
-                    json=request_payload,
-                    timeout=httpx.Timeout(min(max(deadline - time.monotonic(), 1.0), self.timeout_sec), connect=min(10.0, self.timeout_sec)),
-                )
-                if response.status_code == 503:
-                    last_error = ProviderFailure("local_openai_vision", "local vision model still loading")
-                    time.sleep(min(5.0, max(deadline - time.monotonic(), 0.0)))
-                    continue
-                response.raise_for_status()
-                break
-            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
-                last_error = exc
-                time.sleep(min(5.0, max(deadline - time.monotonic(), 0.0)))
-        else:
-            raise ProviderFailure("local_openai_vision", f"timed out waiting for local vision response: {last_error}")
-        if response is None:
-            raise ProviderFailure("local_openai_vision", f"local vision unavailable: {last_error}")
-        payload = response.json()
-        content = str(payload.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
-        data = self._parse_vision_json(content, provider="local_openai_vision")
-        result = self._vision_data_to_scores(data)
-        result["verification_mode"] = "vision"
-        result["pixel_verified"] = True
-        result["vision_provider"] = "local_openai"
-        result["vision_model"] = self.local_model
-        return result
 
     def _minimax_mmx_vision_score(self, asset_path: Path, prompt: str) -> dict[str, Any]:
         if not self.mmx_path:

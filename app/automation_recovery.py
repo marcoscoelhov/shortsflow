@@ -17,14 +17,9 @@ from app.domain_contracts import (
 )
 
 
-def visual_review_can_be_attempted(report: dict[str, Any]) -> bool:
+def visual_review_is_required(report: dict[str, Any]) -> bool:
     manual_required = {str(item) for item in report.get("manual_required") or []}
     return not report.get("hard_blockers") and bool(manual_required & VISUAL_REVIEW_REQUIREMENTS)
-
-
-def only_safe_visual_review_remains(report: dict[str, Any]) -> bool:
-    manual_required = {str(item) for item in report.get("manual_required") or []}
-    return visual_review_can_be_attempted(report) and manual_required.issubset(VISUAL_REVIEW_REQUIREMENTS)
 
 
 def classify_failure(status: str, failure_reason: str | None, monetization_report: dict[str, Any]) -> dict[str, Any]:
@@ -54,12 +49,9 @@ def classify_failure(status: str, failure_reason: str | None, monetization_repor
             "matched_reasons": matched_reasons or hard_blockers,
             "retry_from_step": None,
         }
-    if status == JOB_STATUS_MONETIZATION_REVIEW and visual_review_can_be_attempted(monetization_report):
-        manual_required = {str(item) for item in monetization_report.get("manual_required") or []}
+    if status == JOB_STATUS_MONETIZATION_REVIEW and visual_review_is_required(monetization_report):
         return {
-            "classification": "visual_review_repairable"
-            if manual_required.issubset(VISUAL_REVIEW_REQUIREMENTS)
-            else "visual_review_partial_repairable",
+            "classification": "human_visual_review_required",
             "matched_reasons": list(monetization_report.get("manual_required") or []),
             "retry_from_step": None,
         }

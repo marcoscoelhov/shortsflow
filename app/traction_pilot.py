@@ -16,7 +16,7 @@ from app.utils import stable_hash
 PILOT_ID_PREFIX = "niche_traction_minimax_fit_20260731"
 PILOT_DURATION_SEC = 40
 PILOT_ACCEPTABLE_DURATION_SEC = {"min": 30, "max": 50}
-PILOT_VISION_POLICY = "qwen_local_exact_no_fallback"
+PILOT_VISION_POLICY = "human_visual_review_required"
 JWST_SOURCE_URL = "https://science.nasa.gov/universe/exoplanets/discovery-alert-webb-reveals-a-steamy-exoplanet-atmosphere/"
 
 

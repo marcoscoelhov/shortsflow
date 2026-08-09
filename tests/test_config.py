@@ -77,28 +77,19 @@ def test_runtime_environment_rejects_unknown_value() -> None:
         Settings(_env_file=None, runtime_environment="laptop")
 
 
-def test_vision_verifier_provider_accepts_local_openai(monkeypatch) -> None:
+def test_visual_review_defaults_to_human_only(monkeypatch) -> None:
     monkeypatch.delenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", raising=False)
-
-    settings = Settings(_env_file=None, vision_verifier_provider="LOCAL_OPENAI")
-
-    assert settings.vision_verifier_provider == "local_openai"
-
-
-def test_local_vision_defaults_to_qwen_cpu_candidate(monkeypatch) -> None:
-    monkeypatch.delenv("SHORTSFLOW_LOCAL_VISION_MODEL", raising=False)
 
     settings = Settings(_env_file=None)
 
-    assert settings.local_vision_model == "qwen3-vl-2b-instruct-q4-k-m"
-    assert settings.local_vision_release_approved is False
+    assert settings.vision_verifier_provider == "disabled"
 
 
 def test_vision_verifier_provider_rejects_unknown_provider(monkeypatch) -> None:
     monkeypatch.delenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", raising=False)
 
     with pytest.raises(ValidationError, match="vision_verifier_provider must be one of"):
-        Settings(_env_file=None, vision_verifier_provider="gemma")
+        Settings(_env_file=None, vision_verifier_provider="local_openai")
 
 
 @pytest.mark.parametrize("field", ["openai_reasoning_effort", "xai_reasoning_effort"])
