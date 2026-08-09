@@ -52,6 +52,42 @@ independente.
 
 ## Deploy
 
+O único fluxo de promoção suportado é:
+
+`feature -> staging -> validação real/humana -> fast-forward do mesmo SHA para main`
+
+Uma feature nunca segue diretamente para `main`. Depois que o SHA exato estiver
+alcançável por `origin/staging`, implantado em staging, validado com providers
+reais e aprovado visualmente pelo operador, o workflow manual **Promote
+validated staging revision** recebe esse SHA completo. Um job sem acesso ao
+environment de produção verifica que o commit pertence ao histórico de staging
+e que avança `main` por fast-forward. Somente então o job protegido pelo
+environment `production` executa `git push <SHA>:refs/heads/main`, sem rebuild,
+squash, merge commit novo ou force-push. Se `main` mudar entre a verificação e o
+push, o próprio fast-forward é recusado e a promoção precisa ser reavaliada.
+
+Pushes e pull requests para `main` passam pelo mesmo controle antes de qualquer
+job associado ao environment `production`. O deploy de produção continua
+exigindo aprovação humana e prepara o release imutável diretamente do SHA já
+validado; aprovação de workflow não autoriza agentes a aprovar produção.
+
+O repositório deve manter um reviewer humano obrigatório no environment
+`production` e permitir que a identidade do workflow de promoção faça somente o
+fast-forward protegido de `main`. Se a regra de branch não autorizar essa
+identidade, ou durante a primeira reconciliação antes de o workflow existir no
+default branch, o operador executa o mesmo protocolo sem automação:
+
+```bash
+git fetch --no-tags origin \
+  refs/heads/main:refs/remotes/origin/main \
+  refs/heads/staging:refs/remotes/origin/staging
+python scripts/check_staging_promotion.py <SHA-VALIDADO>
+git push origin <SHA-VALIDADO>:refs/heads/main
+```
+
+Esse bootstrap continua sujeito à proteção de `main`; ele não usa force-push e
+o servidor rejeita qualquer corrida que deixe a atualização não fast-forward.
+
 GitHub Actions entra na tailnet com identidade efêmera e aciona um usuário
 `deploy` sem acesso geral de root. O deploy:
 
