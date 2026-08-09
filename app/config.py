@@ -218,7 +218,7 @@ class Settings(BaseSettings):
     minimax_scene_plan_timeout_sec: float = 120.0
     llm_scene_plan_timeout_sec: float = 75.0
     openai_api_key: str | None = None
-    openai_base_url: str = "https://api.openai.com/v1"
+    openai_base_url: str = "https://opencode.ai/zen/go/v1"
     openai_model: str = "gpt-5.6-luna"
     openai_reasoning_effort: str = "high"
     openai_timeout_sec: float = 180.0

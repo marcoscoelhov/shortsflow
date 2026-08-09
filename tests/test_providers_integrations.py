@@ -269,6 +269,40 @@ def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> Non
     assert "body_beats equivale aos Beats em escalada" in str(captured["input"])
     assert result["qa_metrics"]["source_provider"] == "openai"
 
+
+def test_openai_scene_planning_uses_responses_api(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text='[{"scene_id":"scene-1","order":1}]')
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            openai_api_key="opencode-go-key",
+            openai_base_url="https://opencode.ai/zen/go/v1",
+            openai_model="gpt-5.6-luna",
+            openai_reasoning_effort="high",
+            openai_timeout_sec=120,
+            llm_json_max_tokens=4096,
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    scenes = OpenAICreativeProvider().plan_scenes({"full_narration": "Uma cena de teste."}, 1)
+
+    assert captured["client_kwargs"]["base_url"] == "https://opencode.ai/zen/go/v1"
+    assert captured["model"] == "gpt-5.6-luna"
+    assert captured["instructions"] == "Return ONLY the final JSON array. No markdown fences."
+    assert scenes == [{"scene_id": "scene-1", "order": 1}]
+
 def test_openai_provider_topic_prompt_uses_hub_viral_ruler(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

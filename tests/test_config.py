@@ -6,6 +6,34 @@ from pydantic import ValidationError
 from app.config import Settings
 
 
+def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(monkeypatch) -> None:
+    fields = (
+        "OPENAI_BASE_URL",
+        "OPENAI_MODEL",
+        "LLM_PRIMARY_PROVIDER",
+        "LLM_SCRIPT_DRAFT_PROVIDER",
+        "LLM_REPAIR_PROVIDER",
+        "LLM_SCENE_PROVIDER",
+        "LLM_FALLBACK_PROVIDER",
+        "LLM_GATE_JUDGE_PROVIDER",
+        "XAI_MODEL",
+    )
+    for field in fields:
+        monkeypatch.delenv(f"SHORTSFLOW_{field}", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.openai_base_url == "https://opencode.ai/zen/go/v1"
+    assert settings.openai_model == "gpt-5.6-luna"
+    assert settings.llm_primary_provider == "openai"
+    assert settings.llm_script_draft_provider == "openai"
+    assert settings.llm_repair_provider == "openai"
+    assert settings.llm_scene_provider == "openai"
+    assert settings.llm_fallback_provider == "disabled"
+    assert settings.llm_gate_judge_provider == "xai"
+    assert settings.xai_model == "grok-4.5"
+
+
 def test_render_primary_backend_defaults_to_remotion(monkeypatch) -> None:
     monkeypatch.delenv("SHORTSFLOW_PRIMARY_BACKEND", raising=False)
 

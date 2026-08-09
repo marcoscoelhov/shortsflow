@@ -193,18 +193,17 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
 
     def _json_array_completion(self, prompt: str) -> Any:
         try:
-            response = self.client.chat.completions.create(
+            response = self.client.responses.create(
                 model=self.model_name,
-                messages=[
-                    {"role": "system", "content": "Return ONLY the final JSON array. Do not include reasoning or chain-of-thought. No markdown fences. Top-level must be an array."},
-                    {"role": "user", "content": prompt},
-                ],
-                reasoning_effort=self.reasoning_effort,
+                instructions="Return ONLY the final JSON array. No markdown fences.",
+                input=prompt,
+                reasoning=cast(Any, {"effort": self.reasoning_effort}),
+                max_output_tokens=self.max_output_tokens,
                 timeout=self.timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = (response.choices[0].message.content or "").strip()
+        raw = (getattr(response, "output_text", None) or "").strip()
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
