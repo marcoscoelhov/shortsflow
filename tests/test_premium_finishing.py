@@ -1419,6 +1419,11 @@ def test_ready_job_schedules_when_premium_audit_is_below_threshold(monkeypatch) 
     job_id = "premium-publish-gate-schedule-block"
     _create_rendered_job(job_id)
     _set_premium_publish_audit(monkeypatch, 8.9)
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {"passed": True, "final_status": "ready_for_upload", "hard_blockers": [], "manual_required": []},
+    )
     with SessionLocal() as session:
         job = session.get(Job, job_id)
         assert job
@@ -1481,3 +1486,47 @@ def test_ready_job_manual_publishes_when_premium_audit_is_below_threshold(monkey
         assert job.status == "published"
         assert schedule is not None
         assert schedule.status == "published"
+
+
+@pytest.mark.parametrize("flow", ["immediate", "scheduled", "recovery"])
+def test_every_youtube_flow_fails_preflight_for_non_publishable_final_status(monkeypatch, flow: str) -> None:
+    job_id = f"youtube-semantic-preflight-{flow}"
+    _create_rendered_job(job_id)
+    _set_premium_publish_audit(monkeypatch, 10.0)
+    orchestrator.storage.persist_json(
+        job_id,
+        "monetization_report.json",
+        {"passed": True, "final_status": "monetization_review", "hard_blockers": [], "manual_required": []},
+    )
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job
+        job.status = "approved_for_publish"
+        job.review_state = "approved"
+        session.commit()
+
+    if flow == "scheduled":
+        response = TestClient(app).post(
+            f"/jobs/{job_id}/schedule",
+            data={
+                "scheduled_for_local": "2099-06-10T14:30",
+                "timezone": "America/Sao_Paulo",
+                "youtube_visibility": "private",
+                "notes": "",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 409
+    else:
+        with pytest.raises(FatalStepError, match="premium_publish_final_status_not_publishable"):
+            orchestrator.publish_job(
+                job_id,
+                youtube_video_id="yt-preflight",
+                trigger="schedule_worker" if flow == "recovery" else "manual",
+            )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        schedule = session.query(PublicationSchedule).filter_by(job_id=job_id).one_or_none()
+        assert job and job.status == "blocked_for_monetization"
+        assert schedule is None

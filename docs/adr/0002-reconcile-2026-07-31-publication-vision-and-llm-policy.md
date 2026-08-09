@@ -42,20 +42,20 @@ nota.
 
 ### Autoridade da revisão visual
 
+Atualização de 2026-08-09: a exceção Qwen descrita originalmente abaixo foi
+revogada. Qwen local ou remoto é somente diagnóstico e não pode aprovar gates,
+confirmar revisão humana, agendar ou publicar; notas de piloto não concedem
+autoridade. `survival_decisions` exige revisão humana inclusive nos pilotos.
+
 - `prompt_heuristic` nunca constitui evidência visual real.
 - O Qwen local pode coletar evidência com
   `SHORTSFLOW_LOCAL_VISION_RELEASE_APPROVED=false`, mas não pode remover a
   pendência visual nesse estado.
-- Para conteúdo cosmos genérico, autoridade automática futura exige aprovação
-  explícita do eval local, provider `local_openai`, modelo exatamente aprovado,
-  ausência de fallback e cobertura de todas as cenas críticas.
-- A lane `survival_decisions` comum exige vision verifier funcional **e revisão
-  humana**. A única exceção é o piloto persistido
-  `niche_traction_minimax_fit_20260731_*`, por decisão explícita do operador:
-  seus jobs marcados com `pilot_qwen_autoapproval=true` podem remover a
-  pendência visual somente com provider `local_openai`, modelo
-  `qwen3-vl-2b-instruct-q4-k-m`, todas as cenas críticas aprovadas e nenhum
-  fallback. Essa exceção não autoriza agendar nem publicar.
+- Para conteúdo cosmos genérico, o eval local, provider/modelo exatos, ausência
+  de fallback e cobertura de cenas críticas qualificam a evidência diagnóstica,
+  mas não concedem autoridade automática ao Qwen.
+- A lane `survival_decisions` exige vision verifier funcional e **revisão
+  humana**, inclusive no piloto persistido `niche_traction_minimax_fit_20260731_*`.
 
 Resolvido em 2026-07-31: tentativas visuais novas agora validam provider, modelo,
 alinhamento e ausência de fallback antes de contar uma cena como verificada. O
@@ -80,11 +80,11 @@ schema estrito já está ativo.
 ### Escopo do piloto de retenção
 
 - `survival_decisions` é uma lane editorial opt-in, hipotética e sem publicação
-  automática. No piloto de tração, Qwen substitui a revisão humana visual, mas
-  não substitui os demais gates nem concede autoridade de publicação.
+  automática. No piloto de tração, Qwen fornece apenas evidência diagnóstica e
+  não substitui a revisão humana visual.
 - `pilot-10k-start --seed <n>` persiste 18 assignments em ordem A/B/C e cria os
-  três canários. `--process --qwen-autoapprove` gera/renderiza somente esses três
-  com autoridade Qwen limitada ao processo e sem publicar.
+  três canários. `--process` gera/renderiza somente esses três, sem aprovar ou
+  publicar.
 - O alvo de duração do piloto é 40 segundos, com faixa operacional aceita de
   30–50 segundos. Duração dentro da faixa é registrada para análise e não causa
   regeneração; factualidade, integridade técnica e demais hard blockers seguem

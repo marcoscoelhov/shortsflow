@@ -1,6 +1,7 @@
 from tests.e2e_support import *  # noqa: F403
 from app.config import Settings
-from app.providers.llm_clients import XAICreativeProvider
+from app.providers.errors import ProviderFailure
+from app.providers.llm_clients import QwenCreativeProvider, XAICreativeProvider
 
 
 def test_llm_facade_preserves_public_provider_imports() -> None:
@@ -197,6 +198,15 @@ def test_llm_registry_builds_qwen_optional_provider(monkeypatch) -> None:
     assert provider.provider_name == "qwen"
     assert provider.model_name == "qwen3.7-plus"
     assert captured["client_kwargs"]["base_url"] == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+
+def test_qwen_provider_cannot_audit_or_judge_publication() -> None:
+    provider = object.__new__(QwenCreativeProvider)
+
+    with pytest.raises(ProviderFailure, match="not a publication authority"):
+        provider.audit_publish_package({"forged_score": 1.0})
+    with pytest.raises(ProviderFailure, match="not a quality-gate authority"):
+        provider.judge_quality_gate("publish_readiness", {"forged_score": 1.0})
 
 def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> None:
     captured: dict[str, object] = {}

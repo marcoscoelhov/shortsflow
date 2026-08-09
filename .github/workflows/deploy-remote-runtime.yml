@@ -1,6 +1,7 @@
 name: Deploy remote runtime
 
 on:
+  pull_request:
   push:
     branches:
       - staging
@@ -25,6 +26,14 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            remotion/package-lock.json
       - name: Install media tooling
         run: |
           sudo apt-get update
@@ -32,12 +41,23 @@ jobs:
           ffprobe -version
       - name: Install application
         run: python -m pip install -e '.[dev]'
+      - name: Install JavaScript dependencies
+        run: |
+          npm ci
+          npm ci --prefix remotion
+      - name: Typecheck Remotion
+        run: npm run typecheck --prefix remotion
+      - name: Audit JavaScript dependencies
+        run: |
+          npm audit --audit-level=high
+          npm audit --prefix remotion --audit-level=high
       - name: Run canonical test suite
         env:
           SHORTSFLOW_USE_MOCK_PROVIDERS: "true"
         run: pytest -q
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: test
     runs-on: ubuntu-latest
     environment:

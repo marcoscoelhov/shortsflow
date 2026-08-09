@@ -135,7 +135,7 @@ Manter constantes: alvo de 40 segundos, voz, ritmo, acabamento, horário, quanti
 
 ### Gate visual antes de publicar
 
-Nenhum asset pode ser aprovado somente por `prompt_heuristic`. Por decisão operacional posterior registrada no [ADR 0002](../adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md), os 18 assignments deste piloto dispensam revisão humana visual: hook, prova e payoff exigem o Qwen local exato (`local_openai` + `qwen3-vl-2b-instruct-q4-k-m`), sem fallback, aprovando todas as cenas críticas. Critérios: leitura em menos de 1 segundo, objetos corretos, continuidade, ausência de texto falso, anatomia plausível e nenhuma contradição com o roteiro. Para braços factuais, uma imagem bonita mas cientificamente errada reprova. A autoaprovação visual não autoriza agendamento ou publicação.
+Nenhum asset pode ser aprovado somente por `prompt_heuristic`. A exceção histórica de autoaprovação Qwen foi removida: nos 18 assignments deste piloto, o Qwen local exato (`local_openai` + `qwen3-vl-2b-instruct-q4-k-m`) produz apenas evidência diagnóstica de hook, prova e payoff, e uma pessoa precisa revisar antes de qualquer aprovação. Critérios: leitura em menos de 1 segundo, objetos corretos, continuidade, ausência de texto falso, anatomia plausível e nenhuma contradição com o roteiro.
 
 ### Medição e decisão
 

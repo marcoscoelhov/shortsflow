@@ -31,6 +31,14 @@ class AdmissionDecision:
     reasons: tuple[str, ...]
 
 
+class RuntimeAdmissionRefused(RuntimeError):
+    def __init__(self, reasons: tuple[str, ...], *, after_wait: bool = False) -> None:
+        self.reasons = reasons
+        self.after_wait = after_wait
+        suffix = " after waiting" if after_wait else ""
+        super().__init__(f"runtime refused heavy job{suffix}: {', '.join(reasons)}")
+
+
 def assert_real_execution_location(*, environment: str, use_mock_providers: bool) -> None:
     if environment == "development" and not use_mock_providers:
         raise RuntimeError(

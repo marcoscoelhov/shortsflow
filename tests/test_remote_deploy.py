@@ -13,6 +13,9 @@ from scripts.remote_deploy import (
     LegacyHandoff,
     _handoff_legacy_production,
     _install_release,
+    _restore_runtime_files,
+    _runtime_file_manifest,
+    _sync_runtime_files,
     _write_release_environment,
     atomic_activate,
     deploy,
@@ -27,6 +30,9 @@ def test_staging_plan_uses_isolated_state_and_service(tmp_path: Path) -> None:
         backup_root=tmp_path / "backups",
         config_root=tmp_path / "etc",
         runtime_root=tmp_path / "run",
+        systemd_root=tmp_path / "etc/systemd/system",
+        sbin_root=tmp_path / "usr/local/sbin",
+        tmpfiles_root=tmp_path / "usr/lib/tmpfiles.d",
     )
 
     plan = DeploymentPlan.create("staging", "a" * 40, layout=layout)
@@ -36,6 +42,14 @@ def test_staging_plan_uses_isolated_state_and_service(tmp_path: Path) -> None:
     assert plan.database_path == tmp_path / "srv/staging/data/shortsflow.db"
     assert plan.service_name == "shortsflow-staging.service"
     assert plan.port == 8082
+
+
+def test_system_plan_installs_runtime_files_in_host_paths() -> None:
+    plan = DeploymentPlan.create("production", "a" * 40, layout=DeploymentLayout.system())
+
+    assert plan.systemd_root == Path("/etc/systemd/system")
+    assert plan.sbin_root == Path("/usr/local/sbin")
+    assert plan.tmpfiles_root == Path("/usr/lib/tmpfiles.d")
 
 
 def test_deployment_plan_rejects_unresolved_revision(tmp_path: Path) -> None:
@@ -143,6 +157,8 @@ def test_failed_health_restores_previous_release_and_revision(tmp_path: Path, mo
     monkeypatch.setattr("scripts.remote_deploy._prepare_repository", lambda _plan: events.append("repository"))
     monkeypatch.setattr("scripts.remote_deploy._extract_release", lambda _plan: events.append("release"))
     monkeypatch.setattr("scripts.remote_deploy._install_release", lambda _plan: events.append("install"))
+    monkeypatch.setattr("scripts.remote_deploy._sync_runtime_files", lambda _plan: {})
+    monkeypatch.setattr("scripts.remote_deploy._restore_runtime_files", lambda _snapshot: events.append("runtime-files-restored"))
     monkeypatch.setattr("scripts.remote_deploy._drain", lambda _plan: events.append("drain"))
     monkeypatch.setattr("scripts.remote_deploy._backup", lambda _plan: events.append("backup") or tmp_path / "backup")
     monkeypatch.setattr("scripts.remote_deploy._run", lambda *args, **kwargs: events.append(args[0]))
@@ -158,6 +174,7 @@ def test_failed_health_restores_previous_release_and_revision(tmp_path: Path, mo
     assert plan.current_link.resolve() == previous
     assert ("revision", plan.revision) in events
     assert ("revision", previous_revision) in events
+    assert "runtime-files-restored" in events
     assert events.index("drain") < events.index("backup")
 
 
@@ -205,6 +222,8 @@ def test_failed_first_production_activation_restores_legacy_and_removes_current(
     monkeypatch.setattr("scripts.remote_deploy._prepare_repository", lambda _plan: None)
     monkeypatch.setattr("scripts.remote_deploy._extract_release", lambda _plan: None)
     monkeypatch.setattr("scripts.remote_deploy._install_release", lambda _plan: None)
+    monkeypatch.setattr("scripts.remote_deploy._sync_runtime_files", lambda _plan: {})
+    monkeypatch.setattr("scripts.remote_deploy._restore_runtime_files", lambda _snapshot: None)
     monkeypatch.setattr("scripts.remote_deploy._drain", lambda _plan: None)
     monkeypatch.setattr(
         "scripts.remote_deploy._handoff_legacy_production",
@@ -226,3 +245,32 @@ def test_failed_first_production_activation_restores_legacy_and_removes_current(
 
     assert not plan.current_link.exists()
     assert ["systemctl", "start", "shortsflow-hub.service", "shortsflow-automation.timer"] in commands
+
+
+def test_runtime_files_update_idempotently_and_restore_on_rollback(tmp_path: Path, monkeypatch) -> None:
+    plan = DeploymentPlan.create("staging", "a" * 40, layout=DeploymentLayout.under(tmp_path))
+    for source, _destination, _mode in _runtime_file_manifest(plan):
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(f"sha={plan.revision}; name={source.name}\n", encoding="utf-8")
+    service_destination = plan.systemd_root / "shortsflow-staging.service"
+    service_destination.parent.mkdir(parents=True, exist_ok=True)
+    service_destination.write_text("old unit\n", encoding="utf-8")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        "scripts.remote_deploy._run",
+        lambda args, **_kwargs: commands.append([str(item) for item in args]) or SimpleNamespace(returncode=0),
+    )
+
+    snapshot = _sync_runtime_files(plan)
+    first_contents = {destination: destination.read_bytes() for destination in snapshot}
+    second_snapshot = _sync_runtime_files(plan)
+
+    assert service_destination.read_text(encoding="utf-8").startswith(f"sha={plan.revision}")
+    assert {destination: destination.read_bytes() for destination in second_snapshot} == first_contents
+    assert commands.count(["systemctl", "daemon-reload"]) == 2
+
+    _restore_runtime_files(snapshot)
+
+    assert service_destination.read_text(encoding="utf-8") == "old unit\n"
+    assert not (plan.sbin_root / "shortsflow-backup").exists()
+    assert commands[-1] == ["systemctl", "daemon-reload"]

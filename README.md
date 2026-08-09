@@ -17,7 +17,7 @@ O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipelin
 - Arquitetura modularizada para manutencao local: `JobOrchestrator` coordena lifecycle, lease, retry, eventos e worker; pipelines, providers, contexto do hub e publicacao ficam em modulos donos.
 - Testes divididos por dominio para reduzir o custo de regressao e evitar depender de uma suite e2e monolitica para mudancas locais.
 - Roteiros agora usam explicitamente `hook`, `loop`, `body_beats`, `payoff` e `ending`; o `full_narration` deve concatenar esses blocos sem perder a tensao nem o fechamento.
-- A revisao visual automatica roda por padrao no gate de monetizacao quando aparece `visual_review_required`; ela so pode remover a pendencia com autoridade local explicitamente aprovada e proveniencia local valida. No piloto de tracao, o Qwen exato substitui a revisao humana visual somente durante a execucao autorizada e nunca autoriza publicacao.
+- A revisao visual automatica roda por padrao no gate de monetizacao quando aparece `visual_review_required`; Qwen pode produzir evidencia diagnostica, mas nunca remover a revisao humana, aprovar gates, agendar ou publicar.
 - A mesma revisao visual pode remover divida visual de jobs em backlog; se ainda restar revisao factual/editorial, o job fica pendente e o ciclo tenta outro candidato para o mesmo slot.
 
 ## Comeco rapido
@@ -180,10 +180,10 @@ python -m app.cli pilot-10k-start --seed 20260731
 O alvo editorial é 40 segundos e a faixa aceita é 30–50 segundos; o pipeline não
 deve regenerar um conteúdo aprovado apenas por variar dentro dessa janela.
 
-Para tambem gerar e renderizar os tres, com autoaprovacao visual estrita pelo Qwen local:
+Para tambem gerar e renderizar os tres para revisao humana:
 
 ```bash
-python -m app.cli pilot-10k-start --seed 20260731 --process --qwen-autoapprove
+python -m app.cli pilot-10k-start --seed 20260731 --process
 ```
 
 O dry-run legado nao e o experimento persistente. O piloto novo ainda nao implementa promocao/rollback ou
