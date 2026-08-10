@@ -1,6 +1,6 @@
 import React from 'react';
 import {Audio} from '@remotion/media';
-import {AbsoluteFill, Img, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, Easing, Img, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
 import type {FinishPlan, SceneOverlay, ScenePlan, SceneVisualEvent, VisualStyleProfile} from './FinishPlan.schema';
 import {fontFamily} from './fonts';
 import {PremiumCaptionTrack} from './PremiumCaption';
@@ -13,16 +13,21 @@ export const PremiumShort: React.FC<FinishPlan> = (plan) => {
 
   return (
     <AbsoluteFill style={{background: plan.style.palette.background, fontFamily}}>
-      {plan.scenes.map((scene) => (
-        <SceneLayer
-          key={scene.scene_id}
-          scene={scene}
-          fps={fps}
-          accent={plan.style.palette.accent}
-          safeArea={plan.style.safe_area}
-          styleProfile={plan.style.visual_style_profile}
-        />
-      ))}
+      {plan.scenes.map((scene, index) => {
+        const nextScene = plan.scenes[index + 1];
+        const exitOverlapFrames = msToFrame(nextScene?.transition.duration_ms ?? 0, fps);
+        return (
+          <SceneLayer
+            key={scene.scene_id}
+            scene={scene}
+            fps={fps}
+            accent={plan.style.palette.accent}
+            safeArea={plan.style.safe_area}
+            styleProfile={plan.style.visual_style_profile}
+            exitOverlapFrames={exitOverlapFrames}
+          />
+        );
+      })}
       <Vignette />
       <PremiumCaptionTrack items={plan.caption_track.items} plan={plan} />
       {audioSource ? <Audio src={audioSource} /> : null}
@@ -36,12 +41,13 @@ const SceneLayer: React.FC<{
   accent: string;
   safeArea: FinishPlan['style']['safe_area'];
   styleProfile?: VisualStyleProfile;
-}> = ({scene, fps, accent, safeArea, styleProfile}) => {
+  exitOverlapFrames: number;
+}> = ({scene, fps, accent, safeArea, styleProfile, exitOverlapFrames}) => {
   const frame = useCurrentFrame();
   const startFrame = msToFrame(scene.start_ms, fps);
   const durationFrames = Math.max(1, msToFrame(scene.duration_ms, fps));
   const localFrame = frame - startFrame;
-  const transitionFrames = Math.max(1, msToFrame(scene.transition.duration_ms || 160, fps));
+  const transitionFrames = scene.order === 1 ? 0 : Math.max(1, msToFrame(scene.transition.duration_ms || 180, fps));
   const motionProgress = interpolate(localFrame, [0, durationFrames], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
@@ -54,21 +60,24 @@ const SceneLayer: React.FC<{
   const scale = scene.motion.start_scale + (scene.motion.end_scale - scene.motion.start_scale) * easedMotion + pulse + eventCamera.scale;
   const x = scene.motion.x_delta * easedMotion + eventCamera.x;
   const y = scene.motion.y_delta * easedMotion + eventCamera.y;
-  const opacityIn = scene.order === 1 ? 1 : interpolate(localFrame, [0, transitionFrames], [0, 1], {
+  const transitionStartOpacity = scene.transition.kind === 'evidence_cut'
+    ? 0.58
+    : scene.transition.kind === 'payoff_reveal'
+      ? 0.16
+      : 0;
+  const opacity = scene.order === 1 ? 1 : interpolate(localFrame, [0, transitionFrames], [transitionStartOpacity, 1], {
+    easing: Easing.bezier(0.22, 1, 0.36, 1),
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
   });
-  // The outgoing Sequence extends through the incoming transition and stays
-  // opaque underneath it. Fading both layers exposes the composition's black
-  // background for one or two frames at scene boundaries.
-  const opacity = opacityIn;
-  const enter = spring({
-    frame: Math.max(0, localFrame),
-    fps,
-    config: {damping: 24, stiffness: 140, mass: 0.75}
+  const enter = transitionFrames === 0 ? 1 : interpolate(localFrame, [0, transitionFrames], [0, 1], {
+    easing: Easing.bezier(0.22, 1, 0.36, 1),
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
   });
   const transitionLift = transitionOffset(scene.transition.kind, enter);
   const clipPath = transitionClipPath(scene.transition.kind, enter);
+  const transitionExposure = 1 + Math.sin(Math.PI * enter) * (scene.transition.kind === 'payoff_reveal' ? 0.035 : 0.018);
   const roleContrast = scene.retention_role === 'visual_hook'
     ? 1.12
     : scene.retention_role === 'turn_or_payoff' || scene.retention_role === 'loop_close'
@@ -84,7 +93,7 @@ const SceneLayer: React.FC<{
   const assetSource = mediaSource(scene.asset_src || scene.asset_uri || scene.asset_path);
 
   return (
-    <Sequence from={startFrame} durationInFrames={durationFrames + transitionFrames}>
+    <Sequence from={startFrame} durationInFrames={durationFrames + exitOverlapFrames}>
       <AbsoluteFill style={{opacity, clipPath}}>
         <Img
           src={assetSource}
@@ -92,8 +101,10 @@ const SceneLayer: React.FC<{
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            transform: `translate3d(${x + transitionLift.x}px, ${y + transitionLift.y}px, 0) scale(${scale * transitionLift.scale})`,
-            filter: imageFilter
+            translate: `${x + transitionLift.x}px ${y + transitionLift.y}px`,
+            scale: scale * transitionLift.scale,
+            filter: `${imageFilter} brightness(${transitionExposure})`,
+            willChange: 'opacity, translate, scale, clip-path'
           }}
         />
         <SceneTone scene={scene} accent={accent} localFrame={localFrame} fps={fps} />
@@ -129,15 +140,25 @@ const SceneOverlays: React.FC<{
         if (activeFrame < 0 || activeFrame >= durationFrames) {
           return null;
         }
+        const enterFrames = Math.min(Math.max(2, Math.round(fps * 0.18)), Math.max(1, Math.floor(durationFrames / 3)));
+        const exitFrames = Math.min(Math.max(3, Math.round(fps * 0.24)), Math.max(1, Math.floor(durationFrames / 3)));
         const enter = spring({
           frame: activeFrame,
           fps,
-          config: {damping: 18, stiffness: 170, mass: 0.7}
+          config: {damping: 22, stiffness: 145, mass: 0.78}
         });
-        const opacity = interpolate(activeFrame, [0, Math.max(2, fps * 0.16)], [0, 1], {
-          extrapolateLeft: 'clamp',
-          extrapolateRight: 'clamp'
-        });
+        const opacity = durationFrames < 4
+          ? 1
+          : interpolate(
+              activeFrame,
+              [0, enterFrames, durationFrames - exitFrames, durationFrames - 1],
+              [0, 1, 1, 0],
+              {
+                easing: [Easing.bezier(0.22, 1, 0.36, 1), Easing.linear, Easing.bezier(0.4, 0, 1, 1)],
+                extrapolateLeft: 'clamp',
+                extrapolateRight: 'clamp'
+              }
+            );
         const key = `${overlay.variant || overlay.kind}-${overlay.side || index}`;
 
         if (overlay.variant === 'choice_label') {
@@ -428,7 +449,8 @@ const mediaSource = (value: string): string => {
 };
 
 const SceneTone: React.FC<{scene: ScenePlan; accent: string; localFrame: number; fps: number}> = ({scene, accent, localFrame, fps}) => {
-  const reveal = interpolate(localFrame, [0, Math.round(fps * 0.35)], [0.65, 0.2], {
+  const reveal = interpolate(localFrame, [0, Math.round(fps * 0.55)], [0.38, 0.16], {
+    easing: Easing.bezier(0.22, 1, 0.36, 1),
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
   });
@@ -448,11 +470,13 @@ const TransitionAccent: React.FC<{kind: string; accent: string; progress: number
   if (kind === 'cold_open') {
     return null;
   }
-  const alpha = interpolate(progress, [0, 0.45, 1], [0.34, 0.12, 0], {
+  const atmosphereOpacity = interpolate(progress, [0, 0.42, 1], [0, kind === 'payoff_reveal' ? 0.2 : 0.11, 0], {
+    easing: [Easing.bezier(0.22, 1, 0.36, 1), Easing.bezier(0.4, 0, 1, 1)],
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
   });
-  const borderWidth = interpolate(progress, [0, 1], [18, 0], {
+  const sheenPosition = interpolate(progress, [0, 1], [-32, 132], {
+    easing: Easing.bezier(0.22, 1, 0.36, 1),
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
   });
@@ -461,9 +485,10 @@ const TransitionAccent: React.FC<{kind: string; accent: string; progress: number
     <AbsoluteFill
       style={{
         background: payoff
-          ? `linear-gradient(90deg, color-mix(in oklch, ${accent} ${Math.round(alpha * 100)}%, transparent), transparent 52%)`
-          : `linear-gradient(180deg, rgba(255,255,255,${alpha}), transparent 40%)`,
-        boxShadow: payoff ? `inset 0 0 0 ${borderWidth}px color-mix(in oklch, ${accent} 48%, transparent)` : 'none',
+          ? `radial-gradient(ellipse at ${sheenPosition}% 46%, color-mix(in oklch, ${accent} 74%, transparent), transparent 42%)`
+          : `linear-gradient(108deg, transparent ${sheenPosition - 24}%, color-mix(in oklch, ${accent} 56%, transparent) ${sheenPosition}%, transparent ${sheenPosition + 20}%)`,
+        mixBlendMode: 'screen',
+        opacity: atmosphereOpacity,
         pointerEvents: 'none'
       }}
     />
@@ -473,7 +498,7 @@ const TransitionAccent: React.FC<{kind: string; accent: string; progress: number
 const Vignette: React.FC = () => (
   <AbsoluteFill
     style={{
-      background: 'radial-gradient(circle at 50% 42%, transparent 0%, transparent 55%, rgba(0,0,0,0.56) 100%)',
+      background: 'radial-gradient(circle at 50% 42%, transparent 0%, transparent 58%, rgba(0,0,0,0.46) 100%)',
       pointerEvents: 'none'
     }}
   />
@@ -494,15 +519,12 @@ const visualEventProgress = (event: SceneVisualEvent, localFrame: number, fps: n
 const visualEventPulse = (event: SceneVisualEvent, localFrame: number, fps: number) => {
   const startFrame = msToFrame(event.start_ms, fps);
   const durationFrames = Math.max(2, msToFrame(event.duration_ms, fps));
-  return interpolate(
-    localFrame,
-    [startFrame, startFrame + durationFrames * 0.42, startFrame + durationFrames],
-    [0, 1, 0],
-    {
-      extrapolateLeft: 'clamp',
-      extrapolateRight: 'clamp'
-    }
-  );
+  const progress = interpolate(localFrame, [startFrame, startFrame + durationFrames], [0, 1], {
+    easing: Easing.bezier(0.22, 1, 0.36, 1),
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  });
+  return Math.sin(Math.PI * progress);
 };
 
 const easeInOutCubic = (value: number) => {
@@ -511,23 +533,29 @@ const easeInOutCubic = (value: number) => {
 };
 
 const transitionOffset = (kind: string, progress: number) => {
-  const eased = 1 - Math.pow(1 - progress, 4);
   if (kind === 'payoff_reveal') {
-    return {x: interpolate(eased, [0, 1], [34, 0]), y: 0, scale: interpolate(eased, [0, 1], [1.035, 1])};
+    return {x: interpolate(progress, [0, 1], [28, 0]), y: 0, scale: interpolate(progress, [0, 1], [1.028, 1])};
   }
   if (kind === 'evidence_cut') {
-    return {x: 0, y: interpolate(eased, [0, 1], [18, 0]), scale: interpolate(eased, [0, 1], [1.025, 1])};
+    return {x: 0, y: interpolate(progress, [0, 1], [12, 0]), scale: interpolate(progress, [0, 1], [1.018, 1])};
   }
-  return {x: 0, y: 0, scale: interpolate(eased, [0, 1], [1.012, 1])};
+  return {x: 0, y: interpolate(progress, [0, 1], [6, 0]), scale: interpolate(progress, [0, 1], [1.012, 1])};
 };
 
 const transitionClipPath = (kind: string, progress: number) => {
-  if (kind !== 'payoff_reveal') {
-    return 'inset(0 0 0 0)';
+  if (kind === 'payoff_reveal') {
+    const right = interpolate(progress, [0, 1], [12, 0], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp'
+    });
+    return `inset(0 ${right}% 0 0 round ${Math.round((1 - progress) * 18)}px)`;
   }
-  const right = interpolate(progress, [0, 1], [20, 0], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp'
-  });
-  return `inset(0 ${right}% 0 0)`;
+  if (kind === 'evidence_cut') {
+    const bottom = interpolate(progress, [0, 1], [5, 0], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp'
+    });
+    return `inset(0 0 ${bottom}% 0)`;
+  }
+  return 'inset(0 0 0 0)';
 };

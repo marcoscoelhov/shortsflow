@@ -1133,8 +1133,33 @@ def test_premium_scene_crossfade_never_fades_both_scenes_to_black() -> None:
     scene_layer = source[source.index("const SceneLayer"):source.index("const SceneOverlays")]
 
     assert "const opacityOut" not in scene_layer
-    assert "const opacity = opacityIn" in scene_layer
-    assert "durationInFrames={durationFrames + transitionFrames}" in scene_layer
+    assert "nextScene?.transition.duration_ms" in source
+    assert "exitOverlapFrames={exitOverlapFrames}" in source
+    assert "durationInFrames={durationFrames + exitOverlapFrames}" in scene_layer
+    assert "background: 'black'" not in source
+
+
+def test_premium_scene_transitions_use_filmic_easing_without_white_flash() -> None:
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
+    scene_layer = source[source.index("const SceneLayer"):source.index("const SceneOverlays")]
+    transition_accent = source[source.index("const TransitionAccent"):source.index("const Vignette")]
+
+    assert "Easing.bezier(0.22, 1, 0.36, 1)" in scene_layer
+    assert "translate:" in scene_layer
+    assert "scale:" in scene_layer
+    assert "transform: `translate3d" not in scene_layer
+    assert "rgba(255,255,255" not in transition_accent
+    assert "mixBlendMode: 'screen'" in transition_accent
+
+
+def test_premium_overlays_fade_out_instead_of_disappearing_on_last_frame() -> None:
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
+    overlays = source[source.index("const SceneOverlays"):source.index("const eventCameraOffset")]
+
+    assert "durationFrames - exitFrames" in overlays
+    assert "[0, enterFrames, durationFrames - exitFrames, durationFrames - 1]" in overlays
+    assert "[0, 1, 1, 0]" in overlays
+    assert "Easing.bezier(0.22, 1, 0.36, 1)" in overlays
 
 
 def test_premium_caption_component_keeps_lateral_breathing_room() -> None:
