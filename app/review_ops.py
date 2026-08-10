@@ -6,10 +6,9 @@ from sqlalchemy import select
 
 from app.db import session_scope
 from app.job_origin import CREATION_VIA_RECREATION, JOB_ORIGIN_UNKNOWN, infer_job_origin_from_notes, normalize_job_origin
-from app.models import Job, RenderOutput, ReviewRecord, TopicRequest
+from app.models import Job, ReviewRecord, TopicRequest
 from app.pipelines.common import FatalStepError
-from app.render_selection import promote_render_output_to_file
-from app.utils import iso_now, new_id, path_from_uri, stable_hash, utcnow
+from app.utils import iso_now, new_id, stable_hash, utcnow
 
 
 class ReviewOperations:
@@ -38,6 +37,40 @@ class ReviewOperations:
             if not job:
                 raise KeyError(job_id)
             self.validate_review_action(job, payload["action"])
+            approval_report: dict[str, Any] | None = None
+            if payload["action"] == "approve":
+                approval_report = self.monetization_pipeline.build_monetization_report(
+                    session,
+                    job,
+                    set(payload.get("reason_codes") or []),
+                )
+                self.storage.persist_json(
+                    job.job_id,
+                    "monetization_report.json",
+                    self.owner._serialize_for_json(approval_report),
+                )
+                if not approval_report["passed"]:
+                    quality_summary = dict(job.quality_summary or {})
+                    quality_summary["monetization"] = {
+                        "passed": approval_report["passed"],
+                        "final_status": approval_report["final_status"],
+                        "hard_blockers": approval_report["hard_blockers"],
+                        "manual_required": approval_report["manual_required"],
+                        "warnings": approval_report["warnings"],
+                        "content_hash": stable_hash(approval_report),
+                    }
+                    job.quality_summary = quality_summary
+                    job.status = approval_report["final_status"]
+                    self.owner._refresh_retention_state(session, job)
+                    session.commit()
+                    blockers = approval_report["hard_blockers"] + approval_report["manual_required"]
+                    raise FatalStepError(f"monetization readiness incomplete: {', '.join(blockers)}")
+                self.owner._ensure_premium_publish_preflight(
+                    session,
+                    job,
+                    context="approval",
+                    extra_confirmations=set(payload.get("reason_codes") or []),
+                )
             review = ReviewRecord(
                 review_id=new_id(),
                 job_id=job_id,
@@ -53,24 +86,8 @@ class ReviewOperations:
             review_id = review.review_id
             session.add(review)
             if payload["action"] == "approve":
-                report = self.monetization_pipeline.build_monetization_report(session, job, set(payload.get("reason_codes") or []))
-                if not report["passed"]:
-                    self.storage.persist_json(job.job_id, "monetization_report.json", self.owner._serialize_for_json(report))
-                    quality_summary = dict(job.quality_summary or {})
-                    quality_summary["monetization"] = {
-                        "passed": report["passed"],
-                        "final_status": report["final_status"],
-                        "hard_blockers": report["hard_blockers"],
-                        "manual_required": report["manual_required"],
-                        "warnings": report["warnings"],
-                        "content_hash": stable_hash(report),
-                    }
-                    job.quality_summary = quality_summary
-                    job.status = report["final_status"]
-                    self.owner._refresh_retention_state(session, job)
-                    session.commit()
-                    raise FatalStepError(f"monetization readiness incomplete: {', '.join(report['hard_blockers'] + report['manual_required'])}")
-                self.storage.persist_json(job.job_id, "monetization_report.json", self.owner._serialize_for_json(report))
+                assert approval_report is not None
+                report = approval_report
                 quality_summary = dict(job.quality_summary or {})
                 quality_summary["monetization"] = {
                     "passed": report["passed"],
@@ -170,82 +187,3 @@ class ReviewOperations:
             raise FatalStepError(f"job status {job.status} cannot be rejected")
         if action == "retry" and job.status not in retryable_statuses:
             raise FatalStepError(f"job status {job.status} cannot be retried")
-
-    def approve_premium_for_publish(
-        self,
-        job_id: str,
-        reviewer_identity: str = "tailscale:local-reviewer",
-    ) -> None:
-        with session_scope() as session:
-            job = session.get(Job, job_id)
-            if not job:
-                raise KeyError(job_id)
-            self.validate_review_action(job, "approve")
-            render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job_id))
-            if not render:
-                raise FatalStepError("job nao tem render final para substituir pela versao premium")
-            premium_report = self.owner._read_job_json(job_id, "premium_finishing_report.json")
-            premium_video_uri = str(premium_report.get("video_uri") or "").strip()
-            premium_path = path_from_uri(premium_video_uri) if premium_video_uri else self.storage.job_dir(job_id, create=False) / "render" / "premium.mp4"
-            if not premium_path.exists():
-                raise FatalStepError("versao premium ainda nao foi gerada")
-            if not premium_report or not bool(premium_report.get("passed")):
-                raise FatalStepError("versao premium nao passou no gate de acabamento")
-            confirmations = {"premium_version_selected", "visual_review_confirmed"}
-            payload = {
-                "reviewer_identity": reviewer_identity,
-                "action": "approve_premium",
-                "reason_codes": sorted(confirmations),
-                "notes": "Versao premium selecionada como arquivo final para publicacao.",
-            }
-            job_dir = self.storage.job_dir(job_id, create=False)
-            artifact_index, original_video_uri = promote_render_output_to_file(
-                render,
-                selected_video_path=premium_path,
-                job_dir=job_dir,
-                artifact_index=dict(job.artifact_index or {}),
-                selected_render_ref="render/premium.mp4",
-                fallback_standard_ref="render/final.mp4",
-            )
-            job.artifact_index = artifact_index
-            report = self.monetization_pipeline.build_monetization_report(session, job, confirmations)
-            if not report["passed"]:
-                self.storage.persist_json(job.job_id, "monetization_report.json", self.owner._serialize_for_json(report))
-                job.status = report["final_status"]
-                self.owner._refresh_retention_state(session, job)
-                raise FatalStepError(f"monetization readiness incomplete: {', '.join(report['hard_blockers'] + report['manual_required'])}")
-            self.storage.persist_json(job.job_id, "monetization_report.json", self.owner._serialize_for_json(report))
-            quality_summary = dict(job.quality_summary or {})
-            quality_summary["monetization"] = {
-                "passed": report["passed"],
-                "final_status": report["final_status"],
-                "hard_blockers": report["hard_blockers"],
-                "manual_required": report["manual_required"],
-                "warnings": report["warnings"],
-                "content_hash": stable_hash(report),
-            }
-            quality_summary["selected_render"] = {"variant": "premium", "previous_video_uri": original_video_uri, "video_uri": render.video_uri}
-            job.quality_summary = quality_summary
-            package = self.monetization_pipeline.build_publish_package(session, job)
-            package["selected_render"] = "premium"
-            package["standard_video_uri"] = original_video_uri
-            self.storage.persist_json(job.job_id, "publish_package.json", self.owner._serialize_for_json(package))
-            job.status = "approved_for_publish"
-            job.review_state = "approved"
-            review = ReviewRecord(
-                review_id=new_id(),
-                job_id=job_id,
-                schema_version=self.settings.schema_version,
-                content_hash=stable_hash(payload),
-                created_at=utcnow(),
-                reviewer_identity=reviewer_identity,
-                action="approve_premium",
-                reason_codes=payload["reason_codes"],
-                notes=payload["notes"],
-                retry_step=None,
-            )
-            session.add(review)
-            self.topic_pipeline.upsert_topic_registry(session, job_id, approved=True)
-            self.owner._refresh_retention_state(session, job)
-            self.persist_human_review_artifact(job_id, payload, action="approve_premium", review_id=review.review_id)
-            self.owner._append_event(job_id, "review.premium_approved", "succeeded", {"video_uri": render.video_uri, "previous_video_uri": original_video_uri})

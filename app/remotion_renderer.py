@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 from app.pipelines.common import FatalStepError
 from app.utils import ensure_dir, path_from_uri, read_json
@@ -60,13 +61,16 @@ class RemotionCliRenderer:
         resolved_plan_path = plan_path.resolve()
         resolved_output_path = output_path.resolve()
         resolved_log_path = log_path.resolve()
+        pending_output_path = resolved_output_path.with_name(
+            f".{resolved_output_path.stem}.{uuid4().hex}.pending{resolved_output_path.suffix}"
+        )
         self.assert_environment_ready()
         command = [
             str(remotion_bin),
             "render",
             str(entrypoint),
             PREMIUM_COMPOSITION_ID,
-            str(resolved_output_path),
+            str(pending_output_path),
             "--props",
             str(resolved_plan_path),
             "--codec",
@@ -82,7 +86,6 @@ class RemotionCliRenderer:
             "--overwrite",
             "--concurrency",
             "2",
-            "--disable-web-security",
             "--log",
             "info",
         ]
@@ -93,32 +96,41 @@ class RemotionCliRenderer:
             entrypoint.resolve(),
             resolved_plan_path,
             resolved_output_path,
+            pending_output_path,
             resolved_log_path,
             *local_media_paths,
         ]
         ensure_dir(resolved_output_path.parent)
         try:
-            result = subprocess.run(
-                command,
-                cwd=self.project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=self.timeout_sec,
-            )
-        except subprocess.TimeoutExpired as exc:
+            try:
+                result = subprocess.run(
+                    command,
+                    cwd=self.project_dir,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=self.timeout_sec,
+                )
+            except subprocess.TimeoutExpired as exc:
+                resolved_log_path.write_text(
+                    self._redacted_process_output(exc.stdout, exc.stderr, redaction_paths),
+                    encoding="utf-8",
+                )
+                raise FatalStepError("render premium excedeu o tempo limite") from exc
             resolved_log_path.write_text(
-                self._redacted_process_output(exc.stdout, exc.stderr, redaction_paths),
+                self._redacted_process_output(result.stdout, result.stderr, redaction_paths),
                 encoding="utf-8",
             )
-            raise FatalStepError("render premium excedeu o tempo limite") from exc
-        resolved_log_path.write_text(
-            self._redacted_process_output(result.stdout, result.stderr, redaction_paths),
-            encoding="utf-8",
-        )
-        if result.returncode != 0:
-            raise FatalStepError("render premium falhou no Remotion CLI")
-        return command
+            if result.returncode != 0:
+                raise FatalStepError("render premium falhou no Remotion CLI")
+            if not pending_output_path.exists() or pending_output_path.stat().st_size <= 0:
+                raise FatalStepError("render premium nao produziu arquivo de video")
+            pending_output_path.replace(resolved_output_path)
+        finally:
+            pending_output_path.unlink(missing_ok=True)
+        public_command = list(command)
+        public_command[4] = str(resolved_output_path)
+        return public_command
 
     def _preflight_local_media(self, plan_path: Path) -> list[Path]:
         try:

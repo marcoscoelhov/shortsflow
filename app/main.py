@@ -9,7 +9,7 @@ import secrets
 import uuid
 from urllib.parse import quote, urlencode
 
-from fastapi import BackgroundTasks, FastAPI, Form, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Form, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -57,16 +57,7 @@ automation_service = AutomationService(orchestrator)
 
 
 
-def _generate_premium_finish_background(job_id: str) -> None:
-    try:
-        orchestrator.generate_premium_finishing(job_id)
-    except Exception as exc:  # noqa: BLE001
-        orchestrator.record_premium_finishing_failure(job_id, str(exc))
-
-
 def _log_render_startup_preflight() -> None:
-    if str(settings.render_primary_backend).lower() != "remotion":
-        return
     status = orchestrator.premium_finishing.renderer.preflight_environment()
     if status["ready"]:
         logger.info("remotion preflight passed project_dir=%s", status["project_dir"])
@@ -82,7 +73,6 @@ def _request_path_with_query(request: Request) -> str:
 def _shared_template_context(request: Request) -> dict[str, object]:
     return {
         "settings": settings,
-        "operational_settings": build_operational_settings_context(settings),
         "automation": automation_service.dashboard_context(),
         "viral_prompt_template": load_viral_prompt_template(hub_settings_path(settings.data_dir)),
         "return_to": _request_path_with_query(request),
@@ -455,6 +445,7 @@ def operational_settings_page(request: Request):
         "settings.html",
         {
             "settings": settings,
+            "operational_settings": build_operational_settings_context(settings),
         },
     )
 
@@ -564,7 +555,6 @@ def job_json(job_id: str):
                 "duration_ms": details["render"].duration_ms if details["render"] else None,
             },
             "progress": details["progress"],
-            "premium_finishing": details.get("premium_finishing") or {},
         }
 
 
@@ -588,7 +578,6 @@ def job_detail(request: Request, job_id: str):
             "review_error": request.query_params.get("review_error"),
             "publish_error": request.query_params.get("publish_error"),
             "reprocess_error": request.query_params.get("reprocess_error"),
-            "premium_error": request.query_params.get("premium_error"),
         },
     )
 
@@ -605,21 +594,6 @@ def delete_job(job_id: str):
         redirect_to = f"/jobs/{job_id}?{urlencode({'review_error': str(exc)})}"
         return RedirectResponse(url=redirect_to, status_code=303)
     return RedirectResponse(url=f"/?{urlencode({'deleted_job': resolved_job_id[:8]})}", status_code=303)
-
-
-@app.post("/jobs/{job_id}/premium-finish")
-def generate_premium_finish(job_id: str, background_tasks: BackgroundTasks):
-    try:
-        with SessionLocal() as session:
-            resolved_job_id = hub_context.resolve_job_id(session, job_id)
-        orchestrator.request_premium_finishing(resolved_job_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
-    except FatalStepError as exc:
-        redirect_to = f"/jobs/{job_id}?{urlencode({'premium_error': str(exc)})}"
-        return RedirectResponse(url=redirect_to, status_code=303)
-    background_tasks.add_task(_generate_premium_finish_background, resolved_job_id)
-    return RedirectResponse(url=f"/jobs/{resolved_job_id}?premium_started=1", status_code=303)
 
 
 @app.post("/jobs/{job_id}/reprocess")
@@ -681,15 +655,3 @@ def review_job(
         return RedirectResponse(url=redirect_to, status_code=303)
     redirect_to = f"/jobs/{new_job_id}" if new_job_id else f"/jobs/{job_id}"
     return RedirectResponse(url=redirect_to, status_code=303)
-
-
-@app.post("/jobs/{job_id}/premium-approve")
-def approve_premium_for_publish(job_id: str, reviewer_identity: str = Form(default="tailscale:local-reviewer")):
-    try:
-        orchestrator.approve_premium_for_publish(job_id, reviewer_identity=reviewer_identity)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
-    except FatalStepError as exc:
-        redirect_to = f"/jobs/{job_id}?{urlencode({'review_error': str(exc)})}"
-        return RedirectResponse(url=redirect_to, status_code=303)
-    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)

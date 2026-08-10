@@ -57,8 +57,8 @@ painel somente depois do gate de negocio definido pelo operador.
 | Politica editorial de nicho | Perfil declarativo | Nao e plugin executavel; e configuracao versionada validada. |
 | `legacy/` | Podado | Quarentena excluida; recuperacao permanece no historico Git. |
 | Constantes visuais duplicadas no orquestrador | Podar | Copias mortas; owner ativo e `image_assets.py`. |
-| Referencias residuais a Ponytail | Podar | Plugin/script nao existe no tree; remover comentarios de proveniencia e corrigir docs Wayfinder que ainda o tratam como ativo. |
-| `app/static/replicar-shortsflow-prompt.md` | Investigar/podar | Sem referencia ativa encontrada; confirmar uso manual antes de excluir. |
+| Referencias residuais a Ponytail | Podado | Comentarios e documentos que apontavam para checker inexistente foram removidos. |
+| Prompt estatico de replicacao | Podado | Documento sem consumidor ativo removido; recuperacao permanece no historico Git. |
 | Demo TikTok duplicada | Manter | Dois destinos de hosting distintos. |
 
 ## Achados priorizados
@@ -83,7 +83,7 @@ painel somente depois do gate de negocio definido pelo operador.
 | 16 | Registries ainda exigem editar core para novo provider | Arquitetura | Medio | M/L | MED | `providers/registry.py:10-27`, `llm_routing.py:454-485` |
 | 17 | Hotspots excedem o contexto recomendado | Manutencao | Alto | L | MED | `automation.py`, `monetization_pipeline.py`, `orchestrator.py` |
 | 18 | Constantes mortas poluem contexto | Poda parcial | Baixo/medio | S | LOW | `orchestrator.py:126-199`; quarentena `legacy/` ja excluida |
-| 19 | Docs/comentarios ainda apresentam Ponytail como componente ativo | Poda | Baixo | S | LOW | `monetization_pipeline.py:242`, `premium_publish_gate.py:84`, `docs/wayfinder/` |
+| 19 | Docs/comentarios ainda apresentam Ponytail como componente ativo | Podado | Baixo | S | LOW | Referencias removidas |
 
 ### Achados de direcao
 

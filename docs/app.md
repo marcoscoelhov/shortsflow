@@ -163,7 +163,7 @@ Etapas atuais de `JobOrchestrator._steps()`:
 | `tts` | 2 | Gera narracao e metadados basicos de audio. |
 | `subtitle_alignment` | 1 | Normaliza legenda e arquivos de render. |
 | `background_music` | 1 | Seleciona ou gera trilha, faz mix e valida audio final. |
-| `render` | 1 | Gera `render/final.mp4` vertical via Remotion por padrao, com `render/remotion.log`, `render/edit_plan.json` e `premium_finishing_report.json`. |
+| `render` | 1 | Gera `render/final.mp4` vertical via Remotion, com `render/remotion.log`, `render/edit_plan.json` e `premium_finishing_report.json`. |
 | `monetization_readiness_gate` | 0 | Consolida direitos, disclosure, factualidade, repeticao e publish readiness. |
 | `publish_to_review_hub` | 0 | Persiste o pacote de publicacao e leva o job ao hub. |
 
@@ -307,18 +307,12 @@ Defaults importantes:
 Camadas de configuracao:
 
 - `.env`: boot, infraestrutura e segredos. Inclui `SHORTSFLOW_APP_URL`, `SHORTSFLOW_HUB_AUTH_TOKEN`, `SHORTSFLOW_DATABASE_URL`, chaves de provedores, OAuth do YouTube, token manual do TikTok e exposicao Tailnet.
-- Hub de Revisao: ajustes operacionais nao secretos. Inclui LLM ativo, fallback de LLM, planejador de cenas, prompt viral global, fonte de musica, autopopulacao do banco local, TTS primario, modo de publicacao, API do YouTube, publicacao cruzada no TikTok, horario do ciclo diario, horario padrao de publicacao, janela da agenda, score minimo e coleta de performance. O gerador de imagens aparece como informacao operacional; hoje, em execucao real, ele e MiniMax.
+- Hub de Revisao: apenas ajustes cotidianos nao secretos de musica ligada/desligada, publicacao, automacao e coleta de performance.
 - defaults do codigo: valores seguros usados quando nem `.env` nem Hub definem uma sobreposicao.
 
 Quando `SHORTSFLOW_HUB_AUTH_TOKEN` esta configurado, requisicoes `GET` e `HEAD` aceitam o cookie `shortsflow_hub_token` para navegacao. Requisicoes `POST` exigem `x-shortsflow-hub-token` ou `Authorization: Bearer <token>`; cookie nao autentica mutacoes por desenho.
 
-As sobreposicoes do Hub ficam na tabela `operational_settings`. Elas sao aplicadas no startup do FastAPI e nos comandos `shortsflow automation-run` e `shortsflow analytics-sync-run`. Segredos nunca devem ser adicionados a essa tabela; novos campos editaveis precisam entrar pela allowlist em `app/operational_settings.py`.
-
-Terminologia do painel:
-
-- **Planejador de cenas (LLM)**: escolhe o LLM que cria `scene_plan.json`, com cenas, intencao visual e prompts. Ele nao gera imagens.
-- **Gerador de imagens**: provider que gera ou seleciona os assets visuais no passo `asset_generation`. Hoje, em execucao real, e MiniMax; por isso aparece como leitura operacional, nao como seletor editavel.
-- **TTS primario**: escolhe o provider principal da narracao. Edge TTS pode ser o padrao operacional barato e nao bloqueia elegibilidade automatizada por nome; Gemini TTS e ElevenLabs continuam disponiveis quando configurados.
+As sobreposicoes cotidianas ficam na tabela `operational_settings` e sao aplicadas no startup do FastAPI e nos comandos operacionais. Providers, modelos, endpoints, direitos, segredos e boot permanecem exclusivamente na configuracao protegida do ambiente.
 
 Musica de fundo:
 
@@ -350,8 +344,8 @@ Credenciais MiniMax por midia:
 - imagem usa `SHORTSFLOW_MINIMAX_IMAGE_API_KEY` so depois de limite ou quota na chave de texto, e marca essa chave como esgotada para o job atual
 - se nao houver chave de texto, imagem usa diretamente `SHORTSFLOW_MINIMAX_IMAGE_API_KEY`
 - musica usa `SHORTSFLOW_MINIMAX_MUSIC_API_KEY` ou a chave resolvida de texto apenas quando MiniMax Music esta configurado como provider ou fallback
-- narracao usa Gemini TTS quando `SHORTSFLOW_TTS_PRIMARY_PROVIDER=gemini_tts` ou a sobreposicao do Hub escolhe `gemini_tts`, e `SHORTSFLOW_GEMINI_TTS_API_KEY` ou `SHORTSFLOW_GEMINI_API_KEY` esta configurada; por padrao, escolhe uma voz Gemini pelo perfil de narrador do roteiro e registra a decisao em `narration_asset.json`; se Gemini falhar, tenta ElevenLabs
-- narracao usa ElevenLabs quando `SHORTSFLOW_TTS_PRIMARY_PROVIDER=elevenlabs` ou a sobreposicao do Hub escolhe `elevenlabs`, e `SHORTSFLOW_ELEVENLABS_API_KEY` esta configurada; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados
+- narracao usa Gemini TTS quando `SHORTSFLOW_TTS_PRIMARY_PROVIDER=gemini_tts` e `SHORTSFLOW_GEMINI_TTS_API_KEY` ou `SHORTSFLOW_GEMINI_API_KEY` esta configurada; por padrao, escolhe uma voz Gemini pelo perfil de narrador do roteiro e registra a decisao em `narration_asset.json`; se Gemini falhar, tenta ElevenLabs
+- narracao usa ElevenLabs quando `SHORTSFLOW_TTS_PRIMARY_PROVIDER=elevenlabs` e `SHORTSFLOW_ELEVENLABS_API_KEY` esta configurada; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados
 - `edge_tts` pode ser selecionado como primario operacional; nao e tratado como provider tecnico nem bloqueia elegibilidade automatizada por nome
 
 Limite de provedor para troca de chave de imagem significa quota, saldo, credito ou rate limit. Timeout, erro de conexao, resposta invalida e `5xx` continuam sendo falhas transientes da chamada atual.
@@ -402,7 +396,7 @@ render/edit_plan.json
 premium_finishing_report.json
 ```
 
-Como Remotion e o backend padrao por ADR-0012, o ambiente operacional precisa ter `npm install` executado dentro de `remotion/`. Quando `SHORTSFLOW_PRIMARY_BACKEND=ffmpeg` for usado para manutencao legado, os artefatos voltam a incluir `render/ffmpeg.log` e `render_motion_plan.json`.
+Remotion e o unico renderer de video por ADR-0013, portanto o ambiente operacional precisa ter `npm install` executado dentro de `remotion/`. FFmpeg continua disponivel somente para audio, probe e validacao tecnica do MP4.
 
 O boot do Hub roda um preflight do Remotion antes de iniciar o worker e registra aviso claro se `remotion/node_modules/.bin/remotion`, `remotion/src/index.ts` ou `remotion/package-lock.json` estiverem ausentes. `/healthz` tambem expõe `render.primary_backend`, `render.remotion_ready` e `render.remotion_missing_items`.
 
@@ -480,12 +474,11 @@ Falhas e reparos parciais relevantes entram em `AutomationRun.metadata.automatio
 
 Um job so entra em publicacao automatizada se terminar em `ready_for_upload`, passar no score composto minimo de `0.82`, nao tiver repeticao alta e cumprir os thresholds de factualidade, retencao, metadados e assets. Ao passar, o sistema aprova o job e usa agendamento nativo do YouTube com `publishAt` no horario do slot em `America/Sao_Paulo`; isso registra agenda `scheduled`, nao `published`.
 
-Politica decidida: o gate premium deve rodar novamente antes de aprovar, agendar ou publicar em qualquer
-plataforma. Estado atual: os caminhos YouTube ainda contornam essa chamada e constituem gap bloqueante para
-declarar autopublicacao segura. O score premium baixo, isoladamente, e diagnostico; auditoria ausente,
-malformada ou incompleta e hard blocker tecnico devem falhar fechado. Veja o ADR 0002.
+O gate premium roda novamente antes de aprovar, agendar ou publicar em qualquer plataforma. O score premium
+baixo, isoladamente, e diagnostico; auditoria ausente, malformada ou incompleta e hard blocker tecnico falham
+fechado. Veja o ADR 0002.
 
-O lease do worker tem piso de uma hora e heartbeat menos agressivo. Passos reais de imagem, TTS e Remotion/ffmpeg podem segurar SQLite por minutos; esse piso evita que outro worker recupere o mesmo job por heartbeat pulado enquanto a etapa ainda esta legitimamente em execucao.
+O lease do worker tem piso de uma hora e heartbeat menos agressivo. Passos reais de imagem, TTS e Remotion podem segurar SQLite por minutos; esse piso evita que outro worker recupere o mesmo job por heartbeat pulado enquanto a etapa ainda esta legitimamente em execucao.
 
 ## Coleta de performance
 

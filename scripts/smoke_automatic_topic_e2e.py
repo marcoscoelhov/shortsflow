@@ -93,7 +93,6 @@ def _configure_environment(data_dir: Path) -> None:
     os.environ["SHORTSFLOW_DATA_DIR"] = str(data_dir)
     os.environ["SHORTSFLOW_DATABASE_URL"] = f"sqlite:///{data_dir / 'smoke.db'}"
     os.environ["SHORTSFLOW_USE_MOCK_PROVIDERS"] = "true"
-    os.environ["SHORTSFLOW_RENDER_PRIMARY_BACKEND"] = "ffmpeg"
     os.environ["SHORTSFLOW_BACKGROUND_MUSIC_ENABLED"] = "false"
     os.environ["SHORTSFLOW_FACT_PACK_ENABLED"] = "false"
     os.environ["SHORTSFLOW_NICHE_ID"] = "curiosidades"

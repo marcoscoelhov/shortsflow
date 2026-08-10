@@ -25,99 +25,8 @@ class OperationalSettingSpec:
     description: str | None = None
 
 
-@dataclass(frozen=True)
-class OperationalInfoSpec:
-    key: str
-    label: str
-    group: str
-    value: str
-    description: str | None = None
-
-
-PROVIDER_OPTIONS = (
-    ("disabled", "Desativado"),
-    ("openai", "OpenAI"),
-    ("deepseek", "DeepSeek"),
-    ("qwen", "Qwen"),
-    ("minimax", "MiniMax"),
-    ("xai", "XAI (Grok)"),
-)
-
-TTS_PROVIDER_OPTIONS = (
-    ("gemini_tts", "Gemini TTS"),
-    ("elevenlabs", "ElevenLabs"),
-    ("edge_tts", "Edge TTS"),
-)
-
 OPERATIONAL_SETTING_SPECS = (
-    OperationalSettingSpec("llm_primary_provider", "LLM principal", "LLM", "select", PROVIDER_OPTIONS),
-    OperationalSettingSpec("llm_fallback_provider", "LLM fallback", "LLM", "select", PROVIDER_OPTIONS),
-    OperationalSettingSpec("llm_script_draft_provider", "Rascunho de roteiro", "LLM", "select", PROVIDER_OPTIONS),
-    OperationalSettingSpec("llm_repair_provider", "Reparo", "LLM", "select", PROVIDER_OPTIONS),
-    OperationalSettingSpec(
-        "llm_scene_provider",
-        "Planejador de cenas (LLM)",
-        "LLM",
-        "select",
-        PROVIDER_OPTIONS,
-        description="Cria o plano textual de cenas e prompts; nao gera imagens.",
-    ),
-    OperationalSettingSpec(
-        "llm_gate_judge_provider",
-        "Juiz LLM dos gates",
-        "LLM",
-        "select",
-        PROVIDER_OPTIONS,
-        description="Provider para juiz editorial (viral, metadata, visual, growth). Operacao atual: xAI com Grok 4.5.",
-    ),
-    OperationalSettingSpec(
-        "llm_gate_judge_model",
-        "Modelo do juiz LLM",
-        "LLM",
-        "text",
-        description="Override opcional do modelo do juiz editorial.",
-    ),
-    OperationalSettingSpec(
-        "llm_premium_review_enabled",
-        "Usar LLM Pro em exceções",
-        "LLM",
-        "checkbox",
-        description="Permite Grok 4.5 em revisão premium/final, temas complexos ou escalonamento explícito.",
-    ),
-    OperationalSettingSpec("llm_premium_review_provider", "LLM Pro excepcional", "LLM", "select", PROVIDER_OPTIONS),
-    OperationalSettingSpec("llm_premium_review_model", "Modelo Pro excepcional", "LLM", "text"),
-    OperationalSettingSpec("llm_enable_fallback", "Fallback ativo", "LLM", "checkbox"),
-    OperationalSettingSpec("viral_intensity_hard_block", "Bloquear roteiro por score viral", "LLM", "checkbox", description="Desative para encaminhar roteiros factualmente seguros para revisão, com o score viral como alerta."),
-    OperationalSettingSpec("viral_intensity_min_score", "Score viral mínimo", "LLM", "number", min_value=0, max_value=1, step="0.01"),
-    OperationalSettingSpec("viral_intensity_min_hook_scroll_stop", "Hook mínimo", "LLM", "number", min_value=0, max_value=1, step="0.01"),
-    OperationalSettingSpec("viral_intensity_min_share_trigger", "Gatilho de compartilhamento mínimo", "LLM", "number", min_value=0, max_value=1, step="0.01"),
-    OperationalSettingSpec(
-        "background_music_provider",
-        "Fonte de trilha",
-        "Musica",
-        "select",
-        (("local_bank", "Banco local"), ("minimax", "MiniMax"), ("auto", "Auto")),
-    ),
     OperationalSettingSpec("background_music_enabled", "Trilha ativa", "Musica", "checkbox"),
-    OperationalSettingSpec("music_bank_auto_populate", "Popular banco local", "Musica", "checkbox"),
-    OperationalSettingSpec("allow_music_api_fallback", "Fallback para API", "Musica", "checkbox"),
-    OperationalSettingSpec(
-        "tts_primary_provider",
-        "TTS primario",
-        "Narracao",
-        "select",
-        TTS_PROVIDER_OPTIONS,
-        description="Edge TTS e o padrao operacional barato; nao bloqueia elegibilidade automatizada.",
-    ),
-    OperationalSettingSpec("edge_tts_voice", "Voz Edge TTS", "Narracao", "text"),
-    OperationalSettingSpec("edge_tts_commercial_rights_confirmed", "Direitos Edge TTS confirmados", "Narracao", "checkbox"),
-    OperationalSettingSpec(
-        "fact_pack_enabled",
-        "Fact pack / checador de fatos",
-        "Automacao",
-        "checkbox",
-        description="Desligado: nao busca fontes nem bloqueia automatic_topic por fact_pack_missing.",
-    ),
     OperationalSettingSpec("youtube_publish_mode", "Modo YouTube", "Publicacao", "select", (("manual", "Manual"), ("api", "API"))),
     OperationalSettingSpec("youtube_api_enabled", "API YouTube ativa", "Publicacao", "checkbox"),
     OperationalSettingSpec("youtube_notify_subscribers", "Notificar inscritos", "Publicacao", "checkbox"),
@@ -179,19 +88,8 @@ OPERATIONAL_SETTING_SPECS = (
     ),
 )
 
-OPERATIONAL_INFO_SPECS = (
-    OperationalInfoSpec(
-        "image_generation_provider",
-        "Gerador de imagens",
-        "Imagem",
-        "MiniMax",
-        "Gera os assets visuais no passo Imagens. Hoje nao ha outro provider real selecionavel.",
-    ),
-)
-
 OPERATIONAL_SETTING_KEYS = {spec.key for spec in OPERATIONAL_SETTING_SPECS}
 _SPECS_BY_KEY = {spec.key: spec for spec in OPERATIONAL_SETTING_SPECS}
-_CHECKBOX_KEYS = {spec.key for spec in OPERATIONAL_SETTING_SPECS if spec.input_type == "checkbox"}
 _SENSITIVE_KEY_PARTS = ("api_key", "secret", "token", "oauth", "password")
 
 
@@ -211,7 +109,7 @@ def build_operational_settings_context(settings: Settings) -> dict[str, Any]:
     with SessionLocal() as session:
         saved_keys = set(load_operational_settings(session))
     groups: list[dict[str, Any]] = []
-    for group_name in ("LLM", "Imagem", "Musica", "Narracao", "Publicacao", "Automacao", "Crescimento"):
+    for group_name in ("Musica", "Publicacao", "Automacao", "Crescimento"):
         fields = []
         for spec in OPERATIONAL_SETTING_SPECS:
             if spec.group != group_name:
@@ -229,24 +127,6 @@ def build_operational_settings_context(settings: Settings) -> dict[str, Any]:
                     "max": spec.max_value,
                     "step": spec.step,
                     "saved": spec.key in saved_keys,
-                    "description": spec.description,
-                }
-            )
-        for spec in OPERATIONAL_INFO_SPECS:
-            if spec.group != group_name:
-                continue
-            fields.append(
-                {
-                    "key": spec.key,
-                    "label": spec.label,
-                    "input_type": "readonly",
-                    "value": "Mock local" if settings.use_mock_providers and spec.key == "image_generation_provider" else spec.value,
-                    "checked": False,
-                    "options": [],
-                    "min": None,
-                    "max": None,
-                    "step": None,
-                    "saved": False,
                     "description": spec.description,
                 }
             )
@@ -330,8 +210,6 @@ def _coerce_value(spec: OperationalSettingSpec, value: Any) -> Any:
         return number
     cleaned = str(value).strip()
     if not cleaned:
-        if spec.key == "llm_gate_judge_model":
-            return None
         raise ValueError(f"{spec.label} nao pode ficar vazio")
     allowed_options = {option_value for option_value, _label in spec.options}
     if allowed_options and cleaned not in allowed_options:

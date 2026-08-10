@@ -4,7 +4,7 @@
   <div>
     <p class="eyebrow">Configurações</p>
     <h2>Operação do hub</h2>
-    <p>Ajuste providers, música, automação e publicação sem editar arquivos de ambiente.</p>
+    <p>Ajuste somente decisões cotidianas de música, automação e publicação. Providers e infraestrutura ficam no ambiente protegido.</p>
   </div>
 </section>
 
@@ -20,8 +20,5 @@
 </section>
 {% endif %}
 
-{% set settings_form_class = "panel operational-settings-page-card" %}
-{% set settings_form_dialog = false %}
-{% set settings_return_to = "/settings" %}
 {% include "_operational_settings_form.html" %}
 {% endblock %}

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -20,7 +20,6 @@ from tests.e2e_support import (
     _create_basic_job,
     _write_job_artifact,
     app,
-    main_module,
     orchestrator,
 )
 
@@ -31,7 +30,7 @@ from app.premium_finishing import RemotionCliRenderer
 from app.quality.premium_finishing_gate import PremiumFinishingGate
 from app.quality.premium_publish_gate import PREMIUM_PUBLISH_AUDIT_STAGES
 from app.quality.render_gate import RenderGateResult
-from app.utils import file_sha256, stable_hash, utcnow
+from app.utils import stable_hash
 
 
 class FakePremiumRenderer:
@@ -53,6 +52,12 @@ class FakePremiumGate:
         assert expected_duration_ms == 35_000
         assert edit_plan["style"]["component_policy"] == "free_only"
         return RenderGateResult(True, [], {"duration_ms": expected_duration_ms})
+
+
+class RejectingPremiumGate:
+    def validate(self, video_path: Path, expected_duration_ms: int, edit_plan: dict) -> RenderGateResult:
+        assert video_path.exists()
+        return RenderGateResult(False, ["invalid_render"], {"duration_ms": expected_duration_ms})
 
 
 def _audit_result(score: float) -> dict:
@@ -222,54 +227,14 @@ def _add_premium_generation_inputs(job_id: str) -> None:
     )
 
 
-def test_premium_finishing_generates_parallel_artifacts(monkeypatch) -> None:
-    job_id = "premium-generation"
-    _create_rendered_job(job_id)
-    _add_premium_generation_inputs(job_id)
-    monkeypatch.setattr(orchestrator.premium_finishing, "renderer", FakePremiumRenderer())
-    monkeypatch.setattr(orchestrator.premium_finishing, "gate", FakePremiumGate())
-
-    report = orchestrator.generate_premium_finishing(job_id)
-
-    assert report["passed"] is True
-    edit_plan_path = Path(__import__("os").environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "render" / "edit_plan.json"
-    premium_path = edit_plan_path.parent / "premium.mp4"
-    plan_text = edit_plan_path.read_text(encoding="utf-8")
-    plan = json.loads(plan_text)
-    assert premium_path.exists()
-    assert plan["plan_name"] == "Plano de Acabamento Editorial"
-    assert plan["style"]["component_policy"] == "free_only"
-    assert plan["caption_track"]["max_lines"] == 1
-    assert "file://" not in plan_text
-    assert str(Path(__import__("os").environ["SHORTSFLOW_DATA_DIR"]).resolve()) not in plan_text
-    assert "asset_path" not in plan["scenes"][0]
-    assert "path" not in plan["audio"]
-    assert report["command"] == ["remotion", "render", "render/premium.mp4"]
-    assert {scene["motion"]["kind"] for scene in plan["scenes"]} == {"subtle_push"}
-    assert plan["scenes"][0]["overlays"] == []
-    assert "sem_texto_superior_editorial" in plan["summary"]["premium_features"]
-    assert "transicoes_semanticas" in plan["summary"]["premium_features"]
-    with SessionLocal() as session:
-        job = session.get(Job, job_id)
-        assert job
-        assert job.artifact_index["premium_video"] == "render/premium.mp4"
-        assert job.quality_summary["premium_finishing"]["premium_finishing_gate_pass"] is True
-
-
-def test_remotion_primary_render_skips_legacy_ffmpeg(monkeypatch) -> None:
+def test_render_pipeline_produces_primary_remotion_artifacts(monkeypatch) -> None:
     job_id = "remotion-primary-no-ffmpeg"
     with SessionLocal() as session:
         _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Render primário Remotion")
         session.commit()
     _add_premium_generation_inputs(job_id)
-    monkeypatch.setattr(orchestrator.settings, "render_primary_backend", "remotion")
     monkeypatch.setattr(orchestrator.premium_finishing, "renderer", FakePremiumRenderer())
     monkeypatch.setattr(orchestrator.premium_finishing, "gate", FakePremiumGate())
-
-    def fail_if_ffmpeg_is_used(*args, **kwargs):
-        raise AssertionError("FFmpeg legacy render should not run when Remotion is primary")
-
-    monkeypatch.setattr(orchestrator.render_pipeline, "render_with_repair", fail_if_ffmpeg_is_used)
 
     with SessionLocal() as session:
         job = session.get(Job, job_id)
@@ -291,71 +256,20 @@ def test_remotion_primary_render_skips_legacy_ffmpeg(monkeypatch) -> None:
         assert render.ffmpeg_log_uri.endswith("/render/remotion.log")
 
 
-def test_promote_as_primary_render_uses_premium_file_hash() -> None:
-    job_id = "premium-promote-file-hash"
-    _create_rendered_job(job_id)
-    premium_path = _write_job_artifact(job_id, "render/premium.mp4", "premium-file-bytes")
-    orchestrator.storage.persist_json(
-        job_id,
-        "premium_finishing_report.json",
-        {"status": "succeeded", "passed": True, "video_uri": premium_path.as_uri(), "reasons": []},
-    )
-    orchestrator.storage.persist_json(
-        job_id,
-        "render_output.json",
-        {"content_hash": "old-render-hash", "video_uri": "old-video-uri", "filesize_bytes": 5},
-    )
-
+def test_failed_primary_render_gate_preserves_previous_final(monkeypatch) -> None:
+    job_id = "remotion-primary-gate-failure"
     with SessionLocal() as session:
-        orchestrator.premium_finishing.promote_as_primary_render(session, job_id, previous_video_uri="file:///tmp/standard.mp4")
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Render anterior")
         session.commit()
-
-    with SessionLocal() as session:
-        render = session.query(RenderOutput).filter_by(job_id=job_id).one()
-        assert render.video_uri == premium_path.as_uri()
-        assert render.content_hash == file_sha256(premium_path)
-
-    render_payload = json.loads((Path(__import__("os").environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "render_output.json").read_text(encoding="utf-8"))
-    assert render_payload["content_hash"] == file_sha256(premium_path)
-    assert render_payload["selected_render"] == "remotion"
-
-
-def test_premium_finishing_reprocesses_from_tts_when_current_narration_is_not_primary(monkeypatch) -> None:
-    job_id = "premium-primary-tts"
-    _create_rendered_job(job_id)
     _add_premium_generation_inputs(job_id)
-    monkeypatch.setattr(orchestrator.settings, "use_mock_providers", False)
-    monkeypatch.setattr(orchestrator.settings, "runtime_environment", "staging")
-    monkeypatch.setattr(orchestrator.settings, "tts_primary_provider", "gemini_tts")
+    final_path = _write_job_artifact(job_id, "render/final.mp4", "previous-valid-video")
     monkeypatch.setattr(orchestrator.premium_finishing, "renderer", FakePremiumRenderer())
-    monkeypatch.setattr(orchestrator.premium_finishing, "gate", FakePremiumGate())
-    called = {}
+    monkeypatch.setattr(orchestrator.premium_finishing, "gate", RejectingPremiumGate())
 
-    with SessionLocal() as session:
-        narration = session.query(NarrationAsset).filter(NarrationAsset.job_id == job_id).one()
-        narration.provider = "edge_tts"
-        session.commit()
+    with SessionLocal() as session, pytest.raises(FatalStepError, match="gate de render Remotion falhou"):
+        orchestrator.premium_finishing.generate_primary_render(session, job_id)
 
-    def fake_reprocess(received_job_id: str, step_name: str) -> str:
-        called["job_id"] = received_job_id
-        called["step_name"] = step_name
-        with SessionLocal() as session:
-            narration = session.query(NarrationAsset).filter(NarrationAsset.job_id == received_job_id).one()
-            narration.provider = "gemini_tts"
-            narration.content_hash = "primary-narration-hash"
-            job = session.get(Job, received_job_id)
-            assert job
-            job.status = "monetization_review"
-            session.commit()
-        return "monetization_review"
-
-    monkeypatch.setattr(orchestrator, "reprocess_job_from_step", fake_reprocess)
-
-    report = orchestrator.generate_premium_finishing(job_id)
-
-    assert report["passed"] is True
-    assert called == {"job_id": job_id, "step_name": "tts"}
-
+    assert final_path.read_text(encoding="utf-8") == "previous-valid-video"
 
 def test_remotion_cli_renderer_uses_absolute_artifact_paths(tmp_path, monkeypatch) -> None:
     project_dir = tmp_path / "remotion"
@@ -376,6 +290,7 @@ def test_remotion_cli_renderer_uses_absolute_artifact_paths(tmp_path, monkeypatc
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured["cwd"] = kwargs["cwd"]
+        Path(command[4]).write_bytes(b"complete-file")
         return SimpleNamespace(
             returncode=0,
             stdout=f"ok project={project_dir} props={plan_path}",
@@ -399,6 +314,78 @@ def test_remotion_cli_renderer_uses_absolute_artifact_paths(tmp_path, monkeypatc
     assert "<remotion>" in log_text
     assert "<edit_plan.json>" in log_text
     assert "<premium.mp4>" in log_text
+
+
+def test_remotion_cli_renderer_promotes_a_complete_file_atomically(tmp_path, monkeypatch) -> None:
+    project_dir = tmp_path / "remotion"
+    remotion_bin = project_dir / "node_modules" / ".bin" / "remotion"
+    entrypoint = project_dir / "src" / "index.ts"
+    remotion_bin.parent.mkdir(parents=True)
+    entrypoint.parent.mkdir(parents=True)
+    remotion_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    entrypoint.write_text("export {};\n", encoding="utf-8")
+    (project_dir / "package-lock.json").write_text("{}", encoding="utf-8")
+    plan_path = tmp_path / "edit_plan.json"
+    output_path = tmp_path / "final.mp4"
+    log_path = tmp_path / "remotion.log"
+    plan_path.write_text("{}", encoding="utf-8")
+    output_path.write_bytes(b"previous-complete-file")
+    captured = {}
+
+    def fake_run(command, **_kwargs):
+        render_target = Path(command[4])
+        captured["render_target"] = render_target
+        assert render_target != output_path
+        assert output_path.read_bytes() == b"previous-complete-file"
+        render_target.write_bytes(b"new-complete-file")
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("app.remotion_renderer.subprocess.run", fake_run)
+
+    command = RemotionCliRenderer(project_dir=project_dir).render(
+        plan_path=plan_path,
+        output_path=output_path,
+        log_path=log_path,
+    )
+
+    assert output_path.read_bytes() == b"new-complete-file"
+    assert not captured["render_target"].exists()
+    assert "--disable-web-security" not in command
+
+
+def test_remotion_cli_renderer_preserves_previous_file_when_render_fails(tmp_path, monkeypatch) -> None:
+    project_dir = tmp_path / "remotion"
+    remotion_bin = project_dir / "node_modules" / ".bin" / "remotion"
+    entrypoint = project_dir / "src" / "index.ts"
+    remotion_bin.parent.mkdir(parents=True)
+    entrypoint.parent.mkdir(parents=True)
+    remotion_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    entrypoint.write_text("export {};\n", encoding="utf-8")
+    (project_dir / "package-lock.json").write_text("{}", encoding="utf-8")
+    plan_path = tmp_path / "edit_plan.json"
+    output_path = tmp_path / "final.mp4"
+    log_path = tmp_path / "remotion.log"
+    plan_path.write_text("{}", encoding="utf-8")
+    output_path.write_bytes(b"previous-complete-file")
+    captured = {}
+
+    def fake_run(command, **_kwargs):
+        render_target = Path(command[4])
+        captured["render_target"] = render_target
+        render_target.write_bytes(b"partial-file")
+        return SimpleNamespace(returncode=1, stdout="", stderr="failed")
+
+    monkeypatch.setattr("app.remotion_renderer.subprocess.run", fake_run)
+
+    with pytest.raises(FatalStepError, match="render premium falhou"):
+        RemotionCliRenderer(project_dir=project_dir).render(
+            plan_path=plan_path,
+            output_path=output_path,
+            log_path=log_path,
+        )
+
+    assert output_path.read_bytes() == b"previous-complete-file"
+    assert not captured["render_target"].exists()
 
 
 def test_remotion_cli_renderer_preflight_reports_missing_runtime(tmp_path) -> None:
@@ -1194,124 +1181,54 @@ def test_premium_runtime_plan_stages_local_media_for_remotion_public(tmp_path: P
     assert (project_dir / "public" / "shortsflow-runtime" / "stage-job" / "audio.wav").exists()
 
 
-def test_job_detail_hides_manual_premium_action() -> None:
-    job_id = "premium-action"
-    _create_rendered_job(job_id)
-
-    response = TestClient(app).get(f"/jobs/{job_id}")
-
-    assert response.status_code == 200
-    assert "Comparar acabamento editorial" not in response.text
-    assert "Gerar versão premium" not in response.text
-    assert f'action="/jobs/{job_id}/premium-finish"' not in response.text
-    assert "data-premium-progress" not in response.text
-
-
-def test_premium_action_route_starts_background_generation(monkeypatch) -> None:
-    job_id = "premium-route"
-    _create_rendered_job(job_id)
-    called = {}
-
-    def fake_generate(received_job_id: str) -> dict:
-        called["job_id"] = received_job_id
-        return {"passed": True, "created_at": utcnow().isoformat()}
-
-    monkeypatch.setattr(main_module.orchestrator, "generate_premium_finishing", fake_generate)
-
-    response = TestClient(app).post(f"/jobs/{job_id}/premium-finish", follow_redirects=False)
-
-    assert response.status_code == 303
-    assert response.headers["location"] == f"/jobs/{job_id}?premium_started=1"
-    assert called["job_id"] == job_id
+def test_primary_render_contains_staged_scene_paths_and_cleans_runtime_media(tmp_path: Path) -> None:
+    job_id = "remotion-safe-runtime-media"
     with SessionLocal() as session:
-        details = orchestrator.get_job_details(session, job_id)
-    assert details["premium_finishing"]["status"] == "running"
-    assert details["premium_finishing"]["running"] is True
-
-
-def test_job_detail_hides_premium_progress_when_generation_is_running() -> None:
-    job_id = "premium-progress"
-    _create_rendered_job(job_id)
-    orchestrator.premium_finishing.mark_running(job_id, phase="rendering", detail="Render premium em andamento")
-
-    response = TestClient(app).get(f"/jobs/{job_id}")
-
-    assert response.status_code == 200
-    assert 'hx-trigger="every 4s"' not in response.text
-    assert "Gerando versão premium" not in response.text
-    assert "Render premium em andamento" not in response.text
-    assert "data-premium-progress" not in response.text
-
-
-def test_job_detail_hides_premium_comparison_when_parallel_video_exists() -> None:
-    job_id = "premium-comparison"
-    _create_rendered_job(job_id)
-    premium_path = _write_job_artifact(job_id, "render/premium.mp4", "premium")
-    orchestrator.storage.persist_json(job_id, "render/edit_plan.json", {"plan_name": "Plano de Acabamento Editorial"})
-    orchestrator.storage.persist_json(
-        job_id,
-        "premium_finishing_report.json",
-        {"passed": True, "video_uri": premium_path.as_uri(), "reasons": []},
-    )
-
-    response = TestClient(app).get(f"/jobs/{job_id}")
-
-    assert response.status_code == 200
-    assert "Versão premium" not in response.text
-    assert "Critérios aprovados" not in response.text
-    assert "Abrir premium" not in response.text
-    assert "Aprovar premium e liberar agenda" not in response.text
-    assert f'action="/jobs/{job_id}/premium-approve"' not in response.text
-
-
-def test_premium_approval_promotes_premium_video_to_publish_package(monkeypatch) -> None:
-    job_id = "premium-approval"
-    _create_rendered_job(job_id)
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Staging seguro")
+        session.commit()
     _add_premium_generation_inputs(job_id)
-    _set_premium_publish_audit(monkeypatch, 9.4)
-    premium_path = _write_job_artifact(job_id, "render/premium.mp4", "premium")
-    orchestrator.storage.persist_json(
-        job_id,
-        "premium_finishing_report.json",
-        {"status": "succeeded", "passed": True, "video_uri": premium_path.as_uri(), "reasons": []},
-    )
+    project_dir = tmp_path / "remotion"
+    observed = {}
 
-    def fake_monetization_report(session, job, confirmations):
-        assert "premium_version_selected" in confirmations
-        assert "visual_review_confirmed" in confirmations
-        return {
-            "passed": True,
-            "final_status": "monetization_review",
-            "hard_blockers": [],
-            "manual_required": [],
-            "warnings": [],
-        }
+    class InspectingRenderer:
+        def __init__(self) -> None:
+            self.project_dir = project_dir
 
-    def fake_publish_package(session, job):
-        render = session.query(RenderOutput).filter_by(job_id=job.job_id).one()
-        return {"schema_version": "1.0.0", "job_id": job.job_id, "video_uri": render.video_uri, "status": "ready_for_publish"}
+        def render(self, *, plan_path: Path, output_path: Path, log_path: Path) -> list[str]:
+            runtime_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            asset_src = runtime_plan["scenes"][0]["asset_src"]
+            staged_path = (project_dir / "public" / asset_src).resolve()
+            runtime_job_dir = (project_dir / "public" / "shortsflow-runtime" / job_id).resolve()
+            assert staged_path.is_relative_to(runtime_job_dir)
+            assert staged_path.exists()
+            observed["runtime_job_dir"] = runtime_job_dir
+            output_path.write_bytes(b"premium-video")
+            log_path.write_text("fake remotion log", encoding="utf-8")
+            return ["remotion", "render", str(output_path)]
 
-    monkeypatch.setattr(orchestrator.monetization_pipeline, "build_monetization_report", fake_monetization_report)
-    monkeypatch.setattr(orchestrator.monetization_pipeline, "build_publish_package", fake_publish_package)
-
-    response = TestClient(app).post(f"/jobs/{job_id}/premium-approve", follow_redirects=False)
-
-    assert response.status_code == 303
-    assert response.headers["location"] == f"/jobs/{job_id}"
     with SessionLocal() as session:
-        job = session.get(Job, job_id)
-        render = session.query(RenderOutput).filter_by(job_id=job_id).one()
-        assert job
-        assert job.status == "approved_for_publish"
-        assert job.review_state == "approved"
-        assert render.video_uri == premium_path.as_uri()
-        assert render.content_hash == file_sha256(premium_path)
-        assert job.artifact_index["render"] == "render/premium.mp4"
-        assert job.artifact_index["standard_render"] == "render/final.mp4"
-    package_path = Path(__import__("os").environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "publish_package.json"
-    package = json.loads(package_path.read_text(encoding="utf-8"))
-    assert package["video_uri"] == premium_path.as_uri()
-    assert package["selected_render"] == "premium"
+        scene_plan = session.query(ScenePlan).filter_by(job_id=job_id).one()
+        scenes = [dict(scene) for scene in scene_plan.scenes]
+        scenes[0]["scene_id"] = "../escape"
+        scene_plan.scenes = scenes
+        session.query(SceneAsset).filter_by(job_id=job_id).one().scene_id = "../escape"
+        session.commit()
+
+    service = orchestrator.premium_finishing
+    original_renderer = service.renderer
+    original_gate = service.gate
+    service.renderer = InspectingRenderer()
+    service.gate = FakePremiumGate()
+    try:
+        with SessionLocal() as session:
+            report = service.generate_primary_render(session, job_id)
+    finally:
+        service.renderer = original_renderer
+        service.gate = original_gate
+
+    assert report["passed"] is True
+    assert not observed["runtime_job_dir"].exists()
+    assert not (project_dir / "public" / "shortsflow-runtime" / "escape.jpg").exists()
 
 
 def test_premium_publish_gate_allows_approval_and_schedule_with_visual_confirmation(monkeypatch) -> None:
@@ -1359,7 +1276,7 @@ def test_premium_publish_gate_allows_approval_and_schedule_with_visual_confirmat
         assert schedule.status == "scheduled"
 
 
-def test_premium_publish_gate_allows_approval_without_internal_visual_confirmation(monkeypatch) -> None:
+def test_premium_publish_gate_blocks_approval_without_visual_confirmation(monkeypatch) -> None:
     job_id = "premium-publish-gate-visual-block"
     _create_rendered_job(job_id)
     _set_premium_publish_audit(monkeypatch, 9.8)
@@ -1377,21 +1294,22 @@ def test_premium_publish_gate_allows_approval_without_internal_visual_confirmati
         }
         session.commit()
 
-    orchestrator.review_job(
-        {
-            "reviewer_identity": "test",
-            "action": "approve",
-            "reason_codes": [],
-            "notes": None,
-        },
-        job_id,
-    )
+    with pytest.raises(FatalStepError, match="visual_review_required"):
+        orchestrator.review_job(
+            {
+                "reviewer_identity": "test",
+                "action": "approve",
+                "reason_codes": [],
+                "notes": None,
+            },
+            job_id,
+        )
 
     with SessionLocal() as session:
         job = session.get(Job, job_id)
         assert job
-        assert job.status == "approved_for_publish"
-        assert job.review_state == "approved"
+        assert job.status == "blocked_for_monetization"
+        assert job.review_state == "blocked"
 
 
 def test_ready_job_approves_when_premium_audit_is_below_threshold(monkeypatch) -> None:

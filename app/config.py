@@ -91,7 +91,6 @@ class Settings(BaseSettings):
     asset_semantic_threshold: float = 0.80
     asset_total_threshold: float = 0.75
     render_min_bitrate: int = 250_000
-    render_primary_backend: str = "remotion"
     asset_generation_timeout_sec: float = 75.0
     asset_generation_regeneration_rounds: int = 2
     asset_generation_parallelism: int = 4
@@ -351,15 +350,6 @@ class Settings(BaseSettings):
         allowed = {"local_bank", "minimax", "auto"}
         if normalized not in allowed:
             raise ValueError("background_music_provider must be one of: local_bank, minimax, auto")
-        return normalized
-
-    @field_validator("render_primary_backend")
-    @classmethod
-    def validate_render_primary_backend(cls, value: str) -> str:
-        normalized = value.strip().lower()
-        allowed = {"ffmpeg", "remotion"}
-        if normalized not in allowed:
-            raise ValueError("render_primary_backend must be one of: ffmpeg, remotion")
         return normalized
 
     @field_validator("runtime_environment")

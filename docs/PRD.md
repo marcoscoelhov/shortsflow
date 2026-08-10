@@ -377,7 +377,7 @@ Gates editoriais podem ser diagnóstico por padrão, mas hard blockers técnicos
 - Uvicorn;
 - Pydantic/Pydantic Settings;
 - Remotion como renderer principal;
-- FFmpeg como backend legado/manutenção;
+- FFmpeg para audio e validacao tecnica;
 - pytest para testes;
 - systemd para serviço/timer em produção local.
 
@@ -435,15 +435,9 @@ Camadas:
 2. Hub: ajustes operacionais não secretos.
 3. defaults do código.
 
-Configurações de Hub devem incluir:
+Configurações de Hub devem incluir apenas:
 
-- LLM principal;
-- fallback de LLM;
-- LLM de reparo;
-- planejador de cenas;
-- prompt viral global;
-- TTS primário;
-- música/fonte local;
+- música ligada/desligada;
 - modo de publicação;
 - YouTube API ligada/desligada;
 - TikTok ligado/desligado;
@@ -493,7 +487,7 @@ Requisitos:
 - logs e plano de edição salvos;
 - healthcheck deve indicar se Remotion está pronto;
 - setup deve instalar dependências Node no subprojeto `remotion/`;
-- FFmpeg permanece disponível apenas como caminho legado explícito.
+- FFmpeg nao renderiza o video final; permanece apenas para audio, probe e validacao tecnica.
 
 ### 6.6 Concorrência e confiabilidade
 

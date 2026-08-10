@@ -209,16 +209,7 @@ def test_operational_settings_route_saves_allowlisted_overrides() -> None:
         "/operations/settings",
         data={
             "return_to": "/",
-            "llm_primary_provider": "deepseek",
-            "llm_fallback_provider": "openai",
-            "llm_script_draft_provider": "deepseek",
-            "llm_repair_provider": "openai",
-            "llm_scene_provider": "deepseek",
-            "llm_enable_fallback": "true",
-            "background_music_provider": "local_bank",
             "background_music_enabled": "true",
-            "music_bank_auto_populate": "true",
-            "tts_primary_provider": "elevenlabs",
             "youtube_publish_mode": "api",
             "youtube_api_enabled": "true",
             "automation_daily_timezone": "UTC",
@@ -234,16 +225,11 @@ def test_operational_settings_route_saves_allowlisted_overrides() -> None:
 
     assert response.status_code == 303
     assert response.headers["location"] == "/?settings_saved=1"
-    assert main_module.settings.llm_primary_provider == "deepseek"
-    assert main_module.settings.tts_primary_provider == "elevenlabs"
     assert main_module.settings.youtube_publish_mode == "api"
     assert main_module.settings.youtube_api_enabled is True
-    assert main_module.settings.allow_music_api_fallback is False
     with SessionLocal() as session:
         saved_keys = set(session.scalars(select(OperationalSetting.key)).all())
 
-    assert "llm_primary_provider" in saved_keys
-    assert "tts_primary_provider" in saved_keys
     assert "youtube_api_enabled" in saved_keys
     assert "openai_api_key" not in saved_keys
 

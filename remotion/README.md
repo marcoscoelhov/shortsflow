@@ -1,8 +1,8 @@
 # ShortsFlow Remotion
 
-Subprojeto isolado para gerar o render principal Remotion e a **Versao Premium Paralela** da prova de **Acabamento Editorial Premium**.
+Subprojeto isolado que gera o `render/final.mp4` com **Acabamento Editorial Premium**.
 
-O render principal operacional do ShortsFlow usa `SHORTSFLOW_PRIMARY_BACKEND=remotion` por padrao. O Hub chama o binario local em `remotion/node_modules/.bin/remotion`; ele nao baixa dependencias durante a execucao do worker.
+Remotion e o unico renderer de video do ShortsFlow. O Hub chama o binario local em `remotion/node_modules/.bin/remotion`; ele nao baixa dependencias durante a execucao do worker.
 
 Uso local:
 
@@ -10,7 +10,7 @@ Uso local:
 cd remotion
 npm install
 npm run typecheck
-npm run render -- /caminho/para/render/premium.mp4 --props /caminho/para/render/edit_plan.json
+npm run render -- /caminho/para/render/final.mp4 --props /caminho/para/render/edit_plan.json
 ```
 
 Use `npm run typecheck` para validar TypeScript sem disparar render.

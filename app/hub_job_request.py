@@ -95,13 +95,11 @@ def build_hub_job_request(
     requested_angle: str | None,
     custom_angle: str | None,
     ready_script_text: str | None,
-
     default_niche_id: str,
     retention_optimized_duration_sec: int,
     viral_prompt_template: str,
     trend_seed_resolver: Callable[[str], HubTrendSeed],
     learned_retention_guidance: str | None = None,
-    **_legacy_options: object,
 ) -> HubJobRequestBuildResult:
     normalized_mode = normalize_hub_input_mode(input_mode)
     angle = selected_angle(custom_angle, requested_angle)

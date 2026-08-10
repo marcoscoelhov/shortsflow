@@ -56,7 +56,7 @@ class ReadyScript:
     fact_check_confirmed: bool = True
 
 
-def build_ready_script_notes(notes: str | None, raw_script: str, _legacy_fact_check_confirmed: bool | None = None) -> str:
+def build_ready_script_notes(notes: str | None, raw_script: str) -> str:
     parts = [
         "input_mode=script",
 

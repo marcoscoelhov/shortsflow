@@ -1,5 +1,7 @@
 # Evaluate Remotion for Premium Editorial Finishing
 
+Status: superseded by ADR-0012 and ADR-0013
+
 ShortsFlow will evaluate Remotion as a candidate for **Acabamento Editorial Premium** by generating a **Versao Premium Paralela** from a **Plano de Acabamento Editorial**, while keeping the existing `render/final.mp4` flow intact during the trial. Remotion should become the main renderer only if it wins the **Prova Comparativa de Acabamento** across comparable **Jobs de Video** and passes the **Gate de Acabamento Premium** without regressing the existing publication-ready media contracts.
 
 **Consequences**

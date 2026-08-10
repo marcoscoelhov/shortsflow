@@ -36,7 +36,6 @@ def _settings(**overrides: object) -> SimpleNamespace:
         "real_run_allow_mock_fallback": False,
         "llm_fallback_provider": "disabled",
         "watchdog_alert_delivery": "record_only",
-        "render_primary_backend": "remotion",
         "watchdog_min_future_coverage_days": 3,
     }
     values.update(overrides)

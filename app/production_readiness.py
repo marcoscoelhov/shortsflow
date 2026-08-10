@@ -147,8 +147,6 @@ class ProductionReadinessService:
         )
 
     def _remotion_preflight_check(self) -> ProductionReadinessCheck:
-        if str(getattr(self.settings, "render_primary_backend", "")).lower() != "remotion":
-            return ProductionReadinessCheck("remotion_preflight", True, "warning", "remotion not primary")
         try:
             preflight = self.orchestrator.premium_finishing.renderer.preflight_environment()
         except Exception as exc:  # noqa: BLE001

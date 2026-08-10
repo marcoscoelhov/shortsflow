@@ -1619,7 +1619,7 @@ Fechamento: Da próxima vez, lembra: você está vendo um planeta impossível on
             "target_duration_sec": 35,
             "tone": "intrigante_direto",
             "cta_style": "none",
-            "notes": build_ready_script_notes(None, ready_script, True),
+            "notes": build_ready_script_notes(None, ready_script),
             "requested_angle": None,
         }
     )

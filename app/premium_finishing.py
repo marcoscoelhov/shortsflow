@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from PIL import Image
 from sqlalchemy import delete
@@ -16,17 +18,32 @@ from app.pipelines.common import FatalStepError, model_payload
 from app.pipelines.finish_plan import build_finish_plan, public_finish_plan
 from app.pipelines.timeline import normalize_scene_timings
 from app.quality.premium_finishing_gate import PremiumFinishingGate
-from app.render_selection import promote_render_output_to_file
+from app.quality.render_gate import RenderGateResult
 from app.remotion_renderer import RemotionCliRenderer
 from app.utils import ensure_dir, file_sha256, file_uri, new_id, path_from_uri, read_json, stable_hash, utcnow
-from urllib.parse import unquote, urlparse
+
+
+class _MockRemotionRenderer:
+    def preflight_environment(self) -> dict[str, Any]:
+        return {"ready": True, "project_dir": "mock", "missing_items": []}
+
+    def render(self, *, plan_path: Path, output_path: Path, log_path: Path) -> list[str]:
+        output_path.write_bytes(b"mock-remotion-video")
+        log_path.write_text("mock remotion render", encoding="utf-8")
+        return ["remotion-mock", "render", str(output_path)]
+
+
+class _MockPremiumFinishingGate:
+    def validate(self, video_path: Path, expected_duration_ms: int, edit_plan: dict[str, Any]) -> RenderGateResult:
+        return RenderGateResult(True, [], {"duration_ms": expected_duration_ms})
 
 
 class PremiumFinishingService:
     def __init__(self, owner: Any, *, renderer: RemotionCliRenderer | None = None, gate: PremiumFinishingGate | None = None) -> None:
         self.owner = owner
-        self.renderer = renderer or RemotionCliRenderer(allowed_media_root=owner.settings.artifacts_dir)
-        self.gate = gate or PremiumFinishingGate(owner.render_gate)
+        use_mocks = bool(owner.settings.use_mock_providers)
+        self.renderer = renderer or (_MockRemotionRenderer() if use_mocks else RemotionCliRenderer(allowed_media_root=owner.settings.artifacts_dir))
+        self.gate = gate or (_MockPremiumFinishingGate() if use_mocks else PremiumFinishingGate(owner.render_gate))
 
     @property
     def storage(self) -> Any:
@@ -35,109 +52,6 @@ class PremiumFinishingService:
     @property
     def settings(self) -> Any:
         return self.owner.settings
-
-    def context(self, job_id: str) -> dict[str, Any]:
-        job_dir = self.storage.job_dir(job_id, create=False)
-        video_path = job_dir / "render" / "premium.mp4"
-        edit_plan = self._read_json(job_id, "render/edit_plan.json")
-        report = self._read_json(job_id, "premium_finishing_report.json")
-        log_path = job_dir / "render" / "remotion.log"
-        status = str(report.get("status") or ("succeeded" if video_path.exists() else "not_started"))
-        return {
-            "available": video_path.exists(),
-            "video_uri": file_uri(video_path) if video_path.exists() else None,
-            "edit_plan_uri": file_uri(job_dir / "render" / "edit_plan.json") if edit_plan else None,
-            "log_uri": file_uri(log_path) if log_path.exists() else None,
-            "edit_plan": edit_plan,
-            "report": report,
-            "status": status,
-            "running": status == "running",
-            "gate_pass": bool(report.get("passed")),
-            "error": report.get("error"),
-        }
-
-    def generate_parallel_version(self, session: Session, job_id: str) -> dict[str, Any]:
-        job = session.get(Job, job_id)
-        if not job:
-            raise KeyError(job_id)
-        scene_plan = session.scalar(select(ScenePlan).where(ScenePlan.job_id == job_id))
-        narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job_id))
-        subtitles = session.scalar(select(SubtitleTrack).where(SubtitleTrack.job_id == job_id))
-        render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job_id))
-        background_music = session.scalar(select(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job_id))
-        selected_assets = session.scalars(
-            select(SceneAsset).where(SceneAsset.job_id == job_id, SceneAsset.selected.is_(True)).order_by(SceneAsset.scene_id)
-        ).all()
-        if not scene_plan or not narration or not subtitles or not selected_assets:
-            raise FatalStepError("job ainda nao tem cenas, narracao, legendas e assets selecionados para prova premium")
-        visual_contract = self._read_json(job_id, "visual_contract.json")
-        plan = build_finish_plan(
-            schema_version=self.settings.schema_version,
-            job=job,
-            scene_plan=scene_plan,
-            selected_assets=list(selected_assets),
-            narration=narration,
-            subtitles=subtitles,
-            background_music=background_music,
-            render=render,
-            visual_contract=visual_contract,
-            media_base_url=f"{str(self.settings.app_url).rstrip('/')}/artifacts",
-            artifacts_dir=self.settings.artifacts_dir,
-        )
-        job_dir = self.storage.job_dir(job_id)
-        plan_artifact = self.storage.persist_json(job_id, "render/edit_plan.json", public_finish_plan(plan))
-        output_path = job_dir / "render" / "premium.mp4"
-        log_path = job_dir / "render" / "remotion.log"
-        self.mark_running(job_id, phase="rendering", detail="Render premium em andamento")
-        self.owner._append_event(job_id, "premium_finishing.started", "succeeded", {"finish_plan_hash": plan_artifact.content_hash})
-        try:
-            command = self._render_with_runtime_plan(job_id, plan, output_path=output_path, log_path=log_path)
-            public_command = self._public_command(command, job_dir)
-            gate_result = self.gate.validate(output_path, narration.duration_ms, plan)
-        except FatalStepError as exc:
-            report = self._failure_report(job_id, plan, str(exc))
-            self.storage.persist_json(job_id, "premium_finishing_report.json", report)
-            self.owner._append_event(job_id, "premium_finishing.failed", "failed", {"message": str(exc)})
-            raise
-        report = {
-            "schema_version": self.settings.schema_version,
-            "job_id": job_id,
-            "created_at": utcnow().isoformat(),
-            "status": "succeeded" if gate_result.passed else "failed",
-            "passed": gate_result.passed,
-            "reasons": gate_result.reasons,
-            "metrics": gate_result.metrics,
-            "video_uri": file_uri(output_path),
-            "edit_plan_uri": plan_artifact.uri,
-            "log_uri": file_uri(log_path),
-            "command": public_command,
-            "content_hash": file_sha256(output_path) if output_path.exists() else None,
-        }
-        self.storage.persist_json(job_id, "premium_finishing_report.json", report)
-        if not gate_result.passed:
-            self.owner._append_event(job_id, "premium_finishing.failed", "failed", {"reasons": gate_result.reasons})
-            raise FatalStepError(f"gate de acabamento premium falhou: {', '.join(gate_result.reasons[:6])}")
-        artifact_index = dict(job.artifact_index or {})
-        artifact_index.update(
-            {
-                "premium_video": "render/premium.mp4",
-                "premium_edit_plan": "render/edit_plan.json",
-                "premium_finishing_report": "premium_finishing_report.json",
-                "premium_remotion_log": "render/remotion.log",
-            }
-        )
-        job.artifact_index = artifact_index
-        quality_summary = dict(job.quality_summary or {})
-        quality_summary["premium_finishing"] = {
-            "premium_finishing_gate_pass": True,
-            "duration_ms": gate_result.metrics.get("duration_ms"),
-            "scene_count": len(plan["scenes"]),
-            "caption_count": len(plan["caption_track"]["items"]),
-            "component_policy": plan["style"]["component_policy"],
-        }
-        job.quality_summary = quality_summary
-        self.owner._append_event(job_id, "premium_finishing.completed", "succeeded", quality_summary["premium_finishing"])
-        return report
 
     def generate_primary_render(self, session: Session, job_id: str) -> dict[str, Any]:
         job = session.get(Job, job_id)
@@ -188,15 +102,18 @@ class PremiumFinishingService:
         ensure_dir(render_dir)
         plan_artifact = self.storage.persist_json(job_id, "render/edit_plan.json", public_finish_plan(plan))
         output_path = render_dir / "final.mp4"
+        candidate_path = render_dir / ".final.pending.mp4"
         log_path = render_dir / "remotion.log"
         poster_path = render_dir / "poster.jpg"
-        self.mark_running(job_id, phase="rendering", detail="Render principal Remotion em andamento")
+        candidate_path.unlink(missing_ok=True)
         self.owner._append_event(job_id, "render.remotion_primary.started", "succeeded", {"finish_plan_hash": plan_artifact.content_hash})
         try:
-            command = self._render_with_runtime_plan(job_id, plan, output_path=output_path, log_path=log_path)
+            command = self._render_with_runtime_plan(job_id, plan, output_path=candidate_path, log_path=log_path)
+            command = [str(output_path) if item == str(candidate_path) else item for item in command]
             public_command = self._public_command(command, job_dir)
-            gate_result = self.gate.validate(output_path, narration.duration_ms, plan)
+            gate_result = self.gate.validate(candidate_path, narration.duration_ms, plan)
         except FatalStepError as exc:
+            candidate_path.unlink(missing_ok=True)
             report = self._failure_report(job_id, plan, str(exc))
             report["source"] = "remotion_primary"
             self.storage.persist_json(job_id, "premium_finishing_report.json", report)
@@ -212,14 +129,16 @@ class PremiumFinishingService:
                 "passed": False,
                 "reasons": gate_result.reasons,
                 "metrics": gate_result.metrics,
-                "video_uri": file_uri(output_path) if output_path.exists() else None,
+                "video_uri": None,
                 "edit_plan_uri": plan_artifact.uri,
                 "log_uri": file_uri(log_path),
                 "command": public_command,
             }
             self.storage.persist_json(job_id, "premium_finishing_report.json", report)
             self.owner._append_event(job_id, "render.remotion_primary.failed", "failed", {"reasons": gate_result.reasons})
+            candidate_path.unlink(missing_ok=True)
             raise FatalStepError(f"gate de render Remotion falhou: {', '.join(gate_result.reasons[:6])}")
+        candidate_path.replace(output_path)
         with Image.open(path_from_uri(selected_assets[0].uri)) as poster_source:
             poster_source.resize((540, 960)).save(poster_path, format="JPEG")
         duration_ms = int(gate_result.metrics.get("duration_ms") or narration.duration_ms)
@@ -260,6 +179,7 @@ class PremiumFinishingService:
             "log_uri": file_uri(log_path),
             "command": public_command,
             "content_hash": file_sha256(output_path),
+            "background_music_mixed": bool(background_music and background_music.mixed_audio_uri),
         }
         self.storage.persist_json(job_id, "premium_finishing_report.json", report)
         artifact_index = dict(job.artifact_index or {})
@@ -291,112 +211,6 @@ class PremiumFinishingService:
         self.owner._append_event(job_id, "render.remotion_primary.completed", "succeeded", quality_summary["selected_render"])
         return report
 
-    def promote_as_primary_render(
-        self,
-        session: Session,
-        job_id: str,
-        *,
-        previous_video_uri: str | None = None,
-        source: str = "remotion_primary",
-    ) -> None:
-        job = session.get(Job, job_id)
-        if not job:
-            raise KeyError(job_id)
-        render = session.scalar(select(RenderOutput).where(RenderOutput.job_id == job_id))
-        if not render:
-            raise FatalStepError("job nao tem render final para promover Remotion como primario")
-        premium_report = self._read_json(job_id, "premium_finishing_report.json")
-        premium_video_uri = str(premium_report.get("video_uri") or "").strip()
-        premium_path = path_from_uri(premium_video_uri) if premium_video_uri else self.storage.job_dir(job_id, create=False) / "render" / "premium.mp4"
-        if not premium_path.exists():
-            raise FatalStepError("versao Remotion ainda nao foi gerada")
-        if not premium_report or not bool(premium_report.get("passed")):
-            raise FatalStepError("versao Remotion nao passou no gate de acabamento")
-        job_dir = self.storage.job_dir(job_id, create=False)
-        artifact_index, original_video_uri = promote_render_output_to_file(
-            render,
-            selected_video_path=premium_path,
-            job_dir=job_dir,
-            artifact_index=dict(job.artifact_index or {}),
-            selected_render_ref="render/premium.mp4",
-            previous_video_uri=previous_video_uri,
-        )
-        job.artifact_index = artifact_index
-        render_payload = self._read_json(job_id, "render_output.json")
-        if render_payload:
-            render_payload.update(
-                {
-                    "content_hash": render.content_hash,
-                    "video_uri": render.video_uri,
-                    "filesize_bytes": render.filesize_bytes,
-                    "selected_render": "remotion",
-                    "standard_video_uri": original_video_uri,
-                }
-            )
-            self.storage.persist_json(job_id, "render_output.json", render_payload)
-        quality_summary = dict(job.quality_summary or {})
-        quality_summary["selected_render"] = {
-            "variant": "remotion",
-            "previous_video_uri": original_video_uri,
-            "video_uri": render.video_uri,
-            "source": source,
-        }
-        job.quality_summary = quality_summary
-        self.owner._append_event(job_id, "render.primary_promoted", "succeeded", quality_summary["selected_render"])
-
-    def narration_uses_primary_tts(self, narration: NarrationAsset | None) -> bool:
-        if narration is None:
-            return False
-        return str(narration.provider or "").lower() in self.primary_tts_provider_names()
-
-    def primary_tts_provider_names(self) -> set[str]:
-        if self.settings.use_mock_providers:
-            return {"espeak_ng", "synthetic_wav"}
-        configured = str(self.settings.tts_primary_provider or "elevenlabs").strip().lower()
-        return {configured or "elevenlabs"}
-
-    def primary_tts_refresh_needed(self, session: Session, job_id: str) -> bool:
-        job = session.get(Job, job_id)
-        if not job:
-            raise KeyError(job_id)
-        narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job_id))
-        return narration is not None and not self.narration_uses_primary_tts(narration)
-
-    def require_primary_tts(self, session: Session, job_id: str) -> None:
-        narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job_id))
-        if self.narration_uses_primary_tts(narration):
-            return
-        current_provider = str(narration.provider) if narration else "ausente"
-        expected = ", ".join(sorted(self.primary_tts_provider_names()))
-        raise FatalStepError(f"versao premium exige TTS primario ({expected}); provider atual: {current_provider}")
-
-    def mark_running(self, job_id: str, *, phase: str = "queued", detail: str = "Acabamento premium iniciado") -> dict[str, Any]:
-        report = {
-            "schema_version": self.settings.schema_version,
-            "job_id": job_id,
-            "created_at": utcnow().isoformat(),
-            "status": "running",
-            "phase": phase,
-            "detail": detail,
-            "passed": False,
-            "reasons": ["premium_finishing_running"],
-        }
-        self.storage.persist_json(job_id, "premium_finishing_report.json", report)
-        return report
-
-    def mark_failed(self, job_id: str, error: str) -> dict[str, Any]:
-        report = {
-            "schema_version": self.settings.schema_version,
-            "job_id": job_id,
-            "created_at": utcnow().isoformat(),
-            "status": "failed",
-            "passed": False,
-            "error": error,
-            "reasons": ["premium_render_failed"],
-        }
-        self.storage.persist_json(job_id, "premium_finishing_report.json", report)
-        return report
-
     def _failure_report(self, job_id: str, plan: dict[str, Any], error: str) -> dict[str, Any]:
         return {
             "schema_version": self.settings.schema_version,
@@ -411,6 +225,7 @@ class PremiumFinishingService:
 
     def _render_with_runtime_plan(self, job_id: str, plan: dict[str, Any], *, output_path: Path, log_path: Path) -> list[str]:
         runtime_plan_path: Path | None = None
+        runtime_public_dir = self._runtime_public_dir(job_id)
         try:
             runtime_plan = self._stage_runtime_media(job_id, plan)
             with tempfile.NamedTemporaryFile("w", suffix=".json", prefix=f"{job_id}-remotion-", delete=False, encoding="utf-8") as handle:
@@ -420,31 +235,56 @@ class PremiumFinishingService:
         finally:
             if runtime_plan_path is not None:
                 runtime_plan_path.unlink(missing_ok=True)
+            if runtime_public_dir is not None:
+                shutil.rmtree(runtime_public_dir, ignore_errors=True)
 
     def _stage_runtime_media(self, job_id: str, plan: dict[str, Any]) -> dict[str, Any]:
-        project_dir = getattr(self.renderer, "project_dir", None)
-        if not project_dir:
+        public_dir = self._runtime_public_dir(job_id)
+        if public_dir is None:
             return plan
-        public_dir = Path(project_dir) / "public" / "shortsflow-runtime" / job_id
         shutil.rmtree(public_dir, ignore_errors=True)
         ensure_dir(public_dir)
         staged = json.loads(json.dumps(self.owner._serialize_for_json(plan), ensure_ascii=False))
-        for scene in staged.get("scenes") or []:
+        used_names: set[str] = set()
+        for index, scene in enumerate(staged.get("scenes") or []):
             if not isinstance(scene, dict):
                 continue
             source = self._local_media_path(scene.get("asset_uri") or scene.get("asset_path"))
             if source is None or not source.exists():
                 continue
-            target = public_dir / f"{scene.get('scene_id') or source.stem}{source.suffix or '.jpg'}"
+            stem = self._safe_runtime_component(scene.get("scene_id"), fallback=f"scene-{index + 1}")
+            candidate = f"{stem}{source.suffix or '.jpg'}"
+            if candidate in used_names:
+                candidate = f"{stem}-{index + 1}{source.suffix or '.jpg'}"
+            used_names.add(candidate)
+            target = (public_dir / candidate).resolve()
+            if not target.is_relative_to(public_dir.resolve()):
+                raise FatalStepError("destino de asset Remotion fora do staging permitido")
             shutil.copy2(source, target)
-            scene["asset_src"] = f"shortsflow-runtime/{job_id}/{target.name}"
+            scene["asset_src"] = f"shortsflow-runtime/{public_dir.name}/{target.name}"
         audio = staged.get("audio") if isinstance(staged.get("audio"), dict) else {}
         source = self._local_media_path(audio.get("uri") or audio.get("path"))
         if source is not None and source.exists():
             target = public_dir / f"audio{source.suffix or '.wav'}"
             shutil.copy2(source, target)
-            audio["src"] = f"shortsflow-runtime/{job_id}/{target.name}"
+            audio["src"] = f"shortsflow-runtime/{public_dir.name}/{target.name}"
         return staged
+
+    def _runtime_public_dir(self, job_id: str) -> Path | None:
+        project_dir = getattr(self.renderer, "project_dir", None)
+        if not project_dir:
+            return None
+        runtime_root = (Path(project_dir) / "public" / "shortsflow-runtime").resolve()
+        safe_job_id = self._safe_runtime_component(job_id, fallback="job")
+        public_dir = (runtime_root / safe_job_id).resolve()
+        if not public_dir.is_relative_to(runtime_root):
+            raise FatalStepError("diretorio de staging Remotion invalido")
+        return public_dir
+
+    @staticmethod
+    def _safe_runtime_component(value: Any, *, fallback: str) -> str:
+        normalized = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value or "")).strip("-_.")
+        return normalized[:96] or fallback
 
     def _local_media_path(self, value: Any) -> Path | None:
         text = str(value or "").strip()

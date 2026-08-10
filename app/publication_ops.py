@@ -273,8 +273,20 @@ class PublicationOperations:
         job.failure_reason = message
         return message
 
-    def _ensure_premium_publish_preflight(self, session: Session, job: Job, *, context: str) -> Any:
-        result = self._run_premium_publish_gate(session, job, context=context)
+    def _ensure_premium_publish_preflight(
+        self,
+        session: Session,
+        job: Job,
+        *,
+        context: str,
+        extra_confirmations: set[str] | None = None,
+    ) -> Any:
+        result = self._run_premium_publish_gate(
+            session,
+            job,
+            context=context,
+            extra_confirmations=extra_confirmations,
+        )
         if result.passed:
             return result
         message = self._block_job_for_premium_publish_gate(job, result)
@@ -311,16 +323,6 @@ class PublicationOperations:
 
     def _validate_review_action(self, job: Job, action: str) -> None:
         self.review_ops.validate_review_action(job, action)
-
-    def approve_premium_for_publish(
-        self,
-        job_id: str,
-        reviewer_identity: str = "tailscale:local-reviewer",
-    ) -> None:
-        self.review_ops.approve_premium_for_publish(
-            job_id,
-            reviewer_identity=reviewer_identity,
-        )
 
     def publish_job(
         self,

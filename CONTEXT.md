@@ -28,21 +28,9 @@ _Avoid_: video, output, render
 A camada de composicao final do **Arquivo de Video Final** que adiciona ritmo visual, movimento, transicoes, tipografia, enfase de legenda e identidade visual sem alterar roteiro, narracao ou fatos.
 _Avoid_: trocar roteiro, gerar nova pauta, mudar fatos, estetica generica
 
-**Prova Comparativa de Acabamento**:
-A avaliacao humana lado a lado de versoes do mesmo **Job de Video** para decidir se uma abordagem de **Acabamento Editorial Premium** deve virar padrao.
-_Avoid_: opiniao isolada, comparar jobs diferentes, aprovar sem gates, decisao por ferramenta
-
-**Decisao Comparativa de Acabamento**:
-A escolha humana feita durante uma **Prova Comparativa de Acabamento** sobre qual versao do mesmo **Job de Video** tem melhor acabamento, sem aprovar publicacao por si so.
-_Avoid_: aprovacao de publicacao, revisao humana final, score automatico, troca invisivel de arquivo
-
-**Versao Premium Paralela**:
-Um **Arquivo de Video Final** alternativo criado para **Prova Comparativa de Acabamento**, sem substituir o arquivo usado pelo fluxo normal de revisao e publicacao.
-_Avoid_: substituir final.mp4 durante prova, publicacao acidental, versao invisivel, artefato solto
-
 **Gate de Acabamento Premium**:
-A validacao automatica minima de uma **Versao Premium Paralela** antes de ela participar de uma **Prova Comparativa de Acabamento**.
-_Avoid_: comparar arquivo quebrado, julgamento estetico sem sanidade tecnica, aprovar efeito que viola narrativa
+A validacao automatica do **Arquivo de Video Final** composto com **Acabamento Editorial Premium**, antes de ele seguir para revisao e publicacao.
+_Avoid_: julgamento estetico sem sanidade tecnica, aprovar efeito que viola narrativa
 
 **Score da Auditoria Premium**:
 A pontuacao diagnostica do pacote final, usada para expor gaps editoriais sem transformar nota baixa isolada em hard blocker.
@@ -51,10 +39,6 @@ _Avoid_: Score de Autoaprovacao, permissao de publicar, override de artefato aus
 **Preflight Premium de Publicacao**:
 A revalidacao fail-closed de artefatos, contrato de auditoria, hard blockers e revisao visual imediatamente antes de aprovar, agendar ou publicar em qualquer plataforma.
 _Avoid_: score estetico isolado, checagem apenas no TikTok, confiar somente no status antigo do job
-
-**Acao de Prova Premium**:
-O comando humano no **Hub de Revisao** que gera uma **Versao Premium Paralela** para avaliar **Acabamento Editorial Premium** sem mudar o fluxo normal do **Job de Video**.
-_Avoid_: etapa obrigatoria do pipeline, publicacao automatica, aprovacao invisivel, experimento global
 
 **Ajuste de Timing Visual**:
 A mudanca de ritmo de elementos visuais dentro de cenas ja aprovadas, sem reordenar cenas, cortar narracao, alterar legenda ou antecipar payoff.
@@ -317,7 +301,7 @@ Um valor necessario para iniciar ou conectar o sistema, como caminho de dados, U
 _Avoid_: ajuste diario, preferencia de operacao, controle de rotina
 
 **Configuracao Operacional do Hub**:
-Um ajuste nao secreto que uma pessoa muda no **Hub de Revisao** para controlar providers, musica, automacao ou publicacao sem editar a **Configuracao de Ambiente**.
+Um ajuste cotidiano e nao secreto que uma pessoa muda no **Hub de Revisao** para controlar musica, automacao, publicacao ou coleta de performance sem editar a **Configuracao de Ambiente**.
 _Avoid_: segredo, variavel obrigatoria de boot, tuning interno
 
 **Sobreposicao Operacional**:
@@ -495,13 +479,9 @@ _Avoid_: caminho primario, fallback silencioso, mock em run real
 - Um **Scout Competitivo de Shorts** pode gerar **Propostas de Crescimento** ou **Roteiros Sugeridos por Crescimento**, mas nao cria **Jobs de Video** diretamente.
 - Um **Scout Competitivo de Shorts** deve preservar metadados, metricas publicas e analise derivada de **Shorts de Referencia Viral**, nao midia externa nem roteiros externos completos.
 - O **Movimento Visual de Cena** e uma parte possivel do **Acabamento Editorial Premium**, nao o acabamento inteiro.
-- Uma **Prova Comparativa de Acabamento** compara versoes do mesmo **Job de Video** antes de promover uma abordagem de acabamento a padrao.
-- Uma **Decisao Comparativa de Acabamento** nao substitui a **Revisao Humana** necessaria para publicar um **Job de Video**.
-- Uma **Versao Premium Paralela** existe apenas para comparacao ate uma abordagem de **Acabamento Editorial Premium** virar padrao.
-- Uma **Versao Premium Paralela** deve passar pelo **Gate de Acabamento Premium** antes da **Prova Comparativa de Acabamento**.
-- Uma **Acao de Prova Premium** pode criar uma **Versao Premium Paralela** para um **Job de Video** especifico.
+- O **Arquivo de Video Final** usa **Acabamento Editorial Premium** e deve passar pelo **Gate de Acabamento Premium** antes da **Revisao Humana**.
 - Um **Ajuste de Timing Visual** pode fazer parte do **Acabamento Editorial Premium** quando preserva o conteudo editorial aprovado.
-- O **Pacote de Acabamento Premium Inicial** limita a primeira **Prova Comparativa de Acabamento** a recursos avaliaveis e consistentes.
+- O **Pacote de Acabamento Premium Inicial** limita o acabamento a recursos avaliaveis e consistentes.
 - Um **Plano de Acabamento Editorial** aplica **Acabamento Editorial Premium** ao conteudo aprovado de exatamente um **Job de Video**.
 - Um **Plano de Acabamento Deterministico** e a forma inicial preferida de criar um **Plano de Acabamento Editorial** para manter a comparacao avaliavel.
 - O **Hub de Revisao** deve tornar a **Origem do Job** visivel na fila, na revisao do job e em filtros de triagem.

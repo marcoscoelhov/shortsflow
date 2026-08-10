@@ -32,7 +32,7 @@ Ainda existem cortes incrementais possiveis, mas eles nao bloqueiam a manutencao
 - `app/pipelines/tts_assets.py`: dono do ajuste de duracao de TTS, escala de SRT e medicao de audio.
 - `app/pipelines/subtitle_assets.py`: dono da segmentacao, reparo de fronteiras, drift e renderizacao de legendas.
 - `app/pipelines/music_assets.py`: dono de debug, mix com repair, mix direto, musica de fundo e sound design.
-- `app/pipelines/render_pipeline.py`: entrada da etapa `render`, retry de FFmpeg e mutacao segura do comando.
+- `app/pipelines/render_pipeline.py`: entrada unica da etapa `render` via Remotion.
 - `app/pipelines/monetization_pipeline.py`: entrada da etapa `monetization_readiness_gate`, rights, disclosure, fact claims, repeticao, metadata, publish package, hashtags, readiness e auditoria de publish.
 - `app/pipelines/common.py`: exceptions de step e helper `model_payload`.
 - `app/providers/`: providers separados por dominio, com imports diretos pelos modulos donos.

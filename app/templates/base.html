@@ -85,9 +85,6 @@
           <button type="button" class="topbar-icon sidebar-toggle" data-toggle-sidebar aria-label="Colapsar sidebar" aria-pressed="false">
             <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
           </button>
-          <button type="button" class="topbar-icon" data-open-operational-settings aria-label="Abrir configurações">
-            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-          </button>
           <a class="topbar-avatar" href="/settings" aria-label="Abrir configurações">SF</a>
         </div>
       </header>
@@ -229,12 +226,6 @@
         <button type="submit">Criar vídeo</button>
       </form>
     </dialog>
-    <dialog id="operational-settings-modal" class="schedule-picker-modal operational-settings-modal" aria-labelledby="operational-settings-title">
-      {% set settings_form_class = "schedule-picker-card operational-settings-card" %}
-      {% set settings_form_dialog = true %}
-      {% set settings_return_to = return_to %}
-      {% include "_operational_settings_form.html" %}
-    </dialog>
     {% if automation_alert_active %}
     <dialog id="automation-alerts-modal" class="schedule-picker-modal automation-alerts-modal" aria-labelledby="automation-alerts-title">
       <div class="schedule-picker-card automation-alerts-card">
@@ -309,12 +300,6 @@
         initialFocusSelector: "#seed_theme",
       });
       window.bindHubDialog({
-        dialog: document.getElementById("operational-settings-modal"),
-        openSelector: "[data-open-operational-settings]",
-        closeSelector: "[data-close-operational-settings]",
-        initialFocusSelector: "input:not([type='hidden']), select, textarea",
-      });
-      window.bindHubDialog({
         dialog: document.getElementById("automation-alerts-modal"),
         openSelector: "[data-open-automation-alerts]",
         closeSelector: "[data-close-automation-alerts]",
@@ -335,7 +320,7 @@
         sync();
       })();
       (() => {
-        const interactiveSelector = "a, button, input, select, textarea, summary, label, [role='button'], [data-open-create-job], [data-open-operational-settings]";
+        const interactiveSelector = "a, button, input, select, textarea, summary, label, [role='button'], [data-open-create-job]";
         const openRow = (row) => {
           const href = row.dataset.href;
           if (!href) return;

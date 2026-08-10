@@ -32,7 +32,6 @@ Local tracker:
 
 - [Definir janela mínima de maturação para julgar performance](tickets/001-definir-janela-minima-de-maturacao.md) — usar 72h pós-publicação para baseline/breakout; 7d só para confirmação borderline.
 - [Auditar cobertura atual de publicação e métricas disponíveis](tickets/002-auditar-cobertura-e-metricas-disponiveis.md) — julho/cosmos tem 10 schedules com YouTube ID, mas 0 maduros em 72h; baseline local bruto atual é mediana 182 e precisa de filtro oficial antes de atualizar meta.
-- [Verificar se o produto tem anti-slop checker](tickets/007-verificar-anti-slop-checker.md) — há anti-slop real em gates de roteiro/viralidade/auditoria, mas o Ponytail gate está presente e impossível de passar como escrito (`8.6/8.6` com corte `>=9.5`).
 - [Desenhar placar mínimo de breakout](tickets/003-desenhar-placar-minimo-de-breakout.md) — usar um placar textual de cinco sinais nos briefings/CONTROL; sem UI nova.
 - [Comparar pacote editorial dos jobs cosmos agendados](tickets/004-comparar-pacote-editorial-dos-jobs-cosmos.md) — o melhor padrão é objeto conhecido + contradição imediata + payoff concreto; tema abstrato/duplicado perde força.
 - [Decidir primeiro ajuste editorial pós-amostra madura](tickets/005-decidir-primeiro-ajuste-editorial-pos-amostra.md) — primeiro experimento: exigir objeto reconhecível para leigos no primeiro segundo; não mudar mais nada.
@@ -49,7 +48,6 @@ Frontier inicial:
 
 - [Definir janela mínima de maturação para julgar performance](tickets/001-definir-janela-minima-de-maturacao.md) ✅ fechado
 - [Auditar cobertura atual de publicação e métricas disponíveis](tickets/002-auditar-cobertura-e-metricas-disponiveis.md) ✅ fechado
-- [Verificar se o produto tem anti-slop checker](tickets/007-verificar-anti-slop-checker.md) ✅ fechado
 - [Desenhar placar mínimo de breakout](tickets/003-desenhar-placar-minimo-de-breakout.md) ✅ fechado
 - [Comparar pacote editorial dos jobs cosmos agendados](tickets/004-comparar-pacote-editorial-dos-jobs-cosmos.md) ✅ fechado
 - [Decidir primeiro ajuste editorial pós-amostra madura](tickets/005-decidir-primeiro-ajuste-editorial-pos-amostra.md) ✅ fechado

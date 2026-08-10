@@ -1558,8 +1558,6 @@ def test_hub_prompt_panel_saves_and_resets_safe_template(monkeypatch, tmp_path: 
     assert 'data-open-ready-script-bank' not in page.text
     assert 'id="ready-script-bank-modal"' not in page.text
     assert "/automation/ready-scripts/import" not in page.text
-    assert 'data-open-operational-settings' in page.text
-
     library_page = client.get("/library")
     assert library_page.status_code == 200
     assert "Banco de roteiros" in library_page.text

@@ -2312,17 +2312,7 @@ pre {
   max-height: calc(100dvh - 2rem);
 }
 
-.operational-settings-modal {
-  width: min(980px, calc(100vw - 2rem));
-  max-height: calc(100dvh - 2rem);
-}
-
 .ready-script-bank-card {
-  max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
-}
-
-.operational-settings-card {
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
 }
@@ -2422,22 +2412,6 @@ pre {
   color: var(--muted);
   font-size: 0.78rem;
   line-height: 1.35;
-}
-
-.operational-readonly {
-  padding: 0.7rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--line-subtle);
-}
-
-.operational-readonly span {
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.operational-readonly strong {
-  font-size: 0.95rem;
 }
 
 .operational-checkbox {
@@ -2913,8 +2887,7 @@ button,
 }
 
 .schedule-picker-card,
-.ready-script-bank-card,
-.operational-settings-card {
+.ready-script-bank-card {
   background: rgba(31, 31, 34, 0.96);
   border-color: var(--line-strong);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
@@ -3212,10 +3185,8 @@ a:focus-visible {
 
   .calendar-schedule-modal,
   .ready-script-bank-modal,
-  .operational-settings-modal,
   .calendar-schedule-card,
-  .ready-script-bank-card,
-  .operational-settings-card {
+  .ready-script-bank-card {
     max-height: calc(100dvh - 1rem);
   }
 
@@ -4628,8 +4599,7 @@ a:focus-visible {
   .create-job-modal,
   .filters-modal,
   .hub-search-modal,
-  .ready-script-bank-modal,
-  .operational-settings-modal {
+  .ready-script-bank-modal {
     width: min(100vw - 1rem, 520px);
   }
 
@@ -4885,7 +4855,6 @@ body {
 
 .schedule-picker-card,
 .ready-script-bank-card,
-.operational-settings-card,
 .featured-player {
   box-shadow: none;
 }
@@ -5638,13 +5607,11 @@ label,
   }
 
   .create-job-modal,
-  .operational-settings-modal,
   .calendar-schedule-modal {
     width: min(100vw - 0.8rem, 40rem);
   }
 
   .create-job-card,
-  .operational-settings-card,
   .calendar-schedule-card {
     max-height: calc(100dvh - 0.8rem);
   }
@@ -5929,7 +5896,6 @@ body {
 .panel,
 .jobs-table-panel,
 .ready-script-bank-card,
-.operational-settings-card,
 .schedule-picker-card,
 .featured-player,
 .calendar-agenda-day,
@@ -6316,7 +6282,6 @@ textarea {
   .panel,
   .jobs-table-panel,
   .ready-script-bank-card,
-  .operational-settings-card,
   .schedule-picker-card,
   .calendar-agenda-day,
   .ready-script-item {
@@ -6530,13 +6495,11 @@ textarea {
   }
 
   .create-job-modal,
-  .operational-settings-modal,
   .calendar-schedule-modal {
     width: min(100vw - 0.7rem, 40rem);
   }
 
   .create-job-card,
-  .operational-settings-card,
   .calendar-schedule-card {
     max-height: calc(100dvh - 0.7rem);
   }

@@ -106,7 +106,6 @@ class PremiumPublishGate:
                 reasons.append("premium_publish_final_status_not_publishable")
         score = _float(audit_payload.get("overall_min_score"), 0.0)
         target_score = _float(audit_payload.get("target_score"), 0.0)
-        # ponytail: audit score is diagnostic; publication blocks only on real review requirements.
         if visual_review_required and not visual_review_confirmed:
             reasons.append("visual_review_required")
         reasons = list(dict.fromkeys(reason for reason in reasons if reason))

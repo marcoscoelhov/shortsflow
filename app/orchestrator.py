@@ -125,81 +125,6 @@ def normalize_script_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     return _normalize_script_metrics(metrics)
 
 
-NO_TEXT_IMAGE_CONSTRAINT = (
-    "clean vertical cinematic scientific image, natural objects only, no readable text anywhere, "
-    "no letters, no words, no numbers, no symbols, no logo, no watermark, no captions, "
-    "no subtitles, no title card, no poster, no signs, no labels, no UI, no infographic, "
-    "no typography, no diagrams with labels, no text printed on objects, no text on packages, "
-    "no text on cups, no text on screens, no text on charts, no readable brand marks"
-)
-
-ENGLISH_SUBJECT_ALIASES = {
-    "polvo": "octopus",
-    "polvos": "octopuses",
-    "buraco negro": "black hole",
-    "buracos negros": "black holes",
-    "vulcao": "volcano",
-    "vulcoes": "volcanoes",
-    "vulcão": "volcano",
-    "vulcões": "volcanoes",
-    "gato": "cat",
-    "gatos": "cats",
-    "felino": "cat",
-    "felinos": "cats",
-    "cafe": "coffee",
-    "café": "coffee",
-    "cafeina": "caffeine",
-    "cafeína": "caffeine",
-    "cafeina e foco": "caffeine and focus",
-    "café e foco": "coffee and focus",
-    "torre de pisa": "Leaning Tower of Pisa",
-    "torre inclinada de pisa": "Leaning Tower of Pisa",
-    "por que a torre de pisa não cai?": "Leaning Tower of Pisa",
-    "por que a torre de pisa nao cai?": "Leaning Tower of Pisa",
-}
-
-SCENE_VISUAL_HINTS = [
-    (("torre", "pisa", "séculos"), "the Leaning Tower of Pisa in Piazza dei Miracoli at golden hour, visibly tilted but stable, documentary realism"),
-    (("torre", "pisa", "seculos"), "the Leaning Tower of Pisa in Piazza dei Miracoli at golden hour, visibly tilted but stable, documentary realism"),
-    (("solo", "argiloso"), "cutaway view of the Leaning Tower of Pisa foundation resting on soft clay soil layers, unlabeled scientific visualization"),
-    (("solo", "mole"), "cutaway view of the Leaning Tower of Pisa foundation resting on soft clay soil layers, unlabeled scientific visualization"),
-    (("fundação",), "close vertical cutaway of a shallow medieval tower foundation settling into soft ground, documentary engineering realism"),
-    (("fundacao",), "close vertical cutaway of a shallow medieval tower foundation settling into soft ground, documentary engineering realism"),
-    (("centro", "massa"), "unlabeled visual metaphor of the Leaning Tower of Pisa balancing with its mass still over the base, no diagrams or text"),
-    (("inclinação", "reduz"), "engineers stabilizing the base of the Leaning Tower of Pisa with careful soil extraction, documentary realism"),
-    (("inclinacao", "reduz"), "engineers stabilizing the base of the Leaning Tower of Pisa with careful soil extraction, documentary realism"),
-    (("cafeina", "foco"), "caffeine molecules near alert neurons in warm morning light, a plain unbranded coffee cup nearby"),
-    (("cafeína", "foco"), "caffeine molecules near alert neurons in warm morning light, a plain unbranded coffee cup nearby"),
-    (("cafe", "foco"), "plain unbranded coffee cup beside a focused morning workspace, subtle neural energy glow"),
-    (("café", "foco"), "plain unbranded coffee cup beside a focused morning workspace, subtle neural energy glow"),
-    (("adenosina",), "caffeine molecules blocking adenosine receptors on neurons, cinematic scientific visualization"),
-    (("receptores",), "caffeine molecules fitting into neural receptors, cinematic scientific visualization"),
-    (("sonolencia",), "sleep pressure fading from a human silhouette after caffeine reaches the brain, morning light"),
-    (("sonolência",), "sleep pressure fading from a human silhouette after caffeine reaches the brain, morning light"),
-    (("alerta",), "alert brain activity represented by glowing neural pathways beside plain coffee steam"),
-    (("manhã",), "soft morning kitchen light with plain unbranded coffee steam and a person becoming alert in silhouette"),
-    (("manha",), "soft morning kitchen light with plain unbranded coffee steam and a person becoming alert in silhouette"),
-    (("gatos", "veem", "mundo diferente"), "cat face close-up with reflective eyes perceiving an altered night world"),
-    (("terceiro", "párpado"), "macro close-up of a cat eye showing the translucent third eyelid protecting the eye"),
-    (("terceiro", "parpado"), "macro close-up of a cat eye showing the translucent third eyelid protecting the eye"),
-    (("orelha", "180"), "cat ears rotating independently toward subtle sound waves in a quiet room"),
-    (("visão noturna",), "cat moving through a dim night scene with bright reflective eyes and low light visibility"),
-    (("visao noturna",), "cat moving through a dim night scene with bright reflective eyes and low light visibility"),
-    (("memória episódica",), "cat remembering a hidden toy location in a realistic home environment"),
-    (("memoria episodica",), "cat remembering a hidden toy location in a realistic home environment"),
-    (("cabeça", "180"), "cat turning its head sharply to monitor a distant threat, natural posture"),
-    (("cabeca", "180"), "cat turning its head sharply to monitor a distant threat, natural posture"),
-    (("corações", "sangue azul"), "octopus anatomy close-up showing three subtle hearts and blue copper-rich blood vessels"),
-    (("coracoes", "sangue azul"), "octopus anatomy close-up showing three subtle hearts and blue copper-rich blood vessels"),
-    (("hemocianina",), "blue oxygen-carrying blood flowing through octopus anatomy"),
-    (("dna",), "octopus adapting underwater beside clean molecular DNA strands made of light"),
-    (("células nervosas",), "octopus arms exploring rocks independently with subtle neural glow inside the tentacles"),
-    (("celulas nervosas",), "octopus arms exploring rocks independently with subtle neural glow inside the tentacles"),
-    (("tentáculo", "cortado"), "detached octopus arm moving reflexively on the seabed, natural biology, non-graphic"),
-    (("tentaculo", "cortado"), "detached octopus arm moving reflexively on the seabed, natural biology, non-graphic"),
-    (("cor", "textura", "predadores"), "octopus rapidly changing skin color and texture while camouflaging from a predator"),
-]
-
 def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -772,7 +697,6 @@ class JobOrchestrator:
             "publication_attempts": self._read_job_json(job_id, "youtube_publish_attempts.json").get("attempts", []) or cleanup_snapshots.get("publication_attempts", []),
             "retention_cleanup": retention_cleanup,
             "artifacts_cleaned": artifacts_cleaned,
-            "premium_finishing": {} if artifacts_cleaned else self.premium_finishing.context(job_id),
         }
 
     def build_job_progress(
@@ -833,16 +757,6 @@ class JobOrchestrator:
             session.delete(job)
         self.storage.remove_job_artifacts(job_id)
 
-    def approve_premium_for_publish(
-        self,
-        job_id: str,
-        reviewer_identity: str = "tailscale:local-reviewer",
-    ) -> None:
-        self.publication_ops.approve_premium_for_publish(
-            job_id,
-            reviewer_identity=reviewer_identity,
-        )
-
     def publish_job(
         self,
         job_id: str,
@@ -857,43 +771,6 @@ class JobOrchestrator:
             youtube_url=youtube_url,
             trigger=trigger,
         )
-
-    def generate_premium_finishing(self, job_id: str) -> dict[str, Any]:
-        with self._heavy_execution():
-            return self._generate_premium_finishing_under_slot(job_id)
-
-    def _generate_premium_finishing_under_slot(self, job_id: str) -> dict[str, Any]:
-        with session_scope() as session:
-            refresh_needed = self.premium_finishing.primary_tts_refresh_needed(session, job_id)
-            narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job_id)) if refresh_needed else None
-            current_provider = str(narration.provider) if narration else None
-        if refresh_needed:
-            self._append_event(
-                job_id,
-                "premium_finishing.primary_tts_refresh_requested",
-                "succeeded",
-                {
-                    "current_provider": current_provider,
-                    "expected_providers": sorted(self.premium_finishing.primary_tts_provider_names()),
-                },
-            )
-            self.reprocess_job_from_step(job_id, "tts")
-            with session_scope() as session:
-                self.premium_finishing.require_primary_tts(session, job_id)
-        with session_scope() as session:
-            return self.premium_finishing.generate_parallel_version(session, job_id)
-
-    def request_premium_finishing(self, job_id: str) -> None:
-        with session_scope() as session:
-            job = session.get(Job, job_id)
-            if not job:
-                raise KeyError(job_id)
-        self.premium_finishing.mark_running(job_id, phase="queued", detail="Acabamento premium aguardando execução")
-        self._append_event(job_id, "premium_finishing.requested", "succeeded", {})
-
-    def record_premium_finishing_failure(self, job_id: str, error: str) -> None:
-        self.premium_finishing.mark_failed(job_id, error)
-        self._append_event(job_id, "premium_finishing.failed", "failed", {"message": error})
 
     def update_publish_metadata(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self.publication_ops.update_publish_metadata(job_id, payload)
@@ -1181,8 +1058,8 @@ class JobOrchestrator:
             raise FatalStepError("seed_theme too short after normalization")
         if request.target_duration_sec < 35 or request.target_duration_sec > 55:
             raise FatalStepError(f"target_duration_sec outside supported range: {request.target_duration_sec}")
-        render_preflight: dict[str, object] = {"ready": True, "backend": self.settings.render_primary_backend}
-        if not self.settings.use_mock_providers and str(self.settings.render_primary_backend).lower() == "remotion":
+        render_preflight: dict[str, object] = {"ready": True, "backend": "remotion"}
+        if not self.settings.use_mock_providers:
             render_preflight = self.premium_finishing.renderer.preflight_environment()
             if not render_preflight.get("ready"):
                 missing = "; ".join(str(item) for item in render_preflight.get("missing_items") or [])

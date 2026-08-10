@@ -40,7 +40,7 @@ class OrchestratorWorkerOperations:
             self.owner.worker_thread = None
 
     def lease_delta(self) -> timedelta:
-        # Real provider steps (image generation, TTS and Remotion/ffmpeg render) can hold
+        # Real provider steps (image generation, TTS and Remotion render) can hold
         # a SQLite write transaction open for several minutes. Keep the lease long
         # enough that the worker will not reclaim the same job while the step is still
         # legitimately running if heartbeat refreshes are skipped by SQLite locks.

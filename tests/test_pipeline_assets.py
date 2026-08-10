@@ -1,28 +1,6 @@
 from tests.e2e_support import *  # noqa: F403
 
 
-def test_operational_settings_context_separates_scene_planner_from_image_generator(monkeypatch) -> None:
-    from app.operational_settings import build_operational_settings_context
-
-    monkeypatch.setattr(main_module.settings, "use_mock_providers", False)
-    context = build_operational_settings_context(main_module.settings)
-    fields = {field["key"]: field for group in context["groups"] for field in group["fields"]}
-    group_names = {group["name"] for group in context["groups"]}
-
-    assert fields["llm_scene_provider"]["label"] == "Planejador de cenas (LLM)"
-    assert "nao gera imagens" in fields["llm_scene_provider"]["description"]
-    assert "Imagem" in group_names
-    assert "Narracao" in group_names
-    assert fields["image_generation_provider"]["label"] == "Gerador de imagens"
-    assert fields["image_generation_provider"]["input_type"] == "readonly"
-    assert fields["image_generation_provider"]["value"] == "MiniMax"
-    assert fields["tts_primary_provider"]["label"] == "TTS primario"
-    assert fields["tts_primary_provider"]["options"] == [
-        {"value": "gemini_tts", "label": "Gemini TTS"},
-        {"value": "elevenlabs", "label": "ElevenLabs"},
-        {"value": "edge_tts", "label": "Edge TTS"},
-    ]
-
 def test_llm_registry_uses_deepseek_for_repair_and_scene_defaults(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.providers.llm.get_settings",

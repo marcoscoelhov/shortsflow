@@ -11,7 +11,7 @@ O produto atual nao termina em "video pronto". Ele cobre criacao do job, pipelin
 - Hub SSR em `http://127.0.0.1:8080`, com lista paginada de jobs, detalhe focado em aprovar e agendar, dashboard de publicacao e calendario mensal.
 - Worker em thread, iniciado no lifespan do FastAPI, responsavel pelo pipeline e tambem pela publicacao agendada quando o modo YouTube esta em `api`.
 - Banco padrao em SQLite e artefatos em `data/artifacts/<job_id>/`.
-- Render principal padrao via Remotion; FFmpeg permanece como caminho legado apenas por configuracao explicita.
+- Render de video exclusivamente via Remotion; FFmpeg permanece apenas para audio e validacao tecnica.
 - Integracao real com YouTube disponivel por OAuth e upload via API quando o modo API esta ligado no Hub.
 - Politica de retencao automatica para artefatos temporarios: jobs continuam visiveis no hub mesmo depois da limpeza dos arquivos pesados.
 - Arquitetura modularizada para manutencao local: `JobOrchestrator` coordena lifecycle, lease, retry, eventos e worker; pipelines, providers, contexto do hub e publicacao ficam em modulos donos.
@@ -227,16 +227,14 @@ o fluxo nao deve ser considerado pronto para autopublicacao segura.
 
 O `.env.example` e intencionalmente pequeno. Ele deve guardar boot, infraestrutura e segredos: URL do app, diretorio de dados, banco, chaves de provedores, OAuth do YouTube e Tailnet.
 
-Ajustes operacionais nao secretos ficam no Hub de Revisao, em Configurações:
+Ajustes cotidianos nao secretos ficam no Hub de Revisao, em Configurações:
 
-- LLM principal, fallback, reparo, planejador de cenas e rascunho.
-- prompt viral global: contrato editorial para hook, retencao, payoff, tom, SEO e formato semantico dos roteiros gerados.
-- gerador de imagens visivel como leitura operacional; hoje, em execucao real, e MiniMax.
-- musica de fundo, banco local e fallback para API.
+- musica de fundo ligada ou desligada.
 - modo de publicacao, API do YouTube, notificacao de inscritos, publicacao cruzada no TikTok e limite diario de retropostagem.
 - horario do ciclo diario, horario padrao de publicacao, janela da agenda, tentativas e score minimo.
+- coleta e janelas de performance.
 
-O Hub persiste esses valores como sobreposicoes operacionais no banco. Use `Restaurar .env` no modal para limpar as sobreposicoes e voltar aos defaults do ambiente/codigo.
+Providers, modelos, endpoints, direitos e infraestrutura ficam exclusivamente no ambiente protegido. O Hub persiste apenas os ajustes cotidianos no banco; `Restaurar .env` limpa essas sobreposicoes.
 
 O lease de jobs tem piso operacional longo para passos reais de midia, como imagem, TTS e render. Isso evita que o worker recupere o mesmo job enquanto uma etapa legitima esta demorando e o SQLite pulou heartbeats por lock local.
 
@@ -296,19 +294,13 @@ Se `SHORTSFLOW_TTS_PRIMARY_PROVIDER=edge_tts`, o app ignora Gemini e ElevenLabs 
 
 ## Render principal
 
-O backend operacional padrao e Remotion, alinhado ao contrato atual de acabamento premium. O worker chama o binario local em `remotion/node_modules/.bin/remotion`, por isso o setup precisa instalar as dependencias Node do subprojeto antes de rodar Jobs de Video.
+Remotion e o unico renderer de video, alinhado ao contrato atual de acabamento premium. O worker chama o binario local em `remotion/node_modules/.bin/remotion`, por isso o setup precisa instalar as dependencias Node do subprojeto antes de rodar Jobs de Video.
 
 Valide Remotion depois de instalar dependencias:
 
 ```bash
 cd remotion
 npm run typecheck
-```
-
-Configuracao padrao:
-
-```env
-SHORTSFLOW_PRIMARY_BACKEND=remotion
 ```
 
 Para geração real, instale as dependências do compositor antes de iniciar o servidor:
@@ -320,7 +312,7 @@ npm ci
 
 O preflight agora interrompe o job antes de consumir provedores quando o Remotion não estiver disponível. A intensidade viral também é configurável: por padrão, um roteiro factual seguro com score abaixo da meta segue para revisão com alerta; use `YTS_VIRAL_INTENSITY_HARD_BLOCK=true` apenas para bloquear a renderização nesses casos.
 
-O caminho FFmpeg ainda existe para manutencao e diagnostico, mas nao deve ser tratado como default operacional.
+FFmpeg continua instalado para mixagem, normalizacao de audio, probe e validacao do MP4; ele nao gera mais o video final.
 
 No startup, o Hub registra aviso se o runtime Remotion estiver incompleto. `/healthz` tambem expõe `render.remotion_ready` e os itens ausentes.
 

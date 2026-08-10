@@ -17,7 +17,6 @@ def test_healthcheck_exposes_deployed_runtime_identity(monkeypatch, tmp_path) ->
         llm_gate_judge_provider="xai",
         llm_gate_judge_model="grok",
         tts_primary_provider="edge_tts",
-        render_primary_backend="remotion",
         artifacts_dir=tmp_path / "artifacts",
         data_dir=tmp_path,
         runtime_environment="staging",

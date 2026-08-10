@@ -88,7 +88,7 @@ SHORTSFLOW_YOUTUBE_CLIENT_SECRET=...
 SHORTSFLOW_YOUTUBE_CHANNEL_ID=...
 ```
 
-Depois de subir o hub, ajuste LLM principal, musica, automacao, modo de publicacao e API do YouTube no modal `Configurações`. Mudancas no Hub nao exigem editar `.env`; mudancas de segredos ou URLs de boot ainda exigem reiniciar o `uvicorn`.
+Depois de subir o hub, ajuste apenas musica ligada/desligada, automacao, publicacao e coleta de performance na pagina `Configurações`. Providers, modelos, segredos, endpoints e direitos permanecem na configuracao protegida do ambiente.
 
 ## 4. Subir o hub
 
@@ -282,7 +282,7 @@ youtube_publish_attempts.json
 events.jsonl
 ```
 
-`render/ffmpeg.log` ainda pode aparecer quando o backend legado FFmpeg for forçado por configuracao, mas o caminho operacional padrao e Remotion.
+Novos jobs registram `render/remotion.log`. FFmpeg permanece apenas nas operacoes de audio, probe e validacao tecnica.
 
 ## 12. Retencao automatica
 

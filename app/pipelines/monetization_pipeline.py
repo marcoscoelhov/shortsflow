@@ -232,7 +232,6 @@ class MonetizationPipeline(BasePipeline):
         elif metadata_ctr.reasons:
             warnings.extend(metadata_ctr.reasons)
         if channel_repetition_report["repetition_risk"] != "low":
-            # ponytail: YouTube permits recurring subjects when each video is materially varied.
             # Similarity remains visible for operators but cannot block a finished original job.
             warnings.append("channel_repetition_warning")
         publish_audit_required = "text_publish_audit_skipped" in publish_readiness["reasons"]

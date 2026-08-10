@@ -30,10 +30,10 @@ def healthcheck() -> dict[str, Any]:
             "llm_gate_judge": settings.llm_gate_judge_provider,
             "llm_gate_judge_model": settings.llm_gate_judge_model,
             "tts_primary": settings.tts_primary_provider,
-            "render_backend": settings.render_primary_backend,
+            "render_backend": "remotion",
         },
         "render": {
-            "primary_backend": settings.render_primary_backend,
+            "primary_backend": "remotion",
             "remotion_ready": bool(remotion["ready"]),
             "remotion_missing_items": remotion["missing_items"],
         },
