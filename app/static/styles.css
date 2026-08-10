@@ -7087,7 +7087,7 @@ textarea {
 
 .decision-player-shell {
   display: grid;
-  justify-items: center;
+  justify-items: stretch;
   gap: 0.45rem;
   padding: 0.55rem;
   border: 1px solid oklch(40% 0.018 28 / 0.62);
@@ -7096,7 +7096,11 @@ textarea {
 }
 
 .decision-player {
-  width: min(100%, 14.5rem);
+  display: block;
+  width: 100%;
+  max-width: none;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
   border-radius: 6px;
   background: oklch(10% 0.008 24);
   box-shadow: none;
@@ -7191,12 +7195,6 @@ textarea {
   font-size: 0.84rem;
 }
 
-@media (max-width: 980px) {
-  .decision-player {
-    width: min(100%, 18rem);
-  }
-}
-
 @media (max-width: 640px) {
   .detail-header-panel .detail-header,
   .job-progress-head {
@@ -7238,10 +7236,6 @@ textarea {
   .job-progress-step strong,
   .job-progress-step small {
     align-self: center;
-  }
-
-  .decision-player {
-    width: min(100%, 16rem);
   }
 }
 
