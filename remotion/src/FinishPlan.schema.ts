@@ -1,16 +1,9 @@
 import {z} from 'zod';
-import type {Caption as RemotionCaption} from '@remotion/captions';
 
 const finiteNumber = z.number().finite();
 const nonNegativeInteger = z.number().int().nonnegative();
 const positiveInteger = z.number().int().positive();
 const safeIdentifier = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
-
-export const CaptionTokenSchema = z.object({
-  text: z.string(),
-  fromMs: nonNegativeInteger,
-  toMs: positiveInteger
-}).refine((token) => token.toMs > token.fromMs, {message: 'caption token must end after it starts'});
 
 export const CaptionItemSchema = z.object({
   idx: z.string(),
@@ -21,21 +14,10 @@ export const CaptionItemSchema = z.object({
   confidence: finiteNumber.nullable(),
   emphasis: z.array(z.string()),
   start_ms: nonNegativeInteger.optional(),
-  end_ms: positiveInteger.optional(),
-  tokens: z.array(CaptionTokenSchema).optional()
+  end_ms: positiveInteger.optional()
 }).superRefine((caption, context) => {
   if (caption.endMs <= caption.startMs) {
     context.addIssue({code: 'custom', message: 'caption must end after it starts'});
-  }
-  let previousTokenEnd = caption.startMs;
-  for (const token of caption.tokens ?? []) {
-    if (token.fromMs < caption.startMs || token.toMs > caption.endMs) {
-      context.addIssue({code: 'custom', message: 'caption token exceeds caption timing', path: ['tokens']});
-    }
-    if (token.fromMs < previousTokenEnd) {
-      context.addIssue({code: 'custom', message: 'caption tokens overlap or are out of order', path: ['tokens']});
-    }
-    previousTokenEnd = token.toMs;
   }
 });
 
@@ -140,10 +122,10 @@ export const FinishPlanSchema = z.object({
     if (scene.end_ms > plan.canvas.duration_ms) {
       context.addIssue({code: 'custom', message: 'scene exceeds composition duration', path: ['scenes']});
     }
-    if (scene.order !== index + 1 || scene.start_ms !== previousSceneEnd) {
-      context.addIssue({code: 'custom', message: 'scenes must be ordered and contiguous', path: ['scenes']});
+    if (scene.order !== index + 1 || scene.start_ms < previousSceneEnd) {
+      context.addIssue({code: 'custom', message: 'scenes must be ordered and non-overlapping', path: ['scenes']});
     }
-    if (scene.duration_ms !== scene.end_ms - scene.start_ms) {
+    if (scene.duration_ms !== Math.max(500, scene.end_ms - scene.start_ms)) {
       context.addIssue({code: 'custom', message: 'scene duration is inconsistent', path: ['scenes']});
     }
     previousSceneEnd = scene.end_ms;
@@ -164,7 +146,7 @@ export const FinishPlanSchema = z.object({
   }
 });
 
-export type CaptionItem = z.infer<typeof CaptionItemSchema> & RemotionCaption;
+export type CaptionItem = z.infer<typeof CaptionItemSchema>;
 export type FinishPlan = z.infer<typeof FinishPlanSchema>;
 export type SceneOverlay = z.infer<typeof SceneOverlaySchema>;
 export type ScenePlan = z.infer<typeof ScenePlanSchema>;

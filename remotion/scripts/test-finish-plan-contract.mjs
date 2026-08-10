@@ -49,7 +49,23 @@ assert.equal(FinishPlanSchema.safeParse({...validPlan, scenes: [validScene, vali
 assert.equal(FinishPlanSchema.safeParse({...validPlan, scenes: [{...validScene, duration_ms: 34000}]}).success, false);
 assert.equal(FinishPlanSchema.safeParse({...validPlan, summary: {...validPlan.summary, scene_count: 2}}).success, false);
 
-const tokenText = ' polvo';
+const producerCompatiblePlan = {
+  ...validPlan,
+  scenes: [
+    {...validScene, end_ms: 250, duration_ms: 500},
+    {
+      ...validScene,
+      scene_id: 'scene-2',
+      order: 2,
+      start_ms: 300,
+      duration_ms: 34700,
+      transition: {kind: 'soft_cut', duration_ms: 160}
+    }
+  ],
+  summary: {...validPlan.summary, scene_count: 2}
+};
+assert.equal(FinishPlanSchema.safeParse(producerCompatiblePlan).success, true);
+
 const captionPlan = {
   ...validPlan,
   caption_track: {
@@ -61,23 +77,18 @@ const captionPlan = {
       endMs: 1000,
       timestampMs: 0,
       confidence: null,
-      emphasis: [],
-      tokens: [
-        {text: 'Um', fromMs: 0, toMs: 240},
-        {text: tokenText, fromMs: 240, toMs: 710}
-      ]
+      emphasis: []
     }]
   },
   summary: {...validPlan.summary, caption_count: 1}
 };
-const parsedCaptionPlan = FinishPlanSchema.parse(captionPlan);
-assert.equal(parsedCaptionPlan.caption_track.items[0].tokens[1].text, tokenText);
+FinishPlanSchema.parse(captionPlan);
 assert.equal(
   FinishPlanSchema.safeParse({
     ...captionPlan,
     caption_track: {
       ...captionPlan.caption_track,
-      items: [{...captionPlan.caption_track.items[0], endMs: 500}]
+      items: [{...captionPlan.caption_track.items[0], endMs: 0}]
     }
   }).success,
   false

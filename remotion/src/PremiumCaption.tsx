@@ -37,15 +37,9 @@ const PremiumCaption: React.FC<{
   const frame = useCurrentFrame();
   const start = msToFrame(captionStartMs(caption), fps);
   const end = msToFrame(captionEndMs(caption), fps);
-  const hasTimedTokens = Boolean(caption.tokens?.length);
-  const textParts = hasTimedTokens ? caption.tokens!.map((token) => token.text) : caption.text.split(' ');
+  const textParts = caption.text.split(' ');
   const localProgress = Math.min(0.999, Math.max(0, (frame - start) / Math.max(1, end - start)));
-  const timedWordIndex = caption.tokens?.findIndex((token) => (
-    frame >= msToFrame(token.fromMs, fps) && frame < msToFrame(token.toMs, fps)
-  ));
-  const activeWordIndex = timedWordIndex !== undefined && timedWordIndex >= 0
-    ? timedWordIndex
-    : weightedActiveWordIndex(textParts, localProgress);
+  const activeWordIndex = weightedActiveWordIndex(textParts, localProgress);
   const fontSize = captionFontSize(caption.text);
   const sideInset = Math.max(108, Number(plan.style.safe_area?.x || 0));
 
@@ -90,12 +84,9 @@ const PremiumCaption: React.FC<{
         }}
       >
         {textParts.map((text, index) => {
-          const token = caption.tokens?.[index];
-          const highlight = token
-            ? wordHighlightProgress(frame, msToFrame(token.fromMs, fps), msToFrame(token.toMs, fps), 0, 1)
-            : wordHighlightProgress(frame, start, end, index, textParts.length);
+          const highlight = wordHighlightProgress(frame, start, end, index, textParts.length);
           return (
-            <React.Fragment key={`${token?.fromMs ?? text}-${index}`}>
+            <React.Fragment key={`${text}-${index}`}>
               <span
                 style={{
                   display: 'inline-block',
@@ -106,7 +97,7 @@ const PremiumCaption: React.FC<{
               >
                 {text}
               </span>
-              {!hasTimedTokens && index < textParts.length - 1 ? ' ' : ''}
+              {index < textParts.length - 1 ? ' ' : ''}
             </React.Fragment>
           );
         })}

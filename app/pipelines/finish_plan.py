@@ -213,7 +213,7 @@ def _caption_item(item: dict[str, Any]) -> dict[str, Any]:
     text = " ".join(str(item.get("text") or "").split())
     start_ms = max(0, int(item.get("start_ms") or 0))
     end_ms = max(start_ms + 1, int(item.get("end_ms") or 0))
-    caption = {
+    return {
         "idx": str(item.get("idx") or ""),
         "startMs": start_ms,
         "endMs": end_ms,
@@ -224,31 +224,6 @@ def _caption_item(item: dict[str, Any]) -> dict[str, Any]:
         "text": text,
         "emphasis": _caption_emphasis(text),
     }
-    tokens = _caption_tokens(item.get("tokens"), start_ms=start_ms, end_ms=end_ms)
-    if tokens:
-        caption["tokens"] = tokens
-    return caption
-
-
-def _caption_tokens(value: Any, *, start_ms: int, end_ms: int) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    tokens: list[dict[str, Any]] = []
-    for raw_token in value:
-        if not isinstance(raw_token, dict):
-            continue
-        text = str(raw_token.get("text") or "")
-        try:
-            token_start = int(raw_token.get("fromMs"))
-            token_end = int(raw_token.get("toMs"))
-        except (TypeError, ValueError):
-            continue
-        if not text or token_start < start_ms or token_end <= token_start or token_end > end_ms:
-            continue
-        tokens.append({"text": text, "fromMs": token_start, "toMs": token_end})
-    return tokens
-
-
 def _caption_emphasis(text: str) -> list[str]:
     words = [word.strip(".,:;!?()[]{}").lower() for word in text.split()]
     candidates = [word for word in words if len(word) >= 6]

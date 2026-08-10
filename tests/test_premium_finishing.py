@@ -1250,49 +1250,6 @@ def test_primary_render_contains_staged_scene_paths_and_cleans_runtime_media(tmp
     assert not (project_dir / "public" / "shortsflow-runtime" / "escape.jpg").exists()
 
 
-def test_primary_render_preserves_caption_token_timing() -> None:
-    job_id = "remotion-caption-token-timing"
-    with SessionLocal() as session:
-        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Sincronia da legenda")
-        session.commit()
-    _add_premium_generation_inputs(job_id)
-    expected_tokens = [
-        {"text": "Um", "fromMs": 0, "toMs": 240},
-        {"text": " polvo", "fromMs": 240, "toMs": 710},
-    ]
-    observed = {}
-
-    class InspectingCaptionRenderer:
-        def render(self, *, plan_path: Path, output_path: Path, log_path: Path) -> list[str]:
-            runtime_plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            observed["tokens"] = runtime_plan["caption_track"]["items"][0].get("tokens")
-            output_path.write_bytes(b"premium-video")
-            log_path.write_text("fake remotion log", encoding="utf-8")
-            return ["remotion", "render", str(output_path)]
-
-    with SessionLocal() as session:
-        subtitles = session.query(SubtitleTrack).filter_by(job_id=job_id).one()
-        items = [dict(item) for item in subtitles.items]
-        items[0]["tokens"] = expected_tokens
-        subtitles.items = items
-        session.commit()
-
-    service = orchestrator.premium_finishing
-    original_renderer = service.renderer
-    original_gate = service.gate
-    service.renderer = InspectingCaptionRenderer()
-    service.gate = FakePremiumGate()
-    try:
-        with SessionLocal() as session:
-            report = service.generate_primary_render(session, job_id)
-    finally:
-        service.renderer = original_renderer
-        service.gate = original_gate
-
-    assert report["passed"] is True
-    assert observed["tokens"] == expected_tokens
-
-
 def test_premium_publish_gate_allows_approval_and_schedule_with_visual_confirmation(monkeypatch) -> None:
     job_id = "premium-publish-gate-pass"
     _create_rendered_job(job_id)

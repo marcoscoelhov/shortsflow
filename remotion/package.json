@@ -10,7 +10,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@remotion/captions": "4.0.507",
     "@remotion/cli": "4.0.507",
     "@remotion/google-fonts": "4.0.507",
     "@remotion/layout-utils": "4.0.507",
