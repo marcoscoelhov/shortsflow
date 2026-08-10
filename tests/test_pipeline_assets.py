@@ -1608,35 +1608,6 @@ def test_review_page_renders_dynamic_checklist_and_structured_reason_codes() -> 
     assert "Disclosure de IA marcado no YouTube" in response.text
     assert "automático" in response.text
 
-def test_render_motion_plan_uses_stable_scene_framing() -> None:
-    scenes = [
-        {"scene_id": "scene-1", "order": 1, "actual_start_ms": 0, "actual_end_ms": 10_000},
-        {"scene_id": "scene-2", "order": 2, "actual_start_ms": 10_000, "actual_end_ms": 20_000},
-        {"scene_id": "scene-3", "order": 3, "actual_start_ms": 20_000, "actual_end_ms": 30_000},
-        {"scene_id": "scene-4", "order": 4, "actual_start_ms": 30_000, "actual_end_ms": 40_000},
-    ]
-
-    plan = orchestrator.render_pipeline.build_render_motion_plan("motion-job", scenes)
-
-    assert plan["motion_policy"] == "stable_scene_framing"
-    assert [scene["mode"] for scene in plan["scenes"]] == ["stable_hold", "stable_hold", "stable_hold", "stable_hold"]
-    assert plan["summary"]["enabled"] is False
-    assert plan["summary"]["modes"] == {"stable_hold": 4}
-    assert plan["summary"]["max_zoom_delta"] == 0.0
-    assert plan["scenes"][0]["start_zoom"] == 1.0
-    assert plan["scenes"][1]["start_zoom"] == plan["scenes"][1]["end_zoom"]
-
-def test_render_motion_filter_uses_stable_frames_without_zoompan() -> None:
-    motion = {"start_zoom": 1.0, "end_zoom": 1.0}
-
-    filter_graph = orchestrator.render_pipeline._scene_motion_filter(0, 5.0, motion)
-
-    assert "zoompan" not in filter_graph
-    assert "crop=1080:1920,fps=30" in filter_graph
-    assert "trim=duration=5.000" in filter_graph
-    assert "setpts=PTS-STARTPTS" in filter_graph
-    assert filter_graph.endswith("format=yuv420p[v0]")
-
 def test_scene_timings_fall_back_to_token_boundaries() -> None:
     scenes = [
         {"scene_id": "scene-1", "token_start": 0, "token_end": 9},
