@@ -48,6 +48,23 @@ def test_accepts_same_staged_sha_that_fast_forwards_main(promotion_repo: tuple[P
     assert_safe_staging_promotion(staged_revision, repo=repo)
 
 
+def test_accepts_staged_merge_commit_that_still_fast_forwards_main(
+    promotion_repo: tuple[Path, str, str],
+) -> None:
+    repo, main_revision, _staged_revision = promotion_repo
+    _git(repo, "switch", "--detach", main_revision)
+    (repo / "parallel.txt").write_text("parallel staged work\n", encoding="utf-8")
+    _git(repo, "add", "parallel.txt")
+    _git(repo, "commit", "-m", "parallel staged work")
+    merged_revision = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "switch", "staging")
+    _git(repo, "merge", "--no-ff", merged_revision, "-m", "reconcile staged work")
+    staged_revision = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "update-ref", "refs/remotes/origin/staging", staged_revision)
+
+    assert_safe_staging_promotion(staged_revision, repo=repo)
+
+
 def test_rejects_feature_sha_not_reachable_from_staging(promotion_repo: tuple[Path, str, str]) -> None:
     repo, main_revision, _staged_revision = promotion_repo
     _git(repo, "switch", "--detach", main_revision)

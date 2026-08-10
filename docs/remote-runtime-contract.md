@@ -96,6 +96,10 @@ git push origin <SHA-VALIDADO>:refs/heads/main
 
 Esse bootstrap continua sujeito à proteção de `main`; ele não usa force-push e
 o servidor rejeita qualquer corrida que deixe a atualização não fast-forward.
+Como `staging` pode conter commits de reconciliação, a proteção de `main` não
+deve exigir histórico linear: essa regra rejeitaria o mesmo SHA já validado. A
+linearidade da promoção é garantida pela checagem de ancestralidade e pelo push
+fast-forward sem `--force`.
 
 GitHub Actions entra na tailnet com identidade efêmera e aciona um usuário
 `deploy` sem acesso geral de root. O deploy:
