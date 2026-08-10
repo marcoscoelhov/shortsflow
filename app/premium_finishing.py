@@ -245,18 +245,22 @@ class PremiumFinishingService:
         shutil.rmtree(public_dir, ignore_errors=True)
         ensure_dir(public_dir)
         staged = json.loads(json.dumps(self.owner._serialize_for_json(plan), ensure_ascii=False))
-        used_names: set[str] = set()
+        used_scene_ids: set[str] = set()
         for index, scene in enumerate(staged.get("scenes") or []):
             if not isinstance(scene, dict):
                 continue
+            base_stem = self._safe_runtime_component(scene.get("scene_id"), fallback=f"scene-{index + 1}")
+            stem = base_stem
+            collision_index = 2
+            while stem in used_scene_ids:
+                stem = f"{base_stem}-{collision_index}"
+                collision_index += 1
+            used_scene_ids.add(stem)
+            scene["scene_id"] = stem
             source = self._local_media_path(scene.get("asset_uri") or scene.get("asset_path"))
             if source is None or not source.exists():
                 continue
-            stem = self._safe_runtime_component(scene.get("scene_id"), fallback=f"scene-{index + 1}")
             candidate = f"{stem}{source.suffix or '.jpg'}"
-            if candidate in used_names:
-                candidate = f"{stem}-{index + 1}{source.suffix or '.jpg'}"
-            used_names.add(candidate)
             target = (public_dir / candidate).resolve()
             if not target.is_relative_to(public_dir.resolve()):
                 raise FatalStepError("destino de asset Remotion fora do staging permitido")

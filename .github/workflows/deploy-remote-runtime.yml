@@ -75,7 +75,9 @@ jobs:
           npm ci
           npm ci --prefix remotion
       - name: Typecheck Remotion
-        run: npm run typecheck --prefix remotion
+        run: |
+          npm run test:contract --prefix remotion
+          npm run typecheck --prefix remotion
       - name: Audit JavaScript dependencies
         run: |
           npm audit --audit-level=high

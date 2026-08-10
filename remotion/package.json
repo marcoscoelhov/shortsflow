@@ -1,17 +1,24 @@
 {
   "name": "shortsflow-premium-remotion",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "scripts": {
     "studio": "remotion studio src/index.ts",
     "render": "remotion render src/index.ts ShortsFlowPremiumShort",
+    "test:contract": "node --experimental-strip-types scripts/test-finish-plan-contract.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@remotion/cli": "4.0.481",
+    "@remotion/captions": "4.0.507",
+    "@remotion/cli": "4.0.507",
+    "@remotion/google-fonts": "4.0.507",
+    "@remotion/layout-utils": "4.0.507",
+    "@remotion/media": "4.0.507",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "remotion": "4.0.481"
+    "remotion": "4.0.507",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/react": "^18.2.79",

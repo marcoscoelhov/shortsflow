@@ -1120,7 +1120,7 @@ def test_survival_overlay_labels_fall_back_neutrally_without_changing_generic_pl
 
 
 def test_premium_caption_highlight_uses_only_current_word() -> None:
-    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumCaption.tsx").read_text(encoding="utf-8")
 
     assert "caption.emphasis.includes" not in source
     assert "index === activeWordIndex" in source
@@ -1138,9 +1138,8 @@ def test_premium_scene_crossfade_never_fades_both_scenes_to_black() -> None:
 
 
 def test_premium_caption_component_keeps_lateral_breathing_room() -> None:
-    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumShort.tsx").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumCaption.tsx").read_text(encoding="utf-8")
 
-    assert "captionSideInset" in source
     assert "Math.max(108" in source
     assert "maxWidth: 840" in source
     assert "padding: '8px 28px 10px'" in source
@@ -1196,6 +1195,7 @@ def test_primary_render_contains_staged_scene_paths_and_cleans_runtime_media(tmp
 
         def render(self, *, plan_path: Path, output_path: Path, log_path: Path) -> list[str]:
             runtime_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            assert [scene["scene_id"] for scene in runtime_plan["scenes"]] == ["escape", "escape-2"]
             asset_src = runtime_plan["scenes"][0]["asset_src"]
             staged_path = (project_dir / "public" / asset_src).resolve()
             runtime_job_dir = (project_dir / "public" / "shortsflow-runtime" / job_id).resolve()
@@ -1210,8 +1210,27 @@ def test_primary_render_contains_staged_scene_paths_and_cleans_runtime_media(tmp
         scene_plan = session.query(ScenePlan).filter_by(job_id=job_id).one()
         scenes = [dict(scene) for scene in scene_plan.scenes]
         scenes[0]["scene_id"] = "../escape"
+        scenes[0]["actual_end_ms"] = 17_500
+        scenes.append({**scenes[0], "scene_id": "..?escape", "order": 2, "actual_start_ms": 17_500, "actual_end_ms": 35_000})
         scene_plan.scenes = scenes
-        session.query(SceneAsset).filter_by(job_id=job_id).one().scene_id = "../escape"
+        existing_asset = session.query(SceneAsset).filter_by(job_id=job_id).one()
+        existing_asset.scene_id = "../escape"
+        session.add(
+            SceneAsset(
+                asset_id=f"{job_id}-asset-2",
+                job_id=job_id,
+                scene_id="..?escape",
+                schema_version="1.0.0",
+                content_hash="asset-hash-2",
+                provider="test",
+                kind="image",
+                uri=existing_asset.uri,
+                width=1080,
+                height=1920,
+                selected=True,
+                scores={},
+            )
+        )
         session.commit()
 
     service = orchestrator.premium_finishing
@@ -1229,6 +1248,49 @@ def test_primary_render_contains_staged_scene_paths_and_cleans_runtime_media(tmp
     assert report["passed"] is True
     assert not observed["runtime_job_dir"].exists()
     assert not (project_dir / "public" / "shortsflow-runtime" / "escape.jpg").exists()
+
+
+def test_primary_render_preserves_caption_token_timing() -> None:
+    job_id = "remotion-caption-token-timing"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="monetization_review", seed_theme="Sincronia da legenda")
+        session.commit()
+    _add_premium_generation_inputs(job_id)
+    expected_tokens = [
+        {"text": "Um", "fromMs": 0, "toMs": 240},
+        {"text": " polvo", "fromMs": 240, "toMs": 710},
+    ]
+    observed = {}
+
+    class InspectingCaptionRenderer:
+        def render(self, *, plan_path: Path, output_path: Path, log_path: Path) -> list[str]:
+            runtime_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            observed["tokens"] = runtime_plan["caption_track"]["items"][0].get("tokens")
+            output_path.write_bytes(b"premium-video")
+            log_path.write_text("fake remotion log", encoding="utf-8")
+            return ["remotion", "render", str(output_path)]
+
+    with SessionLocal() as session:
+        subtitles = session.query(SubtitleTrack).filter_by(job_id=job_id).one()
+        items = [dict(item) for item in subtitles.items]
+        items[0]["tokens"] = expected_tokens
+        subtitles.items = items
+        session.commit()
+
+    service = orchestrator.premium_finishing
+    original_renderer = service.renderer
+    original_gate = service.gate
+    service.renderer = InspectingCaptionRenderer()
+    service.gate = FakePremiumGate()
+    try:
+        with SessionLocal() as session:
+            report = service.generate_primary_render(session, job_id)
+    finally:
+        service.renderer = original_renderer
+        service.gate = original_gate
+
+    assert report["passed"] is True
+    assert observed["tokens"] == expected_tokens
 
 
 def test_premium_publish_gate_allows_approval_and_schedule_with_visual_confirmation(monkeypatch) -> None:
