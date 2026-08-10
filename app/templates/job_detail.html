@@ -43,15 +43,13 @@
     Job {{ job.job_id[:8] }} atualizado. Status {{ job_status_label(job.status) }}. Progresso {{ progress.percent }}%, {{ progress.current_label }}.
   </p>
   <nav class="job-local-nav" aria-label="Seções do job">
-    <a href="#decisao-job">Decidir</a>
-    <a href="#video-final">Vídeo</a>
+    <a href="#decisao-job">Revisar</a>
     <a href="#progresso-job">Progresso</a>
     <a href="#qualidade-job">Qualidade</a>
     <a href="#agenda-job">Agenda</a>
   </nav>
   <div class="job-mobile-tabs" role="tablist" aria-label="Tarefas do job">
-    <button type="button" role="tab" aria-selected="true" data-job-tab="decidir">Decidir</button>
-    <button type="button" role="tab" aria-selected="false" data-job-tab="video">Vídeo</button>
+    <button type="button" role="tab" aria-selected="true" data-job-tab="decidir">Revisar</button>
     <button type="button" role="tab" aria-selected="false" data-job-tab="progresso">Progresso</button>
     <button type="button" role="tab" aria-selected="false" data-job-tab="qualidade">Qualidade</button> <!-- tab kept for mobile, no duplicate controls -->
     <button type="button" role="tab" aria-selected="false" data-job-tab="conteudo">Conteúdo</button>
@@ -107,73 +105,29 @@
         </div>
         <span class="badge {{ job.status }}">{{ job_status_label(job.status) }}</span>
       </div>
-      <div class="focus-strip">
-        <div class="focus-pill">
-          <strong>Próxima ação</strong>
-          <span>{{ job_next_action(job.status, schedule_status) }}</span>
-        </div>
-        <div class="focus-pill">
-          <strong>Progresso</strong>
-          <span>{{ progress.percent }}% · {{ progress.current_label }}</span>
-        </div>
-        <div class="focus-pill">
-          <strong>Origem</strong>
-          <span title="{{ details.job_origin.description }}">{{ details.job_origin.label }}</span>
-        </div>
-        <div class="focus-pill">
-          <strong>Via</strong>
-          <span title="{{ details.creation_via.description }}">{{ details.creation_via.label }}</span>
-        </div>
+      <div class="detail-header-meta" aria-label="Resumo do job">
+        <span title="{{ details.job_origin.description }}">{{ details.job_origin.label }}</span>
+        <span title="{{ details.creation_via.description }}">via {{ details.creation_via.label }}</span>
         {% if publication_schedule_display %}
-        <div class="focus-pill">
-          <strong>Agenda</strong>
-          <span>{{ schedule_status_label(publication_schedule_display.status) }}</span>
-        </div>
+        <span>{{ schedule_status_label(publication_schedule_display.status) }}</span>
         {% endif %}
         {% if render %}
-        <div class="focus-pill">
-          <strong>Duração</strong>
-          <span>{{ (render.duration_ms / 1000)|round(1) }} s</span>
-        </div>
+        <span>{{ (render.duration_ms / 1000)|round(1) }} s</span>
         {% endif %}
       </div>
     </section>
-
-    {% if diagnosis.visible %}
-    <section class="panel status-banner error-banner">
-      <strong>{{ diagnosis.title }}</strong>
-      <p>{{ diagnosis.cause }}</p>
-      <p>{{ diagnosis.action }}</p>
-      {% if diagnosis.problem_items %}
-      <div class="job-problem-list" aria-label="Problemas específicos do job">
-        {% for item in diagnosis.problem_items %}
-        <article class="job-problem-item">
-          <span>{{ item.kind }}</span>
-          <strong>{{ item.title }}</strong>
-          <p>{{ item.cause }}</p>
-          <small>{{ item.action }}</small>
-        </article>
-        {% endfor %}
-      </div>
-      {% endif %}
-      {% if diagnosis.evidence %}
-      <details class="inline-disclosure">
-        <summary aria-label="Abrir evidências da falha">Evidências da falha</summary>
-        <pre>{% for item in diagnosis.evidence %}{{ item }}
-{% endfor %}</pre>
-      </details>
-      {% endif %}
-    </section>
-    {% endif %}
 
     <section id="progresso-job" class="panel job-progress-panel" data-job-panel="progresso" role="tabpanel">
       <div class="job-progress-head">
         <div>
-          <p class="eyebrow">Progresso do job</p>
-          <h3>{{ progress.current_label }}</h3>
+          <p class="eyebrow">Pipeline</p>
+          <h3>{% if progress.state == "completed" %}Processamento concluído{% else %}{{ progress.current_label }}{% endif %}</h3>
           <p>{{ progress.summary }}</p>
         </div>
-        <strong>{{ progress.percent }}%</strong>
+        <div class="job-progress-count">
+          <strong>{{ progress.percent }}%</strong>
+          <span>{{ progress.completed_steps }} de {{ progress.total_steps }} etapas</span>
+        </div>
       </div>
       <div
         class="job-progress-bar"
@@ -185,10 +139,10 @@
       >
         <span class="job-progress-fill {{ progress.state }}" style="width: {{ progress.percent }}%"></span>
       </div>
-      <div class="job-progress-steps" aria-label="Etapas do pipeline">
+      <div class="job-progress-steps" aria-label="Etapas do pipeline" role="list">
         {% for step in progress.steps %}
-        <div class="job-progress-step {{ step.status }}">
-          <span>{{ step.index }}</span>
+        <div class="job-progress-step {{ step.status }}" role="listitem" aria-label="{{ step.label }}: {{ step.status }}">
+          <span aria-hidden="true">{% if step.status == "completed" %}✓{% else %}{{ step.index }}{% endif %}</span>
           <strong>{{ step.label }}</strong>
           {% if step.duration_ms %}
           <small>{{ (step.duration_ms / 1000)|round(1) }} s</small>
@@ -205,48 +159,6 @@
       {% if progress.last_event %}
       <p class="job-progress-last">Último evento: {{ progress.last_event.event_name }} · {{ progress.last_event.status }}</p>
       {% endif %}
-    </section>
-
-    <section id="video-final" class="panel featured-render minimal-featured-render" data-job-panel="video" role="tabpanel">
-      <div class="featured-player-shell">
-        {% if render %}
-        <video class="featured-player" controls preload="metadata" playsinline poster="{{ artifact_url(render.poster_uri) }}" src="{{ artifact_url(render.video_uri) }}"></video>
-        {% elif artifacts_cleaned %}
-        <div class="empty-state-card">
-          <strong>Os arquivos de mídia deste job já foram removidos.</strong>
-          <p>O registro do job continua aqui, mas arquivo final, áudio e assets expiraram pela política de retenção.</p>
-        </div>
-        {% else %}
-        <div class="empty-state-card">
-          <strong>Arquivo final ainda não disponível.</strong>
-          <p>Aguarde o render terminar para revisar aqui.</p>
-        </div>
-        {% endif %}
-      </div>
-      <div class="featured-copy">
-        <p class="eyebrow">Revisão</p>
-        <h3>Revise o vídeo final</h3>
-        <div class="compact-checklist">
-          <span>1. Assista ao vídeo renderizado</span>
-          <span>2. Ajuste título e descrição, se precisar</span>
-          <span>3. Aprove ou rejeite o job</span>
-          <span>4. Agende a publicação</span>
-        </div>
-        {% if artifacts_cleaned %}
-        <p class="publication-note">Os artefatos pesados já expiraram. Os metadados e o histórico do job continuam disponíveis abaixo.</p>
-        {% endif %}
-        {% if render %}
-        <div class="featured-meta">
-          <span>{{ render.resolution }}</span>
-          <span>{{ render.video_codec }} + {{ render.audio_codec }}</span>
-          <span>{{ (render.duration_ms / 1000)|round(1) }} s</span>
-        </div>
-        <div class="featured-actions">
-          <a class="button-link" href="{{ artifact_url(render.video_uri) }}" target="_blank" rel="noopener">Abrir vídeo</a>
-          <a class="button-link ghost-link" href="{{ artifact_url(render.poster_uri) }}" target="_blank" rel="noopener">Abrir poster</a>
-        </div>
-        {% endif %}
-      </div>
     </section>
 
     <details id="qualidade-job" class="panel collapse-panel" data-job-panel="qualidade" role="tabpanel" {% if monetization.get("hard_blockers") %}open{% endif %}>
@@ -462,14 +374,68 @@
         <pre>{{ job.artifact_index or {} }}</pre>
       </div>
     </details>
+
+    {% if diagnosis.visible %}
+    <details class="panel job-notice-drawer" data-job-panel="tecnico" role="tabpanel">
+      <summary>
+        <span>
+          <strong>Pontos para conferir</strong>
+          <small>{{ diagnosis.title }}</small>
+        </span>
+        <span class="badge monetization_review">{{ diagnosis.problem_items|length or 1 }}</span>
+      </summary>
+      <div class="job-notice-body">
+        <p>{{ diagnosis.cause }}</p>
+        <p>{{ diagnosis.action }}</p>
+        {% if diagnosis.problem_items %}
+        <div class="job-problem-list" aria-label="Pontos específicos para conferir">
+          {% for item in diagnosis.problem_items %}
+          <article class="job-problem-item">
+            <span>{{ item.kind }}</span>
+            <strong>{{ item.title }}</strong>
+            <p>{{ item.cause }}</p>
+            <small>{{ item.action }}</small>
+          </article>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if diagnosis.evidence %}
+        <details class="inline-disclosure">
+          <summary aria-label="Abrir evidências">Evidências</summary>
+          <pre>{% for item in diagnosis.evidence %}{{ item }}
+{% endfor %}</pre>
+        </details>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
   </div>
 
   <aside class="side-column" data-job-panel="decidir" role="tabpanel">
     <section id="decisao-job" class="panel sticky workflow-focus">
       <div class="focus-step {% if is_approved %}completed{% elif can_approve or can_reject or can_retry %}active{% endif %}">
-        <p class="eyebrow">Passo 1</p>
-        <h3>Decidir revisão</h3>
-        <p class="publication-note">Aprovar libera para agendamento. Revisão final e upload manual no YouTube Studio. Rejeitar ou refazer exige motivo.</p>
+        <p class="eyebrow">Revisão final</p>
+        <h3>Assista e decida</h3>
+        <div id="video-final" class="decision-player-shell">
+          {% if render %}
+          <video class="decision-player" controls preload="metadata" playsinline poster="{{ artifact_url(render.poster_uri) }}" src="{{ artifact_url(render.video_uri) }}"></video>
+          <div class="decision-player-meta">
+            <span>{{ (render.duration_ms / 1000)|round(1) }} s</span>
+            <a href="{{ artifact_url(render.video_uri) }}" target="_blank" rel="noopener">Abrir em nova aba</a>
+          </div>
+          {% elif artifacts_cleaned %}
+          <div class="empty-state-card">
+            <strong>Os arquivos de mídia deste job já foram removidos.</strong>
+            <p>O histórico do job continua disponível.</p>
+          </div>
+          {% else %}
+          <div class="empty-state-card">
+            <strong>Vídeo ainda não disponível.</strong>
+            <p>Aguarde o render para revisar.</p>
+          </div>
+          {% endif %}
+        </div>
+        <p class="publication-note">Confira imagem, áudio e legendas. Ao aprovar, o job segue para a agenda.</p>
         {% if can_reprocess_tts %}
         <form method="post" action="/jobs/{{ job.job_id }}/reprocess" class="review-form">
           <input type="hidden" name="from_step" value="tts">
@@ -496,8 +462,9 @@
           {% endif %}
           {% if can_approve %}
           <div class="button-row action-stack review-primary-action">
-            <button type="submit" name="action" value="approve">Aprovar para agendamento (revisão final no YouTube Studio)</button>
+            <button type="submit" name="action" value="approve">Aprovar e seguir para agenda</button>
           </div>
+          <p class="field-help">O upload continua sob revisão final no YouTube Studio.</p>
           {% endif %}
           <details class="inline-disclosure">
             <summary aria-label="Abrir motivos para rejeitar ou refazer">Motivos para rejeitar ou refazer</summary>
@@ -754,7 +721,7 @@
     const hashToTab = {
       "#decisao-job": "decidir",
       "#agenda-job": "decidir",
-      "#video-final": "video",
+      "#video-final": "decidir",
       "#progresso-job": "progresso",
       "#qualidade-job": "qualidade",
     };

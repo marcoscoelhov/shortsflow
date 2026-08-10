@@ -318,7 +318,7 @@ def test_job_detail_can_confirm_originality_for_repetition_blocker() -> None:
 
     assert response.status_code == 200
     assert 'name="confirmation_codes" value="originality_confirmed"' in response.text
-    assert "Aprovar para agendamento (revisão final no YouTube Studio)" in response.text
+    assert "Aprovar e seguir para agenda" in response.text
 
 
 def test_hub_create_job_sends_title_mode_tone_angle_and_seo_notes(monkeypatch) -> None:
@@ -2639,7 +2639,7 @@ def test_job_detail_shows_visual_review_report_as_auxiliary_evidence() -> None:
     assert "Revisão visual auxiliar" in response.text
     assert "codex_vision" in response.text
     assert "Frames revisados sem desvio visual relevante." in response.text
-    assert "Aprovar para agendamento (revisão final no YouTube Studio)" in response.text
+    assert "Aprovar e seguir para agenda" in response.text
 
 
 def test_retention_sweep_keeps_publishable_jobs_longer_and_job_detail_handles_cleanup() -> None:
