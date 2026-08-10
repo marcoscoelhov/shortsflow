@@ -90,8 +90,6 @@ tests/
   test_pipeline_assets.py
   test_pipeline_script.py
   test_providers_integrations.py
-legacy/
-  README.md
 docs/
   app.md
   runbook-inicializacao.md

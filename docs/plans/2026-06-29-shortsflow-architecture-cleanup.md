@@ -41,7 +41,7 @@ These decisions are canonical for this plan:
   - `quality_summary` high-level keys;
   - Hub routes unless the task explicitly preserves redirects via router extraction.
 - Keep tests deterministic and cheap; use mock providers in tests.
-- Do not import anything from `legacy/` into runtime, tests, CLI, or scripts.
+- Do not recreate the deleted `legacy/` quarantine; recover old implementations from Git history when needed.
 - Existing working tree is dirty. Each agent must inspect relevant diffs before editing and avoid unrelated changes.
 
 ## Baseline Evidence From Diagnosis

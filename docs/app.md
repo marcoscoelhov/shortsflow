@@ -9,12 +9,12 @@ Em linguagem simples, ele funciona como uma linha de producao local: recebe uma 
 Blocos principais:
 
 - `app/main.py`: rotas FastAPI, SSR com Jinja2, formularios do hub, calendario e OAuth do YouTube.
-- `app/hub_context.py`: builders de contexto do hub, listas de jobs, dashboard de publicacao, calendario e status operacional.
+- `app/hub_context.py`: interface publica do contexto SSR do hub; registra helpers de template e concentra lista, dashboard, calendario e detalhe de job.
+- `app/hub_jobs_context.py`, `app/hub_calendar_context.py`, `app/hub_publication_context.py`: implementacao interna dos contextos especializados, com dependencias explicitas e tipadas.
 - `app/orchestrator.py`: worker, maquina de estados do job, retries, lease, eventos e delegacao de steps.
 - `app/publication_ops.py`: review, publicacao, agenda por canal, sync YouTube/TikTok e sweep de retencao de artefatos.
 - `app/pipelines/`: etapas especializadas do pipeline.
 - `app/providers/`: providers de texto, imagem, TTS, musica e fallback.
-- `legacy/`: quarentena temporaria de codigo removido do runtime ativo e mantido apenas para auditoria antes da exclusao.
 - `app/routes/`: routers isolados, hoje com `/healthz`.
 - `app/youtube_api.py`: integracao OAuth e upload real via YouTube Data API.
 - `app/models.py`: persistencia SQLAlchemy de jobs, agenda, review, erros, retries, telemetria e artefatos logicos.
@@ -40,7 +40,7 @@ Mapa de ownership para novas mudancas:
 
 `app/providers/__init__.py` e apenas marcador de package. Novas implementacoes devem entrar no modulo dono dentro de `app/providers/`, e consumidores devem importar diretamente desse modulo.
 
-`app/main.py` ainda concentra rotas SSR principais. Para manter o contexto pequeno, novas regras de consulta, agregacao ou apresentacao de estado devem ir para `HubContext` ou para `PublicationOperations`; a rota deve apenas validar formulario, chamar o dono e redirecionar.
+`app/main.py` ainda concentra rotas SSR principais. Ele consome somente a interface publica de `HubContext`; os contextos especializados sao detalhes internos. Novas regras de consulta, agregacao ou apresentacao de estado devem ir para o modulo de contexto dono, enquanto a rota apenas valida formulario, chama a interface e redireciona.
 
 Testes novos devem preferir a suite de dominio correspondente: `test_pipeline_script.py`, `test_pipeline_assets.py`, `test_hub_publication.py`, `test_orchestrator_flow.py`, `test_providers_integrations.py` ou `test_deep_modules_unit.py`.
 
@@ -535,6 +535,9 @@ Para mudar UX do hub:
 
 - `app/main.py`
 - `app/hub_context.py`
+- `app/hub_jobs_context.py`
+- `app/hub_calendar_context.py`
+- `app/hub_publication_context.py`
 - `app/templates/*.html`
 - `app/static/styles.css`
 

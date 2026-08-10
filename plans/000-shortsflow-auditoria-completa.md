@@ -55,7 +55,7 @@ painel somente depois do gate de negocio definido pelo operador.
 | YouTube/TikTok e futuros destinos | Extensao | `PublicationChannel`, mantendo policy no core. |
 | Remotion e render legado | Extensao interna | `RenderBackend`; Remotion continua default. |
 | Politica editorial de nicho | Perfil declarativo | Nao e plugin executavel; e configuracao versionada validada. |
-| `legacy/` | Podar | Nenhum import ativo; quarentena ja cumpriu seu papel. |
+| `legacy/` | Podado | Quarentena excluida; recuperacao permanece no historico Git. |
 | Constantes visuais duplicadas no orquestrador | Podar | Copias mortas; owner ativo e `image_assets.py`. |
 | Referencias residuais a Ponytail | Podar | Plugin/script nao existe no tree; remover comentarios de proveniencia e corrigir docs Wayfinder que ainda o tratam como ativo. |
 | `app/static/replicar-shortsflow-prompt.md` | Investigar/podar | Sem referencia ativa encontrada; confirmar uso manual antes de excluir. |
@@ -82,7 +82,7 @@ painel somente depois do gate de negocio definido pelo operador.
 | 15 | Nicho suportado e configuracao sao globais | Arquitetura | Bloqueador | L | HIGH | `schemas.py:9-45`, `config.py:50`, `base.html:171` |
 | 16 | Registries ainda exigem editar core para novo provider | Arquitetura | Medio | M/L | MED | `providers/registry.py:10-27`, `llm_routing.py:454-485` |
 | 17 | Hotspots excedem o contexto recomendado | Manutencao | Alto | L | MED | `automation.py`, `monetization_pipeline.py`, `orchestrator.py` |
-| 18 | Quarentena e constantes mortas poluem contexto | Poda | Baixo/medio | S | LOW | `legacy/README.md`, `orchestrator.py:126-199` |
+| 18 | Constantes mortas poluem contexto | Poda parcial | Baixo/medio | S | LOW | `orchestrator.py:126-199`; quarentena `legacy/` ja excluida |
 | 19 | Docs/comentarios ainda apresentam Ponytail como componente ativo | Poda | Baixo | S | LOW | `monetization_pipeline.py:242`, `premium_publish_gate.py:84`, `docs/wayfinder/` |
 
 ### Achados de direcao

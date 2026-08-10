@@ -416,7 +416,7 @@ A cobertura principal inclui:
 - OAuth do YouTube
 - retencao de artefatos
 
-Codigo legado que saiu do runtime ativo fica temporariamente em `legacy/` para auditoria e exclusao futura. Nada ali deve ser importado por app, testes, CLI ou scripts.
+Codigo removido do runtime nao permanece em uma quarentena dentro do repositorio. O historico Git e a fonte para auditoria ou recuperacao de implementacoes antigas.
 
 ## Arquitetura e manutencao por IA
 
