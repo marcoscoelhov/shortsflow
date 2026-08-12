@@ -23,6 +23,22 @@ def test_vision_json_parser_accepts_fence_trailing_text_and_duplicate_object(mon
     get_settings.cache_clear()
 
 
+def test_vision_json_parser_sanitizes_gemini_apostrophe_escape(monkeypatch) -> None:
+    monkeypatch.setenv("SHORTSFLOW_USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", "disabled")
+    get_settings.cache_clear()
+    verifier = SemanticVerifier()
+    # Gemini às vezes emite \' (apóstrofo escapado), inválido em JSON estrito
+    content = '{"description": "marcas d\\\'água e sem artefatos", "aligned_boolean": true, "alignment_score_0_to_1": 0.9}'
+
+    data = verifier._parse_vision_json(content, provider="gemini_vision")
+
+    assert data["alignment_score_0_to_1"] == 0.9
+    assert "água" in data["description"]
+
+    get_settings.cache_clear()
+
+
 def test_gemini_vision_flag_enabled_only_with_provider_and_key(monkeypatch) -> None:
     monkeypatch.setenv("SHORTSFLOW_USE_MOCK_PROVIDERS", "false")
     monkeypatch.setenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", "gemini")

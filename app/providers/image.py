@@ -317,8 +317,11 @@ class SemanticVerifier:
         first_json = content.find("{")
         if first_json == -1:
             raise ProviderFailure(provider, f"invalid vision output: {content[:200]}")
+        # Gemini às vezes emite escape inválido \' (apóstrofo) que o JSON estrito rejeita;
+        # ''\'' nunca é uma sequência de escape válida em JSON, então a troca é segura.
+        sanitized = content.replace("\\'", "'")
         try:
-            data, _ = json.JSONDecoder().raw_decode(content[first_json:])
+            data, _ = json.JSONDecoder().raw_decode(sanitized[first_json:])
         except json.JSONDecodeError as exc:
             raise ProviderFailure(provider, f"invalid vision output: {content[:200]}") from exc
         if not isinstance(data, dict):
