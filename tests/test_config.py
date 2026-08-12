@@ -69,6 +69,15 @@ def test_vision_verifier_provider_rejects_unknown_provider(monkeypatch) -> None:
         Settings(_env_file=None, vision_verifier_provider="local_openai")
 
 
+def test_vision_verifier_provider_accepts_gemini(monkeypatch) -> None:
+    monkeypatch.delenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", raising=False)
+
+    settings = Settings(_env_file=None, vision_verifier_provider="gemini")
+
+    assert settings.vision_verifier_provider == "gemini"
+    assert settings.gemini_vision_model == "gemini-3.5-flash"
+
+
 @pytest.mark.parametrize("field", ["openai_reasoning_effort", "xai_reasoning_effort"])
 def test_reasoning_effort_rejects_unknown_values(field: str) -> None:
     with pytest.raises(ValidationError, match="reasoning effort must be one of"):

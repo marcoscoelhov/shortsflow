@@ -96,6 +96,7 @@ class Settings(BaseSettings):
     asset_generation_parallelism: int = 4
     vision_verifier_provider: str = "disabled"
     vision_verifier_timeout_sec: float = 240.0
+    gemini_vision_model: str = "gemini-3.5-flash"
     background_music_enabled: bool = True
     background_music_provider: str = "local_bank"
     background_music_gain_db: float = -17.0
@@ -338,9 +339,9 @@ class Settings(BaseSettings):
     @classmethod
     def validate_vision_verifier_provider(cls, value: str) -> str:
         normalized = value.strip().lower()
-        allowed = {"minimax_mmx", "disabled"}
+        allowed = {"minimax_mmx", "gemini", "disabled"}
         if normalized not in allowed:
-            raise ValueError("vision_verifier_provider must be one of: minimax_mmx, disabled")
+            raise ValueError("vision_verifier_provider must be one of: minimax_mmx, gemini, disabled")
         return normalized
 
     @field_validator("background_music_provider")

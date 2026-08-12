@@ -23,6 +23,50 @@ def test_vision_json_parser_accepts_fence_trailing_text_and_duplicate_object(mon
     get_settings.cache_clear()
 
 
+def test_gemini_vision_flag_enabled_only_with_provider_and_key(monkeypatch) -> None:
+    monkeypatch.setenv("SHORTSFLOW_USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", "gemini")
+    monkeypatch.setenv("SHORTSFLOW_GEMINI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    verifier = SemanticVerifier()
+
+    assert verifier.provider == "gemini"
+    assert verifier.gemini_enabled is True
+    assert verifier.gemini_model == "gemini-3.5-flash"
+    assert verifier.mmx_enabled is False
+    assert verifier.enabled is True
+
+    get_settings.cache_clear()
+
+
+def test_gemini_vision_parse_and_score_mapping(monkeypatch) -> None:
+    monkeypatch.setenv("SHORTSFLOW_USE_MOCK_PROVIDERS", "false")
+    monkeypatch.setenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", "gemini")
+    monkeypatch.setenv("SHORTSFLOW_GEMINI_API_KEY", "test-key")
+    get_settings.cache_clear()
+    verifier = SemanticVerifier()
+
+    raw = json.dumps(
+        {
+            "description": "estrada vazia, não é eclipse",
+            "aligned_boolean": False,
+            "alignment_score_0_to_1": 0.2,
+            "subject_visibility_score_0_to_1": 0.1,
+            "style_match_score_0_to_1": 0.3,
+            "text_or_watermark_penalty_0_to_1": 0.0,
+            "artifact_penalty_0_to_1": 0.1,
+            "reasons": ["assunto errado"],
+        }
+    )
+    data = verifier._parse_vision_json(raw, provider="gemini_vision")
+    scores = verifier._vision_data_to_scores(data)
+
+    assert scores["semantic_match"] == 0.2
+    assert scores["vision_aligned"] is False
+
+    get_settings.cache_clear()
+
+
 def test_candidate_scoring_does_not_run_expensive_pixel_verification(monkeypatch) -> None:
     monkeypatch.setenv("SHORTSFLOW_USE_MOCK_PROVIDERS", "false")
     monkeypatch.setenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", "disabled")

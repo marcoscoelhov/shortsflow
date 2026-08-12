@@ -13,6 +13,9 @@ from typing import Any
 import httpx
 from PIL import Image, ImageDraw, ImageFilter
 
+from google import genai
+from google.genai import types as genai_types
+
 from app.config import get_settings
 from app.providers.errors import ProviderFailure
 from app.utils import word_tokens
@@ -53,7 +56,10 @@ class SemanticVerifier:
         self.mmx_path = shutil.which("mmx")
         self.timeout_sec = float(settings.vision_verifier_timeout_sec)
         self.mmx_enabled = self.provider == "minimax_mmx" and bool(text_api_key) and bool(self.mmx_path)
-        self.enabled = not settings.use_mock_providers and self.mmx_enabled
+        self.gemini_enabled = self.provider == "gemini" and bool(settings.resolved_gemini_text_api_key)
+        self.gemini_model = settings.gemini_vision_model
+        self._gemini_client: Any | None = None
+        self.enabled = not settings.use_mock_providers and (self.mmx_enabled or self.gemini_enabled)
         self._cache: dict[str, dict[str, Any]] = {}
         self._vision_disabled_reason: str | None = None
 
@@ -208,6 +214,11 @@ class SemanticVerifier:
                 return self._minimax_mmx_vision_score(asset_path, prompt)
             except Exception as exc:  # noqa: BLE001
                 raise ProviderFailure("minimax_vision", str(exc)) from exc
+        if self.gemini_enabled:
+            try:
+                return self._gemini_vision_score(asset_path, prompt)
+            except Exception as exc:  # noqa: BLE001
+                raise ProviderFailure("gemini_vision", str(exc)) from exc
         raise ProviderFailure("vision_verifier", "vision verifier unavailable")
 
     def _vision_prompt(self, scene: dict[str, Any]) -> str:
@@ -259,6 +270,48 @@ class SemanticVerifier:
         parsed["pixel_verified"] = True
         parsed["vision_provider"] = "minimax_mmx"
         return parsed
+
+    def _gemini_vision_score(self, asset_path: Path, prompt: str) -> dict[str, Any]:
+        settings = get_settings()
+        api_key = settings.resolved_gemini_text_api_key
+        if not api_key:
+            raise ProviderFailure("gemini_vision", "missing gemini text api key")
+        if self._gemini_client is None:
+            self._gemini_client = genai.Client(
+                api_key=api_key,
+                http_options=genai_types.HttpOptions(timeout=int(float(self.timeout_sec) * 1000)),
+            )
+        image_bytes = asset_path.read_bytes()
+        response = self._gemini_client.models.generate_content(
+            model=self.gemini_model,
+            contents=[
+                genai_types.Part.from_bytes(data=image_bytes, mime_type=self._mime_type(asset_path)),
+                prompt,
+            ],
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+            ),
+        )
+        raw = (getattr(response, "text", None) or "").strip()
+        if not raw:
+            raise ProviderFailure("gemini_vision", "empty vision response")
+        data = self._parse_vision_json(raw, provider="gemini_vision")
+        parsed = self._vision_data_to_scores(data)
+        parsed["verification_mode"] = "vision"
+        parsed["pixel_verified"] = True
+        parsed["vision_provider"] = "gemini"
+        return parsed
+
+    @staticmethod
+    def _mime_type(path: Path) -> str:
+        suffix = path.suffix.lower()
+        return {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+        }.get(suffix, "image/jpeg")
 
     def _parse_vision_json(self, content: str, *, provider: str) -> dict[str, Any]:
         first_json = content.find("{")
