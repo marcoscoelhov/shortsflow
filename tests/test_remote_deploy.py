@@ -155,6 +155,19 @@ def test_analytics_sync_unit_uses_instantiated_active_release_and_isolated_state
     assert "Unit=shortsflow-analytics-sync@%i.service" in timer
 
 
+def test_remote_runtime_installer_provisions_analytics_unit_templates() -> None:
+    installer = Path("scripts/install_remote_runtime.sh").read_text(encoding="utf-8")
+
+    assert (
+        'install -m 0644 "${repo_root}/deploy/systemd/shortsflow-analytics-sync@.service" '
+        "/etc/systemd/system/shortsflow-analytics-sync@.service"
+    ) in installer
+    assert (
+        'install -m 0644 "${repo_root}/deploy/systemd/shortsflow-analytics-sync@.timer" '
+        "/etc/systemd/system/shortsflow-analytics-sync@.timer"
+    ) in installer
+
+
 def test_failed_health_restores_previous_release_and_revision(tmp_path: Path, monkeypatch) -> None:
     previous_revision = "b" * 40
     plan = DeploymentPlan.create("staging", "a" * 40, layout=DeploymentLayout.under(tmp_path))
