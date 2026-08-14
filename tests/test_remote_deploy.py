@@ -141,6 +141,20 @@ def test_runtime_unit_uses_environment_state_as_working_directory(environment: s
     assert f"Environment=PYTHONPATH=/opt/shortsflow/{environment}/current" in unit
 
 
+def test_analytics_sync_unit_uses_instantiated_active_release_and_isolated_state() -> None:
+    service = Path("deploy/systemd/shortsflow-analytics-sync@.service").read_text(encoding="utf-8")
+    timer = Path("deploy/systemd/shortsflow-analytics-sync@.timer").read_text(encoding="utf-8")
+
+    assert "User=shortsflow-%i" in service
+    assert "Group=shortsflow-%i" in service
+    assert "WorkingDirectory=/srv/shortsflow/%i" in service
+    assert "Environment=PYTHONPATH=/opt/shortsflow/%i/current" in service
+    assert "EnvironmentFile=/etc/shortsflow/%i.env" in service
+    assert "EnvironmentFile=/etc/shortsflow/%i-release.env" in service
+    assert "ExecStart=/opt/shortsflow/%i/current/.venv/bin/python -m app.cli analytics-sync-run" in service
+    assert "Unit=shortsflow-analytics-sync@%i.service" in timer
+
+
 def test_failed_health_restores_previous_release_and_revision(tmp_path: Path, monkeypatch) -> None:
     previous_revision = "b" * 40
     plan = DeploymentPlan.create("staging", "a" * 40, layout=DeploymentLayout.under(tmp_path))
@@ -273,4 +287,46 @@ def test_runtime_files_update_idempotently_and_restore_on_rollback(tmp_path: Pat
 
     assert service_destination.read_text(encoding="utf-8") == "old unit\n"
     assert not (plan.sbin_root / "shortsflow-backup").exists()
+    assert not (plan.systemd_root / "shortsflow-analytics-sync@.service").exists()
+    assert not (plan.systemd_root / "shortsflow-analytics-sync@.timer").exists()
     assert commands[-1] == ["systemctl", "daemon-reload"]
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_successful_deploy_enables_only_the_environment_analytics_timer(
+    environment: str, tmp_path: Path, monkeypatch
+) -> None:
+    plan = DeploymentPlan.create(environment, "a" * 40, layout=DeploymentLayout.under(tmp_path))
+    plan.release_dir.mkdir(parents=True)
+    (plan.release_dir / ".shortsflow-revision").write_text(plan.revision, encoding="utf-8")
+    commands: list[list[str]] = []
+    monkeypatch.setattr("scripts.remote_deploy._assert_staging_capacity", lambda _plan: None)
+    monkeypatch.setattr("scripts.remote_deploy._prepare_repository", lambda _plan: None)
+    monkeypatch.setattr("scripts.remote_deploy._extract_release", lambda _plan: None)
+    monkeypatch.setattr("scripts.remote_deploy._install_release", lambda _plan: None)
+    monkeypatch.setattr("scripts.remote_deploy._sync_runtime_files", lambda _plan: {})
+    monkeypatch.setattr("scripts.remote_deploy._drain", lambda _plan: None)
+    monkeypatch.setattr("scripts.remote_deploy._handoff_legacy_production", lambda _plan: LegacyHandoff())
+    monkeypatch.setattr("scripts.remote_deploy._backup", lambda _plan: tmp_path / "backup")
+    monkeypatch.setattr("scripts.remote_deploy._write_release_environment", lambda _plan, revision=None: None)
+    monkeypatch.setattr("scripts.remote_deploy._wait_for_health", lambda _plan: {"status": "ok"})
+    monkeypatch.setattr(
+        "scripts.remote_deploy._run",
+        lambda args, **_kwargs: commands.append([str(item) for item in args]) or SimpleNamespace(returncode=0),
+    )
+
+    deploy(plan)
+
+    legacy_disable = ["systemctl", "disable", "--now", "shortsflow-analytics-sync.timer"]
+    if environment == "production":
+        assert legacy_disable in commands
+    else:
+        assert legacy_disable not in commands
+    assert [
+        "systemctl",
+        "enable",
+        "--now",
+        f"shortsflow-backup@{environment}.timer",
+        f"shortsflow-backup-weekly@{environment}.timer",
+        f"shortsflow-analytics-sync@{environment}.timer",
+    ] in commands

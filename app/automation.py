@@ -33,7 +33,13 @@ from app.automation_recovery import (
     TEXTUAL_REPAIR_REASONS,
     classify_failure,
 )
-from app.automation_topics import COSMOS_CURIOSITY_POOL, cosmos_policy_notes, has_recognizable_hook_object, select_cosmos_topic
+from app.automation_topics import (
+    COSMOS_CURIOSITY_POOL,
+    WINNER_SEED_MIN_SCORE,
+    cosmos_policy_notes,
+    has_recognizable_hook_object,
+    select_cosmos_topic,
+)
 from app.airtable_ready_scripts import AirtableReadyScriptClient, AirtableReadyScriptSyncResult
 from app.db import session_scope
 from app.domain_contracts import (
@@ -71,7 +77,9 @@ from app.utils import new_id, stable_hash, utcnow
 
 READY_SCRIPT_SPLIT_RE = re.compile(r"(?im)^\s*t[ií]tulo\s*:")
 AUTOMATION_ENABLED_KEY = "automation_enabled"
-SAFE_AUTOMATION_TOPIC_POOL = [seed.topic for seed in COSMOS_CURIOSITY_POOL]
+SAFE_AUTOMATION_TOPIC_POOL = [
+    seed.topic for seed in COSMOS_CURIOSITY_POOL if seed.base_score >= WINNER_SEED_MIN_SCORE
+]
 
 AUTOMATION_REASON_NO_TOPIC = "no_topic"
 AUTOMATION_REASON_NICHE_REJECTED = "niche_rejected"
