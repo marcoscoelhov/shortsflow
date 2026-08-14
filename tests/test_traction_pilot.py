@@ -57,6 +57,14 @@ def test_pilot_start_cli_creates_three_canaries_without_processing(monkeypatch, 
     _cancel_test_jobs([item["job_id"] for item in output["canaries"]])
 
 
+def test_orchestrator_progress_does_not_corrupt_machine_readable_stdout(capsys) -> None:
+    JobOrchestrator()._cli_progress("job-123456", "render", "started")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "job=job-1234 stage=render started" in captured.err
+
+
 def test_forged_qwen_pilot_notes_cannot_remove_human_review() -> None:
     payload = TopicRequestCreate(
         seed_theme="No elevador apagado: LUZ ou PORTA?",

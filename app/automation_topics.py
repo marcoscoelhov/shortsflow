@@ -18,6 +18,9 @@ class CosmosCuriositySeed:
     base_score: float = 0.90
 
 
+WINNER_SEED_MIN_SCORE = 0.97
+
+
 COSMOS_CURIOSITY_POOL: tuple[CosmosCuriositySeed, ...] = (
     CosmosCuriositySeed(
         topic="Por que Vênus é mais quente que Mercúrio?",
@@ -99,6 +102,78 @@ COSMOS_CURIOSITY_POOL: tuple[CosmosCuriositySeed, ...] = (
         tags=("eclipse", "sol", "lua", "ceu"),
         base_score=0.91,
     ),
+    CosmosCuriositySeed(
+        topic="Como Encélado lança um oceano no espaço?",
+        requested_angle="Mostrar o paradoxo visual da lua gelada de Saturno: plumas saem de fraturas no gelo e carregam material ligado ao oceano subterrâneo. Evitar cravar composição ou origem de cada partícula.",
+        hook_seed="Encélado parece congelado, mas lança gêiseres no espaço.",
+        visual_seed="lua Encélado diante de Saturno, superfície de gelo rachada lançando plumas brilhantes ao espaço, documentário cinematográfico sem texto",
+        tags=("encelado", "lua", "geiseres", "saturno"),
+        base_score=0.98,
+    ),
+    CosmosCuriositySeed(
+        topic="Como Europa esconde um oceano sob gelo quebrado?",
+        requested_angle="Explicar de forma conservadora que evidências apontam para um oceano salgado sob a crosta gelada de Europa, contrastando a superfície congelada com água líquida abaixo.",
+        hook_seed="Europa é uma lua congelada que pode esconder um oceano líquido.",
+        visual_seed="lua Europa em close, crosta branca rachada e corte visual sugerindo oceano escuro sob o gelo, Júpiter ao fundo, sem texto",
+        tags=("europa", "lua", "oceano", "jupiter"),
+        base_score=0.97,
+    ),
+    CosmosCuriositySeed(
+        topic="Por que Titã tem rios sem água?",
+        requested_angle="Mostrar o paradoxo de Titã: rios, lagos e chuva podem lembrar a Terra, mas são alimentados principalmente por metano e etano líquidos. Sem sugerir água líquida na superfície.",
+        hook_seed="Titã tem rios e lagos, mas eles não são de água.",
+        visual_seed="lua Titã sob névoa alaranjada, rios e lagos escuros de hidrocarbonetos, Saturno distante, paisagem alienígena realista sem texto",
+        tags=("titan", "lua", "metano", "rios"),
+        base_score=0.98,
+    ),
+    CosmosCuriositySeed(
+        topic="Como pode chover ferro no exoplaneta WASP-76b?",
+        requested_angle="Apresentar como hipótese observacional: no exoplaneta ultraquente WASP-76b, ferro vaporizado no lado diurno pode condensar ao chegar ao lado noturno. Não tratar a chuva de ferro como filmagem direta.",
+        hook_seed="No WASP-76b, o dia pode vaporizar ferro e a noite pode fazê-lo chover.",
+        visual_seed="exoplaneta WASP-76b dividido entre lado diurno incandescente e lado noturno com gotas metálicas, estrela ao fundo, visual científico sem texto",
+        tags=("wasp-76b", "exoplaneta", "ferro", "chuva"),
+        base_score=0.99,
+    ),
+    CosmosCuriositySeed(
+        topic="Como Kepler-16b pode ter dois pores do sol?",
+        requested_angle="Explicar que Kepler-16b orbita duas estrelas, criando a imagem contraintuitiva de dois sóis no céu. Não afirmar condições vistas de uma superfície sólida.",
+        hook_seed="Kepler-16b gira ao redor de dois sóis.",
+        visual_seed="exoplaneta Kepler-16b com duas estrelas no horizonte espacial, duas fontes de luz e sombras cruzadas, ilustração científica cinematográfica sem texto",
+        tags=("kepler-16b", "exoplaneta", "duas estrelas", "orbita"),
+        base_score=0.96,
+    ),
+    CosmosCuriositySeed(
+        topic="Como a Voyager 1 ainda fala com a Terra de tão longe?",
+        requested_angle="Contrastar a pequena sonda Voyager 1 com a enorme distância do espaço interestelar e explicar que antenas terrestres muito sensíveis recebem sinais de rádio extremamente fracos. Evitar distância ou potência exatas.",
+        hook_seed="A Voyager 1 envia um sussurro de rádio através do espaço interestelar.",
+        visual_seed="sonda Voyager 1 minúscula no espaço profundo enviando onda de rádio tênue até grandes antenas na Terra, escala extrema sem texto",
+        tags=("voyager", "missao", "radio", "espaco profundo"),
+        base_score=0.97,
+    ),
+    CosmosCuriositySeed(
+        topic="Como a missão DART moveu uma lua de asteroide ao bater nela?",
+        requested_angle="Mostrar o teste de defesa planetária: a nave DART colidiu com Dimorphos e alterou de forma mensurável sua órbita ao redor de Didymos. Evitar sugerir que o asteroide ameaçava a Terra.",
+        hook_seed="A missão DART bateu de propósito em Dimorphos e mudou sua órbita.",
+        visual_seed="nave DART colidindo com a pequena lua Dimorphos ao lado do asteroide Didymos, detritos iluminados, visual de missão realista sem texto",
+        tags=("dart", "dimorphos", "missao", "asteroide"),
+        base_score=0.98,
+    ),
+    CosmosCuriositySeed(
+        topic="Por que um pulsar parece um farol no espaço?",
+        requested_angle="Explicar o paradoxo visual: a estrela de nêutrons gira e seus feixes cruzam nossa direção, então os pulsos parecem piscadas regulares sem a estrela realmente ligar e desligar.",
+        hook_seed="Um pulsar parece piscar, mas é uma estrela morta girando como um farol.",
+        visual_seed="pulsar compacto girando com dois feixes de luz varrendo o espaço como farol, nebulosa escura ao redor, sem texto",
+        tags=("pulsar", "estrela de neutrons", "farol", "fenomeno"),
+        base_score=0.97,
+    ),
+    CosmosCuriositySeed(
+        topic="Como uma galáxia distante vira um anel de luz?",
+        requested_angle="Mostrar uma lente gravitacional: a massa em primeiro plano curva a luz de uma galáxia mais distante e pode formar arcos ou um anel. Evitar dizer que a galáxia mudou de forma fisicamente.",
+        hook_seed="Uma galáxia pode parecer um anel porque outra massa dobrou sua luz.",
+        visual_seed="galáxia distante formando anel de Einstein ao redor de galáxia em primeiro plano, curvatura de luz visível, imagem astronômica sem texto",
+        tags=("lente gravitacional", "galaxia", "anel de einstein", "fenomeno"),
+        base_score=0.96,
+    ),
 )
 
 _CANONICAL_GROUPS: dict[str, set[str]] = {
@@ -113,6 +188,15 @@ _CANONICAL_GROUPS: dict[str, set[str]] = {
     "netuno": {"netuno", "azul"},
     "meteoro": {"meteoro", "meteoros", "meteorito", "rastro"},
     "eclipse": {"eclipse", "eclipses"},
+    "encelado": {"encelado", "encélado", "geiser", "geiseres", "gêiser", "gêiseres"},
+    "europa": {"europa", "oceano", "gelo"},
+    "titan": {"titan", "titã", "metano"},
+    "wasp_76b": {"wasp-76b", "wasp", "ferro"},
+    "kepler_16b": {"kepler-16b", "kepler", "dois sois", "dois sóis"},
+    "voyager": {"voyager", "sonda"},
+    "dart": {"dart", "dimorphos", "didymos"},
+    "pulsar": {"pulsar", "pulsares", "farol"},
+    "lente_gravitacional": {"lente gravitacional", "anel de einstein"},
 }
 
 _RECOGNIZABLE_HOOK_OBJECT_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -132,6 +216,13 @@ _RECOGNIZABLE_HOOK_OBJECT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("cometa", r"\bcometa\b|\bcometas\b"),
     ("eclipse", r"\beclipse\b|\beclipses\b"),
     ("galaxia", r"\bgalaxia\b|\bgalaxias\b|\bvia\s+lactea\b"),
+    ("encelado", r"\bencelado\b"),
+    ("europa", r"\beuropa\b"),
+    ("titan", r"\btitan\b"),
+    ("wasp_76b", r"\bwasp[\s-]?76b\b"),
+    ("kepler_16b", r"\bkepler[\s-]?16b\b"),
+    ("dart", r"\bdart\b|\bdimorphos\b"),
+    ("pulsar", r"\bpulsar\b|\bpulsares\b"),
 )
 
 
@@ -164,14 +255,17 @@ def cosmos_policy_notes() -> list[str]:
 def select_cosmos_topic(recent_topics: Iterable[str], *, rng: random.Random | None = None) -> TrendCandidate:
     rng = rng or random.Random()
     recent = [str(topic or "") for topic in recent_topics if str(topic or "").strip()]
+    eligible_seeds = tuple(seed for seed in COSMOS_CURIOSITY_POOL if seed.base_score >= WINNER_SEED_MIN_SCORE)
+    if not eligible_seeds:
+        raise RuntimeError("cosmos pool has no seed meeting the winner seed threshold")
     ranked: list[tuple[CosmosCuriositySeed, float]] = []
-    for seed in COSMOS_CURIOSITY_POOL:
+    for seed in eligible_seeds:
         similarity = max((_cosmos_similarity(seed.topic, topic) for topic in recent), default=0.0)
         if similarity >= 0.62:
             continue
         ranked.append((seed, seed.base_score - similarity * 0.50 + rng.random() * 0.015))
     if not ranked:
-        seed = rng.choice(COSMOS_CURIOSITY_POOL)
+        seed = rng.choice(eligible_seeds)
     else:
         seed = max(ranked, key=lambda item: item[1])[0]
     return TrendCandidate(

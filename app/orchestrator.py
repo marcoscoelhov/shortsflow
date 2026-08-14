@@ -6,6 +6,7 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import unicodedata
@@ -913,7 +914,11 @@ class JobOrchestrator:
     def _cli_progress(self, job_id: str, stage: str, state: str, detail: str = "") -> None:
         timestamp = utcnow().strftime("%H:%M:%S")
         suffix = f" {detail}" if detail else ""
-        print(f"[shortsflow {timestamp}] job={job_id[:8]} stage={stage} {state}{suffix}", flush=True)
+        print(
+            f"[shortsflow {timestamp}] job={job_id[:8]} stage={stage} {state}{suffix}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     def _record_step_failure(self, job_id: str, step_name: str, attempt: int, message: str, recoverable: bool) -> None:
         with session_scope() as session:

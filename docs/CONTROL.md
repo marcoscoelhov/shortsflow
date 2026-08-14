@@ -1,6 +1,6 @@
 # ShortsFlow Control
 
-Last updated: 2026-07-31T21:25:28+00:00
+Last updated: 2026-08-14
 
 ## Product North Star
 
@@ -13,10 +13,10 @@ The app must eventually manage multiple channels, each with its own niche, dashb
 Prove the engine can produce at least one breakout/viral short on one channel before expanding surface area.
 
 - Minimum proof: 1 video reaches viral breakout status.
-- Working viral definition until Marcos overrides it: `10,000+ views` or `10x current mature median`, whichever is higher.
-- Current mature median: 396 views from 39 reliable real YouTube Analytics snapshots on 2026-07-31.
+- Working breakout definition for the controlled experiment: `10,000+ views`.
+- Current mature median: 397 views from 29 reliable videos in the operator snapshot, primarily through 2026-08-10.
 - Secondary health target: 600+ mature median views.
-- Cadence: 1 strong cosmos/astronomy video/day.
+- Cadence: 1 `automatic_topic` cosmos/astronomy video every 2 days for 30 days.
 - Scope now: one YouTube Shorts channel, winner-model visual/extreme cosmos topics.
 - Source now: curated cosmos seed bank.
 
@@ -30,7 +30,7 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 
 ## Active Experiment
 
-`automatic_topic` must prefer topics with:
+Run one controlled 30-day experiment. `automatic_topic` must prefer topics with:
 
 - visual impossibility in the first second;
 - cosmic scale or extreme object;
@@ -38,11 +38,20 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 - specific real object early in title/hook;
 - no repeated dead title template.
 
+Rollout contract:
+
+- produce one `automatic_topic` video every 2 days;
+- treat this cadence as an operator rollout setting/manual contract; do not imply that a safe every-other-day production scheduler exists;
+- use the existing maturity rule and do not pivot niche before at least 15 experiment candidates are mature;
+- target a mature median of at least 600 views and a breakout of at least 10,000 views;
+- stop candidates that fail the existing early viral gate before image, audio, rendering, or other expensive media work.
+
 ## Current Evidence
 
-- Analytics refreshed on 2026-07-31: 79 videos, 39 reliable mature snapshots, 17,717 total views.
-- Breakout not reached: best video has 882 views; current target is 10,000 views.
-- Mature median is 396 views, still below the 600+ secondary health target.
+- Operator evidence, primarily through 2026-08-10: 92 videos, 29 reliable, and 12,820 total views.
+- Breakout not reached: best video has 883 views; current target is 10,000 views.
+- Mature median is 397 views, still below the 600+ secondary health target.
+- Engagement evidence remains sparse: 3 shares and 3 comments in the supplied snapshot.
 - Current top repeat pattern: concrete cosmic paradox + visual object — Lua no horizonte, Vênus mais quente que Mercúrio, Marte vermelho/ferrugem, anéis de Saturno e som de buraco negro/NASA.
 - Rendering can reach `ready_for_upload`; automatic generation still shows repeated `gate_rejected` and premium-audit gaps, but the latest watchdog reports 4 future scheduled slots and no recovery needed. Premium audit score below target is diagnostic; technical blockers are not.
 - CEO/operator brief loop exists weekly on Discord and must read this file first.
@@ -98,23 +107,21 @@ Prove the engine can produce at least one breakout/viral short on one channel be
 
 ## Current Bottleneck
 
-Publication safety hardening is the immediate bottleneck before the next automated pilot: YouTube schedule/publish paths still bypass premium preflight, the premium audit does not yet convert every technical blocker into a reason, and fresh visual attempts do not fully validate local provider/model provenance. Performance learning remains the business bottleneck after these safety gaps close.
+The immediate business bottleneck is obtaining 15 mature, comparable candidates without spending on candidates that already fail the early viral gate. Publication safety gates remain mandatory throughout the experiment.
 
 ## Next Task
 
-Single next task: close and regression-test the three publication-safety gaps above without changing niche or editorial strategy; then let the 4-slot scheduled cosmos queue mature and rerun the weekly Analytics sync/report.
+Single next task: activate and observe the controlled 30-day rollout under the manual cadence contract, then evaluate the first 15 mature candidates before considering a niche change.
 
 Acceptance:
 
-- maintain 1 strong cosmos/astronomy scheduled or published video/day;
-- keep at least 3 future scheduled slots; do not force generation while coverage remains healthy;
-- execute premium preflight in YouTube approval/schedule/publish paths;
-- reject audit-reported hard blockers even when the premium score is diagnostic;
-- require approved local provider/model provenance with no fallback before automatic visual confirmation;
+- maintain 1 strong `automatic_topic` cosmos/astronomy video every 2 days for 30 days;
+- reject candidates at the existing early viral gate before expensive media work;
+- preserve premium preflight and all publication hard blockers;
 - do not change niche/strategy before mature evidence exists;
-- check YouTube performance for scheduled videos after they mature;
+- check YouTube performance after candidates mature and wait for at least 15 mature experiment candidates before a niche decision;
 - update baseline/median only from real performance evidence;
-- if performance stalls after enough mature samples, revise topic selection instead of adding platform surface.
+- succeed at mature median `>=600` or a breakout `>=10,000`; if performance stalls after the required mature sample, revise topic selection instead of adding platform surface.
 
 ## Not Now
 

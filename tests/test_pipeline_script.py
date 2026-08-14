@@ -3996,7 +3996,14 @@ def test_automatic_topic_payload_uses_cosmos_focus() -> None:
     assert "Prompt viral customizado do hub" in notes
     assert "source=hub_settings" in notes
     assert custom_prompt in notes
-    assert any(term in payload["seed_theme"].lower() for term in ["vênus", "venus", "lua", "saturno", "marte", "buraco", "estrela", "júpiter", "jupiter", "netuno", "meteoro", "eclipse"])
+    assert any(
+        term in payload["seed_theme"].lower()
+        for term in [
+            "vênus", "venus", "lua", "saturno", "marte", "buraco", "estrela", "júpiter", "jupiter",
+            "netuno", "meteoro", "eclipse", "encélado", "europa", "titã", "titan", "wasp-76b",
+            "kepler-16b", "voyager", "dart", "pulsar", "galáxia",
+        ]
+    )
 
 
 def test_automatic_topic_contract_requires_recognizable_hook_object() -> None:

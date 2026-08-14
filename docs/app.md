@@ -461,8 +461,9 @@ A automacao diaria roda por CLI e systemd timer, nao por scheduler interno do Fa
 python -m app.cli automation-run
 python -m app.cli analytics-sync-run
 scripts/install_automation_timer.sh
-scripts/install_analytics_sync_timer.sh
 ```
+
+No runtime remoto, a coleta de Analytics não usa instalador apontando para o checkout de desenvolvimento. O deploy instala e habilita `shortsflow-analytics-sync@staging.timer` ou `shortsflow-analytics-sync@production.timer`, sempre com a release ativa e o estado isolado do ambiente.
 
 O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de agenda a partir de amanha. A agenda automatica trabalha com dois slots diarios separados: o horario configurado (`automation_publish_time`, normalmente 11h) e reservado para **Banco de Roteiros Prontos** (`ready_script_bank`), e o segundo slot e fixo as 18:00 de Brasilia para **Tema Automatico** (`automatic_topic`). O ciclo considera somente o primeiro dia incompleto e tenta preencher os dois horarios antes de avancar para datas posteriores. Essas lanes nao se substituem silenciosamente: falha no slot de **Tema Automatico** deve virar lacuna operacional/reason code do ciclo, nao conteudo mascarado do **Banco de Roteiros Prontos**. Antes de gerar conteudo novo, o ciclo tenta backlog publicavel compativel com a lane do slot.
 
@@ -485,11 +486,11 @@ O lease do worker tem piso de uma hora e heartbeat menos agressivo. Passos reais
 A coleta de performance e separada da automacao de criacao/publicacao. O comando abaixo busca apenas snapshots de Analytics para Jobs publicados elegiveis:
 
 ```bash
-python -m app.cli analytics-sync-run
-scripts/install_analytics_sync_timer.sh
+systemctl start shortsflow-analytics-sync@production.service
+systemctl status shortsflow-analytics-sync@production.timer --no-pager
 ```
 
-O timer roda as 03h em `America/Sao_Paulo`, depois do ciclo diario principal. A rotina respeita `performance_collection_enabled`, exige OAuth com escopo de Analytics e limita o lote por `performance_sync_batch_limit`.
+O timer é instalado pelo deploy remoto, roda às 03h em `America/Sao_Paulo` e usa `/opt/shortsflow/<ambiente>/current`, `/srv/shortsflow/<ambiente>` e os arquivos `/etc/shortsflow/<ambiente>*.env`. A rotina respeita `performance_collection_enabled`, exige OAuth com escopo de Analytics e limita o lote por `performance_sync_batch_limit`. Para staging, substitua `production` por `staging` nos comandos acima.
 
 Para auditar a base consolidada sem abrir o Hub:
 
