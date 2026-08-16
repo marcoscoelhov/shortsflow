@@ -551,7 +551,16 @@ class LLMProviderRegistry:
     def repair_provider(self) -> llm_facade.LLMProvider | None:
         if self.settings.use_mock_providers:
             return llm_facade.MockCreativeProvider()
-        return self._build_provider(self.settings.llm_repair_provider, required=False)
+        provider = self._build_provider(self.settings.llm_repair_provider, required=False)
+        if provider is None:
+            return None
+        repair_model = (getattr(self.settings, "llm_repair_model", None) or "").strip()
+        if repair_model and hasattr(provider, "model_name"):
+            provider.model_name = repair_model
+        repair_effort = (getattr(self.settings, "llm_repair_reasoning_effort", None) or "").strip()
+        if repair_effort and hasattr(provider, "reasoning_effort"):
+            provider.reasoning_effort = repair_effort
+        return provider
 
     def scene_provider(self) -> llm_facade.LLMProvider | None:
         if self.settings.use_mock_providers:

@@ -51,6 +51,8 @@ SHORTSFLOW_USE_MOCK_PROVIDERS=false
 SHORTSFLOW_LLM_PRIMARY_PROVIDER=openai
 SHORTSFLOW_LLM_SCRIPT_DRAFT_PROVIDER=openai
 SHORTSFLOW_LLM_REPAIR_PROVIDER=openai
+SHORTSFLOW_LLM_REPAIR_MODEL=gpt-5.6-luna
+SHORTSFLOW_LLM_REPAIR_REASONING_EFFORT=max
 SHORTSFLOW_LLM_SCENE_PROVIDER=openai
 SHORTSFLOW_OPENAI_BASE_URL=https://opencode.ai/zen/go/v1
 SHORTSFLOW_OPENAI_MODEL=gpt-5.6-luna
@@ -75,7 +77,7 @@ SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>
 SHORTSFLOW_MINIMAX_IMAGE_API_KEY=<redigido>
 ```
 
-Politica LLM operacional: a conta OpenCode Go em `https://opencode.ai/zen/go/v1` transporta as chamadas de texto. GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho, reparo e planejamento de cenas. DeepSeek v4 Flash atua como fallback criativo quando a invocacao primaria falha. Kimi K3, no papel logico `xai` mas no mesmo endpoint OpenCode Go, julga os gates. DeepSeek v4 Pro faz a revisao premium. Grok nao faz parte da rota operacional. Qwen remoto permanece apenas como provider textual opcional; o serviço visual Qwen local foi removido. A revisão visual de publicação é humana.
+Politica LLM operacional: a conta OpenCode Go em `https://opencode.ai/zen/go/v1` transporta as chamadas de texto. GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho e planejamento de cenas. O repair dedicado usa o mesmo modelo com `reasoning.effort=max`. DeepSeek v4 Flash atua como fallback criativo quando a invocacao primaria falha. Kimi K3, no papel logico `xai` mas no mesmo endpoint OpenCode Go, julga os gates. DeepSeek v4 Pro faz a revisao premium. Grok nao faz parte da rota operacional. Qwen remoto permanece apenas como provider textual opcional; o serviço visual Qwen local foi removido. A revisão visual de publicação é humana.
 
 A politica completa, incluindo a separacao entre score premium diagnostico e Score de Autoaprovacao, esta em
 `docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`. Enquanto o gate premium nao for

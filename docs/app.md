@@ -285,6 +285,7 @@ Defaults importantes:
 - `language=pt-BR`
 - `target_duration_sec=50`
 - `llm_primary_provider=openai` com `openai_model=gpt-5.6-luna` e `openai_reasoning_effort=high`
+- `llm_repair_provider=openai` com `llm_repair_model=gpt-5.6-luna` e `llm_repair_reasoning_effort=max`
 - `llm_fallback_provider=deepseek` com `llm_enable_fallback=true`, `deepseek_base_url=https://opencode.ai/zen/go/v1` e `deepseek_model=deepseek-v4-flash`
 - `llm_gate_judge_provider=xai`
 - `llm_gate_judge_model=kimi-k3` via `xai_base_url=https://opencode.ai/zen/go/v1`

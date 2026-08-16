@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     llm_primary_provider: str = "openai"
     llm_fallback_provider: str = "deepseek"
     llm_repair_provider: str = "openai"
+    llm_repair_model: str | None = "gpt-5.6-luna"
+    llm_repair_reasoning_effort: str = "max"
     llm_scene_provider: str = "openai"
     llm_enable_fallback: bool = True
     llm_script_draft_provider: str = "openai"
@@ -320,7 +322,7 @@ class Settings(BaseSettings):
             raise ValueError("minimax_text_thinking must be one of: auto, enabled, disabled")
         return normalized
 
-    @field_validator("openai_reasoning_effort", "xai_reasoning_effort")
+    @field_validator("openai_reasoning_effort", "xai_reasoning_effort", "llm_repair_reasoning_effort")
     @classmethod
     def validate_reasoning_effort(cls, value: str) -> str:
         normalized = value.strip().lower()
