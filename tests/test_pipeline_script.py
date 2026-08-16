@@ -899,6 +899,47 @@ def test_resilient_creative_provider_repair_script_falls_back_on_timeout() -> No
     assert repaired["qa_metrics"]["fallback_stage"] == "script_repair_timeout"
     assert "timed out after 0.01s" in repaired["qa_metrics"]["fallback_reason"]
 
+def test_dedicated_openai_repair_does_not_use_deepseek_fallback() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(
+        minimax_script_timeout_sec=0.01,
+        llm_enable_fallback=True,
+        llm_script_draft_timeout_sec=0.01,
+    )
+    provider.strict_minimax_validation = False
+
+    class OpenAIRepair:
+        provider_name = "openai"
+
+        def repair_script(self, script, gate_reasons, topic_plan):
+            raise ProviderFailure("openai", "repair failed")
+
+    class DeepSeekFallback:
+        provider_name = "deepseek"
+
+        def repair_script(self, script, gate_reasons, topic_plan):
+            return {"title": "nao deveria usar deepseek", "qa_metrics": {}}
+
+    provider.primary = OpenAIRepair()
+    provider.repair_provider = OpenAIRepair()
+    provider.fallback = DeepSeekFallback()
+
+    with pytest.raises(ProviderFailure, match="repair failed"):
+        provider.repair_script(
+            {"title": "original"},
+            ["word_count_too_low_for_natural_pace"],
+            {"canonical_topic": "sol"},
+        )
+
+    assert (
+        provider.repair_script_with_fallback(
+            {"title": "original"},
+            ["word_count_too_low_for_natural_pace"],
+            {"canonical_topic": "sol"},
+        )
+        is None
+    )
+
 def test_mock_generate_script_grounds_source_fact_ids_when_fact_pack_is_verified() -> None:
     provider = MockCreativeProvider()
 
