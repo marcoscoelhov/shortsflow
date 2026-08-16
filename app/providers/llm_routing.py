@@ -394,7 +394,7 @@ class ResilientCreativeProvider:
                 if self.strict_minimax_validation:
                     timeout_sec = self._provider_timeout_sec(provider, self.settings.minimax_script_timeout_sec)
                     raise ProviderFailure(getattr(provider, "failure_provider_name", "llm_provider"), f"script repair timed out after {timeout_sec}s") from exc
-                if self.settings.llm_enable_fallback and self.fallback:
+                if self._should_delegate_repair_to_fallback():
                     payload = self._run_primary_with_timeout(
                         lambda: self.fallback.repair_script(script, [*gate_reasons, str(exc)], topic_plan),
                         timeout_sec=self._provider_timeout_sec(
@@ -413,7 +413,7 @@ class ResilientCreativeProvider:
             except ProviderFailure as exc:
                 if self.strict_minimax_validation:
                     raise
-                if self.settings.llm_enable_fallback and self.fallback:
+                if self._should_delegate_repair_to_fallback():
                     payload = self._run_primary_with_timeout(
                         lambda: self.fallback.repair_script(script, [*gate_reasons, str(exc)], topic_plan),
                         timeout_sec=self._provider_timeout_sec(
@@ -434,7 +434,7 @@ class ResilientCreativeProvider:
     def repair_script_with_fallback(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any] | None:
         if self.strict_minimax_validation:
             return None
-        if not self.settings.llm_enable_fallback or not self.fallback:
+        if not self._should_delegate_repair_to_fallback():
             return None
         payload = self._run_primary_with_timeout(
             lambda: self.fallback.repair_script(script, gate_reasons, topic_plan),
@@ -446,6 +446,18 @@ class ResilientCreativeProvider:
         payload.setdefault("qa_metrics", {})["fallback_used"] = True
         payload["qa_metrics"]["fallback_stage"] = "script_quality_gate"
         return payload
+
+    def _should_delegate_repair_to_fallback(self) -> bool:
+        if not bool(getattr(self.settings, "llm_enable_fallback", True)) or not self.fallback:
+            return False
+        dedicated = getattr(self, "repair_provider", None)
+        if dedicated is None:
+            return True
+        dedicated_name = str(getattr(dedicated, "provider_name", "") or "").casefold()
+        fallback_name = str(getattr(self.fallback, "provider_name", "") or "").casefold()
+        if dedicated_name and fallback_name and dedicated_name != fallback_name:
+            return False
+        return dedicated is self.fallback
 
     def _provider_timeout_sec(self, provider: llm_facade.LLMProvider, default_timeout_sec: float) -> float:
         return float(getattr(provider, "timeout_sec", default_timeout_sec) or default_timeout_sec)
@@ -539,7 +551,16 @@ class LLMProviderRegistry:
     def repair_provider(self) -> llm_facade.LLMProvider | None:
         if self.settings.use_mock_providers:
             return llm_facade.MockCreativeProvider()
-        return self._build_provider(self.settings.llm_repair_provider, required=False)
+        provider = self._build_provider(self.settings.llm_repair_provider, required=False)
+        if provider is None:
+            return None
+        repair_model = (getattr(self.settings, "llm_repair_model", None) or "").strip()
+        if repair_model and hasattr(provider, "model_name"):
+            provider.model_name = repair_model
+        repair_effort = (getattr(self.settings, "llm_repair_reasoning_effort", None) or "").strip()
+        if repair_effort and hasattr(provider, "reasoning_effort"):
+            provider.reasoning_effort = repair_effort
+        return provider
 
     def scene_provider(self) -> llm_facade.LLMProvider | None:
         if self.settings.use_mock_providers:

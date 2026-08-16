@@ -13,6 +13,8 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
         "LLM_PRIMARY_PROVIDER",
         "LLM_SCRIPT_DRAFT_PROVIDER",
         "LLM_REPAIR_PROVIDER",
+        "LLM_REPAIR_MODEL",
+        "LLM_REPAIR_REASONING_EFFORT",
         "LLM_SCENE_PROVIDER",
         "LLM_FALLBACK_PROVIDER",
         "LLM_ENABLE_FALLBACK",
@@ -35,6 +37,8 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
     assert settings.llm_primary_provider == "openai"
     assert settings.llm_script_draft_provider == "openai"
     assert settings.llm_repair_provider == "openai"
+    assert settings.llm_repair_model == "gpt-5.6-luna"
+    assert settings.llm_repair_reasoning_effort == "max"
     assert settings.llm_scene_provider == "openai"
     assert settings.llm_fallback_provider == "deepseek"
     assert settings.llm_enable_fallback is True
@@ -92,7 +96,7 @@ def test_vision_verifier_provider_accepts_gemini(monkeypatch) -> None:
     assert settings.gemini_vision_model == "gemini-3.5-flash"
 
 
-@pytest.mark.parametrize("field", ["openai_reasoning_effort", "xai_reasoning_effort"])
+@pytest.mark.parametrize("field", ["openai_reasoning_effort", "xai_reasoning_effort", "llm_repair_reasoning_effort"])
 def test_reasoning_effort_rejects_unknown_values(field: str) -> None:
     with pytest.raises(ValidationError, match="reasoning effort must be one of"):
         Settings(_env_file=None, **{field: "turbo"})
