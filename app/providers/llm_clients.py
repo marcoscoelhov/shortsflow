@@ -233,14 +233,17 @@ class XAICreativeProvider(MinimaxCreativeProvider):
 
     def __init__(self) -> None:
         settings = llm_facade.get_settings()
-        if not settings.xai_api_key:
+        base_url = str(settings.xai_base_url).rstrip("/")
+        uses_opencode_go = base_url == "https://opencode.ai/zen/go/v1"
+        api_key = getattr(settings, "openai_api_key", None) if uses_opencode_go else settings.xai_api_key
+        if not api_key:
             raise ProviderFailure(self.failure_provider_name, "missing xai api key")
         self.timeout_sec = settings.xai_timeout_sec
         self.model_name = settings.xai_model
         self.reasoning_effort: Any = str(getattr(settings, "xai_reasoning_effort", "high") or "high").strip().lower()
         self.client = llm_facade.OpenAI(
-            api_key=settings.xai_api_key,
-            base_url=settings.xai_base_url,
+            api_key=api_key,
+            base_url=base_url,
             timeout=self.timeout_sec,
         )
 

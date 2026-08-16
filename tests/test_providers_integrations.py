@@ -32,9 +32,11 @@ def test_llm_defaults_match_quality_first_routing_policy() -> None:
     assert defaults["openai_model"] == "gpt-5.6-luna"
     assert defaults["openai_reasoning_effort"] == "high"
     assert defaults["llm_gate_judge_provider"] == "xai"
-    assert defaults["llm_gate_judge_model"] == "grok-4.6"
-    assert defaults["llm_premium_review_model"] == "grok-4.6"
-    assert defaults["xai_model"] == "grok-4.6"
+    assert defaults["llm_gate_judge_model"] == "kimi-k3"
+    assert defaults["llm_premium_review_provider"] == "deepseek"
+    assert defaults["llm_premium_review_model"] == "deepseek-v4-pro"
+    assert defaults["xai_base_url"] == "https://opencode.ai/zen/go/v1"
+    assert defaults["xai_model"] == "kimi-k3"
     assert defaults["xai_reasoning_effort"] == "high"
 
 
@@ -102,6 +104,35 @@ def test_llm_registry_builds_deepseek_fallback_with_opencode_go_settings_when_en
 
     assert isinstance(provider, DeepSeekCreativeProvider)
     assert provider.model_name == "deepseek-v4-flash"
+    assert captured["api_key"] == "opencode-go-key"
+    assert captured["base_url"] == "https://opencode.ai/zen/go/v1"
+
+
+def test_xai_judge_reuses_opencode_go_key_when_base_url_is_go(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: None))
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            openai_api_key="opencode-go-key",
+            xai_api_key="native-xai-key",
+            xai_base_url="https://opencode.ai/zen/go/v1",
+            xai_model="kimi-k3",
+            xai_reasoning_effort="high",
+            xai_timeout_sec=180,
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    provider = XAICreativeProvider()
+
+    assert provider.model_name == "kimi-k3"
     assert captured["api_key"] == "opencode-go-key"
     assert captured["base_url"] == "https://opencode.ai/zen/go/v1"
 
