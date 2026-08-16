@@ -77,11 +77,11 @@ class Settings(BaseSettings):
     llm_publish_audit_timeout_sec: float = 75.0
     llm_gate_judge_enabled: bool = True
     llm_gate_judge_provider: str = "xai"
-    llm_gate_judge_model: str | None = "grok-4.6"
+    llm_gate_judge_model: str | None = "kimi-k3"
     llm_gate_judge_timeout_sec: float = 120.0
     llm_premium_review_enabled: bool = True
-    llm_premium_review_provider: str = "xai"
-    llm_premium_review_model: str | None = "grok-4.6"
+    llm_premium_review_provider: str = "deepseek"
+    llm_premium_review_model: str | None = "deepseek-v4-pro"
     llm_json_max_tokens: int = 4096
     llm_topic_batch_max_tokens: int = 12000
     fact_pack_enabled: bool = False
@@ -220,8 +220,8 @@ class Settings(BaseSettings):
     openai_reasoning_effort: str = "high"
     openai_timeout_sec: float = 180.0
     xai_api_key: str | None = None
-    xai_base_url: str = "https://api.x.ai/v1"
-    xai_model: str = "grok-4.6"
+    xai_base_url: str = "https://opencode.ai/zen/go/v1"
+    xai_model: str = "kimi-k3"
     xai_reasoning_effort: str = "high"
     xai_timeout_sec: float = 180.0
     deepseek_api_key: str | None = None

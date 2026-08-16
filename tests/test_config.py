@@ -18,7 +18,9 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
         "LLM_ENABLE_FALLBACK",
         "LLM_GATE_JUDGE_PROVIDER",
         "LLM_GATE_JUDGE_MODEL",
+        "LLM_PREMIUM_REVIEW_PROVIDER",
         "LLM_PREMIUM_REVIEW_MODEL",
+        "XAI_BASE_URL",
         "XAI_MODEL",
         "DEEPSEEK_BASE_URL",
         "DEEPSEEK_MODEL",
@@ -39,9 +41,11 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
     assert settings.deepseek_base_url == "https://opencode.ai/zen/go/v1"
     assert settings.deepseek_model == "deepseek-v4-flash"
     assert settings.llm_gate_judge_provider == "xai"
-    assert settings.xai_model == "grok-4.6"
-    assert settings.llm_gate_judge_model == "grok-4.6"
-    assert settings.llm_premium_review_model == "grok-4.6"
+    assert settings.xai_base_url == "https://opencode.ai/zen/go/v1"
+    assert settings.xai_model == "kimi-k3"
+    assert settings.llm_gate_judge_model == "kimi-k3"
+    assert settings.llm_premium_review_provider == "deepseek"
+    assert settings.llm_premium_review_model == "deepseek-v4-pro"
 
 
 def test_viral_intensity_defaults_to_review_warning(monkeypatch) -> None:
