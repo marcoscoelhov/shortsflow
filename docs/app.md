@@ -285,13 +285,15 @@ Defaults importantes:
 - `language=pt-BR`
 - `target_duration_sec=50`
 - `llm_primary_provider=openai` com `openai_model=gpt-5.6-luna` e `openai_reasoning_effort=high`
-- `llm_fallback_provider=disabled`
+- `llm_fallback_provider=deepseek` com `llm_enable_fallback=true`, `deepseek_base_url=https://opencode.ai/zen/go/v1` e `deepseek_model=deepseek-v4-flash`
 - `llm_gate_judge_provider=xai`
-- `llm_gate_judge_model=grok-4.5` com `xai_reasoning_effort=high`
+- `llm_gate_judge_model=grok-4.6` com `xai_reasoning_effort=high`
+- `automatic_topic` gera um único lote de 10 drafts no Luna (ou um lote substituto no DeepSeek em caso de falha), bloqueia repetições e só então o Grok 4.6 ranqueia os 10 e escolhe o único draft que seguirá para roteiro e mídia
 - `llm_premium_review_enabled=true`
 - `llm_premium_review_provider=xai`
-- `llm_premium_review_model=grok-4.5` apenas para exceções: revisão premium/final, tema complexo ou sinal explícito de escalonamento.
+- `llm_premium_review_model=grok-4.6` apenas para exceções: revisão premium/final, tema complexo ou sinal explícito de escalonamento.
 - `llm_json_max_tokens=4096`
+- `llm_topic_batch_max_tokens=12000` (lote único de 10 pautas do `automatic_topic`; maior que o JSON normal)
 - `youtube_publish_mode=manual`
 - `youtube_api_enabled=false`
 - `automation_enabled=false`

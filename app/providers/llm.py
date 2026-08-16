@@ -51,6 +51,17 @@ class LLMProvider(Protocol):
     ) -> dict[str, Any]:
         ...
 
+    def plan_topic_batch(
+        self,
+        candidates: list[dict[str, Any]],
+        draft_count: int,
+        attempt: int,
+        history: list[dict[str, Any]],
+        tone: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         ...
 
@@ -149,8 +160,50 @@ class MockCreativeProvider:
                 "source_provider": "mock",
                 "tone": tone or "intrigante_direto",
                 "notes_applied": bool(notes),
+                "viral_potential_score": 0.75,
+                "viral_potential_reason": "Tema visual reconhecível com contraste e promessa clara.",
             },
         }
+
+    def plan_topic_batch(
+        self,
+        candidates: list[dict[str, Any]],
+        draft_count: int,
+        attempt: int,
+        history: list[dict[str, Any]],
+        tone: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        mock_topics = [
+            "A Lua gigante no horizonte",
+            "A Voyager sussurra para a Terra",
+            "Os anéis de Saturno brilham",
+            "O pulsar funciona como um farol",
+            "Encélado lança gêiseres no espaço",
+            "Titã tem rios sem água",
+            "WASP-76b pode ter chuva de ferro",
+            "A missão DART moveu um asteroide",
+            "Europa esconde um oceano sob o gelo",
+            "Uma galáxia vira um anel de luz",
+        ]
+        drafts = []
+        for index in range(draft_count):
+            topic = mock_topics[index % len(mock_topics)]
+            candidate = candidates[index % len(candidates)] if candidates else {}
+            plan = self.plan_topic(
+                topic,
+                attempt,
+                history,
+                candidate.get("requested_angle"),
+                tone=tone,
+                notes=notes,
+            )
+            plan["canonical_topic"] = topic
+            plan["angle"] = f"Ângulo visual exclusivo {index + 1} sobre {topic}"
+            plan["hook_promise"] = f"{topic} revela uma surpresa visível e contraintuitiva."
+            plan["quality_metrics"]["viral_potential_score"] = round(0.9 - index * 0.02, 2)
+            drafts.append(plan)
+        return {"drafts": drafts}
 
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         subject = topic_plan["canonical_topic"]
@@ -349,6 +402,24 @@ class MockCreativeProvider:
         return {"passed": True, "reasons": [], "retention_score": 0.85, "metadata_score": 0.85, "factual_score": 0.85, "provider": "mock"}
 
     def judge_quality_gate(self, gate_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if gate_kind == "topic_draft_selection":
+            ranking = [
+                {
+                    "index": index,
+                    "viral_potential_score": round(0.9 - index * 0.02, 2),
+                    "reason": f"Rascunho {index} tem promessa visual clara.",
+                }
+                for index in range(10)
+            ]
+            return {
+                "selected_index": 0,
+                "selected_reason": "É o rascunho com contraste visual mais imediato.",
+                "ranking": ranking,
+                "confidence": 0.88,
+                "provider": "mock",
+                "model": "mock",
+                "gate_kind": gate_kind,
+            }
         local_reasons = [str(item) for item in (payload.get("local_reasons") or [])]
         editorial_pass = gate_kind == "editorial" and (
             not local_reasons or local_reasons == ["weak_ending"] or "weak_ending" in local_reasons
@@ -491,6 +562,57 @@ Sem markdown.
         payload = self._normalize_topic_payload(payload, seed_theme)
         payload["quality_metrics"] = {**payload.get("quality_metrics", {}), "source_provider": self.provider_name}
         return payload
+
+    def plan_topic_batch(
+        self,
+        candidates: list[dict[str, Any]],
+        draft_count: int,
+        attempt: int,
+        history: list[dict[str, Any]],
+        tone: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        prompt = f"""
+Crie um lote de pautas de astronomia e universo para YouTube Shorts em pt-BR.
+Use os candidatos locais apenas como inspiração e guardrails; não copie nem limite o lote à quantidade de sementes.
+Candidatos JSON: {json.dumps(candidates, ensure_ascii=False)}
+Histórico aprovado recente JSON: {json.dumps(history[-30:], ensure_ascii=False)}
+Tom: {tone or "intrigante_direto"}
+Notas: {notes or "-"}
+Tentativa: {attempt}
+
+Responda como JSON estrito {{"drafts": [...]}} com exatamente {draft_count} pautas completas e distintas.
+Para este fluxo, draft_count será 10: produza exatamente 10 itens, nunca menos e nunca mais.
+Cada item deve conter canonical_topic, angle, hook_promise, title_candidates (3 a 5), entities,
+search_terms e quality_metrics. quality_metrics deve conter viral_potential_score numérico de 0.0 a 1.0
+e viral_potential_reason não vazio em pt-BR. Essas notas são apenas diagnósticas e não escolhem o vencedor.
+Todas as pautas devem permanecer inequivocamente em astronomia/universo, ter objeto reconhecível no hook,
+ser diferentes do histórico e ser diferentes entre si em tema canônico, ângulo e promessa do hook.
+Não use markdown nem texto fora do objeto JSON.
+"""
+        payload = self._json_completion(
+            prompt,
+            max_tokens=int(getattr(get_settings(), "llm_topic_batch_max_tokens", 12000) or 12000),
+        )
+        if not isinstance(payload, dict):
+            raise ProviderFailure(self.failure_provider_name, "topic batch planner returned non-object json")
+        drafts = payload.get("drafts")
+        if not isinstance(drafts, list):
+            return {"drafts": drafts}
+        normalized_drafts = []
+        for draft in drafts:
+            if not isinstance(draft, dict):
+                normalized_drafts.append(draft)
+                continue
+            fallback_theme = candidates[0].get("topic") if candidates else "astronomia"
+            seed_theme = str(draft.get("canonical_topic") or fallback_theme)
+            normalized = self._normalize_topic_payload(draft, seed_theme)
+            normalized["quality_metrics"] = {
+                **normalized.get("quality_metrics", {}),
+                "source_provider": self.provider_name,
+            }
+            normalized_drafts.append(normalized)
+        return {"drafts": normalized_drafts}
 
     def _normalize_topic_payload(self, payload: dict[str, Any], seed_theme: str) -> dict[str, Any]:
         aliases = {
@@ -819,6 +941,22 @@ Sem markdown.
     def judge_quality_gate(self, gate_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         compact = json.dumps(payload, ensure_ascii=False)
         prompts = {
+            "topic_draft_selection": f"""
+Você é o juiz independente de potencial viral para um lote de 10 pautas de YouTube Shorts em pt-BR.
+Compare o lote inteiro. Não aceite a autoavaliação do gerador como autoridade; faça sua própria avaliação
+de scroll stop, curiosidade sustentada, payoff visual, clareza, novidade e chance de compartilhamento.
+Entrada JSON: {compact}
+
+Responda JSON estrito com:
+- selected_index: inteiro de 0 a 9
+- selected_reason: texto não vazio em pt-BR
+- ranking exatamente 10 entradas, ordenadas por viral_potential_score decrescente
+- cada entrada de ranking: index inteiro, viral_potential_score numérico de 0.0 a 1.0, reason não vazio em pt-BR
+- cada índice de 0 a 9 deve aparecer exatamente uma vez
+- ranking[0].index deve ser igual a selected_index
+- confidence numérico de 0.0 a 1.0
+Sem markdown.
+""",
             "editorial": f"""
 Você é juiz editorial de YouTube Shorts em pt-BR. Avalie se o roteiro é publicável apesar dos alertas locais heurísticos.
 Entrada JSON: {compact}
@@ -866,6 +1004,7 @@ Sem markdown.
             return {"passed": False, "reasons": ["unknown_gate_kind"], "confidence": 0.0, "provider": self.provider_name, "gate_kind": gate_kind}
         result = self._json_completion(prompt)
         result["provider"] = self.provider_name
+        result["model"] = str(getattr(self, "model_name", "") or "")
         result["gate_kind"] = gate_kind
         return result
 
@@ -959,9 +1098,11 @@ Regras obrigatorias para image_prompt:
                     return result
         return None
 
-    def _json_completion(self, prompt: str) -> Any:
+    def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
         extra_body = self._request_extra_body()
-        request_kwargs = {"extra_body": extra_body} if extra_body else {}
+        request_kwargs: dict[str, Any] = {"extra_body": extra_body} if extra_body else {}
+        if max_tokens is not None:
+            request_kwargs["max_tokens"] = max_tokens
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,

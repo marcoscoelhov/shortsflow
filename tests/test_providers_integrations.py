@@ -25,13 +25,16 @@ def test_llm_defaults_match_quality_first_routing_policy() -> None:
     assert defaults["llm_script_draft_provider"] == "openai"
     assert defaults["llm_repair_provider"] == "openai"
     assert defaults["llm_scene_provider"] == "openai"
-    assert defaults["llm_fallback_provider"] == "disabled"
-    assert defaults["llm_enable_fallback"] is False
+    assert defaults["llm_fallback_provider"] == "deepseek"
+    assert defaults["llm_enable_fallback"] is True
+    assert defaults["deepseek_base_url"] == "https://opencode.ai/zen/go/v1"
+    assert defaults["deepseek_model"] == "deepseek-v4-flash"
     assert defaults["openai_model"] == "gpt-5.6-luna"
     assert defaults["openai_reasoning_effort"] == "high"
     assert defaults["llm_gate_judge_provider"] == "xai"
-    assert defaults["llm_gate_judge_model"] == "grok-4.5"
-    assert defaults["xai_model"] == "grok-4.5"
+    assert defaults["llm_gate_judge_model"] == "grok-4.6"
+    assert defaults["llm_premium_review_model"] == "grok-4.6"
+    assert defaults["xai_model"] == "grok-4.6"
     assert defaults["xai_reasoning_effort"] == "high"
 
 
@@ -70,6 +73,37 @@ def test_llm_registry_does_not_build_configured_fallback_when_disabled(monkeypat
     monkeypatch.setattr(registry, "_build_provider", fail_if_built)
 
     assert registry.fallback_provider() is None
+
+
+def test_llm_registry_builds_deepseek_fallback_with_opencode_go_settings_when_enabled(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: None))
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            use_mock_providers=False,
+            llm_enable_fallback=True,
+            llm_fallback_provider="deepseek",
+            deepseek_api_key="legacy-deepseek-key",
+            deepseek_base_url="https://opencode.ai/zen/go/v1",
+            deepseek_model="deepseek-v4-flash",
+            deepseek_timeout_sec=180,
+            openai_api_key="opencode-go-key",
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    provider = LLMProviderRegistry().fallback_provider()
+
+    assert isinstance(provider, DeepSeekCreativeProvider)
+    assert provider.model_name == "deepseek-v4-flash"
+    assert captured["api_key"] == "opencode-go-key"
+    assert captured["base_url"] == "https://opencode.ai/zen/go/v1"
 
 
 def test_script_generation_candidates_skip_duplicate_provider_model() -> None:
@@ -173,6 +207,32 @@ def test_deepseek_provider_uses_v4_flash_openai_compatible_client(monkeypatch) -
     assert "cada valor textual de retention_map deve ser cópia literal" in str(captured["messages"])
     assert "repetition_score usa escala 0.0 a 1.0" in str(captured["messages"])
     assert result["qa_metrics"]["repair_provider"] == "deepseek"
+
+
+def test_deepseek_opencode_go_uses_primary_key_instead_of_legacy_deepseek_key(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    settings = SimpleNamespace(
+        deepseek_api_key="legacy-deepseek-key",
+        deepseek_base_url="https://opencode.ai/zen/go/v1",
+        deepseek_model="deepseek-v4-flash",
+        deepseek_timeout_sec=90,
+        openai_api_key="opencode-go-key",
+        openai_base_url="https://primary-provider.example/v1",
+    )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("app.providers.llm.get_settings", lambda: settings)
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    provider = DeepSeekCreativeProvider()
+
+    assert provider.model_name == "deepseek-v4-flash"
+    assert captured["api_key"] == "opencode-go-key"
+    assert captured["base_url"] == "https://opencode.ai/zen/go/v1"
+
 
 def test_llm_registry_builds_qwen_optional_provider(monkeypatch) -> None:
     settings = SimpleNamespace(
@@ -408,7 +468,7 @@ def test_gate_judge_provider_uses_strong_openai_model(monkeypatch) -> None:
     assert provider.model_name == "gpt-5.4"
 
 
-def test_xai_grok45_gate_judge_uses_high_reasoning(monkeypatch) -> None:
+def test_xai_grok46_gate_judge_uses_high_reasoning(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class FakeCompletions:
@@ -441,7 +501,7 @@ def test_xai_grok45_gate_judge_uses_high_reasoning(monkeypatch) -> None:
         lambda: SimpleNamespace(
             use_mock_providers=False,
             llm_gate_judge_provider="xai",
-            llm_gate_judge_model="grok-4.5",
+            llm_gate_judge_model="grok-4.6",
             xai_api_key="xai-key",
             xai_base_url="https://api.x.ai/v1",
             xai_model="grok-4.20-non-reasoning",
@@ -458,7 +518,7 @@ def test_xai_grok45_gate_judge_uses_high_reasoning(monkeypatch) -> None:
     result = provider.judge_quality_gate("editorial", {"script": {"hook": "Escolha agora"}})
 
     assert result["passed"] is True
-    assert captured["model"] == "grok-4.5"
+    assert captured["model"] == "grok-4.6"
     assert captured["reasoning_effort"] == "high"
 
 
@@ -520,8 +580,8 @@ def test_quality_judge_candidates_fail_closed_when_fallback_disabled() -> None:
 
 
 def test_quality_judge_does_not_retry_same_provider_and_model_as_premium() -> None:
-    premium = SimpleNamespace(provider_name="xai", model_name="grok-4.5", judge_quality_gate=lambda *_args: {})
-    gate = SimpleNamespace(provider_name="xai", model_name="grok-4.5", judge_quality_gate=lambda *_args: {})
+    premium = SimpleNamespace(provider_name="xai", model_name="grok-4.6", judge_quality_gate=lambda *_args: {})
+    gate = SimpleNamespace(provider_name="xai", model_name="grok-4.6", judge_quality_gate=lambda *_args: {})
     resilient = object.__new__(ResilientCreativeProvider)
     resilient.settings = SimpleNamespace(llm_enable_fallback=False, llm_premium_review_enabled=True)
     resilient.premium_review_provider = premium
@@ -531,7 +591,7 @@ def test_quality_judge_does_not_retry_same_provider_and_model_as_premium() -> No
 
     candidates = resilient._quality_judge_candidates("growth_score", {"review_tier": "premium"})
 
-    assert [(role, provider.model_name) for role, provider in candidates] == [("premium_review", "grok-4.5")]
+    assert [(role, provider.model_name) for role, provider in candidates] == [("premium_review", "grok-4.6")]
 
 
 def test_premium_review_provider_uses_deepseek_pro_model_for_exceptions(monkeypatch) -> None:
@@ -704,6 +764,250 @@ def test_resilient_creative_provider_topic_uses_role_timeout() -> None:
     assert plan["canonical_topic"] == "fallback"
     assert plan["quality_metrics"]["fallback_used"] is True
     assert "deepseek_text topic planner timed out after 0.01s" in plan["quality_metrics"]["fallback_reason"]
+
+
+def test_luna_topic_failure_preserves_deepseek_fallback_metadata() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(llm_topic_timeout_sec=30, minimax_text_timeout_sec=30)
+    provider.strict_minimax_validation = False
+
+    class Luna:
+        provider_name = "openai"
+
+        def plan_topic(self, *args, **kwargs):
+            raise ProviderFailure("openai_text", "Luna unavailable")
+
+    class DeepSeek:
+        provider_name = "deepseek"
+
+        def plan_topic(self, *args, **kwargs):
+            return {
+                "canonical_topic": "A Lua no horizonte",
+                "angle": "A ilusão visual da Lua",
+                "hook_promise": "A Lua parece crescer sem mudar de tamanho.",
+                "title_candidates": ["A Lua gigante no horizonte"],
+                "entities": ["Lua"],
+                "search_terms": ["Moon illusion horizon"],
+                "quality_metrics": {
+                    "source_provider": "deepseek",
+                    "viral_potential_score": 0.8,
+                    "viral_potential_reason": "Contraste visual reconhecível.",
+                },
+            }
+
+    provider.primary = Luna()
+    provider.fallback = DeepSeek()
+
+    plan = provider.plan_topic("Lua", 1, [], None)
+
+    assert plan["quality_metrics"]["source_provider"] == "deepseek"
+    assert plan["quality_metrics"]["fallback_used"] is True
+    assert plan["quality_metrics"]["fallback_stage"] == "topic_plan_failure"
+    assert "Luna unavailable" in plan["quality_metrics"]["fallback_reason"]
+
+
+def test_shared_provider_topic_batch_uses_one_json_call_and_exactly_ten_contract(monkeypatch) -> None:
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.provider_name = "openai"
+    provider.failure_provider_name = "openai_text"
+    calls: list[tuple[str, int | None]] = []
+    drafts = [
+        {
+            "canonical_topic": f"Tema astronômico {index}",
+            "angle": f"Ângulo {index}",
+            "hook_promise": f"Objeto espacial {index} revela algo visível.",
+            "title_candidates": [f"Título {index}"],
+            "entities": [f"Objeto {index}"],
+            "search_terms": [f"astronomy object {index}"],
+            "quality_metrics": {
+                "viral_potential_score": 0.8,
+                "viral_potential_reason": "Contraste visual claro.",
+            },
+        }
+        for index in range(10)
+    ]
+
+    def fake_completion(prompt: str, *, max_tokens: int | None = None):
+        calls.append((prompt, max_tokens))
+        return {"drafts": drafts}
+
+    monkeypatch.setattr(provider, "_json_completion", fake_completion)
+
+    result = provider.plan_topic_batch(
+        [{"topic": "Lua"}, {"topic": "Saturno"}],
+        10,
+        1,
+        [],
+        tone="intrigante_direto",
+        notes="sem repetição",
+    )
+
+    assert len(calls) == 1
+    assert calls[0][1] == 12000
+    assert 'JSON estrito {"drafts": [...]}' in calls[0][0]
+    assert "exatamente 10" in calls[0][0]
+    assert len(result["drafts"]) == 10
+    assert all(draft["quality_metrics"]["source_provider"] == "openai" for draft in result["drafts"])
+
+
+def test_luna_batch_failure_invokes_deepseek_batch_once_and_annotates_every_draft() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(llm_topic_timeout_sec=30, minimax_text_timeout_sec=30)
+    provider.strict_minimax_validation = False
+    calls = {"luna": 0, "deepseek": 0}
+
+    class Luna:
+        provider_name = "openai"
+        failure_provider_name = "openai_text"
+
+        def plan_topic_batch(self, *args, **kwargs):
+            calls["luna"] += 1
+            raise ProviderFailure("openai_text", "Luna batch unavailable")
+
+    class DeepSeek:
+        provider_name = "deepseek"
+
+        def plan_topic_batch(self, *args, **kwargs):
+            calls["deepseek"] += 1
+            return {"drafts": [{"quality_metrics": {}} for _ in range(10)]}
+
+    provider.primary = Luna()
+    provider.fallback = DeepSeek()
+
+    result = provider.plan_topic_batch([{"topic": "Lua"}], 10, 1, [])
+
+    assert calls == {"luna": 1, "deepseek": 1}
+    assert all(draft["quality_metrics"]["source_provider"] == "deepseek" for draft in result["drafts"])
+    assert all(draft["quality_metrics"]["fallback_used"] is True for draft in result["drafts"])
+    assert all(draft["quality_metrics"]["fallback_stage"] == "topic_batch_failure" for draft in result["drafts"])
+    assert all("Luna batch unavailable" in draft["quality_metrics"]["fallback_reason"] for draft in result["drafts"])
+
+
+def test_topic_draft_selection_calls_only_gate_judge_once_with_configured_timeout(monkeypatch) -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(llm_gate_judge_timeout_sec=17.0)
+    calls: list[tuple[str, dict]] = []
+
+    class GateJudge:
+        provider_name = "xai"
+        model_name = "grok-4.6"
+
+        def judge_quality_gate(self, gate_kind, payload):
+            calls.append((gate_kind, payload))
+            return {"selected_index": 0, "ranking": [], "confidence": 0.5, "selected_reason": "Razão."}
+
+    class ForbiddenJudge:
+        provider_name = "deepseek"
+
+        def judge_quality_gate(self, *_args):
+            raise AssertionError("generator/fallback must not judge topic drafts")
+
+    provider.gate_judge_provider = GateJudge()
+    provider.primary = ForbiddenJudge()
+    provider.fallback = ForbiddenJudge()
+    provider.repair_provider = ForbiddenJudge()
+    observed_timeout: list[float] = []
+
+    def run(callable_, *, timeout_sec):
+        observed_timeout.append(timeout_sec)
+        return callable_()
+
+    monkeypatch.setattr(provider, "_run_primary_with_timeout", run)
+
+    result = provider.select_topic_draft([{"canonical_topic": "Lua"}])
+
+    assert calls == [("topic_draft_selection", {"drafts": [{"canonical_topic": "Lua"}]})]
+    assert observed_timeout == [17.0]
+    assert result["judge_provider_role"] == "gate_judge"
+    assert result["provider"] == "xai"
+    assert result["model"] == "grok-4.6"
+
+
+def test_luna_batch_route_passes_topic_batch_max_tokens(monkeypatch) -> None:
+    provider = object.__new__(OpenAICreativeProvider)
+    provider.provider_name = "openai"
+    provider.failure_provider_name = "openai_text"
+    provider.model_name = "gpt-5.6-luna"
+    provider.reasoning_effort = "high"
+    provider.max_output_tokens = 4096
+    provider.timeout_sec = 60.0
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text=json.dumps({"drafts": []}))
+
+    provider.client = SimpleNamespace(responses=FakeResponses())
+
+    provider.plan_topic_batch([{"topic": "Lua"}], 10, 1, [])
+
+    assert captured["max_output_tokens"] == 12000
+
+
+def test_deepseek_batch_route_passes_topic_batch_max_tokens(monkeypatch) -> None:
+    provider = object.__new__(DeepSeekCreativeProvider)
+    provider.provider_name = "deepseek"
+    provider.failure_provider_name = "deepseek_text"
+    provider.model_name = "deepseek-v4-flash"
+    provider.timeout_sec = 60.0
+    captured: dict[str, object] = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"drafts": []})))]
+            )
+
+    provider.client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+    provider.plan_topic_batch([{"topic": "Lua"}], 10, 1, [])
+
+    assert captured["max_tokens"] == 12000
+
+
+def test_ordinary_completions_still_use_llm_json_max_tokens(monkeypatch) -> None:
+    provider = object.__new__(OpenAICreativeProvider)
+    provider.provider_name = "openai"
+    provider.failure_provider_name = "openai_text"
+    provider.model_name = "gpt-5.6-luna"
+    provider.reasoning_effort = "high"
+    provider.max_output_tokens = 4096
+    provider.timeout_sec = 60.0
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text=json.dumps({"ok": True}))
+
+    provider.client = SimpleNamespace(responses=FakeResponses())
+
+    provider._json_completion("prompt comum")
+
+    assert captured["max_output_tokens"] == 4096
+
+
+def test_shared_judge_has_topic_draft_selection_prompt(monkeypatch) -> None:
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.provider_name = "xai"
+    provider.model_name = "grok-4.6"
+    captured: list[str] = []
+
+    def fake_completion(prompt: str):
+        captured.append(prompt)
+        return {"selected_index": 0, "selected_reason": "Razão.", "ranking": [], "confidence": 0.5}
+
+    monkeypatch.setattr(provider, "_json_completion", fake_completion)
+
+    result = provider.judge_quality_gate("topic_draft_selection", {"drafts": []})
+
+    assert len(captured) == 1
+    assert "selected_index" in captured[0]
+    assert "ranking exatamente 10" in captured[0]
+    assert result["provider"] == "xai"
+    assert result["model"] == "grok-4.6"
 
 def test_resilient_creative_provider_disables_repair_fallback_in_strict_minimax_mode() -> None:
     provider = object.__new__(ResilientCreativeProvider)
