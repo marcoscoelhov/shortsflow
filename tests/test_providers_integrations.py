@@ -26,6 +26,7 @@ def test_llm_defaults_match_quality_first_routing_policy() -> None:
     assert defaults["llm_repair_provider"] == "openai"
     assert defaults["llm_repair_model"] == "gpt-5.6-luna"
     assert defaults["llm_repair_reasoning_effort"] == "max"
+    assert defaults["llm_repair_timeout_sec"] == 360.0
     assert defaults["llm_scene_provider"] == "openai"
     assert defaults["llm_fallback_provider"] == "deepseek"
     assert defaults["llm_enable_fallback"] is True
@@ -487,6 +488,7 @@ def test_repair_provider_uses_luna_max_on_opencode_go(monkeypatch) -> None:
             llm_repair_provider="openai",
             llm_repair_model="gpt-5.6-luna",
             llm_repair_reasoning_effort="max",
+            llm_repair_timeout_sec=360,
             real_run_allow_mock_fallback=False,
             openai_api_key="opencode-go-key",
             openai_base_url="https://opencode.ai/zen/go/v1",
@@ -504,6 +506,7 @@ def test_repair_provider_uses_luna_max_on_opencode_go(monkeypatch) -> None:
     assert provider.provider_name == "openai"
     assert provider.model_name == "gpt-5.6-luna"
     assert provider.reasoning_effort == "max"
+    assert provider.timeout_sec == 360
 
 
 def test_gate_judge_provider_uses_strong_openai_model(monkeypatch) -> None:

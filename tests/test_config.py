@@ -15,6 +15,7 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
         "LLM_REPAIR_PROVIDER",
         "LLM_REPAIR_MODEL",
         "LLM_REPAIR_REASONING_EFFORT",
+        "LLM_REPAIR_TIMEOUT_SEC",
         "LLM_SCENE_PROVIDER",
         "LLM_FALLBACK_PROVIDER",
         "LLM_ENABLE_FALLBACK",
@@ -39,6 +40,7 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
     assert settings.llm_repair_provider == "openai"
     assert settings.llm_repair_model == "gpt-5.6-luna"
     assert settings.llm_repair_reasoning_effort == "max"
+    assert settings.llm_repair_timeout_sec == 360.0
     assert settings.llm_scene_provider == "openai"
     assert settings.llm_fallback_provider == "deepseek"
     assert settings.llm_enable_fallback is True

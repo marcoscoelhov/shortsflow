@@ -560,6 +560,9 @@ class LLMProviderRegistry:
         repair_effort = (getattr(self.settings, "llm_repair_reasoning_effort", None) or "").strip()
         if repair_effort and hasattr(provider, "reasoning_effort"):
             provider.reasoning_effort = repair_effort
+        repair_timeout = float(getattr(self.settings, "llm_repair_timeout_sec", 0) or 0)
+        if repair_timeout > 0 and hasattr(provider, "timeout_sec"):
+            provider.timeout_sec = repair_timeout
         return provider
 
     def scene_provider(self) -> llm_facade.LLMProvider | None:

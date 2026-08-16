@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     llm_repair_provider: str = "openai"
     llm_repair_model: str | None = "gpt-5.6-luna"
     llm_repair_reasoning_effort: str = "max"
+    llm_repair_timeout_sec: float = 360.0
     llm_scene_provider: str = "openai"
     llm_enable_fallback: bool = True
     llm_script_draft_provider: str = "openai"
@@ -291,6 +292,7 @@ class Settings(BaseSettings):
     @field_validator(
         "llm_topic_timeout_sec",
         "llm_script_draft_timeout_sec",
+        "llm_repair_timeout_sec",
         "minimax_script_timeout_sec",
         "llm_publish_audit_timeout_sec",
         "llm_gate_judge_timeout_sec",
