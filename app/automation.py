@@ -37,8 +37,10 @@ from app.automation_topics import (
     COSMOS_CURIOSITY_POOL,
     WINNER_SEED_MIN_SCORE,
     cosmos_policy_notes,
+    cosmos_topic_candidates_note,
     has_recognizable_hook_object,
     select_cosmos_topic,
+    select_cosmos_topics,
 )
 from app.airtable_ready_scripts import AirtableReadyScriptClient, AirtableReadyScriptSyncResult
 from app.db import session_scope
@@ -1121,13 +1123,21 @@ class AutomationService:
                 .limit(40)
             ).all()
         fallback_notes = cosmos_policy_notes()
-        cosmos_candidate = self._cosmos_automation_topic(recent_topics)
+        winner_candidate_count = sum(seed.base_score >= WINNER_SEED_MIN_SCORE for seed in COSMOS_CURIOSITY_POOL)
+        ranked_candidates = select_cosmos_topics(recent_topics, count=winner_candidate_count)
+        preferred_candidate = self._cosmos_automation_topic(recent_topics)
+        cosmos_candidates = [
+            preferred_candidate,
+            *(candidate for candidate in ranked_candidates if candidate.topic != preferred_candidate.topic),
+        ]
+        cosmos_candidate = cosmos_candidates[0]
         seed_theme = cosmos_candidate.topic
         requested_angle = cosmos_candidate.requested_angle
         notes = "\n".join(
             [
                 *fallback_notes,
                 cosmos_candidate.as_notes(),
+                cosmos_topic_candidates_note(cosmos_candidates),
                 "trend_research=discarded",
                 "trend_discard_reason=automatic_topic_focus_locked_to_cosmos_pool",
                 "trend_source=cosmos_curiosity_pool",

@@ -15,8 +15,13 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
         "LLM_REPAIR_PROVIDER",
         "LLM_SCENE_PROVIDER",
         "LLM_FALLBACK_PROVIDER",
+        "LLM_ENABLE_FALLBACK",
         "LLM_GATE_JUDGE_PROVIDER",
+        "LLM_GATE_JUDGE_MODEL",
+        "LLM_PREMIUM_REVIEW_MODEL",
         "XAI_MODEL",
+        "DEEPSEEK_BASE_URL",
+        "DEEPSEEK_MODEL",
     )
     for field in fields:
         monkeypatch.delenv(f"SHORTSFLOW_{field}", raising=False)
@@ -29,9 +34,14 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
     assert settings.llm_script_draft_provider == "openai"
     assert settings.llm_repair_provider == "openai"
     assert settings.llm_scene_provider == "openai"
-    assert settings.llm_fallback_provider == "disabled"
+    assert settings.llm_fallback_provider == "deepseek"
+    assert settings.llm_enable_fallback is True
+    assert settings.deepseek_base_url == "https://opencode.ai/zen/go/v1"
+    assert settings.deepseek_model == "deepseek-v4-flash"
     assert settings.llm_gate_judge_provider == "xai"
-    assert settings.xai_model == "grok-4.5"
+    assert settings.xai_model == "grok-4.6"
+    assert settings.llm_gate_judge_model == "grok-4.6"
+    assert settings.llm_premium_review_model == "grok-4.6"
 
 
 def test_viral_intensity_defaults_to_review_warning(monkeypatch) -> None:

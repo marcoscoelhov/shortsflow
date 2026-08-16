@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 import re
 from dataclasses import dataclass
@@ -218,7 +219,7 @@ _RECOGNIZABLE_HOOK_OBJECT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("galaxia", r"\bgalaxia\b|\bgalaxias\b|\bvia\s+lactea\b"),
     ("encelado", r"\bencelado\b"),
     ("europa", r"\beuropa\b"),
-    ("titan", r"\btitan\b"),
+    ("titan", r"\btitan?\b"),
     ("wasp_76b", r"\bwasp[\s-]?76b\b"),
     ("kepler_16b", r"\bkepler[\s-]?16b\b"),
     ("dart", r"\bdart\b|\bdimorphos\b"),
@@ -281,6 +282,49 @@ def select_cosmos_topic(recent_topics: Iterable[str], *, rng: random.Random | No
         visual_seed=seed.visual_seed,
         why=["astronomia", "universo", "visual_forte", *seed.tags[:2]],
     )
+
+
+def select_cosmos_topics(recent_topics: Iterable[str], *, count: int = 3) -> list[TrendCandidate]:
+    recent = [str(topic or "") for topic in recent_topics if str(topic or "").strip()]
+    eligible: list[tuple[int, CosmosCuriositySeed, float]] = []
+    for index, seed in enumerate(COSMOS_CURIOSITY_POOL):
+        if seed.base_score < WINNER_SEED_MIN_SCORE:
+            continue
+        similarity = max((_cosmos_similarity(seed.topic, topic) for topic in recent), default=0.0)
+        eligible.append((index, seed, similarity))
+    eligible.sort(key=lambda item: (item[2] >= 0.62, -item[1].base_score, item[2], item[0]))
+    if len(eligible) < count:
+        raise RuntimeError(f"cosmos pool has fewer than {count} distinct winner seeds")
+    return [
+        TrendCandidate(
+            topic=seed.topic,
+            requested_angle=seed.requested_angle,
+            source="cosmos_curiosity_pool",
+            source_url="local://cosmos-curiosity-pool",
+            score=seed.base_score,
+            raw_title=seed.topic,
+            familiarity_score=0.95,
+            source_title=seed.topic,
+            hook_seed=seed.hook_seed,
+            visual_seed=seed.visual_seed,
+            why=["astronomia", "universo", "visual_forte", *seed.tags[:2]],
+        )
+        for _index, seed, _similarity in eligible[:count]
+    ]
+
+
+def cosmos_topic_candidates_note(candidates: Iterable[TrendCandidate]) -> str:
+    payload = [
+        {
+            "topic": candidate.topic,
+            "requested_angle": candidate.requested_angle,
+            "hook_seed": candidate.hook_seed,
+            "visual_seed": candidate.visual_seed,
+            "seed_score": candidate.score,
+        }
+        for candidate in candidates
+    ]
+    return "automatic_topic_candidates_json=" + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _normalize(text: str) -> str:

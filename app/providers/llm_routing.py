@@ -66,12 +66,117 @@ class ResilientCreativeProvider:
                 payload = self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
                 payload["quality_metrics"]["fallback_reason"] = str(exc)
                 payload["quality_metrics"]["fallback_used"] = True
+                payload["quality_metrics"]["fallback_stage"] = "topic_plan_failure"
                 return payload
         if self.strict_minimax_validation:
             raise ProviderFailure("llm_registry", "strict minimax validation requires a primary llm provider")
         if not self.fallback:
             raise ProviderFailure("llm_registry", "no topic llm provider is available")
         return self.fallback.plan_topic(seed_theme, attempt, history, requested_angle, tone=tone, notes=notes)
+
+    def plan_topic_batch(
+        self,
+        candidates: list[dict[str, Any]],
+        draft_count: int,
+        attempt: int,
+        history: list[dict[str, Any]],
+        tone: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        timeout_sec = float(getattr(self.settings, "llm_topic_timeout_sec", self.settings.minimax_text_timeout_sec))
+        if self.primary is not None:
+            try:
+                payload = self._run_primary_with_timeout(
+                    lambda: self.primary.plan_topic_batch(
+                        candidates,
+                        draft_count,
+                        attempt,
+                        history,
+                        tone=tone,
+                        notes=notes,
+                    ),
+                    timeout_sec=timeout_sec,
+                )
+                return self._annotate_topic_batch(payload, self.primary)
+            except concurrent.futures.TimeoutError as exc:
+                failure_reason = f"{self._provider_failure_name(self.primary)} topic batch timed out after {timeout_sec}s"
+                failure_stage = "topic_batch_timeout"
+                failure = exc
+            except ProviderFailure as exc:
+                failure_reason = str(exc)
+                failure_stage = "topic_batch_failure"
+                failure = exc
+            if self.fallback is None:
+                raise ProviderFailure("llm_registry", f"{failure_reason} and no fallback provider is available") from failure
+            payload = self.fallback.plan_topic_batch(
+                candidates,
+                draft_count,
+                attempt,
+                history,
+                tone=tone,
+                notes=notes,
+            )
+            return self._annotate_topic_batch(
+                payload,
+                self.fallback,
+                fallback_reason=failure_reason,
+                fallback_stage=failure_stage,
+            )
+        if self.fallback is None:
+            raise ProviderFailure("llm_registry", "no topic batch llm provider is available")
+        return self._annotate_topic_batch(
+            self.fallback.plan_topic_batch(candidates, draft_count, attempt, history, tone=tone, notes=notes),
+            self.fallback,
+        )
+
+    @staticmethod
+    def _annotate_topic_batch(
+        payload: dict[str, Any],
+        provider: Any,
+        *,
+        fallback_reason: str | None = None,
+        fallback_stage: str | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ProviderFailure(str(getattr(provider, "provider_name", "llm")), "topic batch returned non-object json")
+        drafts = payload.get("drafts")
+        if not isinstance(drafts, list):
+            return payload
+        source_provider = str(getattr(provider, "provider_name", "") or "")
+        for draft in drafts:
+            if not isinstance(draft, dict):
+                continue
+            metrics = draft.get("quality_metrics")
+            if not isinstance(metrics, dict):
+                metrics = {}
+                draft["quality_metrics"] = metrics
+            metrics["source_provider"] = source_provider
+            metrics["fallback_used"] = fallback_reason is not None
+            metrics["fallback_reason"] = fallback_reason
+            metrics["fallback_stage"] = fallback_stage
+        return payload
+
+    def select_topic_draft(self, drafts: list[dict[str, Any]]) -> dict[str, Any]:
+        provider = self.gate_judge_provider
+        if provider is None or not hasattr(provider, "judge_quality_gate"):
+            raise ProviderFailure("llm_registry", "independent topic draft judge is unavailable")
+        timeout_sec = float(getattr(self.settings, "llm_gate_judge_timeout_sec", 45.0))
+        try:
+            result = self._run_primary_with_timeout(
+                lambda: provider.judge_quality_gate("topic_draft_selection", {"drafts": drafts}),
+                timeout_sec=timeout_sec,
+            )
+        except concurrent.futures.TimeoutError as exc:
+            raise ProviderFailure(
+                self._provider_failure_name(provider),
+                f"topic draft judge timed out after {timeout_sec}s",
+            ) from exc
+        if not isinstance(result, dict):
+            raise ProviderFailure(self._provider_failure_name(provider), "topic draft judge returned non-object json")
+        result["judge_provider_role"] = "gate_judge"
+        result["provider"] = str(result.get("provider") or getattr(provider, "provider_name", ""))
+        result["model"] = str(result.get("model") or getattr(provider, "model_name", ""))
+        return result
 
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         candidates = self._script_generation_candidates()

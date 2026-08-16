@@ -17,17 +17,20 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
 
     def __init__(self) -> None:
         settings = llm_facade.get_settings()
-        if not settings.deepseek_api_key:
+        base_url = str(settings.deepseek_base_url).rstrip("/")
+        uses_opencode_go = base_url == "https://opencode.ai/zen/go/v1"
+        api_key = getattr(settings, "openai_api_key", None) if uses_opencode_go else settings.deepseek_api_key
+        if not api_key:
             raise ProviderFailure(self.failure_provider_name, "missing deepseek api key")
         self.timeout_sec = settings.deepseek_timeout_sec
         self.model_name = settings.deepseek_model
         self.client = llm_facade.OpenAI(
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
+            api_key=api_key,
+            base_url=base_url,
             timeout=self.timeout_sec,
         )
 
-    def _json_completion(self, prompt: str) -> Any:
+    def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
         settings = llm_facade.get_settings()
         try:
             response = self.client.chat.completions.create(
@@ -38,7 +41,7 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.7,
-                max_tokens=int(getattr(settings, "llm_json_max_tokens", 4096) or 4096),
+                max_tokens=int(max_tokens if max_tokens is not None else (getattr(settings, "llm_json_max_tokens", 4096) or 4096)),
                 timeout=self.timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
@@ -110,15 +113,18 @@ class GeminiCreativeProvider(MinimaxCreativeProvider):
             http_options=genai_types.HttpOptions(timeout=int(float(self.timeout_sec) * 1000)),
         )
 
-    def _json_completion(self, prompt: str) -> Any:
+    def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
         try:
+            gen_config: dict[str, Any] = {
+                "response_mime_type": "application/json",
+                "temperature": 0.7,
+            }
+            if max_tokens is not None:
+                gen_config["max_output_tokens"] = max_tokens
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
-                config=genai_types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.7,
-                ),
+                config=genai_types.GenerateContentConfig(**gen_config),
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
@@ -161,7 +167,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
             timeout=self.timeout_sec,
         )
 
-    def _json_completion(self, prompt: str) -> Any:
+    def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
         try:
             response = self.client.responses.create(
                 model=self.model_name,
@@ -169,7 +175,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
                 input=prompt,
                 reasoning=cast(Any, {"effort": self.reasoning_effort}),
                 text={"format": {"type": "json_object"}},
-                max_output_tokens=self.max_output_tokens,
+                max_output_tokens=int(max_tokens if max_tokens is not None else self.max_output_tokens),
                 timeout=self.timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
@@ -238,7 +244,7 @@ class XAICreativeProvider(MinimaxCreativeProvider):
             timeout=self.timeout_sec,
         )
 
-    def _json_completion(self, prompt: str) -> Any:
+    def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
         settings = llm_facade.get_settings()
         try:
             response = self.client.chat.completions.create(
@@ -249,7 +255,7 @@ class XAICreativeProvider(MinimaxCreativeProvider):
                 ],
                 response_format={"type": "json_object"},
                 reasoning_effort=self.reasoning_effort,
-                max_tokens=int(getattr(settings, "llm_json_max_tokens", 4096) or 4096),
+                max_tokens=int(max_tokens if max_tokens is not None else (getattr(settings, "llm_json_max_tokens", 4096) or 4096)),
                 timeout=self.timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
