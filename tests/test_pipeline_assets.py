@@ -1618,6 +1618,41 @@ def test_scene_timings_fall_back_to_token_boundaries() -> None:
     assert [scene["actual_start_ms"] for scene in normalized] == [0, 10_000, 20_000]
     assert [scene["actual_end_ms"] for scene in normalized] == [10_000, 20_000, 30_000]
 
+
+def test_scene_timings_rebase_when_duration_changes() -> None:
+    """Stale actual_* from prior 58s duration must be ignored; recompute from tokens for new total."""
+    scenes = [
+        {
+            "scene_id": "scene-1",
+            "token_start": 0,
+            "token_end": 9,
+            "actual_start_ms": 0,
+            "actual_end_ms": 19333,
+        },
+        {
+            "scene_id": "scene-2",
+            "token_start": 10,
+            "token_end": 19,
+            "actual_start_ms": 19333,
+            "actual_end_ms": 38666,
+        },
+        {
+            "scene_id": "scene-3",
+            "token_start": 20,
+            "token_end": 29,
+            "actual_start_ms": 38666,
+            "actual_end_ms": 58000,
+        },
+    ]
+    normalized = normalize_scene_timings(scenes, 54_000)
+    assert [scene["actual_start_ms"] for scene in normalized] == [0, 18_000, 36_000]
+    assert [scene["actual_end_ms"] for scene in normalized] == [18_000, 36_000, 54_000]
+    # cuts stay ordered, no overlap
+    for i in range(len(normalized) - 1):
+        assert normalized[i]["actual_end_ms"] <= normalized[i + 1]["actual_start_ms"]
+    assert normalized[-1]["actual_end_ms"] == 54_000
+
+
 def test_scene_token_coverage_normalizes_numeric_scene_ids_to_strings() -> None:
     narration = "polvos tem tres coracoes e sangue azul no oceano profundo"
     scenes = [
@@ -1869,9 +1904,10 @@ def test_tts_duration_fit_expands_short_audio_and_subtitle_timings(tmp_path: Pat
     )
     cues = parse_srt(srt_path.read_text(encoding="utf-8"))
 
-    assert 35_500 <= result["duration_ms"] <= 36_500
-    assert result["provider_metadata"]["duration_fit_applied"] is True
-    assert 35_500 <= cues[-1]["end_ms"] <= 36_500
+    # Plan 018: do not expand short audio. Duration stays, no fit_applied.
+    assert result["duration_ms"] == 27_000
+    assert result.get("provider_metadata", {}).get("duration_fit_applied") in (None, False)
+    assert cues[-1]["end_ms"] == 27_000
 
 def test_scene_semantics_keeps_image_prompt_in_english() -> None:
     normalized = orchestrator.scene_pipeline.normalize_scene_semantics(

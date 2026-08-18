@@ -307,16 +307,16 @@ class ScriptQualityGate:
             reasons.append("weak_loop_closure")
 
         word_count = len(word_tokens(full_narration))
-        estimated_duration = float(script.get("estimated_duration_sec") or max(0, word_count / 2.55))
+        estimated_duration = float(script.get("estimated_duration_sec") or max(0, word_count / (145 / 60)))
         avg_sentence = avg_words_per_sentence(full_narration)
         max_sentence = max_words_single_sentence(full_narration)
         words_per_second = round(word_count / estimated_duration, 2) if estimated_duration else 0.0
         target_min = max(34.5, target_duration_sec - 10)
         target_max = min(56.5, target_duration_sec + 10)
-        natural_min_wpm = 150
-        natural_max_wpm = 172
-        natural_min_words = max(115 if target_duration_sec >= 45 else 90, math.ceil(target_duration_sec * natural_min_wpm / 60))
-        natural_max_words = min(150, math.floor(min(55, target_duration_sec + 10) * natural_max_wpm / 60))
+        natural_min_wpm = 135
+        natural_max_wpm = 155
+        natural_min_words = max(105, math.ceil(target_duration_sec * natural_min_wpm / 60))
+        natural_max_words = min(130, math.floor(min(55, target_duration_sec + 10) * natural_max_wpm / 60))
         natural_duration_at_fast_pace = round(word_count / (natural_max_wpm / 60), 2) if word_count else 0.0
         natural_duration_at_slow_pace = round(word_count / (natural_min_wpm / 60), 2) if word_count else 0.0
 

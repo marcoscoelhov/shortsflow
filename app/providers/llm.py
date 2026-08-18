@@ -720,7 +720,7 @@ Regras:
 - use golden_sample_brief como régua editorial: aproxime-se dos padrões bons e evite os padrões ruins
 - primeira frase com no maximo 12 palavras
 - media por frase <= 14
-- para target_duration_sec=45, gere 120 a 140 palavras no total; para outros alvos, mire cerca de 150 a 172 WPM naturais, nunca abaixo de 115 palavras
+- para target_duration_sec=45, gere 105 a 130 palavras no total; para outros alvos, mire cerca de 150 a 172 WPM naturais, nunca abaixo de 115 palavras
 - a narração deve soar natural em pt-BR, sem correr e sem arrastar; não compense roteiro curto com pausas longas de TTS
 - use estrutura agressiva de retenção: hook de choque, loop aberto, escalada de fatos, payoff atrasado e fechamento memoravel
 - cada frase deve criar uma pergunta mental ou tensão para a frase seguinte
@@ -878,7 +878,7 @@ Regras obrigatórias:
 - mantenha duração estimada entre 35 e 55 segundos
 - primeira frase com no máximo 12 palavras
 - média por frase <= 14 e frase máxima <= 20 palavras
-- para target_duration_sec=45, mantenha 120 a 140 palavras no total; para outros alvos, mire cerca de 150 a 172 WPM naturais, nunca abaixo de 115 palavras
+- para target_duration_sec=45, mantenha 105 a 130 palavras no total; para outros alvos, mire cerca de 150 a 172 WPM naturais, nunca abaixo de 115 palavras
 - a narração deve soar natural em pt-BR, sem correr e sem arrastar; não compense roteiro curto com pausas longas de TTS
 - preserve a promessa central e os fatos úteis, mas reescreva o necessário
 - a primeira palavra do hook deve ser, quando natural, um número, nome próprio ou verbo de ação
