@@ -3029,6 +3029,51 @@ def test_script_postprocess_repairs_common_provider_text_issues() -> None:
     assert "supplementação" not in combined
     assert "alimentação" in processed["title"]
 
+def test_postprocess_keeps_loop_and_payoff_in_full_narration() -> None:
+    """Regression: repair postprocess must keep loop+payoff in spoken full_narration (TTS source)."""
+    hook = "Saturno parece sólido flutuando no espaço."
+    loop = "Entao por que Saturno nao cai?"
+    body_beats = [
+        "Seus aneis sao feitos de gelo e rocha.",
+        "A gravidade puxa tudo para o centro.",
+        "Mas a velocidade orbital cria um equilibrio.",
+    ]
+    payoff = "A resposta esta na fisica dos aneis que parecem instaveis mas nao sao."
+    ending = "Saturno flutua porque o que vemos e um sistema em movimento constante."
+    script = {
+        "title": "Saturno e seus aneis",
+        "hook": hook,
+        "loop": loop,
+        "body_beats": body_beats,
+        "payoff": payoff,
+        "ending": ending,
+        "cta": None,
+        "full_narration": " ".join([hook, loop, *body_beats, payoff, ending]),
+        "estimated_duration_sec": 42,
+        "key_facts": [],
+        "source_fact_ids": [],
+        "claim_trace": [],
+        "token_count": 55,
+        "language": "pt-BR",
+        "retention_map": {},
+        "qa_metrics": {},
+    }
+
+    processed = orchestrator.script_pipeline._postprocess_script_for_quality(
+        script, {"canonical_topic": "saturno", "fact_pack": {}}, ["weak_loop_closure"]
+    )
+
+    # loop text (normalized punctuation ok) present in spoken narration
+    assert "por que saturno nao cai" in processed["full_narration"].lower()
+    # payoff text present
+    assert "resposta esta na fisica dos aneis" in processed["full_narration"].lower()
+    # narration ends with a sentence (repair may rewrite ending via loop_closure, but loop+payoff are kept)
+    assert processed["full_narration"].rstrip().endswith(".")
+    # token count preserved within tolerance (ending rewrite may shorten)
+    orig_parts = " ".join([hook, loop, *body_beats, payoff, ending])
+    assert len(word_tokens(processed["full_narration"])) >= len(word_tokens(orig_parts)) - 8
+
+
 def test_weak_fact_query_rejects_generic_food_cause_terms() -> None:
     assert orchestrator.script_pipeline._is_weak_fact_query("causa comida")
 
