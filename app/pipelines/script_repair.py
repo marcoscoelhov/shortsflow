@@ -451,8 +451,7 @@ class ScriptRepairDomain(BasePipeline):
                     for beat, fact in zip(beats, grounded_facts[: len(beats)], strict=False)
                 ]
                 rewritten["ending"] = self._loop_closure_sentence(anchor, str(rewritten.get("hook") or ""), beats[-1] if beats else anchor, 0)
-                sentences = [rewritten["hook"], *rewritten["body_beats"], rewritten["ending"]]
-                rewritten["full_narration"] = " ".join(sentence.rstrip(".!?") + "." for sentence in sentences if sentence).strip()
+                # full_narration will be (re)composed by _normalize_script_narration_fields after this
                 return rewritten
 
         narration_sentences = [sentence for sentence in sentence_split(str(rewritten.get("full_narration") or "")) if sentence]
@@ -472,8 +471,7 @@ class ScriptRepairDomain(BasePipeline):
                 break
             body_beats.append(candidate)
         rewritten["body_beats"] = body_beats[:4]
-        narration_parts = [rewritten["hook"], *rewritten["body_beats"], rewritten["ending"]]
-        rewritten["full_narration"] = " ".join(str(sentence).rstrip(".!?") + "." for sentence in narration_parts if sentence).strip()
+        # Do not set full_narration. Leave loop/payoff from input; final normalize will compose 5-part from parts.
         rewritten["key_facts"] = [sentence.rstrip(".!?") for sentence in rewritten["body_beats"][:3] if sentence]
         rewritten["source_fact_ids"] = []
         rewritten["claim_trace"] = [
@@ -570,15 +568,8 @@ class ScriptRepairDomain(BasePipeline):
         variant_seed = stable_hash({"hook": hook, "anchor": anchor, "payoff_hint": payoff_hint})
         variant = int(str(variant_seed)[:2], 16) if str(variant_seed)[:2] else 0
         repaired["ending"] = self._loop_closure_sentence(anchor, hook, payoff_hint, variant)
-        repaired["full_narration"] = " ".join(
-            sentence
-            for sentence in [
-                hook.rstrip(".!?") + "." if hook else "",
-                *body_beats,
-                repaired["ending"],
-            ]
-            if sentence
-        ).strip()
+        # Do not assign full_narration here. The final _normalize_script_narration_fields (called after split)
+        # will compose hook + loop + body_beats + payoff + ending.
         return repaired
 
     def _loop_closure_sentence(self, anchor: str, hook: str, payoff_hint: str, variant: int) -> str:
