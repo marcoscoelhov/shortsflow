@@ -1,66 +1,76 @@
 # Planos de Implementacao ShortsFlow
 
-Gerado pela skill `improve` em 2026-07-13, no commit `08fbea1`.
+Gerado / reconciliado pela skill `improve` em 2026-08-18, contra **origin/staging `8d9de7a`**.
 
-Estes planos foram escritos para execucao por `gpt-5.6-terra` com raciocinio
-`high`, sempre em worktree/branch isolada. O executor deve ler o plano inteiro,
-executar cada verificacao e atualizar o status abaixo. Nao executar dois planos
-que alterem o banco ou o pipeline ao mesmo tempo.
+O lote vigente de **qualidade de roteiro/video** e **017–019** (auditoria 2026-08-18, commit `e1a7cdb`). Execute-os em worktree/branch isolada (`advisor/NNN-<slug>`), com providers mock, sem push e sem YouTube real.
 
-O relatorio mestre e [000-shortsflow-auditoria-completa.md](000-shortsflow-auditoria-completa.md).
+Os planos **010–016** continuam como backlog de ops (lease, YouTube, analytics). Nao misturar com 017–019 no mesmo worktree.
 
-## Ordem e status
+Os planos **000–009** (13/07, commit `08fbea1`) ficam como **backlog historico**. Nao executar 002/003: os pedacos ainda validos foram reescritos em 010–014. Nao executar 006–009: `docs/CONTROL.md` marca multinicho / refactor grande como Not Now.
+
+Relatorio mestre antigo: [000-shortsflow-auditoria-completa.md](000-shortsflow-auditoria-completa.md).
+
+## Ordem vigente — qualidade roteiro/video (2026-08-18)
 
 | Plano | Titulo | Prioridade | Esforco | Depende de | Status |
 |---|---|---:|---:|---|---|
-| 001 | Estabilizar a verificacao canonica | P0 | M | - | TODO |
-| 002 | Endurecer autenticacao, leases e publicacao | P0 | L | 001 | TODO |
-| 003 | Adotar migracoes e corrigir consultas quentes | P1 | L | 001, 002 | TODO |
-| 004 | Versionar e compor o prompt mestre | P0 | L | 001, 003 | TODO |
-| 005 | Reduzir modulos acima do limite de contexto | P1 | XL | 001, 002, 004 | TODO |
-| 006 | Introduzir perfis de canal e nicho | P1 | XL | 003, 004, 005 | TODO |
-| 007 | Criar paineis multinicho realmente isolados | P2 | L | 006 | TODO |
-| 008 | Formalizar pontos internos de extensao | P2 | L | 005, 006 | TODO |
-| 009 | Fechar o ciclo de experimentos de retencao | P2 | XL | 004, 006, 007 | TODO |
+| 017 | Restaurar Loop e Payoff na narracao falada | P0 | S | — | TODO |
+| 018 | Alinhar ritmo 135–155 WPM e rebase de cortes | P0 | M | — | TODO |
+| 019 | Juiz LLM fail-closed | P0 | S | — | DONE |
 
-Status validos: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED: <motivo>`,
-`REJECTED: <motivo>`.
+017, 018 e 019 sao independentes (arquivos diferentes). Podem rodar em worktrees paralelas. Nao tocar `test_pipeline_script.py` nos tres ao mesmo tempo — 018 so edita esse arquivo se um fixture de WPM exigir.
+
+## Backlog ops (010–016)
+
+| Plano | Titulo | Prioridade | Esforco | Depende de | Status |
+|---|---|---:|---:|---|---|
+| 010 | Preservar lease vivo no reprocesso | P0 | M | — | TODO |
+| 011 | Claim atomico antes do upload YouTube | P0 | L | — | TODO |
+| 012 | Roteiro pronto nao e fact pack verified | P0 | M | — | TODO |
+| 013 | Paginar jobs do Hub no SQL | P1 | M | — | TODO |
+| 014 | Tirar o 1+N do sync de Analytics | P1 | M | — | TODO |
+| 015 | Isolar timeout de LLM | P1 | L | — | TODO |
+| 016 | Reconciliar contratos do operador (docs) | P1 | S | — | TODO |
+
+Status validos: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED: <motivo>`, `REJECTED: <motivo>`.
+
+## Backlog historico (2026-07-13)
+
+| Plano | Titulo | Status |
+|---|---|---|
+| 001 | Estabilizar a verificacao canonica | HISTORICAL — so reabrir se pytest colidir em `data-test/` |
+| 002 | Endurecer autenticacao, leases e publicacao | SUPERSEDED by 010, 011, 012, 016 |
+| 003 | Migracoes e consultas quentes | SUPERSEDED in part by 013, 014; Alembic/indexes/tx boundary still deferred |
+| 004 | Versionar prompt mestre | HISTORICAL / Not Now |
+| 005 | Modularizar pipeline | HISTORICAL — ADR 0004 already landed incrementally |
+| 006 | ChannelProfile | HISTORICAL / CONTROL Not Now |
+| 007 | Paineis multinicho | HISTORICAL / CONTROL Not Now |
+| 008 | Seams de extensao | HISTORICAL / CONTROL Not Now |
+| 009 | Loop de retencao / experimentos | HISTORICAL / CONTROL Not Now |
 
 ## Dependencias
 
-- `001` e obrigatorio antes de qualquer refatoracao: sem baseline verde o Terra
-  nao consegue distinguir regressao nova de interferencia da suite.
-- `002` vem antes da expansao porque upload duplicado, lease roubado e confianca
-  indevida em roteiro importado ampliariam o risco em varios canais.
-- `003` cria o mecanismo de migracao necessario para as novas entidades.
-- `004` define ownership e versionamento de prompt antes de um perfil de canal
-  apontar para prompts distintos.
-- `005` reduz o contexto dos hotspots antes de adicionar a dimensao de perfil.
-- `006` cria isolamento no dominio; `007` apenas o expoe como paineis.
-- `008` evita que providers/importadores/canais voltem a inflar o core.
-- `009` usa perfil, prompt e painel para experimentar agressividade com evidencia.
+- 017–019 nao se bloqueiam.
+- Nenhum dos 010–016 bloqueia o outro.
+- Se a suite inteira interferir em `data-test/`, pare e trate 001 antes de um plano L.
+- Nao misture 011 com publicacao real.
 
-## Regras globais para o Terra
+## Regras globais para o executor
 
-1. Criar uma branch `advisor/NNN-<slug>` em uma worktree separada.
-2. Nao alterar nomes de steps, estados publicos, chaves de `quality_summary` ou
-   nomes de artefatos sem migracao e teste de compatibilidade.
-3. Fazer commits Conventional Commits pequenos; nao fazer push nem abrir PR.
-4. Manter providers reais desligados nos testes e nao publicar conteudo externo.
-5. Interromper quando um plano exigir arquivo fora do escopo ou quando o drift
-   check mostrar mudanca estrutural que invalide os trechos citados.
-6. Antes do drift check, rode `git status --short`; os comandos com o commit-base
-   comparam tambem mudancas locais e nao autorizam descartar trabalho existente.
+1. Branch `advisor/NNN-<slug>` em worktree separada, a partir de `origin/staging` (`8d9de7a` ou sucessor). Nao use o `main` local `e1a7cdb` como se fosse staging.
+2. Nao renomear estados publicos, chaves de `quality_summary` ou artefatos sem o plano pedir.
+3. Conventional Commits pequenos. Sem push, sem PR, sem deploy.
+4. `SHORTSFLOW_USE_MOCK_PROVIDERS=true`. Sem provider pago, sem upload.
+5. Drift check do plano primeiro. Excerpt diferente = STOP.
+6. `git status --short` no fim: so arquivos do escopo + esta linha de status.
 
-## Achados considerados e rejeitados
+## Achados considerados e rejeitados (2026-08-18)
 
-- Remover FFmpeg inteiro: rejeitado. Ele ainda e dependencia de audio, probe e
-  backend explicito de manutencao; somente o render legado pode ser isolado.
-- Transformar gates centrais em plugins dinamicos: rejeitado. Factualidade,
-  direitos, integridade de render e contrato de estados pertencem ao core.
-- Criar um painel FastAPI separado por nicho: rejeitado. Duplicaria rotas e
-  estado; os paineis devem ser escopos do mesmo Hub sobre `ChannelProfile`.
-- Carregar plugins arbitrarios por filesystem/entry point agora: adiado. O app
-  precisa primeiro de interfaces tipadas e registro explicito.
-- Remover as duas copias do video de review TikTok: rejeitado por enquanto.
-  Uma atende o Hub privado e outra o GitHub Pages publico.
+- CSRF / remover cookie em POST: rejeitado. O Hub autentica formularios pelo cookie de `/auth`. O contrato morto era o README. Plano 016 so documenta.
+- Cookie `Secure`: adiado. Hub escuta em loopback atras de HTTPS Tailscale; nao e o vazamento do cookie-vs-doc.
+- Fatiar `automation.py` / `monetization_pipeline.py` / `llm.py`: Not Now (CONTROL + ADR 0004).
+- ChannelProfile / segundo painel: Not Now ate o experimento de um canal.
+- Alembic + indices do worker + tirar provider de dentro da transacao: fica no 003 historico; nao entrou nos 7 escolhidos.
+- Lint/mypy/lock Python: baixa alavancagem contra lease/upload.
+- Remover FFmpeg: ja rejeitado em 13/07.
+- Comentario "Marcos policy" em `script_pipeline.py`: o invariante ja esta nas linhas seguintes; sem plano.

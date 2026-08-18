@@ -86,9 +86,7 @@ class LlmQualityJudge:
             base_reasons = {reason.split(":", 1)[0] for reason in normalized}
         else:
             base_reasons = set(normalized)
-        return base_reasons.issubset(EDITORIAL_SOFT_REASONS) or any(
-            reason in EDITORIAL_SOFT_REASONS for reason in normalized
-        )
+        return base_reasons.issubset(EDITORIAL_SOFT_REASONS)
 
     def should_override(self, *, local_passed: bool, local_reasons: list[str], judge: LlmJudgeResult) -> bool:
         if local_passed or judge.skipped or not judge.passed:
@@ -150,7 +148,10 @@ def _normalize_judge_result(gate_kind: str, raw: Any) -> LlmJudgeResult:
     reasons = [str(item) for item in raw.get("reasons") or [] if str(item).strip()]
     scores = raw.get("scores") if isinstance(raw.get("scores"), dict) else {}
     confidence = _float(raw.get("confidence"), 0.0)
-    passed = bool(raw.get("passed")) and confidence >= 0.55
+    passed_val = raw.get("passed")
+    if not isinstance(passed_val, bool):
+        return LlmJudgeResult(False, reasons=["llm_judge_invalid_response"], gate_kind=gate_kind)
+    passed = passed_val is True and confidence >= 0.55
     return LlmJudgeResult(
         passed=passed,
         confidence=confidence,
