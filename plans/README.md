@@ -14,9 +14,14 @@ Relatorio mestre antigo: [000-shortsflow-auditoria-completa.md](000-shortsflow-a
 
 | Plano | Titulo | Prioridade | Esforco | Depende de | Status |
 |---|---|---:|---:|---|---|
+<<<<<<< HEAD
 | 017 | Restaurar Loop e Payoff na narracao falada | P0 | S | — | DONE |
-| 018 | Alinhar ritmo 135–155 WPM e rebase de cortes | P0 | M | — | TODO |
-| 019 | Juiz LLM fail-closed | P0 | S | — | TODO |
+| 018 | Alinhar ritmo 135–155 WPM e rebase de cortes | P0 | M | — | DONE |
+=======
+| 017 | Restaurar Loop e Payoff na narracao falada | P0 | S | — | DONE |
+| 018 | Alinhar ritmo 135–155 WPM e rebase de cortes | P0 | M | — | DONE |
+>>>>>>> origin/advisor/018-ritmo-e-timing
+| 019 | Juiz LLM fail-closed | P0 | S | — | DONE |
 
 017, 018 e 019 sao independentes (arquivos diferentes). Podem rodar em worktrees paralelas. Nao tocar `test_pipeline_script.py` nos tres ao mesmo tempo — 018 so edita esse arquivo se um fixture de WPM exigir.
 

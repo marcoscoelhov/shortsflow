@@ -19,12 +19,11 @@ class TTSDomain:
         target_ms: int | None = None
         if duration_ms > 55_000:
             target_ms = 54_000
-        elif duration_ms < 35_000:
-            target_ms = 36_000
+        # Do not expand (slow down) short audio <35s; let the range check in caller fail the step.
         if target_ms is None:
             return result
         speed = duration_ms / target_ms
-        if not 0.5 <= speed <= 2.0:
+        if not 0.5 <= speed <= 1.12:  # tighten: only mild compress <=1.12; no expand at all
             return result
         temp_audio = audio_path.with_suffix(".fit.wav")
         try:

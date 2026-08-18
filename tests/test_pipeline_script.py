@@ -4053,7 +4053,59 @@ def test_script_gate_rejects_100_words_for_45s_natural_pace() -> None:
 
     assert not result.passed
     assert "word_count_too_low_for_natural_pace" in result.reasons
-    assert result.metrics["natural_min_words"] >= 115
+    assert result.metrics["natural_min_words"] >= 105
+
+
+
+def test_script_gate_accepts_110_130_words_for_45s_and_rejects_150_as_too_high() -> None:
+    """New natural pace band 135-155 WPM for 45s target: 105-130 words (TDD red on old 150/172)."""
+    def _make_script(n_words: int) -> dict[str, object]:
+        words = ["detalhe"] + ["visual"] * (n_words - 2) + ["final"]
+        narration = " ".join(words) + "."
+        return {
+            "title": "O detalhe visual que muda o que vemos",
+            "hook": "Algo parece comum mas um detalhe muda tudo.",
+            "loop": "Por que esse detalhe e decisivo?",
+            "body_beats": [
+                "O detalhe aparece na imagem.",
+                "Ele explica o mecanismo.",
+                "A consequencia fica visivel no final.",
+            ],
+            "payoff": "A causa era o detalhe o tempo todo.",
+            "ending": "Agora voce ve o detalhe em tudo.",
+            "cta": None,
+            "full_narration": narration,
+            "estimated_duration_sec": 45,
+            "key_facts": ["O detalhe explica o fenomeno visual."],
+            "token_count": n_words,
+            "language": "pt-BR",
+            "retention_map": {
+                "visual_hook": "Algo parece comum mas um detalhe muda tudo.",
+                "proof_or_tension": "Por que esse detalhe e decisivo?",
+                "escalation": "O detalhe aparece na imagem.",
+                "turn_or_payoff": "A causa era o detalhe o tempo todo.",
+                "loop_close": "Agora voce ve o detalhe em tudo.",
+            },
+            "qa_metrics": {
+                "hook_score": 0.92,
+                "clarity_score": 0.9,
+                "information_density_score": 0.85,
+                "repetition_score": 0.15,
+                "ending_strength_score": 0.88,
+            },
+        }
+
+    # ~112 words: within new 105-130
+    script_ok = _make_script(112)
+    result_ok = ScriptQualityGate().validate(script_ok, target_duration_sec=45)
+    assert "word_count_too_low_for_natural_pace" not in result_ok.reasons
+    assert "word_count_too_high_for_natural_pace" not in result_ok.reasons
+
+    # 150 words should trigger high under new constants
+    script_high = _make_script(150)
+    result_high = ScriptQualityGate().validate(script_high, target_duration_sec=45)
+    assert "word_count_too_high_for_natural_pace" in result_high.reasons
+    assert result_high.metrics.get("natural_max_words", 999) <= 130
 
 
 def test_default_viral_prompt_uses_competitor_scale_fear_pattern() -> None:
