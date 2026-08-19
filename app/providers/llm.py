@@ -110,13 +110,13 @@ class MockCreativeProvider:
                 "A resposta só aparece quando a imagem final devolve sentido completo à pista mostrada no começo.",
                 [
                     "O detalhe surge como pista discreta antes da resposta aparecer claramente na tela.",
-                    f"O recorte em {angle_label} transforma a pista visual em tensão sem antecipar a resposta.",
-                    "O entorno muda a cena e revela uma consequência maior que parecia no começo.",
-                    "A comparação confirma o mecanismo e transforma a dúvida inicial em imagem concreta.",
-                    "A última evidência aproxima a virada e preserva o detalhe decisivo para o final.",
+                    f"O recorte em {angle_label} transforma a pista em tensão sem antecipar a resposta.",
+                    "O entorno muda a cena e revela uma consequência maior que parecia.",
+                    "A comparação confirma o mecanismo e transforma a dúvida em imagem concreta.",
+                    "A última evidência aproxima a virada e preserva o detalhe decisivo.",
                 ],
                 "A virada final chega. A pista rouba a cena diante do olho, parece fogo e fica difícil de ignorar.",
-                "Quando você rever o começo, observe de novo. A primeira cena já entregava tudo em tempo real.",
+                "Quando você rever o começo, observe. A primeira cena já entregava tudo em tempo real.",
             )
         return (
             False,
