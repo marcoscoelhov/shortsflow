@@ -737,8 +737,8 @@ def test_survival_finish_plan_tells_the_binary_choice_through_scene_overlays() -
         {
             "scene_id": f"scene-{index + 1}",
             "order": index + 1,
-            "actual_start_ms": index * 4_000,
-            "actual_end_ms": (index + 1) * 4_000,
+            "token_start": index * 10,
+            "token_end": index * 10 + 9,
             "retention_role": role,
             "narration_text": narrations[index],
         }
@@ -955,8 +955,8 @@ def test_survival_finish_plan_keeps_short_overlay_windows_frame_visible(scene_du
         {
             "scene_id": f"scene-{index + 1}",
             "order": index + 1,
-            "actual_start_ms": index * scene_duration_ms,
-            "actual_end_ms": (index + 1) * scene_duration_ms,
+            "token_start": index * 10,
+            "token_end": index * 10 + 9,
             "retention_role": "loop_close" if index == 4 else "visual_evidence",
             "narration_text": narration,
         }
@@ -1006,8 +1006,8 @@ def test_survival_finish_plan_preserves_long_payoff_overlay_timing() -> None:
         {
             "scene_id": f"scene-{index + 1}",
             "order": index + 1,
-            "actual_start_ms": index * duration_ms,
-            "actual_end_ms": (index + 1) * duration_ms,
+            "token_start": index * 10,
+            "token_end": index * 10 + 9,
             "retention_role": "loop_close" if index == 1 else "visual_hook",
             "narration_text": (
                 "A chave abre a porta errada, mas o livro revela a saída real."
