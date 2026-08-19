@@ -212,17 +212,44 @@ class ScriptRepairDomain(BasePipeline):
             "loop_close": self._first_grounded_retention_text([ending, fallback_sentences[-1] if fallback_sentences else ""], narration),
         }
 
-        synced_segments: list[Any] = []
+        # The real LLM can emit segments with natural-language (pt-BR) codes that do not
+        # match the English editorial contract (visual_hook, proof_or_tension, escalation,
+        # turn_or_payoff, loop_close). Never trust those codes for grounding: rebuild the
+        # canonical contract segments deterministically from the script text so the gate
+        # always sees complete, grounded retention entries regardless of LLM wording.
+        contract_order = ["visual_hook", "proof_or_tension", "escalation", "turn_or_payoff", "loop_close"]
+        # Preserve start/end timing from the source segments when a canonical code matches,
+        # else fall back to proportionate slots across the narration.
+        timing_by_code: dict[str, dict[str, Any]] = {}
         for segment in segments or []:
             if not isinstance(segment, dict):
-                synced_segments.append(segment)
                 continue
-            code = str(segment.get("code") or "").strip()
-            mapped_text = retention_texts.get(code)
-            synced_segment = dict(segment)
-            if mapped_text:
-                synced_segment["mapped_text"] = mapped_text
-            synced_segments.append(synced_segment)
+            timing_by_code[str(segment.get("code") or "").strip()] = segment
+
+        DEFAULT_SLOTS = {
+            "visual_hook": (0, 2),
+            "proof_or_tension": (2, 7),
+            "escalation": (7, 20),
+            "turn_or_payoff": (20, max(34, duration - 3)),
+            "loop_close": (max(duration - 3, 0), duration),
+        }
+
+        synced_segments: list[Any] = []
+        for code in contract_order:
+            text = retention_texts.get(code) or ""
+            source = timing_by_code.get(code, {})
+            start = source.get("start_sec", DEFAULT_SLOTS[code][0])
+            end = source.get("end_sec", DEFAULT_SLOTS[code][1])
+            goal = source.get("goal", "")
+            synced_segments.append(
+                {
+                    "code": code,
+                    "start_sec": start,
+                    "end_sec": max(start, end),
+                    "goal": goal,
+                    "mapped_text": text,
+                }
+            )
         synced_map["segments"] = synced_segments
         synced_map["synced_from_script"] = True
         updated["retention_map"] = synced_map
