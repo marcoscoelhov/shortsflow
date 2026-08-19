@@ -70,8 +70,11 @@ class BackgroundMusicGate:
 
         bed_ratio = self._bed_relative_rms_ratio(narration["samples"], mixed["samples"])
         metrics["bed_relative_rms_ratio"] = round(bed_ratio, 4)
-        if bed_ratio < 0.015 and source_rms_dbfs < -45.0:
+        min_ratio = 0.05
+        if bed_ratio < min_ratio:
             reasons.append("music_bed_inaudible")
+        elif bed_ratio > 0.60:
+            reasons.append("music_bed_overwhelms_narration")
         return BackgroundMusicGateResult(not reasons, reasons, metrics)
 
     def _read_wave_stats(self, path: Path) -> dict[str, Any]:

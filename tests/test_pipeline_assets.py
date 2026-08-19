@@ -516,6 +516,90 @@ def test_render_gate_parses_short_black_frame_leaks() -> None:
 
     assert intervals == [{"start_sec": 24.4333, "end_sec": 24.5, "duration_sec": 0.0666667}]
 
+
+def _make_test_video(path: Path, *, color: str, duration_sec: int, pure_black_after_sec: int = 0) -> None:
+    """Build a tiny real H.264 mp4 with luma noise matching astronomy footage, or a real black leak."""
+    import subprocess  # noqa: PLC0415
+
+    import imageio_ffmpeg  # noqa: PLC0415
+
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    if pure_black_after_sec:
+        args = [
+            ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"color=c={color}:s=320x480:r=30:d={duration_sec}",
+            "-f", "lavfi", "-i", "color=black:s=320x480:r=30:d=1",
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-filter_complex",
+            f"[0:v]trim=duration={pure_black_after_sec}[pre];[1:v][pre]concat=n=2:v=1:a=0[v]",
+            "-map", "[v]", "-map", "2:a", "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(path),
+        ]
+    else:
+        args = [
+            ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"color=c={color}:s=320x480:r=30:d={duration_sec}",
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(path),
+        ]
+    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr[-500:]
+
+
+def test_render_gate_accepts_dark_astronomy_video(tmp_path: Path) -> None:
+    """Cosmos/buracos negros são legítimamente escuros (luma ~5-10%). O gate não pode bloquear por isso."""
+    video = tmp_path / "space.mp4"
+    _make_test_video(video, color="0x141414", duration_sec=3)  # RGB ~20/255 (~8% luma)
+
+    result = RenderGate().validate(video, expected_duration_ms=3000)
+
+    assert "black_frame_leak_detected" not in result.reasons
+    assert result.metrics["black_frame_intervals"] == []
+
+
+def test_render_gate_rejects_real_black_leak(tmp_path: Path) -> None:
+    """Um leak de render (tela preta pura por >0.5s) continua sendo bloqueado."""
+    video = tmp_path / "leak.mp4"
+    _make_test_video(video, color="0x141414", duration_sec=3, pure_black_after_sec=1)
+
+    result = RenderGate().validate(video, expected_duration_ms=3000)
+
+    assert "black_frame_leak_detected" in result.reasons
+
+
+def test_image_prompt_strips_orphan_manga_clause(tmp_path: Path) -> None:
+    """Um 'manga' solto vazado no image_prompt (em vez do 'avoid manga') não deve chegar ao modelo."""
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from app.pipelines.image_assets import ImageAssetDomain  # noqa: PLC0415
+
+    svc = ImageAssetDomain(SimpleNamespace(settings=SimpleNamespace(minimax_image_aspect_ratio="9:16")))
+    dirty = (
+        "photorealistic deep-space scene of a black hole, no infographic, no watermark., manga, "
+        "vertical 9:16 frame for YouTube Shorts, single full-frame vertical image"
+    )
+    cleaned = svc._strip_orphan_undesired_style_clauses(dirty, {"visual_style_profile": None})
+
+    assert " manga" not in f" {cleaned.lower()} "
+    assert " vertical 9:16 frame" in cleaned.lower()
+    assert "photorealistic deep-space scene" in cleaned
+
+
+def test_calibrate_bed_gain_reaches_target_ratio() -> None:
+    from app.audio.music_mix import calibrate_bed_gain  # noqa: PLC0415
+
+    # narração a -16dB, música a -34dB (fonte quieta). Para ratio 0.14 (~ -17dB rel),
+    # o bed precisa estar a ~ -33dB, então quase zero de atenuação (ganho ~+1dB), não -17dB.
+    gain = calibrate_bed_gain(
+        narration_rms_db=-16.0,
+        music_rms_db=-34.0,
+        target_ratio=0.14,
+        min_db=-6.0,
+        max_db=6.0,
+        fallback_db=-17.0,
+    )
+    assert gain > -6.0  # não usa mais o corte fixo que enterra a música
+    assert -6.0 <= gain <= 6.0
+
 def test_minimax_scene_prompt_keeps_image_prompt_english_exception(monkeypatch) -> None:
     captured: dict[str, str] = {}
 

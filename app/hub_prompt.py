@@ -15,6 +15,15 @@ Use estrutura de copywriting agressiva para retenção:
 4. Escalada em 3 a 5 beats: crença comum quebrada → fato estranho → consequência visual → virada.
 5. Payoff atrasado: guarde a explicacao mais forte para o ultimo terco.
 6. Fechamento com imagem mental forte, quase comentário fixado.
+FOCO OBRIGATÓRIO DO CANAL (dados de performance 2026-08):
+- Priorize TEMAS DE MEMBROS do SISTEMA SOLAR (planetas, Lua, Sol, cometas/asteroides/meteoros do sistema) com HOOK DE PARADOXO VISUAL imediato: o objeto é familiar, mas o que parece não é.
+- Exemplos que viralizaram no canal: Urano "parece que caiu", Netuno "parece oceano mas é armadilha", Marte "não é vermelho por ser quente", Saturno "não tem anéis, tem um acidente em órbita".
+- EVITE eixo fora do foco que zerou views: exoplanetas (WASP-76b etc.), galáxias/colisão da Via Láctea, matéria escura, astrofísica abstrata, história humana, curiosidades da vida terrestre (sangue de caranguejo, Pompeia, Anticítera).
+- Não repita o sufixo morto "o detalhe estranho antes de você notar" / "o detalhe que quase ninguém percebe" — isso derruba views (banido por auditaría 2026-06, regressou).
+CTA DE COMENTÁRIO (obrigatório no soft cta e no final do full_narration, últimos 8s):
+- Feche com uma PERGUNTA polarizante de opinião do nicho que convide a comentar, ex.: "Qual planeta te dá mais medo?" / "Saturno te mancou na escola também?" / "Você saberia dizer qual é o mais estranho?"
+- Nunca feche só com "manda pra quem..." (share trigger) sem também abrir pergunta de comentário; comentário é o motor de distribuição do Shorts.
+- Pergunta deve ser de opinião (sem resposta certa única) para maximizar comentários, não trivia de fato.
 Obrigatório para o roteiro passar no gate:
 - hook deve criar interrupção de rolagem por medo, escala ou quebra de crença; não apenas explicar o tema
 - título deve ser competitivo contra padrões como “The size will scare you”, “Most violent weather in space” e “NASA saw this...”
@@ -39,6 +48,11 @@ Proibido:
 - nao comece com "voce sabia", "você sabia", "ja imaginou", "já imaginou", "nesse video" ou aberturas genericas equivalentes
 - nao entregue a explicacao completa no primeiro beat; abra um loop e feche depois
 - nao use clickbait falso: todo choque precisa ser provado no roteiro
+ESTRUTURA VENCEDORA OBRIGATÓRIA (de research winning-viral-structure-cosmos-shorts):
+- Hook: "E se [extrema cósmica] [familiar lugar/objeto]?" ou "[Objeto] vs [Anomalia]"
+- Beats: escala + consequência no familiar + paradoxo + payoff com retorno ao hook visual
+- Visual: scale_comparison, familiar_contrast, payoff_pulse, high-fidelity CGI
+- Loop/payoff explícito obrigatório
 Modelos de hook para astronomia:
 - "O Sol vira poeira nessa comparação."
 - "Netuno parece calmo. Não é."

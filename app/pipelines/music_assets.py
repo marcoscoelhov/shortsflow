@@ -62,6 +62,9 @@ class MusicDomain:
         strategies = ["sidechaincompress+amix+loudnorm", "simple_amix+loudnorm"]
         last_error: str | None = None
         attempts_log: list[dict[str, Any]] = []
+        target_ratio = getattr(self.pipeline.settings, "music_bed_relative_rms_target", None)
+        gain_min_db = getattr(self.pipeline.settings, "music_bed_gain_min_db", -6.0)
+        gain_max_db = getattr(self.pipeline.settings, "music_bed_gain_max_db", 6.0)
         for strategy in strategies:
             try:
                 result = self.mix_background_music(
@@ -71,6 +74,9 @@ class MusicDomain:
                     target_duration_ms=target_duration_ms,
                     gain_db=gain_db,
                     strategy=strategy,
+                    target_ratio=target_ratio,
+                    gain_min_db=gain_min_db,
+                    gain_max_db=gain_max_db,
                 )
                 attempts_log.append({"repair_attempt": len(attempts_log) + 1, "strategy": strategy, "passed": True, "reason_codes": []})
                 if strategy != strategies[0]:
@@ -97,6 +103,10 @@ class MusicDomain:
         target_duration_ms: int,
         gain_db: float,
         strategy: str = "sidechaincompress+amix+loudnorm",
+        *,
+        target_ratio: float | None = None,
+        gain_min_db: float = -6.0,
+        gain_max_db: float = 6.0,
     ) -> dict[str, Any]:
         try:
             return mix_background_music(
@@ -106,6 +116,9 @@ class MusicDomain:
                 target_duration_ms=target_duration_ms,
                 gain_db=gain_db,
                 strategy=strategy,
+                target_ratio=target_ratio,
+                gain_min_db=gain_min_db,
+                gain_max_db=gain_max_db,
             )
         except RuntimeError as exc:
             raise RecoverableStepError(str(exc)) from exc

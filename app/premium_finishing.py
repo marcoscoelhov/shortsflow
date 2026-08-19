@@ -136,7 +136,12 @@ class PremiumFinishingService:
             }
             self.storage.persist_json(job_id, "premium_finishing_report.json", report)
             self.owner._append_event(job_id, "render.remotion_primary.failed", "failed", {"reasons": gate_result.reasons})
-            candidate_path.unlink(missing_ok=True)
+            # Preserve the failed render for diagnosis instead of destroying the
+            # only evidence of what the gate rejected (e.g. false-positive gates).
+            failed_preview = render_dir / "failed_preview.mp4"
+            candidate_path.replace(failed_preview)
+            report["failed_preview_uri"] = file_uri(failed_preview)
+            self.storage.persist_json(job_id, "premium_finishing_report.json", report)
             raise FatalStepError(f"gate de render Remotion falhou: {', '.join(gate_result.reasons[:6])}")
         candidate_path.replace(output_path)
         with Image.open(path_from_uri(selected_assets[0].uri)) as poster_source:

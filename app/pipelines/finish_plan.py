@@ -34,6 +34,12 @@ def build_finish_plan(
     scene_segments = normalize_scene_timings(scene_plan.scenes, narration.duration_ms)
     assets_by_scene = {asset.scene_id: asset for asset in selected_assets}
     contract = visual_contract if isinstance(visual_contract, dict) else {}
+    if not contract:
+        contract = {
+            "winning_viral_structure": True,
+            "preferred_visuals": ["scale_comparison", "familiar_object_contrast", "payoff_return"],
+            "retention_roles_priority": ["visual_hook", "scale_reveal", "consequence_familiar", "loop_close"],
+        }
     visual_style_profile = public_visual_style_profile(contract.get("visual_style_profile"))
     survival_choices = _survival_choice_labels(job, scene_segments, contract)
     survival_hazard_marker = _survival_hazard_marker(job, scene_segments, contract)

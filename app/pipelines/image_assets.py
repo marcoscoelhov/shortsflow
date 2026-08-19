@@ -671,6 +671,7 @@ class ImageAssetDomain:
             if constraint.lower() not in prompt.lower():
                 prompt = f"{prompt}, {constraint}".strip(", ")
 
+        prompt = self._strip_orphan_undesired_style_clauses(prompt, scene)
         prompt = self._dedupe_prompt_clauses(prompt)
         if len(prompt) <= MINIMAX_IMAGE_PROMPT_TARGET_CHARS:
             return self._sanitize_high_contrast_comic_prompt(prompt, scene)
@@ -794,3 +795,29 @@ class ImageAssetDomain:
             seen.add(key)
             deduped.append(clause)
         return ", ".join(deduped)
+
+    def _strip_orphan_undesired_style_clauses(self, prompt: str, scene: dict[str, Any]) -> str:
+        """Remove style-token fragments that leak as standalone clauses (e.g. a bare 'manga').
+
+        The LLM prompts instruct 'avoid anime, manga, cartoon...' and some provider
+        responses echo those terms as a bare clause ('...no watermark., manga, vertical...'),
+        which misdirects the image model toward an anime/manga look. Only strip them when no
+        explicit visual_style_profile is selected (high_contrast_comic legitimately uses them).
+        """
+        if self._uses_high_contrast_comic(scene):
+            return prompt
+        orphans = {"manga", "mangá", "anime", "cartoon", "comic", "comic panel", "flat vector", "flat vector art", "2d icon"}
+        clauses = [clause.strip() for clause in re.split(r",|;", prompt) if clause.strip()]
+        kept: list[str] = []
+        for clause in clauses:
+            lowered = " ".join(clause.lower().split())
+            if lowered in orphans:
+                continue
+            # clip a dangling '...,manga,'/'manga,' token at the edges of an otherwise longer clause
+            if lowered.startswith("manga") or lowered.endswith("manga") or lowered == "manga":
+                cleaned = re.sub(r"(?i)\bmanga\b", "", clause).strip(" ,")
+                if cleaned:
+                    kept.append(cleaned)
+                continue
+            kept.append(clause)
+        return ", ".join(kept)

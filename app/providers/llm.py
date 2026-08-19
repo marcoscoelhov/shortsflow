@@ -143,7 +143,7 @@ class MockCreativeProvider:
         base_topic = seed_theme.strip().lower()
         angle = requested_angle or self.angle_templates[(attempt - 1) % len(self.angle_templates)]
         title_candidates = [
-            f"{base_topic.capitalize()}: o detalhe que quase ninguem percebe",
+            f"{base_topic.capitalize()}: a cena que muda tudo",
             f"Por que {base_topic} parece impossivel quando voce entende {angle}",
             f"O segredo de {base_topic} que muda tudo em segundos",
         ]
@@ -648,7 +648,7 @@ Não use markdown nem texto fora do objeto JSON.
         if isinstance(title_candidates, str):
             title_candidates = [title_candidates]
         if not isinstance(title_candidates, list) or not title_candidates:
-            title_candidates = [f"{canonical_topic.capitalize()}: o detalhe que quase ninguem percebe"]
+            title_candidates = [f"{canonical_topic.capitalize()}: a cena que muda tudo"]
 
         entities = normalized.get("entities")
         if isinstance(entities, str):
