@@ -59,7 +59,16 @@ class MusicDomain:
         target_duration_ms: int,
         gain_db: float,
     ) -> dict[str, Any]:
-        strategies = ["sidechaincompress+amix+loudnorm", "simple_amix+loudnorm"]
+        target_ratio = getattr(self.pipeline.settings, "music_bed_relative_rms_target", None)
+        gain_min_db = getattr(self.pipeline.settings, "music_bed_gain_min_db", -6.0)
+        gain_max_db = getattr(self.pipeline.settings, "music_bed_gain_max_db", 6.0)
+        # Quando há alvo audível de bed, o sidechaincompress afoga a música sob
+        # narração contínua (ducking agressivo), então preferimos o simple_amix que
+        # mantém o bed presente; sidechain fica como fallback de repair.
+        if target_ratio and target_ratio > 0:
+            strategies = ["simple_amix+loudnorm", "sidechaincompress+amix+loudnorm"]
+        else:
+            strategies = ["sidechaincompress+amix+loudnorm", "simple_amix+loudnorm"]
         last_error: str | None = None
         attempts_log: list[dict[str, Any]] = []
         for strategy in strategies:
@@ -71,6 +80,9 @@ class MusicDomain:
                     target_duration_ms=target_duration_ms,
                     gain_db=gain_db,
                     strategy=strategy,
+                    target_ratio=target_ratio,
+                    gain_min_db=gain_min_db,
+                    gain_max_db=gain_max_db,
                 )
                 attempts_log.append({"repair_attempt": len(attempts_log) + 1, "strategy": strategy, "passed": True, "reason_codes": []})
                 if strategy != strategies[0]:
@@ -97,6 +109,10 @@ class MusicDomain:
         target_duration_ms: int,
         gain_db: float,
         strategy: str = "sidechaincompress+amix+loudnorm",
+        *,
+        target_ratio: float | None = None,
+        gain_min_db: float = -6.0,
+        gain_max_db: float = 6.0,
     ) -> dict[str, Any]:
         try:
             return mix_background_music(
@@ -106,6 +122,9 @@ class MusicDomain:
                 target_duration_ms=target_duration_ms,
                 gain_db=gain_db,
                 strategy=strategy,
+                target_ratio=target_ratio,
+                gain_min_db=gain_min_db,
+                gain_max_db=gain_max_db,
             )
         except RuntimeError as exc:
             raise RecoverableStepError(str(exc)) from exc

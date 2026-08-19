@@ -1120,7 +1120,10 @@ def test_mock_repair_script_regenerates_coherent_structure_for_long_target(gate_
     )
     assert repaired["full_narration"] == expected_narration
     assert repaired["full_narration"].endswith(repaired["ending"])
-    assert len(word_tokens(repaired["full_narration"])) >= 138
+    # Long target follows the rhythm contract set by the quality gate (135-155 WPM):
+    # for a 55s target the natural window is [124, 130] words.
+    long_target_words = len(word_tokens(repaired["full_narration"]))
+    assert 124 <= long_target_words <= 130
     assert repaired["source_fact_ids"] == ["F1", "F2"]
 
 

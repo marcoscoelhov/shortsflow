@@ -19,8 +19,23 @@ class RenderGateResult:
 
 
 class RenderGate:
-    def __init__(self, min_bitrate: int = 250_000) -> None:
+    def __init__(
+        self,
+        min_bitrate: int = 250_000,
+        *,
+        black_pix_threshold: float = 0.02,
+        black_min_duration_sec: float = 0.5,
+    ) -> None:
         self.min_bitrate = min_bitrate
+        # blackdetect pix_th is the luma-threshold that marks a frame "black".
+        # Contents like deep space / black holes are legitimately dark (avg luma
+        # around 2-10%), so a 0.10 threshold false-positives on every cosmos
+        # video. 0.02 only catches real render leaks (nearly pure black frames)
+        # while letting dark astronomy footage pass.
+        self.black_pix_threshold = black_pix_threshold
+        # A true black-frame leak (missing/corrupt layer) usually lasts well
+        # over a second of frames, not a 40ms transition. Require long runs.
+        self.black_min_duration_sec = black_min_duration_sec
 
     def validate(self, video_path: Path, expected_duration_ms: int) -> RenderGateResult:
         reasons: list[str] = []
@@ -90,7 +105,7 @@ class RenderGate:
                 "-i",
                 str(video_path),
                 "-vf",
-                "blackdetect=d=0.04:pix_th=0.10",
+                "blackdetect=d=0.04:pix_th=" + str(self.black_pix_threshold),
                 "-an",
                 "-f",
                 "null",
@@ -103,7 +118,7 @@ class RenderGate:
         if decode.returncode != 0:
             reasons.append("ffmpeg_decode_failed")
             metrics["decode_stderr"] = decode.stderr[-1000:]
-        black_intervals = self.black_intervals(decode.stderr, minimum_duration_sec=0.04)
+        black_intervals = self.black_intervals(decode.stderr, minimum_duration_sec=self.black_min_duration_sec)
         metrics["black_frame_intervals"] = black_intervals
         if black_intervals:
             reasons.append("black_frame_leak_detected")

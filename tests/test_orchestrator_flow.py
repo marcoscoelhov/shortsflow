@@ -1082,6 +1082,13 @@ def test_scene_regeneration_route_handles_recoverable_error(monkeypatch) -> None
     assert response.headers["location"].startswith(f"/jobs/{job_id}?reprocess_error=")
 
 def test_regenerate_scene_runs_only_render_downstream(monkeypatch) -> None:
+    # The module-level background worker shares this singleton orchestrator. A
+    # "running" job with our own lease is NOT skipped by _process_job_under_slot
+    # (lease_owner == self.worker_id), so the worker could replay the whole
+    # pipeline into ran_steps and race with this test. Pause only the worker
+    # iteration loop (not stop_worker, which sets stop_event and would cancel
+    # the on-demand _run_step calls below) so only the regenerate path runs.
+    monkeypatch.setattr(orchestrator, "_worker_iteration", lambda: False)
     job_id = "scene-regeneration-partial"
     ran_steps: list[str] = []
 

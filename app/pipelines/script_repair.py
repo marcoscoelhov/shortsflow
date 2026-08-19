@@ -160,6 +160,11 @@ class ScriptRepairDomain(BasePipeline):
             processed = self._rewrite_script_conservatively(processed, fact_pack, plan_dict)
         if self._should_repair_loop(processed, gate_reasons):
             processed = self._repair_script_loop_closure(processed, plan_dict)
+        # Rewrites above (conservative fact rewrite / loop repair) update hook, loop,
+        # body_beats, payoff and ending but leave full_narration stale (they now defer
+        # to _normalize_script_narration_fields). Re-compose here so the narration text
+        # always reflects those rewritten parts before sentence splitting below.
+        processed = self._normalize_script_narration_fields(processed)
         processed = self._split_long_script_sentences(processed)
         processed = self._normalize_script_visible_text(processed)
         processed = self._sync_story_arc_to_script(processed)

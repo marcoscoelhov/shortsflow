@@ -784,9 +784,9 @@ class MonetizationPipeline(BasePipeline):
             repaired_title = f"O detalhe que faz o predador perder {subject} de vista"
         elif re.search(r"\b(?:por que|como|entenda|explica(?:ção)?)\b", base, re.I):
             repaired_title = re.sub(r"^\s*(?:por que|como|entenda|explica(?:ção)?|o que é)\s+", "", base, flags=re.I).strip().capitalize()
-            repaired_title = f"O detalhe estranho que muda {repaired_title[:58]} antes de você notar"
+            repaired_title = f"{repaired_title[:70]}: a cena que muda tudo"
         else:
-            repaired_title = f"{base}: o detalhe estranho antes de você notar"
+            repaired_title = f"{base}: a cena que muda tudo"
         repaired_title = re.sub(r"\s+", " ", repaired_title).strip()[:100]
         repaired_tags = self.build_publish_hashtags(topic_plan, script)
         for token in word_tokens(" ".join([topic, current_title, hook])):

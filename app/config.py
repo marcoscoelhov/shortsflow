@@ -104,6 +104,14 @@ class Settings(BaseSettings):
     background_music_enabled: bool = True
     background_music_provider: str = "local_bank"
     background_music_gain_db: float = -17.0
+    # Alvo audível para o bed relativo à narração (bed_rms / narration_rms).
+    # Um valor fixo de gain dobra o bed independente do volume da fonte; este
+    # alvo calibra o ganho dinâmico para que a música seja perceptível (~0.12)
+    # sem disputar com a voz. Se o mix não conseguir medir os níveis, cai no
+    # background_music_gain_db fixo como fallback.
+    music_bed_relative_rms_target: float = 0.14
+    music_bed_gain_min_db: float = -6.0
+    music_bed_gain_max_db: float = 6.0
     music_bank_dir: Path = Path("data/music_bank")
     music_bank_auto_populate: bool = True
     allow_music_api_fallback: bool = False
@@ -137,6 +145,12 @@ class Settings(BaseSettings):
     youtube_client_id: str | None = None
     youtube_client_secret: str | None = None
     youtube_oauth_redirect_uri: str | None = None
+    # Perfil de canal YouTube: quando definido, separa token/state OAuth entre canais
+    # (ex.: "canal2" -> youtube_oauth_token.canal2.json), permitindo alternar contas
+    # sem destruir a configuração do canal atual. Vazio = perfil padrão (monocanal atual).
+    youtube_channel_profile: str | None = None
+    # channel_id opcional específico do perfil (quando definido, sobrepõe youtube_channel_id)
+    youtube_channel_profile_channel_id: str | None = None
     youtube_notify_subscribers: bool = False
     tiktok_auto_publish_enabled: bool = False
     tiktok_access_token: str | None = None
@@ -499,13 +513,22 @@ class Settings(BaseSettings):
     def artifacts_dir(self) -> Path:
         return self.data_dir / "artifacts"
 
+    def _youtube_profile_suffix(self) -> str:
+        profile = str(self.youtube_channel_profile or "").strip()
+        return f".{profile}" if profile else ""
+
+    @property
+    def resolved_youtube_channel_id(self) -> str | None:
+        """Channel ID efetivo: o específico do perfil, se definido; senão o canal padrão."""
+        return (self.youtube_channel_profile_channel_id or "").strip() or self.youtube_channel_id
+
     @property
     def youtube_token_path(self) -> Path:
-        return self.data_dir / "youtube_oauth_token.json"
+        return self.data_dir / f"youtube_oauth_token{self._youtube_profile_suffix()}.json"
 
     @property
     def youtube_oauth_state_path(self) -> Path:
-        return self.data_dir / "youtube_oauth_state.json"
+        return self.data_dir / f"youtube_oauth_state{self._youtube_profile_suffix()}.json"
 
 
 @lru_cache(maxsize=1)

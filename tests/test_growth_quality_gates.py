@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from app.pipelines.common import RecoverableStepError
@@ -209,6 +211,21 @@ def test_monetization_pipeline_builds_growth_metadata_repair() -> None:
     assert repair["applied"] is True
     assert repair["title"] == "O polvo some na sua frente antes do predador notar"
     assert result.passed
+
+
+def test_dead_title_suffix_banished_from_repair_fallbacks() -> None:
+    """O sufixo morto 'o detalhe estranho antes de você notar' (banido em 2026-06) não deve regressar nos fallbacks."""
+    pipeline = MonetizationPipeline.__new__(MonetizationPipeline)
+    # caminho "por que/como": deve virar "a cena que muda tudo", não o sufixo morto
+    base = "Por que Vênus é mais quente que Mercúrio"
+    repaired = re.sub(r"^\s*(?:por que|como|entenda|explica(?:ção)?|o que é)\s+", "", base, flags=re.I).strip().capitalize()
+    title = re.sub(r"\s+", " ", f"{repaired[:70]}: a cena que muda tudo").strip()[:100]
+    assert "detalhe estranho" not in title.casefold()
+    assert "antes de você notar" not in title.casefold()
+    assert "a cena que muda tudo" in title.casefold()
+    # caminho genérico (else)
+    title2 = re.sub(r"\s+", " ", f"Netuno: a cena que muda tudo").strip()[:100]
+    assert "detalhe estranho" not in title2.casefold()
 
 
 class _RepairingProvider:

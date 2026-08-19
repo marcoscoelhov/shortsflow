@@ -32,7 +32,10 @@ class BackgroundMusicGate:
             "music_path": str(music_path),
             "mixed_audio_path": str(mixed_audio_path),
         }
-        if gain_db > -8.0 or gain_db < -30.0:
+        # Faixa segura: o mix calibra o ganho dinamicamente até +6dB para atingir o
+        # alvo de ratio audível (ver music_bed_gain_max_db). Aceite essa faixa em vez
+        # de um teto rígido de -8 que contradizia a calibração e enterrava a música.
+        if gain_db > 6.0 or gain_db < -30.0:
             reasons.append("gain_db_outside_safe_range")
 
         narration = self._read_wave_stats(narration_path)
@@ -70,8 +73,14 @@ class BackgroundMusicGate:
 
         bed_ratio = self._bed_relative_rms_ratio(narration["samples"], mixed["samples"])
         metrics["bed_relative_rms_ratio"] = round(bed_ratio, 4)
-        if bed_ratio < 0.015 and source_rms_dbfs < -45.0:
+        # Faixas largas de sanidade: o ajuste fino do nível do bed é feito pela
+        # calibração dinâmica (music_bed_relative_rms_target). O gate aqui só barra
+        # casos absurdos — bed praticamente ausente ou claramente mais alto que a voz —
+        # sem rejeitar vídeos legítimos (narração com pausas, sound design, etc.).
+        if bed_ratio < 0.02:
             reasons.append("music_bed_inaudible")
+        elif bed_ratio > 1.2:
+            reasons.append("music_bed_overwhelms_narration")
         return BackgroundMusicGateResult(not reasons, reasons, metrics)
 
     def _read_wave_stats(self, path: Path) -> dict[str, Any]:

@@ -705,7 +705,7 @@ class AssetPipeline(BasePipeline):
             music_path=raw_music_path,
             mixed_audio_path=mixed_audio_path,
             expected_duration_ms=narration.duration_ms,
-            gain_db=self.settings.background_music_gain_db,
+            gain_db=float(mixed_result.get("gain_db_used") or self.settings.background_music_gain_db),
         )
         self.storage.persist_json(
             job.job_id,

@@ -107,16 +107,16 @@ class MockCreativeProvider:
             return (
                 True,
                 "Se parecem tão conhecidos, por que o primeiro detalhe muda tudo? "
-                "A resposta só aparece quando a imagem final devolve sentido completo à pista mostrada no começo.",
+                "A resposta só aparece quando a imagem final devolve sentido à pista do começo.",
                 [
-                    "O detalhe surge como pista discreta antes da resposta aparecer claramente na tela.",
-                    f"O recorte em {angle_label} transforma a pista visual em tensão sem antecipar a resposta.",
-                    "O entorno muda a cena e revela uma consequência maior que parecia no começo.",
-                    "A comparação confirma o mecanismo e transforma a dúvida inicial em imagem concreta.",
-                    "A última evidência aproxima a virada e preserva o detalhe decisivo para o final.",
+                    "O detalhe surge como pista discreta antes da resposta aparecer na tela.",
+                    f"O recorte em {angle_label} transforma a pista em tensão sem antecipar a resposta.",
+                    "O entorno muda a cena e revela uma consequência maior que parecia.",
+                    "A comparação confirma o mecanismo e transforma a dúvida em imagem concreta.",
+                    "A última evidência aproxima a virada e preserva o detalhe decisivo.",
                 ],
-                "A virada final chega. A pista rouba a cena diante do olho, parece fogo e fica difícil de ignorar.",
-                "Quando você rever o começo, observe de novo. A primeira cena já entregava tudo em tempo real.",
+                "A virada final chega. A pista rouba a cena e fica difícil de ignorar.",
+                "Quando você rever, observe: a primeira cena já entregava tudo em tempo real.",
             )
         return (
             False,
@@ -143,7 +143,7 @@ class MockCreativeProvider:
         base_topic = seed_theme.strip().lower()
         angle = requested_angle or self.angle_templates[(attempt - 1) % len(self.angle_templates)]
         title_candidates = [
-            f"{base_topic.capitalize()}: o detalhe que quase ninguem percebe",
+            f"{base_topic.capitalize()}: a cena que muda tudo",
             f"Por que {base_topic} parece impossivel quando voce entende {angle}",
             f"O segredo de {base_topic} que muda tudo em segundos",
         ]
@@ -648,7 +648,7 @@ Não use markdown nem texto fora do objeto JSON.
         if isinstance(title_candidates, str):
             title_candidates = [title_candidates]
         if not isinstance(title_candidates, list) or not title_candidates:
-            title_candidates = [f"{canonical_topic.capitalize()}: o detalhe que quase ninguem percebe"]
+            title_candidates = [f"{canonical_topic.capitalize()}: a cena que muda tudo"]
 
         entities = normalized.get("entities")
         if isinstance(entities, str):

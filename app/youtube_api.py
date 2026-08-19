@@ -252,7 +252,7 @@ class YouTubePublisher:
             raise YouTubeIntegrationError("video_id do YouTube ausente")
         if not normalized_text:
             raise YouTubeIntegrationError("comentário do YouTube vazio")
-        if not self.settings.youtube_channel_id:
+        if not self.settings.resolved_youtube_channel_id:
             raise YouTubeIntegrationError("SHORTSFLOW_YOUTUBE_CHANNEL_ID ausente")
         credentials = self._load_credentials(refresh=True)
         discovery, _ = self._google_upload_dependencies()
@@ -263,7 +263,7 @@ class YouTubePublisher:
                 part="snippet",
                 body={
                     "snippet": {
-                        "channelId": self.settings.youtube_channel_id,
+                        "channelId": self.settings.resolved_youtube_channel_id,
                         "videoId": normalized_video_id,
                         "topLevelComment": {"snippet": {"textOriginal": normalized_text[:500]}},
                     }

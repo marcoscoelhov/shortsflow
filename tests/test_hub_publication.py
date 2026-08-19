@@ -3615,6 +3615,23 @@ def test_youtube_connection_status_requires_analytics_scope(monkeypatch, tmp_pat
     assert status.reporting_connected is False
     assert "yt-analytics" in " ".join(status.analytics_missing_items or [])
 
+def test_youtube_channel_profile_isolates_oauth_state(tmp_path) -> None:
+    """Perfil de canal separa token/state OAuth e channel_id entre contas, sem afetar o canal padrão."""
+    settings = Settings(
+        data_dir=tmp_path,
+        youtube_channel_id="UCdefault",
+        youtube_channel_profile="canal2",
+        youtube_channel_profile_channel_id="UCcanal2",
+    )
+    assert settings.youtube_token_path.name == "youtube_oauth_token.canal2.json"
+    assert settings.youtube_oauth_state_path.name == "youtube_oauth_state.canal2.json"
+    assert settings.resolved_youtube_channel_id == "UCcanal2"
+
+    # canal padrão intacto
+    default = Settings(data_dir=tmp_path, youtube_channel_id="UCdefault")
+    assert default.youtube_token_path.name == "youtube_oauth_token.json"
+    assert default.youtube_oauth_state_path.name == "youtube_oauth_state.json"
+    assert default.resolved_youtube_channel_id == "UCdefault"
 def test_youtube_connection_status_keeps_reporting_pending_without_adapter(monkeypatch, tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path,

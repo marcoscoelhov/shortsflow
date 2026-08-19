@@ -588,7 +588,7 @@ class TopicPipeline(BasePipeline):
         if isinstance(title_candidates, str):
             title_candidates = [title_candidates]
         if not isinstance(title_candidates, list) or not title_candidates:
-            title_candidates = [f"{canonical_topic.capitalize()}: o detalhe que quase ninguem percebe"]
+            title_candidates = [f"{canonical_topic.capitalize()}: a cena que muda tudo"]
 
         entities = normalized.get("entities")
         if isinstance(entities, str):
