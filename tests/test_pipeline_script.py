@@ -4244,3 +4244,122 @@ def test_resilient_script_generation_does_not_use_deterministic_safety_net() -> 
 
     assert "script generation failed across llm providers" in str(exc.value)
     assert "local_deterministic" not in str(exc.value)
+
+
+def test_postprocess_rebuilds_canonical_retention_segments_from_pt_br_codes() -> None:
+    """The real LLM emits retention_map segments with natural pt-BR codes
+    (gancho_visual, prova_tensao, fechamento_loop...). The gate only recognizes
+    the English contract codes, so postprocess must rebuild the canonical
+    segments deterministically and keep them grounded."""
+    pipeline = orchestrator.script_pipeline
+    script = {
+        "title": "Por que o céu escurece rápido",
+        "hook": "Depois que o Sol some, o céu ainda continua claro por um tempo.",
+        "loop": "Por que mesmo assim fica claro?",
+        "body_beats": [
+            "A luz solar chega espalhada pela atmosfera mesmo depois do horizonte.",
+            "Parte dessa luz continua sendo refletida e mantém o céu claro.",
+            "O azul que você vê é luz espalhada, não o brilho do próprio Sol.",
+        ],
+        "payoff": "O azul que você vê é luz solar espalhada no ar, não o brilho do próprio Sol.",
+        "ending": "Depois de cada pôr do sol, você fica vendo um eco da luz do dia.",
+        "cta": None,
+        "full_narration": (
+            "Depois que o Sol some, o céu ainda continua claro por um tempo. "
+            "A luz solar chega espalhada pela atmosfera mesmo depois do horizonte. "
+            "Parte dessa luz continua sendo refletida e mantém o céu claro. "
+            "O azul que você vê é luz solar espalhada no ar, não o brilho do próprio Sol. "
+            "Depois de cada pôr do sol, você fica vendo um eco da luz do dia."
+        ),
+        "estimated_duration_sec": 45.0,
+        "language": "pt-BR",
+        "key_facts": [],
+        "source_fact_ids": [],
+        "claim_trace": [],
+        "retention_map": {
+            "segments": [
+                {"code": "gancho_visual", "start_sec": 0, "end_sec": 2, "goal": "gancho visual"},
+                {"code": "primeira_explicacao", "start_sec": 2, "end_sec": 7, "goal": "explica"},
+                {"code": "escalada_visual", "start_sec": 7, "end_sec": 20, "goal": "escala"},
+                {"code": "virada", "start_sec": 20, "end_sec": 42, "goal": "virada"},
+                {"code": "fechamento_com_replay", "start_sec": 42, "end_sec": 45, "goal": "fecha"},
+            ]
+        },
+        "qa_metrics": {},
+    }
+    processed = pipeline._postprocess_script_for_quality(
+        script,
+        {"canonical_topic": "por que o ceu escurece", "fact_pack": {"status": "limited", "facts": []}},
+        [],
+    )
+    codes = [s.get("code") for s in processed["retention_map"]["segments"]]
+    assert codes == ["visual_hook", "proof_or_tension", "escalation", "turn_or_payoff", "loop_close"]
+    assert all(s.get("mapped_text") for s in processed["retention_map"]["segments"])
+
+
+def test_soft_cta_accepted_when_ending_punctuation_differs() -> None:
+    """A soft CTA ending in '?' that appears in the narration ending in '.'
+    (or vice versa) must be accepted — terminal punctuation should not make
+    the CTA look ungrounded."""
+    pipeline = orchestrator.script_pipeline
+    script = {
+        "title": "Sombras ao entardecer",
+        "hook": "Quando o Sol se põe, a sombra sobe pelo céu.",
+        "loop": "De onde vem essa luz que fica depois?",
+        "body_beats": [
+            "A luz se espalha no ar alto e continua iluminando.",
+            "Conforme a Terra gira, esse clarão vai sumindo.",
+            "O que sobra é o eco de luz do dia que já passou.",
+        ],
+        "payoff": "O azul tardio é luz espalhada que ainda viaja até seus olhos.",
+        "ending": "Você acha mais assustador o Sol sumir ou a sombra subir.",
+        "cta": "Você acha mais assustador o Sol sumir ou a sombra subir?",
+        "full_narration": (
+            "Quando o Sol se põe, a sombra sobe pelo céu. "
+            "A luz se espalha no ar alto e continua iluminando. "
+            "Conforme a Terra gira, esse clarão vai sumindo. "
+            "O que sobra é o eco de luz do dia que já passou. "
+            "O azul tardio é luz espalhada que ainda viaja até seus olhos. "
+            "Você acha mais assustador o Sol sumir ou a sombra subir."
+        ),
+        "estimated_duration_sec": 45.0,
+        "language": "pt-BR",
+        "key_facts": [],
+        "source_fact_ids": [],
+        "claim_trace": [],
+        "retention_map": {
+            "visual_hook": {"text": "Quando o Sol se põe, a sombra sobe pelo céu."},
+            "proof_or_tension": {"text": "A luz se espalha no ar alto e continua iluminando."},
+            "escalation": {"text": "Conforme a Terra gira, esse clarão vai sumindo."},
+            "turn_or_payoff": {"text": "O azul tardio é luz espalhada que ainda viaja até seus olhos."},
+            "loop_close": {"text": "Você acha mais assustador o Sol sumir ou a sombra subir."},
+        },
+        "qa_metrics": {
+            "hook_score": 0.9,
+            "clarity_score": 0.9,
+            "information_density_score": 0.8,
+            "repetition_score": 0.2,
+            "ending_strength_score": 0.9,
+        },
+    }
+    processed = pipeline._postprocess_script_for_quality(
+        script,
+        {"canonical_topic": "sombras ao entardecer", "fact_pack": {"status": "limited", "facts": []}},
+        [],
+    )
+    result = ScriptQualityGate().validate(
+        processed,
+        target_duration_sec=45,
+        request={"cta_style": "soft", "duration_sec": 45, "language": "pt-BR", "niche_id": "curiosidades"},
+    )
+    assert "soft_cta_not_in_narration" not in result.reasons
+
+    # The absence case must still be detected: a CTA not in the narration at all.
+    bad = dict(processed)
+    bad["cta"] = "Comente qual planeta você moraria"
+    result_bad = ScriptQualityGate().validate(
+        bad,
+        target_duration_sec=45,
+        request={"cta_style": "soft", "duration_sec": 45, "language": "pt-BR", "niche_id": "curiosidades"},
+    )
+    assert "soft_cta_not_in_narration" in result_bad.reasons

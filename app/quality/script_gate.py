@@ -282,7 +282,7 @@ class ScriptQualityGate:
             cta = str(script.get("cta") or "").strip()
             if not cta:
                 reasons.append("missing_soft_cta")
-            elif self._normalize(cta) not in self._normalize(full_narration):
+            elif not self._cta_grounded_in_narration(cta, full_narration):
                 reasons.append("soft_cta_not_in_narration")
             if not structured_report["story_arc_complete"]:
                 reasons.append("story_arc_incomplete")
@@ -653,3 +653,15 @@ class ScriptQualityGate:
         for source, target in replacements.items():
             text = text.replace(source, target)
         return text
+
+    def _cta_grounded_in_narration(self, cta: str, narration: str) -> bool:
+        """True when the CTA text appears in the narration, allowing terminal
+        punctuation differences (e.g. CTA ends with '?' while the narration
+        sentence ends with '.'). Punct spans are collapsed so a trailing '?'
+        or '.' on the CTA still matches the same words in the narration."""
+        import re as _re
+
+        def compact(value: str) -> str:
+            return _re.sub(r"[^a-z0-9\u00e0-\u00ff\s]", "", self._normalize(value))
+
+        return bool(compact(cta)) and compact(cta) in compact(narration)
