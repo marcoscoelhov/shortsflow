@@ -276,6 +276,17 @@ def select_niche_policy(niche_id: str = DEFAULT_NICHE_ID) -> NichePolicy:
             experimental=True,
             hypothetical=True,
         )
+    if normalized == "fiction_microdrama":
+        from app.microdrama_pilot import MICRODRAMA_CONCEPT_POOL, MICRODRAMA_LABEL_PT_BR, microdrama_policy_notes
+
+        return NichePolicy(
+            niche_id="fiction_microdrama",
+            label_pt_br=MICRODRAMA_LABEL_PT_BR,
+            seed_pool=MICRODRAMA_CONCEPT_POOL,
+            policy_notes=microdrama_policy_notes(),
+            experimental=True,
+            hypothetical=True,
+        )
     raise ValueError(f"unsupported niche_id: {normalized}")
 
 

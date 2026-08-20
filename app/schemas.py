@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-SUPPORTED_NICHES = {"curiosidades", "survival_decisions"}
+SUPPORTED_NICHES = {"curiosidades", "survival_decisions", "fiction_microdrama"}
 SUPPORTED_LANGUAGES = {"pt-BR"}
 
 
@@ -24,6 +24,29 @@ class TopicRequestCreate(BaseModel):
 
     @model_validator(mode="after")
     def preserve_experiment_markers(self) -> TopicRequestCreate:
+        if self.niche_id == "fiction_microdrama":
+            if self.job_origin in {"automatic_topic", "ready_script_bank"} or self.creation_via == "daily_cycle":
+                raise ValueError("fiction_microdrama is manual-only and cannot enter automated creation lanes")
+            from app.microdrama_pilot import microdrama_policy_notes
+
+            protected_keys = {
+                "fictional_scenario",
+                "fiction_format",
+                "automatic_publication_allowed",
+                "human_review_required",
+                "originality_review_required",
+            }
+            existing_notes = "\n".join(
+                line
+                for line in str(self.notes or "").strip().splitlines()
+                if line.strip().partition("=")[0].strip() not in protected_keys
+            ).strip()
+            required_notes = list(microdrama_policy_notes())
+            existing_lines = set(existing_notes.splitlines())
+            self.notes = "\n".join(
+                part for part in [existing_notes, *(note for note in required_notes if note not in existing_lines)] if part
+            )
+            return self
         if self.niche_id != "survival_decisions":
             return self
         if self.job_origin == "automatic_topic":
@@ -72,7 +95,7 @@ class TopicRequestCreate(BaseModel):
         normalized = value.strip()
         if normalized not in SUPPORTED_NICHES:
             raise ValueError(
-                "unsupported niche_id: supported values are 'curiosidades' and 'survival_decisions'"
+                "unsupported niche_id: supported values are 'curiosidades', 'survival_decisions', and 'fiction_microdrama'"
             )
         return normalized
 

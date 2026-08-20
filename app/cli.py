@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from app.config import get_settings
+from app.microdrama_pilot import build_microdrama_pilot_plan, start_microdrama_pilot
 from app.remote_runtime import RemoteRuntimeClient, current_revision, resume_deployed_revision
 from app.runtime_execution import assert_real_execution_location
 from app.survival_experiment import build_survival_cohort_plan
@@ -59,6 +60,18 @@ def main(argv: list[str] | None = None) -> None:
         help="Gera plano JSON seco de 6 cenários do experimento survival_decisions",
     )
     survival_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para seleção determinística")
+
+    microdrama_plan_parser = subparsers.add_parser(
+        "microdrama-pilot-plan",
+        help="Imprime o plano JSON seco do piloto de microdramas",
+    )
+    microdrama_plan_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para ordem determinística")
+
+    microdrama_start_parser = subparsers.add_parser(
+        "microdrama-pilot-start",
+        help="Persiste o piloto de microdramas e cria três canários sem publicar",
+    )
+    microdrama_start_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para ordem determinística")
 
     pilot_parser = subparsers.add_parser(
         "pilot-10k-start",
@@ -119,6 +132,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "survival-cohort-plan":
         print(json.dumps(build_survival_cohort_plan(seed=args.seed), ensure_ascii=False, indent=2))
         return
+    if args.command == "microdrama-pilot-plan":
+        print(json.dumps(build_microdrama_pilot_plan(seed=args.seed), ensure_ascii=False, indent=2))
+        return
 
     runtime_settings = get_settings()
     assert_real_execution_location(
@@ -137,6 +153,11 @@ def main(argv: list[str] | None = None) -> None:
     init_db()
     apply_operational_settings(orchestrator.settings)
     service = AutomationService(orchestrator)
+
+    if args.command == "microdrama-pilot-start":
+        result = start_microdrama_pilot(orchestrator, seed=args.seed)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
 
     if args.command == "pilot-10k-start":
         result = start_traction_pilot(orchestrator, seed=args.seed, canary_count=3)

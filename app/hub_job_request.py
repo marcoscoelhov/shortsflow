@@ -12,6 +12,7 @@ from app.job_origin import (
 )
 from app.hub_prompt import build_viral_prompt_note
 from app.manual_script import build_ready_script_notes, parse_ready_script
+from app.microdrama_pilot import MICRODRAMA_NICHE_ID
 from app.schemas import TopicRequestCreate
 from app.survival_experiment import SURVIVAL_NICHE_ID
 
@@ -106,9 +107,9 @@ def build_hub_job_request(
     selected_niche = niche_id or default_niche_id
     trend_report: dict[str, object] | None = None
 
-    if selected_niche == SURVIVAL_NICHE_ID and normalized_mode != "script" and not seed_theme.strip():
+    if selected_niche in {SURVIVAL_NICHE_ID, MICRODRAMA_NICHE_ID} and normalized_mode != "script" and not seed_theme.strip():
         raise ValueError(
-            "survival_decisions requires an explicit theme, title, or ready script; "
+            f"{selected_niche} requires an explicit theme, title, or ready script; "
             "it cannot fall back to automatic_topic"
         )
 
