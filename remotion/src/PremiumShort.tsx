@@ -213,7 +213,6 @@ const SceneOverlays: React.FC<{
             >
               <div style={{display: 'flex', justifyContent: 'space-between', color: 'white', fontSize: 32, fontWeight: 850}}>
                 <span>{overlay.text}</span>
-                <span>{Math.round(progress * 100)}%</span>
               </div>
               <div style={{height: 22, marginTop: 12, borderRadius: 20, background: 'rgba(255,255,255,0.2)', overflow: 'hidden'}}>
                 <div
@@ -270,7 +269,7 @@ const SceneOverlays: React.FC<{
             fps,
             config: {damping: 20, stiffness: 150, mass: 0.78}
           });
-          const wrong = overlay.side !== 'right';
+          const wrong = overlay.text === 'ESCOLHA ERRADA' || overlay.text === 'SEGUE A ILUSÃO';
           const outcomeIndicatorProgress = interpolate(activeFrame, [0, Math.max(3, fps * 0.28)], [0, 1], {
             extrapolateLeft: 'clamp',
             extrapolateRight: 'clamp'
