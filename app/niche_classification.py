@@ -7,6 +7,8 @@ from typing import Iterable
 
 
 ASTRONOMY_NICHE = "astronomia"
+MICRODRAMA_NICHE = "fiction_microdrama"
+MICRODRAMA_ALLOWED_KEYWORDS = ("microdrama", "ficção", "suspense", "história")
 ASTRONOMY_ALLOWED_KEYWORDS = (
     "astronomia",
     "universo",
@@ -111,6 +113,17 @@ def _dedupe_preserve_order(values: Iterable[str]) -> tuple[str, ...]:
 
 
 def classify_niche_contract(*texts: object, fallback_niche: str = "curiosidades") -> NicheClassification:
+    explicit_niche = (fallback_niche or "curiosidades").strip() or "curiosidades"
+    if explicit_niche == MICRODRAMA_NICHE:
+        return NicheClassification(
+            niche=MICRODRAMA_NICHE,
+            subniche="suspense_emocional",
+            allowed_keywords=MICRODRAMA_ALLOWED_KEYWORDS,
+            forbidden_keywords=(),
+            matched_terms=("microdrama", "ficção"),
+            source="explicit_request_niche",
+        )
+
     source_text = " ".join(str(text or "") for text in texts if text is not None)
     normalized = _normalize_text(source_text)
     subniche_source_text = "\n".join(

@@ -38,6 +38,11 @@ COSMOS_POLICY_MARKER_PATTERN = re.compile(
     r"cosmos_astronomia_universo_first|automatic_topic_focus\s*=\s*astronomia",
     re.IGNORECASE,
 )
+FICTION_MICRODRAMA_PATTERN = re.compile(
+    r"fictional_scenario\s*=\s*true.*fiction_format\s*=\s*microdrama|"
+    r"fiction_format\s*=\s*microdrama.*fictional_scenario\s*=\s*true",
+    re.IGNORECASE | re.DOTALL,
+)
 
 NEGATED_SCIENCE_CONTEXT_PATTERN = re.compile(
     r"\b(?:sem|nao|não)\s+(?:parecer\s+)?(?:explica[cç][aã]o\s+)?cient[ií]fic[oa]s?\b",
@@ -87,6 +92,8 @@ def resolve_editorial_mode(topic_plan: Any | None = None, request: Any | None = 
     angle = str(_read_field(topic_plan, "angle", "") or "")
     hook_promise = str(_read_field(topic_plan, "hook_promise", "") or "")
     quality_metrics = _read_field(topic_plan, "quality_metrics", {}) or {}
+    if FICTION_MICRODRAMA_PATTERN.search(notes):
+        return "viral_curiosidades"
     override_text = " ".join(part for part in [notes, requested_angle] if part).strip()
     if override_text and STRICT_OVERRIDE_PATTERN.search(override_text):
         return "factual_strict"

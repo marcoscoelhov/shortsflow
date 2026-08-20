@@ -23,6 +23,7 @@ from app.domain_contracts import (
 )
 from app.editorial.topic_mode import resolve_editorial_mode
 from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
+from app.microdrama_pilot import MICRODRAMA_NICHE_ID
 from app.models import BackgroundMusicAsset, Job, NarrationAsset, PerformanceMetric, PublicationSchedule, RenderOutput, ReviewRecord, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRequest
 from app.pipelines.base import BasePipeline
 from app.quality.llm_judge import (
@@ -106,6 +107,7 @@ class MonetizationPipeline(BasePipeline):
         ]
 
     def build_monetization_report(self, session: Session, job: Job, extra_confirmations: set[str] | None = None) -> dict[str, Any]:
+        request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job.job_id))
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         script = session.scalar(select(Script).where(Script.job_id == job.job_id))
         narration = session.scalar(select(NarrationAsset).where(NarrationAsset.job_id == job.job_id))
@@ -116,7 +118,8 @@ class MonetizationPipeline(BasePipeline):
         script_artifact = self.read_job_json(job.job_id, "script.json")
         ready_script_input = self._ready_script_input(fact_pack, script_artifact)
         ready_script_bank_input = self._ready_script_bank_input(job, fact_pack, script_artifact)
-        tags = self.build_publish_hashtags(topic_plan, script)
+        microdrama = (request.niche_id if request else job.niche_id) == MICRODRAMA_NICHE_ID
+        tags = self.microdrama_publish_hashtags() if microdrama else self.build_publish_hashtags(topic_plan, script)
         confirmations = self.manual_monetization_confirmations(session, job.job_id)
         confirmations.update(extra_confirmations or set())
         if ready_script_input:
@@ -130,7 +133,14 @@ class MonetizationPipeline(BasePipeline):
         channel_repetition_report = self.build_channel_repetition_report(session, job, topic_plan, script)
         metadata_review = self.build_metadata_review(topic_plan, script, tags)
         metadata_ctr = self.metadata_ctr_gate.validate(topic_plan, script, tags)
-        metadata_repair = self.build_growth_metadata_repair(topic_plan, script, tags, metadata_ctr.reasons)
+        metadata_repair = self.build_growth_metadata_repair(
+            topic_plan,
+            script,
+            tags,
+            metadata_ctr.reasons,
+            niche_id=request.niche_id if request else job.niche_id,
+            notes=request.notes if request else None,
+        )
         if metadata_repair.get("applied"):
             tags = list(metadata_repair.get("hashtags") or tags)
             metadata_review = {
@@ -765,11 +775,34 @@ class MonetizationPipeline(BasePipeline):
         script: Script | None,
         tags: list[str],
         metadata_reasons: list[str],
+        *,
+        niche_id: str | None = None,
+        notes: str | None = None,
     ) -> dict[str, Any]:
         repairable_reasons = {"title_too_explanatory", "title_click_tension_low", "weak_hashtags", "metadata_ctr_below_threshold"}
         if not repairable_reasons.intersection(metadata_reasons):
             return {"applied": False, "reason": "metadata_ctr_already_acceptable"}
         current_title = str(getattr(script, "title", "") or (topic_plan.canonical_topic if topic_plan else "")).strip()
+        if niche_id == MICRODRAMA_NICHE_ID:
+            base = re.sub(r"^\s*fic[cç][aã]o\s*:\s*", "", current_title, flags=re.IGNORECASE)
+            base = re.sub(r"\s*:\s*a cena que muda tudo\s*$", "", base, flags=re.IGNORECASE).strip(" .")
+            arm_match = re.search(r"(?im)^experiment_arm\s*=\s*([ABC])\s*$", str(notes or ""))
+            arm = arm_match.group(1).upper() if arm_match else "A"
+            prefix = "Decisão impossível" if arm == "B" else "O mistério" if arm == "C" else "O segredo"
+            if not base.casefold().startswith(prefix.casefold()):
+                base = f"{prefix}: {base}"
+            repaired_title = re.sub(r"\s+", " ", base).strip()[:100]
+            repaired_tags = self.microdrama_publish_hashtags()
+            overrides = self.normalize_publish_metadata_overrides(repaired_title, None, repaired_tags)
+            return {
+                "applied": True,
+                "strategy": "microdrama_metadata_rewrite",
+                "original_title": current_title,
+                "title": overrides["title"],
+                "hashtags": overrides["hashtags"],
+                "reasons": list(metadata_reasons),
+                "overrides": overrides,
+            }
         hook = str(getattr(script, "hook", "") or "").strip()
         topic = str(getattr(topic_plan, "canonical_topic", "") or current_title).strip()
         title_source = " ".join([current_title, hook, topic])
@@ -916,14 +949,16 @@ class MonetizationPipeline(BasePipeline):
         background_music = session.scalar(select(BackgroundMusicAsset).where(BackgroundMusicAsset.job_id == job.job_id))
         publication_schedule = session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job.job_id))
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
-        survival_decisions = (request.niche_id if request else job.niche_id) == "survival_decisions"
+        niche_id = request.niche_id if request else job.niche_id
+        survival_decisions = niche_id == "survival_decisions"
+        microdrama = niche_id == MICRODRAMA_NICHE_ID
         title = self.build_publish_title(job, request, script)
         if survival_decisions:
             title = self._survival_publish_title(request, title)
         fact_pack = self.read_job_json(job.job_id, "fact_pack.json")
         script_artifact = self.read_job_json(job.job_id, "script.json")
         monetization_report = self.read_job_json(job.job_id, ARTIFACT_MONETIZATION_REPORT)
-        tags = self.build_publish_hashtags(topic_plan, script)
+        tags = self.microdrama_publish_hashtags() if microdrama else self.build_publish_hashtags(topic_plan, script)
         declared_hashtags = dict(getattr(script, "qa_metrics", None) or {}).get("declared_hashtags") if script else None
         if not declared_hashtags and monetization_report.get("metadata_review", {}).get("suggested_hashtags"):
             tags = list(monetization_report["metadata_review"]["suggested_hashtags"])
@@ -941,6 +976,11 @@ class MonetizationPipeline(BasePipeline):
                 description_lines.append(str(ai_notice).strip())
             description_lines.append(" ".join(tags))
             description = "\n\n".join(description_lines)
+        elif microdrama:
+            story_description = self.build_publish_description(topic_plan, script, title, tags, ai_notice)
+            description = "\n\n".join(
+                part for part in ["Microficção original do Bairro da Estação.", story_description] if part
+            )
         else:
             description = self.build_publish_description(topic_plan, script, title, tags, ai_notice)
         if not survival_decisions and overrides.get("description"):
@@ -965,7 +1005,7 @@ class MonetizationPipeline(BasePipeline):
             "title": title[:100],
             "description": description[:4900],
             "hashtags": list(dict.fromkeys(tags)),
-            "category": "Entertainment" if survival_decisions else "Education",
+            "category": "Entertainment" if survival_decisions or microdrama else "Education",
             "language": job.language,
             "video_uri": render.video_uri if render else None,
             "poster_uri": render.poster_uri if render else None,
@@ -1170,6 +1210,10 @@ class MonetizationPipeline(BasePipeline):
         if "#shorts" not in normalized_tags:
             normalized_tags.insert(0, "#shorts")
         return list(dict.fromkeys(normalized_tags))[:5]
+
+    @staticmethod
+    def microdrama_publish_hashtags() -> list[str]:
+        return ["#shorts", "#microdrama", "#ficcao", "#suspense", "#historias"]
 
     def build_publish_hashtags(self, topic_plan: TopicPlan | None, script: Script | None) -> list[str]:
         declared_hashtags = dict(getattr(script, "qa_metrics", None) or {}).get("declared_hashtags") if script else None
