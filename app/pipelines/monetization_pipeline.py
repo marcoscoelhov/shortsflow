@@ -117,7 +117,6 @@ class MonetizationPipeline(BasePipeline):
         ready_script_input = self._ready_script_input(fact_pack, script_artifact)
         ready_script_bank_input = self._ready_script_bank_input(job, fact_pack, script_artifact)
         tags = self.build_publish_hashtags(topic_plan, script)
-        checklist = self.build_quality_checklist(job)
         confirmations = self.manual_monetization_confirmations(session, job.job_id)
         confirmations.update(extra_confirmations or set())
         if ready_script_input:
@@ -197,6 +196,7 @@ class MonetizationPipeline(BasePipeline):
         quality_summary = dict(job.quality_summary or {})
         quality_summary["metadata_ctr"] = metadata_ctr_metrics | {"reasons": metadata_ctr.reasons}
         job.quality_summary = quality_summary
+        checklist = self.build_quality_checklist(job)
         publish_readiness = self.publish_readiness_report(
             script,
             topic_plan,

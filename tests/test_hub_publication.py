@@ -4382,6 +4382,125 @@ def test_publish_audit_failures_become_automatic_hard_blockers() -> None:
 
     assert blockers == ["source_fact_mismatch", "unsupported_claim", "claim_trace_grounding_missing", "low_retention_hook"]
 
+def test_build_monetization_report_refreshes_checklist_after_metadata_confirmation(monkeypatch) -> None:
+    job_id = "generated-metadata-confirmation-checklist"
+    quality_summary = {
+        "script": {"script_quality_gate_pass": True},
+        "scene_plan": {"scene_plan_gate_pass": True},
+        "assets": {
+            "semantic_threshold_pass": True,
+            "asset_visual_gate_pass": True,
+            "asset_visual_gate_checked": True,
+            "asset_visual_verification_modes": ["prompt_heuristic"],
+        },
+        "metadata_ctr": {"metadata_ctr_gate_pass": False, "metadata_ctr_score": 0.61},
+        "subtitles": {"subtitle_gate_pass": True},
+        "render": {"render_gate_pass": True},
+    }
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="monetization_review",
+            seed_theme="Decisões de sobrevivência",
+            quality_summary=quality_summary,
+        )
+        session.flush()
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.job_origin = "manual_theme"
+        session.commit()
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline.metadata_ctr_gate,
+        "validate",
+        lambda *args, **kwargs: SimpleNamespace(
+            passed=False,
+            reasons=["metadata_ctr_below_threshold"],
+            metrics={"metadata_ctr_gate_pass": False, "metadata_ctr_score": 0.61},
+        ),
+    )
+    monkeypatch.setattr(orchestrator.monetization_pipeline, "build_growth_metadata_repair", lambda *args, **kwargs: {"applied": False})
+    monkeypatch.setattr(orchestrator.monetization_pipeline.llm_judge, "may_consider_override", lambda reasons: False)
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline,
+        "build_rights_registry",
+        lambda *args, **kwargs: {"all_commercial_rights_confirmed": True, "entries": []},
+    )
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline,
+        "build_ai_disclosure_report",
+        lambda *args, **kwargs: {
+            "youtube_disclosure_required": False,
+            "auto_confirmed": False,
+            "contains_synthetic_visuals": False,
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline,
+        "build_fact_claims_report",
+        lambda *args, **kwargs: {"requires_fact_review": False, "claim_trace": [], "claim_sources": []},
+    )
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline,
+        "build_channel_repetition_report",
+        lambda *args, **kwargs: {"repetition_risk": "low", "matches": [], "signals": {}},
+    )
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline,
+        "build_metadata_review",
+        lambda *args, **kwargs: {
+            "requires_metadata_review": True,
+            "title": "Decisões de sobrevivência",
+            "suggested_hashtags": ["#shorts", "#sobrevivencia", "#decisoes"],
+            "reasons": ["metadata_ctr_below_threshold"],
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline,
+        "provider_publish_audit",
+        lambda *args, **kwargs: {"passed": True, "reasons": [], "provider": "test"},
+    )
+
+    def capture_publish_readiness(*args, **kwargs):
+        captured["publish_checklist"] = dict(args[4])
+        return {"passed": True, "reasons": [], "minimax_audit": {"passed": True}}
+
+    def capture_growth(quality, monetization):
+        captured["growth_quality"] = quality
+        captured["growth_monetization"] = monetization
+        return SimpleNamespace(
+            passed=True,
+            decision="ready_for_growth_review",
+            reasons=[],
+            metrics={"growth_score": 0.9, "growth_score_gate_pass": True},
+        )
+
+    monkeypatch.setattr(orchestrator.monetization_pipeline, "publish_readiness_report", capture_publish_readiness)
+    monkeypatch.setattr(orchestrator.monetization_pipeline.growth_score_gate, "evaluate", capture_growth)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.job_origin == "manual_theme"
+        report = orchestrator.monetization_pipeline.build_monetization_report(
+            session,
+            job,
+            {"metadata_confirmed", "visual_review_confirmed"},
+        )
+
+    assert report["quality_checklist"]["metadata_ctr_gate_pass"] is True
+    assert all(report["quality_checklist"].values())
+    assert captured["publish_checklist"] == report["quality_checklist"]
+    assert captured["growth_quality"]["metadata_ctr"]["metadata_ctr_gate_pass"] is True
+    assert "quality_gate_not_passed" not in captured["growth_monetization"]["hard_blockers"]
+    assert "quality_gate_not_passed" not in report["hard_blockers"]
+    assert report["manual_required"] == []
+    assert report["passed"] is True
+    assert report["final_status"] == "ready_for_upload"
+
+
 def test_build_monetization_report_turns_publish_audit_failure_into_manual_review(monkeypatch) -> None:
     job_id = orchestrator.create_job(
         {
