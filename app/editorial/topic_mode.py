@@ -92,7 +92,8 @@ def resolve_editorial_mode(topic_plan: Any | None = None, request: Any | None = 
     angle = str(_read_field(topic_plan, "angle", "") or "")
     hook_promise = str(_read_field(topic_plan, "hook_promise", "") or "")
     quality_metrics = _read_field(topic_plan, "quality_metrics", {}) or {}
-    if FICTION_MICRODRAMA_PATTERN.search(notes):
+    stored_niche = str(quality_metrics.get("topic_niche") or "").strip() if isinstance(quality_metrics, Mapping) else ""
+    if FICTION_MICRODRAMA_PATTERN.search(notes) or stored_niche == "fiction_microdrama":
         return "viral_curiosidades"
     override_text = " ".join(part for part in [notes, requested_angle] if part).strip()
     if override_text and STRICT_OVERRIDE_PATTERN.search(override_text):
