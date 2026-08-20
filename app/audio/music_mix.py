@@ -86,8 +86,8 @@ def mix_background_music(
             f"[0:a]aresample=24000,volume={gain_db}dB,atrim=0:{duration_sec:.3f},"
             f"afade=t=out:st={fade_out_start:.3f}:d=1.2[bg];"
             "[1:a]aresample=24000[voc];"
-            "[voc][bg]amix=inputs=2:weights='1 0.55':normalize=0,"
-            "alimiter=limit=0.93,loudnorm=I=-16:LRA=11:TP=-1.5[out]"
+            "[voc][bg]amix=inputs=2:weights='1 1':normalize=0,"
+            "loudnorm=I=-16:LRA=11:TP=-1.5[out]"
         )
     try:
         result = subprocess.run(
