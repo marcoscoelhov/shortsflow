@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 import os
+import re
 from pathlib import Path
 
 from pydantic import field_validator, model_validator
@@ -29,6 +30,13 @@ def _load_legacy_yts_env_aliases() -> None:
 
 
 _load_legacy_yts_env_aliases()
+
+_CHANNEL_INSTANCE_SLUG_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+
+
+def _is_safe_channel_instance_slug(value: str) -> bool:
+    """Return True for safe lowercase channel-instance slugs (e.g. "jarvis", "channel-a")."""
+    return bool(_CHANNEL_INSTANCE_SLUG_RE.match(value))
 
 
 class Settings(BaseSettings):
@@ -377,9 +385,9 @@ class Settings(BaseSettings):
     def validate_runtime_environment(cls, value: str) -> str:
         normalized = value.strip().lower()
         allowed = {"development", "staging", "production"}
-        if normalized not in allowed:
-            raise ValueError("runtime_environment must be one of: development, staging, production")
-        return normalized
+        if normalized in allowed or _is_safe_channel_instance_slug(normalized):
+            return normalized
+        raise ValueError("runtime_environment must be one of development, staging, production or a safe channel-instance slug like 'jarvis'")
 
     @field_validator(
         "staging_min_free_disk_gb",

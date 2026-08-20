@@ -69,9 +69,23 @@ def test_runtime_environment_is_normalized() -> None:
     assert settings.runtime_environment == "staging"
 
 
+def test_runtime_environment_accepts_safe_channel_instance_slug() -> None:
+    """Channel instance slugs (for metrics-only secondary instances) are accepted and lowercased."""
+    settings = Settings(_env_file=None, runtime_environment="jarvis")
+    assert settings.runtime_environment == "jarvis"
+
+    settings2 = Settings(_env_file=None, runtime_environment="CHANNEL-A")
+    assert settings2.runtime_environment == "channel-a"
+
+    settings3 = Settings(_env_file=None, runtime_environment="my-channel-42")
+    assert settings3.runtime_environment == "my-channel-42"
+
+
 def test_runtime_environment_rejects_unknown_value() -> None:
-    with pytest.raises(ValidationError, match="runtime_environment must be one of"):
-        Settings(_env_file=None, runtime_environment="laptop")
+    # 'laptop' is now a valid safe slug; use values that are invalid even after lowercasing
+    for bad in ("", "1foo", "foo_bar", "foo bar", "STAGING_Mode"):
+        with pytest.raises(ValidationError, match="runtime_environment must be one of"):
+            Settings(_env_file=None, runtime_environment=bad)
 
 
 def test_visual_review_defaults_to_human_only(monkeypatch) -> None:
