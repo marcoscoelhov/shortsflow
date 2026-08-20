@@ -215,6 +215,32 @@ FACT_HISTORY_TECH_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# "Viral-perfection" reasons that observer noise, not blocking defects. They are
+# predictive guesses about engagement, not verifiable defects (bad facts, broken
+# text, wrong language). They remain reported as warnings for telemetry but must
+# NOT fail the gate — otherwise the pipeline endlessly churns real scripts in a
+# repair loop instead of producing. Only the reasons NOT in this set block.
+SOFT_GATE_REASONS = {
+    "academic_title_tone",
+    "avg_sentence_too_long",
+    "body_beat_count_invalid",
+    "broken_viral_closing",
+    "ending_not_connected_to_hook",
+    "estimated_duration_outside_target_window",
+    "generic_ai_style_phrase",
+    "generic_hook_opening",
+    "generic_loop_ending",
+    "hook_first_word_weak",
+    "retention_map_incomplete",
+    "retention_map_not_grounded_in_narration",
+    "sentence_too_long",
+    "story_arc_incomplete",
+    "story_arc_not_grounded_in_narration",
+    "weak_loop_closure",
+    "word_count_too_high_for_natural_pace",
+    "word_count_too_low_for_natural_pace",
+}
+
 
 @dataclass(frozen=True)
 class ScriptGateResult:
@@ -355,6 +381,8 @@ class ScriptQualityGate:
             if maximum is not None and value >= maximum:
                 reasons.append(f"{key}_above_threshold")
 
+        blocking_reasons = [r for r in reasons if r not in SOFT_GATE_REASONS]
+        soft_reasons = [r for r in reasons if r in SOFT_GATE_REASONS]
         metrics = {
             **qa_metrics,
             "word_count": word_count,
@@ -369,7 +397,9 @@ class ScriptQualityGate:
             "natural_max_words": natural_max_words,
             "natural_duration_at_fast_pace_sec": natural_duration_at_fast_pace,
             "natural_duration_at_slow_pace_sec": natural_duration_at_slow_pace,
-            "script_quality_gate_pass": not reasons,
+            "script_quality_gate_pass": not blocking_reasons,
+            "script_quality_gate_blocking": blocking_reasons,
+            "script_quality_gate_warnings": soft_reasons,
             "script_quality_gate_reasons": reasons,
             "fact_risk": fact_risk,
             "claim_trace": trace_report,
@@ -377,7 +407,7 @@ class ScriptQualityGate:
             "loop_gate": loop_metrics,
             "structured_viral_gate": structured_report,
         }
-        return ScriptGateResult(passed=not reasons, reasons=reasons, metrics=metrics)
+        return ScriptGateResult(passed=not blocking_reasons, reasons=reasons, metrics=metrics)
 
     def _collect_text(self, value: Any) -> list[str]:
         if value is None:

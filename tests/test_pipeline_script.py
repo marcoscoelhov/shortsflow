@@ -624,8 +624,9 @@ def test_script_quality_gate_blocks_generic_hook_opening() -> None:
         },
     }
     result = ScriptQualityGate().validate(script, target_duration_sec=35)
-    assert not result.passed
+    assert result.passed
     assert "generic_hook_opening" in result.reasons
+    assert "generic_hook_opening" in result.metrics["script_quality_gate_warnings"]
 
 
 def test_script_quality_gate_requires_cta_and_grounded_story_arc_for_soft_cta_jobs() -> None:
@@ -2789,8 +2790,9 @@ def test_script_gate_rejects_ending_without_loop_connection() -> None:
 
     result = ScriptQualityGate().validate(script, target_duration_sec=35)
 
-    assert not result.passed
+    assert result.passed
     assert "ending_not_connected_to_hook" in result.reasons
+    assert "ending_not_connected_to_hook" in result.metrics["script_quality_gate_warnings"]
     assert result.metrics["loop_gate"]["connected_to_opening"] is False
 
 def test_script_gate_accepts_rewatch_loop_without_exact_token_overlap() -> None:
@@ -2818,8 +2820,8 @@ def test_script_gate_rejects_obvious_academic_title_tone() -> None:
 
     result = ScriptQualityGate().validate(script, target_duration_sec=35)
 
-    assert not result.passed
     assert "academic_title_tone" in result.reasons
+    assert "academic_title_tone" in result.metrics["script_quality_gate_warnings"]
 
 def test_script_gate_rejects_generic_loop_ending_template() -> None:
     script = _base_script(
@@ -2831,8 +2833,8 @@ def test_script_gate_rejects_generic_loop_ending_template() -> None:
 
     result = ScriptQualityGate().validate(script, target_duration_sec=35)
 
-    assert not result.passed
     assert "generic_loop_ending" in result.reasons
+    assert "generic_loop_ending" in result.metrics["script_quality_gate_warnings"]
 
 def test_validate_or_repair_script_recovers_simple_loop_closure(monkeypatch) -> None:
     original_repair_attempts = orchestrator.settings.llm_script_repair_attempts
@@ -4054,8 +4056,8 @@ def test_script_gate_rejects_100_words_for_45s_natural_pace() -> None:
 
     result = ScriptQualityGate().validate(script, target_duration_sec=45)
 
-    assert not result.passed
     assert "word_count_too_low_for_natural_pace" in result.reasons
+    assert "word_count_too_low_for_natural_pace" in result.metrics["script_quality_gate_warnings"]
     assert result.metrics["natural_min_words"] >= 105
 
 
@@ -4363,3 +4365,68 @@ def test_soft_cta_accepted_when_ending_punctuation_differs() -> None:
         request={"cta_style": "soft", "duration_sec": 45, "language": "pt-BR", "niche_id": "curiosidades"},
     )
     assert "soft_cta_not_in_narration" in result_bad.reasons
+
+
+def test_postprocess_dedupes_trailing_repeated_sentence() -> None:
+    """The real LLM occasionally ends the narration by repeating the CTA /
+    closing sentence twice. Postprocess must deterministically drop the trailing
+    duplicate so the script voices it once (and is not flagged repeated_clause)."""
+    pipeline = orchestrator.script_pipeline
+    script = {
+        "title": "Sombras ao entardecer",
+        "hook": "Quando o Sol se põe, a sombra sobe pelo céu.",
+        "loop": "De onde vem essa luz que fica depois?",
+        "body_beats": [
+            "A luz se espalha no ar alto e continua iluminando.",
+            "Conforme a Terra gira, esse clarão vai sumindo.",
+            "O que sobra é o eco de luz do dia que já passou.",
+        ],
+        "payoff": "O azul tardio é luz espalhada que ainda viaja até seus olhos.",
+        "ending": "Você acha mais assustador o Sol sumir ou a sombra subir.",
+        "cta": "Você acha mais assustador o Sol sumir ou a sombra subir?",
+        "full_narration": (
+            "Quando o Sol se põe, a sombra sobe pelo céu. "
+            "A luz se espalha no ar alto e continua iluminando. "
+            "Conforme a Terra gira, esse clarão vai sumindo. "
+            "O que sobra é o eco de luz do dia que já passou. "
+            "O azul tardio é luz espalhada que ainda viaja até seus olhos. "
+            "Você acha mais assustador o Sol sumir ou a sombra subir. "
+            "Você acha mais assustador o Sol sumir ou a sombra subir."
+        ),
+        "estimated_duration_sec": 45.0,
+        "language": "pt-BR",
+        "key_facts": [],
+        "source_fact_ids": [],
+        "claim_trace": [],
+        "retention_map": {},
+        "qa_metrics": {},
+    }
+    processed = pipeline._postprocess_script_for_quality(
+        script,
+        {"canonical_topic": "sombras ao entardecer", "fact_pack": {"status": "limited", "facts": []}},
+        [],
+    )
+    narration = processed["full_narration"]
+    assert narration.count("Você acha mais assustador o Sol sumir") == 1
+    result = ScriptQualityGate().validate(
+        processed,
+        target_duration_sec=45,
+        request={"cta_style": "soft", "duration_sec": 45, "language": "pt-BR", "niche_id": "curiosidades"},
+    )
+    assert "repeated_clause" not in result.reasons
+
+
+def test_script_gate_viral_perfection_reasons_are_warnings_not_blocking() -> None:
+    """'Viral-perfection' reasons (weak loop, hook first word, generic phrasing,
+    word count pacing) are noise for engagement, not verifiable defects. They must
+    be reported as warnings but must NOT fail the gate — otherwise real scripts
+    churn in the repair loop forever instead of producing."""
+    from app.quality.script_gate import SOFT_GATE_REASONS
+
+    assert "weak_loop_closure" in SOFT_GATE_REASONS
+    assert "hook_first_word_weak" in SOFT_GATE_REASONS
+    assert "generic_hook_opening" in SOFT_GATE_REASONS
+    assert "word_count_too_high_for_natural_pace" in SOFT_GATE_REASONS
+    # repeated_clause is a real textual defect (the actual fix lives in the
+    # deterministic dedupe in postprocess), so it must remain blocking here.
+    assert "repeated_clause" not in SOFT_GATE_REASONS
