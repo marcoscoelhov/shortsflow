@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 import shutil
@@ -10,6 +11,23 @@ import tempfile
 
 
 RETENTION = {"daily": 7, "weekly": 4}
+
+_CHANNEL_INSTANCE_SLUG_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+
+
+def _is_safe_channel_instance_slug(value: str) -> bool:
+    """Return True for safe lowercase channel-instance slugs (e.g. "jarvis", "channel-a")."""
+    return bool(_CHANNEL_INSTANCE_SLUG_RE.match(value))
+
+def _validate_environment(value: str) -> str:
+    """Accept standard envs or safe channel instance slug for backup target."""
+    normalized = value.strip().lower()
+    if normalized in {"development", "staging", "production"} or _is_safe_channel_instance_slug(normalized):
+        return normalized
+    raise argparse.ArgumentTypeError(
+        "environment must be one of development, staging, production "
+        "or a safe channel-instance slug like 'jarvis'"
+    )
 
 
 def create_verified_backup(database: Path, backup_dir: Path, *, cadence: str, now: datetime | None = None) -> Path | None:
@@ -48,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="shortsflow-backup")
     subparsers = parser.add_subparsers(dest="command", required=True)
     create = subparsers.add_parser("create")
-    create.add_argument("environment", choices=["staging", "production"])
+    create.add_argument("environment", type=_validate_environment)
     create.add_argument("cadence", choices=sorted(RETENTION))
     verify = subparsers.add_parser("verify")
     verify.add_argument("path", type=Path)
