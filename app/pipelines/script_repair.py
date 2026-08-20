@@ -170,6 +170,7 @@ class ScriptRepairDomain(BasePipeline):
         processed = self._sync_story_arc_to_script(processed)
         processed = self._sanitize_source_fact_ids(processed, fact_pack)
         processed = self._attach_claim_trace(processed, fact_pack)
+        processed = self._dedupe_trailing_repeated_sentence(processed)
         processed["estimated_duration_sec"] = round(max(35.0, min(55.0, len(word_tokens(str(processed.get("full_narration") or ""))) / 2.55)), 2)
         processed = self._sync_retention_map_to_script(processed)
         processed["token_count"] = len(tokenize(str(processed.get("full_narration") or "")))
@@ -186,6 +187,26 @@ class ScriptRepairDomain(BasePipeline):
             "consequence": str(updated.get("ending") or "").strip(),
         }
         return updated
+
+    def _dedupe_trailing_repeated_sentence(self, script: dict[str, Any]) -> dict[str, Any]:
+        """The real LLM occasionally ends the narration by repeating the CTA /
+        closing sentence twice (e.g. '...demorado. Você prefere...demorado.
+        Você prefere...demorado.'). This deterministic fix removes the trailing
+        duplicate consecutive sentence so the script is not rejected (or worse,
+        voiced twice). Idempotent and cheap."""
+        narration = str(script.get("full_narration") or "").strip()
+        if not narration:
+            return script
+        sentences = [part.strip() for part in sentence_split(narration) if part.strip()]
+        if len(sentences) < 2:
+            return script
+        last = self.script_gate._normalize(sentences[-1])  # noqa: SLF001
+        second_last = self.script_gate._normalize(sentences[-2])  # noqa: SLF001
+        if last and last == second_last:
+            updated = dict(script)
+            updated["full_narration"] = " ".join(sentences[:-1]).strip()
+            return self._dedupe_trailing_repeated_sentence(updated)
+        return script
 
     def _sync_retention_map_to_script(self, script: dict[str, Any]) -> dict[str, Any]:
         updated = dict(script)
