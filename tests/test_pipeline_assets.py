@@ -2860,3 +2860,56 @@ def test_minimax_background_music_prompt_is_compact_and_duration_aware(
     assert "Video context:" in prompt
     assert "full_narration" not in prompt
     assert len(prompt) < 900
+
+
+def test_simple_amix_keeps_audible_bed_ratio(tmp_path: Path) -> None:
+    """Regression: the simple_amix path used a trailing alimiter plus weights
+    '1 0.55' that drifted the calibrated bed gain, ending with music that
+    overwhelmed the narration (bed ratio ~1.45 instead of the ~0.14 target).
+    The mix must keep the bed audible yet below the narration so the gate
+    passes with a non-empty background."""
+    from app.audio.music_mix import mix_background_music
+    from app.quality.background_music_gate import BackgroundMusicGate
+
+    sample_rate = 24_000
+    narration_path = tmp_path / "narration.wav"
+    music_path = tmp_path / "music.wav"
+    mixed_path = tmp_path / "mixed.wav"
+
+    def write_wave(path: Path, amplitude: int, freq_hz: float, seconds: float = 1.0) -> None:
+        frame_count = int(sample_rate * seconds)
+        with wave.open(str(path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            frames = bytearray()
+            for idx in range(frame_count):
+                sample = int(amplitude * math.sin(2 * math.pi * freq_hz * (idx / sample_rate)))
+                frames.extend(sample.to_bytes(2, "little", signed=True))
+            wav_file.writeframes(frames)
+
+    write_wave(narration_path, amplitude=16000, freq_hz=220.0, seconds=2.0)
+    write_wave(music_path, amplitude=8000, freq_hz=110.0, seconds=2.0)
+
+    result = mix_background_music(
+        narration_path=narration_path,
+        music_path=music_path,
+        output_path=mixed_path,
+        target_duration_ms=2000,
+        gain_db=-17.0,
+        strategy="simple_amix+loudnorm",
+        target_ratio=0.14,
+        gain_min_db=-6.0,
+        gain_max_db=6.0,
+    )
+    gate = BackgroundMusicGate().validate(
+        narration_path=narration_path,
+        music_path=music_path,
+        mixed_audio_path=mixed_path,
+        expected_duration_ms=2000,
+        gain_db=float(result["gain_db_used"]),
+    )
+    assert gate.passed, f"mix gate failed: {gate.reasons}"
+    assert gate.metrics["music_source"]["rms_dbfs"] > -120  # real bed present
+    ratio = gate.metrics["bed_relative_rms_ratio"]
+    assert 0.02 <= ratio <= 1.2  # audible but does not overwhelm
