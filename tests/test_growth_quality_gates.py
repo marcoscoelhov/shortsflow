@@ -213,6 +213,49 @@ def test_monetization_pipeline_builds_growth_metadata_repair() -> None:
     assert result.passed
 
 
+def test_microdrama_metadata_repair_removes_factual_tags_and_generic_suffix() -> None:
+    pipeline = MonetizationPipeline.__new__(MonetizationPipeline)
+    topic_plan = type(
+        "Topic",
+        (),
+        {
+            "canonical_topic": "Cartas da mãe escondidas durante vinte anos",
+            "angle": "A filha descobre quem reteve a verdade",
+        },
+    )()
+    script = type(
+        "Script",
+        (),
+        {
+            "title": "Ficção: quem escondeu as cartas da mãe por vinte anos?",
+            "hook": "O carteiro não atrasou esta carta.",
+            "key_facts": [],
+            "qa_metrics": {"declared_hashtags": ["#shorts", "#fatos", "#ficcao", "#original", "#dois"]},
+        },
+    )()
+
+    repair = pipeline.build_growth_metadata_repair(
+        topic_plan,
+        script,
+        ["#shorts", "#fatos", "#ficcao", "#original", "#dois"],
+        ["title_click_tension_low", "metadata_ctr_below_threshold"],
+        niche_id="fiction_microdrama",
+        notes="experiment_arm=A\nfictional_scenario=true",
+    )
+    result = MetadataCTRGate().validate(
+        topic_plan,
+        {"title": repair["title"], "full_narration": script.hook},
+        repair["hashtags"],
+    )
+
+    assert repair["applied"] is True
+    assert repair["title"] == "O segredo: quem escondeu as cartas da mãe por vinte anos?"
+    assert repair["hashtags"] == ["#shorts", "#microdrama", "#ficcao", "#suspense", "#historias"]
+    assert "a cena que muda tudo" not in repair["title"].casefold()
+    assert "#fatos" not in repair["hashtags"]
+    assert result.passed
+
+
 def test_dead_title_suffix_banished_from_repair_fallbacks() -> None:
     """O sufixo morto 'o detalhe estranho antes de você notar' (banido em 2026-06) não deve regressar nos fallbacks."""
     pipeline = MonetizationPipeline.__new__(MonetizationPipeline)

@@ -16,6 +16,8 @@ from app.microdrama_pilot import (
     build_microdrama_pilot_plan,
     get_microdrama_pilot,
 )
+from app.niche_classification import classify_niche_contract
+from app.editorial.topic_mode import resolve_editorial_mode
 from app.models import ChannelPublication, Job, PublicationSchedule, RetentionExperiment, RetentionExperimentAssignment, TopicRequest
 from app.orchestrator import JobOrchestrator
 from app.schemas import TopicRequestCreate
@@ -60,6 +62,33 @@ def test_microdrama_request_accepts_manual_creation_and_restores_policy_notes() 
         and "eventos reais" in line
         for line in notes
     )
+
+
+def test_microdrama_explicit_niche_wins_over_incidental_astronomy_terms() -> None:
+    classification = classify_niche_contract(
+        "A voz da Iara veio do observatório sob a Lua",
+        "Ficção sobrenatural no Bairro da Estação",
+        fallback_niche=MICRODRAMA_NICHE_ID,
+    )
+
+    assert classification.niche == MICRODRAMA_NICHE_ID
+    assert classification.subniche == "suspense_emocional"
+    assert classification.source == "explicit_request_niche"
+    assert classification.allowed_keywords == ("microdrama", "ficção", "suspense", "história")
+
+
+def test_microdrama_editorial_mode_stays_entertainment_even_with_surgery_word() -> None:
+    request = type(
+        "Request",
+        (),
+        {
+            "notes": "fictional_scenario=true\nfiction_format=microdrama",
+            "requested_angle": "Uma irmã decide se ouve a confissão antes da cirurgia fictícia.",
+            "seed_theme": "O áudio antes da cirurgia",
+        },
+    )()
+
+    assert resolve_editorial_mode(None, request) == "viral_curiosidades"
 
 
 @pytest.mark.parametrize(

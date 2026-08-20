@@ -8,7 +8,11 @@ from typing import Any
 from app.utils import clamp01 as _clamp
 from app.utils import word_tokens
 
-TENSION_PATTERN = re.compile(r"\b(?:não|nunca|segredo|rouba|esconde|estranho|imposs[ií]vel|antes|por que|muda tudo|ningu[eé]m|predador|fogo|sumir|desaparece|notar)\b", re.I)
+TENSION_PATTERN = re.compile(
+    r"\b(?:não|nunca|segredo|mistério|rouba|esconde|escondeu|estranho|imposs[ií]vel|antes|por que|muda tudo|"
+    r"ningu[eé]m|predador|fogo|sumir|sumiu|desaparece|desapareceu|notar|mentiu|traiu|confiss[aã]o)\b",
+    re.I,
+)
 EXPLAINER_PATTERN = re.compile(r"^\s*(?:por que|como|entenda|explica(?:ção)?|o que é|a ciência por trás)\b", re.I)
 GENERIC_HASHTAGS = {"#viral", "#shorts", "#fyp", "#fy", "#curiosidades", "#curiosidade"}
 
@@ -41,7 +45,14 @@ class MetadataCTRGate:
             + min(0.42, tension_hits * 0.18)
             + (0.16 if not EXPLAINER_PATTERN.search(title) else -0.18)
             + (0.14 if len(words) >= 7 else 0.03)
-            + (0.10 if any(token in title.lower() for token in ["antes", "segredo", "notar", "rouba", "sumir"]) else 0.0)
+            + (
+                0.10
+                if any(
+                    token in title.lower()
+                    for token in ["antes", "segredo", "mistério", "notar", "rouba", "sumir", "impossível", "mentiu", "traiu", "escondeu"]
+                )
+                else 0.0
+            )
         )
         hashtag_score = self._hashtag_score(hashtags, specificity_terms)
         not_clickbait = 1.0 if not re.search(r"\b(?:chocante|inacredit[aá]vel!!!|100%|garantido)\b", title, re.I) else 0.45
