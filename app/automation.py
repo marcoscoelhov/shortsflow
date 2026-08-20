@@ -59,6 +59,7 @@ from app.editorial.topic_mode import resolve_editorial_mode
 from app.hub_prompt import build_viral_prompt_note, hub_settings_path, load_viral_prompt_template
 from app.job_origin import CREATION_VIA_DAILY_CYCLE, JOB_ORIGIN_AUTOMATIC_TOPIC, JOB_ORIGIN_READY_SCRIPT_BANK, JOB_ORIGIN_UNKNOWN
 from app.manual_script import build_ready_script_notes, normalize_ready_script_text, parse_ready_script
+from app.microdrama_pilot import MICRODRAMA_NICHE_ID
 from app.models import (
     AutomationAttempt,
     AutomationRun,
@@ -1202,8 +1203,8 @@ class AutomationService:
             if not job:
                 raise KeyError(job_id)
             topic_request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job_id))
-            if topic_request and topic_request.niche_id == SURVIVAL_NICHE_ID:
-                raise RuntimeError("survival_decisions_requires_human_publication_decision")
+            if topic_request and topic_request.niche_id in {SURVIVAL_NICHE_ID, MICRODRAMA_NICHE_ID}:
+                raise RuntimeError(f"{topic_request.niche_id}_requires_human_publication_decision")
             if job.status == JOB_STATUS_READY_FOR_UPLOAD:
                 pass
             elif job.status != JOB_STATUS_APPROVED_FOR_PUBLISH:

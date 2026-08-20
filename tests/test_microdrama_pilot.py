@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import json
 
 import pytest
@@ -7,6 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 
 from app import cli
+from app.automation import AutomationService
 from app.db import SessionLocal
 from app.hub_job_request import build_hub_job_request
 from app.microdrama_pilot import (
@@ -15,6 +17,7 @@ from app.microdrama_pilot import (
     get_microdrama_pilot,
 )
 from app.models import ChannelPublication, Job, PublicationSchedule, RetentionExperiment, RetentionExperimentAssignment, TopicRequest
+from app.orchestrator import JobOrchestrator
 from app.schemas import TopicRequestCreate
 from app.survival_experiment import select_niche_policy
 
@@ -75,6 +78,35 @@ def test_microdrama_request_rejects_automated_lanes(job_origin: str, creation_vi
             job_origin=job_origin,
             creation_via=creation_via,
         )
+
+
+def test_microdrama_requires_human_publication_decision() -> None:
+    job_id = JobOrchestrator().create_job(
+        TopicRequestCreate(
+            seed_theme="A carta que chegou vinte anos tarde",
+            niche_id=MICRODRAMA_NICHE_ID,
+            target_duration_sec=40,
+            job_origin="manual_theme",
+            creation_via="cli",
+        ).model_dump()
+    )
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.status = "ready_for_upload"
+        session.commit()
+
+    with pytest.raises(RuntimeError, match="fiction_microdrama_requires_human_publication_decision"):
+        AutomationService(JobOrchestrator())._approve_and_schedule(job_id, date(2026, 8, 21))
+
+    with SessionLocal() as session:
+        assert session.scalar(
+            select(func.count()).select_from(PublicationSchedule).where(PublicationSchedule.job_id == job_id)
+        ) == 0
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.status = "cancelled"
+        session.commit()
 
 
 def test_microdrama_hub_requires_manual_theme_title_or_script() -> None:
