@@ -42,7 +42,6 @@ def build_finish_plan(
         }
     visual_style_profile = public_visual_style_profile(contract.get("visual_style_profile"))
     survival_choices = _survival_choice_labels(job, scene_segments, contract)
-    survival_hazard_marker = _survival_hazard_marker(job, scene_segments, contract)
     scenes = []
     for index, scene in enumerate(scene_segments):
         asset = assets_by_scene.get(str(scene.get("scene_id")))
@@ -71,10 +70,9 @@ def build_finish_plan(
                     index,
                     len(scene_segments),
                     scene,
-                    contract,
                     duration_ms=duration_ms,
                     survival_choices=survival_choices,
-                    survival_hazard_marker=survival_hazard_marker,
+                    survival_hazard_marker=_survival_hazard_marker(job, scene),
                 ),
                 "visual_events": _visual_events_for_scene(index, len(scene_segments), scene, duration_ms),
                 **(
@@ -272,7 +270,6 @@ def _overlays_for_scene(
     index: int,
     scene_count: int,
     scene: dict[str, Any],
-    visual_contract: dict[str, Any],
     *,
     duration_ms: int,
     survival_choices: tuple[str, str] | None,
@@ -281,7 +278,6 @@ def _overlays_for_scene(
     if survival_choices is None:
         return []
     left_choice, right_choice = survival_choices
-    hazard_variant, hazard_text = survival_hazard_marker or ("hazard_progress", "PERIGO AUMENTANDO")
     if index == 0:
         choice_overlays = [
             {
@@ -294,8 +290,10 @@ def _overlays_for_scene(
             }
             for side, text in (("left", left_choice), ("right", right_choice))
         ]
-        return [
-            *choice_overlays,
+        if survival_hazard_marker is None:
+            return choice_overlays
+        hazard_variant, hazard_text = survival_hazard_marker
+        return choice_overlays + [
             {
                 "kind": "evidence_marker",
                 "variant": hazard_variant,
@@ -306,16 +304,16 @@ def _overlays_for_scene(
             },
         ]
     if index == scene_count - 1:
-        secondary = _safe_payoff_choices(scene, survival_choices)
+        outcomes = _explicit_payoff_outcomes(scene, survival_choices)
         minimum_outcome_window_ms = max(34, duration_ms // 4)
         comment_start_ms = max(120 + minimum_outcome_window_ms, duration_ms - 2_500)
         comment_start_ms = min(comment_start_ms, max(154, duration_ms - 34))
         end_padding_ms = min(200, max(0, duration_ms // 10))
         overlays = []
-        for side, text, choice in (
-            ("left", "ESCOLHA ERRADA", secondary[0]),
-            ("right", "SAÍDA REAL", secondary[1]),
-        ):
+        for side, choice in (("left", left_choice), ("right", right_choice)):
+            text = outcomes.get(choice)
+            if text is None:
+                continue
             overlay = {
                 "kind": "payoff_tag",
                 "variant": "outcome_comparison",
@@ -324,8 +322,7 @@ def _overlays_for_scene(
                 "start_ms": 120,
                 "duration_ms": max(34, comment_start_ms - 120),
             }
-            if choice:
-                overlay["secondary_text"] = choice
+            overlay["secondary_text"] = choice
             overlays.append(overlay)
         overlays.append(
             {
@@ -341,7 +338,7 @@ def _overlays_for_scene(
     overlay_start_ms = min(160, max(0, duration_ms // 10))
     overlay_end_padding_ms = min(400, max(0, duration_ms // 10))
     overlay_duration_ms = max(34, duration_ms - overlay_start_ms - overlay_end_padding_ms)
-    if index == scene_count - 2:
+    if index == scene_count - 2 and _scene_locks_choice(scene):
         return [
             {
                 "kind": "evidence_marker",
@@ -351,6 +348,9 @@ def _overlays_for_scene(
                 "duration_ms": overlay_duration_ms,
             }
         ]
+    if survival_hazard_marker is None:
+        return []
+    hazard_variant, hazard_text = survival_hazard_marker
     decision_count = max(1, scene_count - 3)
     return [
         {
@@ -381,75 +381,67 @@ def _survival_choice_labels(
 
 def _survival_hazard_marker(
     job: Job,
-    scenes: list[dict[str, Any]],
-    visual_contract: dict[str, Any],
+    scene: dict[str, Any],
 ) -> tuple[str, str] | None:
     if str(getattr(job, "niche_id", "") or "") != "survival_decisions":
         return None
-    raw_context = " ".join(
-        [
-            str(getattr(job, "topic_summary", "") or ""),
-            *(str(scene.get("narration_text") or "") for scene in scenes),
-            str(visual_contract.get("visual_thesis") or ""),
-            str(visual_contract.get("visual_domain") or ""),
-            str(visual_contract.get("visual_world") or ""),
-        ]
-    )
     context = "".join(
         character
-        for character in unicodedata.normalize("NFKD", raw_context.casefold())
+        for character in unicodedata.normalize("NFKD", str(scene.get("narration_text") or "").casefold())
         if not unicodedata.combining(character)
     )
     marker_rules = (
-        (("areia", "biblioteca"), "sand_progress", "AREIA SUBINDO"),
-        (("observatorio", "telescopio", "cupula"), "hazard_progress", "SINAL ANÔMALO"),
-        (("submers", "pressao oceanica"), "hazard_progress", "PRESSÃO AUMENTANDO"),
-        (("farol", "tempestade"), "hazard_progress", "TEMPESTADE AUMENTANDO"),
-        (("museu", "relogio", "tempo congelado"), "hazard_progress", "TEMPO CONGELADO"),
-        (("elevador", "falha de energia"), "hazard_progress", "ENERGIA CAINDO"),
-        (("ponte", "estrutura instavel"), "hazard_progress", "ESTRUTURA CEDENDO"),
-        (("trem", "sem freio"), "hazard_progress", "FIM DA LINHA"),
-        (("estufa", "frio impossivel"), "hazard_progress", "TEMPERATURA CAINDO"),
-        (("teleferico", "suspensao"), "hazard_progress", "EQUILÍBRIO INSTÁVEL"),
-        (("shopping", "apagao"), "hazard_progress", "ROTAS SUMINDO"),
-        (("jardim", "gravidade"), "hazard_progress", "GRAVIDADE FALHANDO"),
+        (r"\bareia\b", "sand_progress", "AREIA SUBINDO"),
+        (r"\bsinal anomalo\b", "hazard_progress", "SINAL ANÔMALO"),
+        (r"\bpressao\b", "hazard_progress", "PRESSÃO AUMENTANDO"),
+        (r"\btempestade\b", "hazard_progress", "TEMPESTADE AUMENTANDO"),
+        (r"\btempo congelado\b", "hazard_progress", "TEMPO CONGELADO"),
+        (r"\b(?:energia|bateria|carga)\b", "hazard_progress", "ENERGIA EM RISCO"),
+        (r"\bestrutura (?:cede|cedendo|instavel)\b", "hazard_progress", "ESTRUTURA CEDENDO"),
+        (r"\bsem freio\b", "hazard_progress", "FRENAGEM EM RISCO"),
+        (r"\b(?:temperatura|frio)\b", "hazard_progress", "TEMPERATURA EM RISCO"),
+        (r"\bgravidade\b", "hazard_progress", "GRAVIDADE ALTERADA"),
     )
-    for keywords, variant, label in marker_rules:
-        if any(keyword in context for keyword in keywords):
+    for pattern, variant, label in marker_rules:
+        if re.search(pattern, context):
             return variant, label
-    return "hazard_progress", "PERIGO AUMENTANDO"
+    return None
 
 
-def _safe_payoff_choices(
+def _scene_locks_choice(scene: dict[str, Any]) -> bool:
+    narration = str(scene.get("narration_text") or "").casefold()
+    return bool(
+        re.search(
+            r"\b(?:escolha(?: agora)? (?:esta |está |ficou )?travada|sem volta|irrevers[ií]vel|n[aã]o (?:d[aá]|tem) para voltar)\b",
+            narration,
+        )
+    )
+
+
+def _explicit_payoff_outcomes(
     scene: dict[str, Any],
     choices: tuple[str, str],
-) -> tuple[str | None, str | None]:
+) -> dict[str, str]:
     narration = str(scene.get("narration_text") or "").casefold()
-    wrong_choice = next(
-        (
-            choice
-            for choice in choices
-            if re.search(rf"\b{re.escape(choice.casefold())}\b[^,.!?;]{{0,48}}\berrad", narration)
-        ),
-        None,
+    outcome_patterns = (
+        (r"abre a porta errada|d[aá] errado", "ESCOLHA ERRADA"),
+        (r"revela a sa[ií]da real", "SAÍDA REAL"),
+        (r"segue a ilus[aã]o", "SEGUE A ILUSÃO"),
+        (r"revela o aviso", "REVELA O AVISO"),
     )
-    real_choice = next(
-        (
-            choice
-            for choice in choices
-            if re.search(rf"\b{re.escape(choice.casefold())}\b[^,.!?;]{{0,48}}\b(?:sa[ií]da|revela)", narration)
-        ),
-        None,
-    )
-    if wrong_choice is not None and real_choice is None:
-        remaining_choices = [choice for choice in choices if choice != wrong_choice]
-        if len(remaining_choices) == 1:
-            real_choice = remaining_choices[0]
-    elif real_choice is not None and wrong_choice is None:
-        remaining_choices = [choice for choice in choices if choice != real_choice]
-        if len(remaining_choices) == 1:
-            wrong_choice = remaining_choices[0]
-    return wrong_choice, real_choice
+    outcomes: dict[str, str] = {}
+    for choice in choices:
+        other_choices = "|".join(
+            re.escape(other.casefold())
+            for other in choices
+            if other != choice
+        )
+        nearby_text = rf"(?:(?!\b(?:{other_choices})\b)[^,.!?;]){{0,48}}"
+        for pattern, label in outcome_patterns:
+            if re.search(rf"\b{re.escape(choice.casefold())}\b{nearby_text}\b(?:{pattern})\b", narration):
+                outcomes[choice] = label
+                break
+    return outcomes if len(outcomes) == len(choices) else {}
 
 
 def _visual_events_for_scene(

@@ -805,7 +805,7 @@ def test_survival_finish_plan_tells_the_binary_choice_through_scene_overlays() -
         "start_ms": 160,
         "duration_ms": 3_440,
     }
-    assert first["scenes"][2]["overlays"][0]["progress"] == 1.0
+    assert first["scenes"][2]["overlays"] == []
     assert first["scenes"][3]["overlays"][0]["variant"] == "choice_state"
     assert first["scenes"][3]["overlays"][0]["text"] == "ESCOLHA TRAVADA"
     assert first["scenes"][4]["overlays"] == [
@@ -839,18 +839,88 @@ def test_survival_finish_plan_tells_the_binary_choice_through_scene_overlays() -
     assert [scene["overlays"] for scene in first["scenes"]] == [scene["overlays"] for scene in second["scenes"]]
 
 
+def test_survival_finish_plan_keeps_overlays_grounded_in_luz_porta_narration() -> None:
+    narrations = [
+        "No elevador apagado da base lunar, você escolhe LUZ ou PORTA?",
+        "Uma faixa de luz acompanha a cabine pelo poço entre os módulos.",
+        "O reflexo se move junto com a cabine dentro do poço.",
+        "A luz refletida desenha uma porta desalinhada.",
+        "PORTA segue a ilusão. LUZ revela o aviso: a luz não era saída.",
+    ]
+    scenes = [
+        {
+            "scene_id": f"scene-{index + 1}",
+            "order": index + 1,
+            "actual_start_ms": index * 4_000,
+            "actual_end_ms": (index + 1) * 4_000,
+            "retention_role": "loop_close" if index == 4 else "visual_evidence",
+            "narration_text": narration,
+        }
+        for index, narration in enumerate(narrations)
+    ]
+
+    plan = build_finish_plan(
+        schema_version="1.0.0",
+        job=SimpleNamespace(
+            job_id="luz-porta-semantic-overlays",
+            niche_id="survival_decisions",
+            topic_summary="Elevador lunar apagado: escolha LUZ ou PORTA",
+        ),
+        scene_plan=SimpleNamespace(scenes=scenes, content_hash="scene-plan"),
+        selected_assets=[
+            SimpleNamespace(scene_id=scene["scene_id"], uri=f"scene-{index}.png", content_hash=f"asset-{index}")
+            for index, scene in enumerate(scenes)
+        ],
+        narration=SimpleNamespace(
+            duration_ms=20_000,
+            content_hash="narration",
+            normalized_audio_uri=None,
+            audio_uri="narration.wav",
+        ),
+        subtitles=SimpleNamespace(items=[], content_hash="subtitles"),
+        background_music=None,
+        render=None,
+        visual_contract={},
+    )
+
+    assert [overlay["text"] for overlay in plan["scenes"][0]["overlays"]] == ["LUZ", "PORTA"]
+    assert not any(
+        overlay["variant"] in {"sand_progress", "hazard_progress"}
+        for scene in plan["scenes"]
+        for overlay in scene["overlays"]
+    )
+    assert not any(
+        overlay["variant"] == "choice_state"
+        for scene in plan["scenes"]
+        for overlay in scene["overlays"]
+    )
+    payoff_overlays = plan["scenes"][-1]["overlays"]
+    assert {
+        overlay["secondary_text"]: overlay["text"]
+        for overlay in payoff_overlays
+        if overlay["variant"] == "outcome_comparison"
+    } == {"PORTA": "SEGUE A ILUSÃO", "LUZ": "REVELA O AVISO"}
+    assert all(overlay["text"] != "SAÍDA REAL" for overlay in payoff_overlays)
+    assert payoff_overlays[-1]["variant"] == "comment_prompt"
+    assert payoff_overlays[-1]["secondary_text"] == "LUZ OU PORTA?"
+
+
 @pytest.mark.parametrize(
     ("topic_summary", "expected_marker"),
     [
-        ("No observatório, você fecha a cúpula ou mantém o sinal?", "SINAL ANÔMALO"),
-        ("No hotel submerso, você sela o corredor ou libera a cápsula?", "PRESSÃO AUMENTANDO"),
-        ("No farol isolado, você usa a bateria no rádio ou na luz?", "TEMPESTADE AUMENTANDO"),
-        ("No museu parado no tempo, você gira o relógio para frente ou para trás?", "TEMPO CONGELADO"),
+        ("No observatório, um sinal anômalo surge: você fecha a cúpula ou mantém o telescópio?", "SINAL ANÔMALO"),
+        ("No hotel submerso, a pressão sobe: você sela o corredor ou libera a cápsula?", "PRESSÃO AUMENTANDO"),
+        ("No farol isolado, a tempestade chega: você usa a bateria no rádio ou na luz?", "TEMPESTADE AUMENTANDO"),
+        ("No museu, o tempo congelado cerca você: gire o relógio para frente ou para trás?", "TEMPO CONGELADO"),
+        ("No elevador lunar, você escolhe luz ou porta?", None),
+        ("No observatório lunar, você fecha a cúpula ou mantém o telescópio?", None),
+        ("No farol isolado, você segue pelo rádio ou pela escada?", None),
+        ("No museu noturno, você leva o relógio ou o mapa?", None),
     ],
 )
 def test_survival_finish_plan_uses_scenario_specific_hazard_marker(
     topic_summary: str,
-    expected_marker: str,
+    expected_marker: str | None,
 ) -> None:
     scene = {
         "scene_id": "scene-1",
@@ -882,12 +952,20 @@ def test_survival_finish_plan_uses_scenario_specific_hazard_marker(
         visual_contract={},
     )
 
-    hazard_marker = plan["scenes"][0]["overlays"][-1]
+    hazard_markers = [
+        overlay
+        for overlay in plan["scenes"][0]["overlays"]
+        if overlay["variant"] in {"sand_progress", "hazard_progress"}
+    ]
+    if expected_marker is None:
+        assert hazard_markers == []
+        return
+    [hazard_marker] = hazard_markers
     assert hazard_marker["variant"] == "hazard_progress"
     assert hazard_marker["text"] == expected_marker
 
 
-def test_survival_finish_plan_completes_binary_payoff_from_one_confident_outcome() -> None:
+def test_survival_finish_plan_omits_binary_payoff_from_one_confident_outcome() -> None:
     payoff_narration = (
         "então o teto se ilumina o livro desenha a planta e a chave abre a porta errada quando seu amigo escolher a "
         "chave lembre do teto a fechadura era distração"
@@ -937,9 +1015,12 @@ def test_survival_finish_plan_completes_binary_payoff_from_one_confident_outcome
 
     opening_overlays = plan["scenes"][0]["overlays"]
     payoff_overlays = plan["scenes"][-1]["overlays"]
-    assert [overlay["text"] for overlay in opening_overlays] == ["CHAVE", "LIVRO", "AREIA SUBINDO"]
-    assert next(overlay for overlay in payoff_overlays if overlay["text"] == "ESCOLHA ERRADA")["secondary_text"] == "CHAVE"
-    assert next(overlay for overlay in payoff_overlays if overlay["text"] == "SAÍDA REAL")["secondary_text"] == "LIVRO"
+    assert [overlay["text"] for overlay in opening_overlays] == ["CHAVE", "LIVRO"]
+    assert not any(overlay["variant"] == "outcome_comparison" for overlay in payoff_overlays)
+    assert len(payoff_overlays) == 1
+    assert payoff_overlays[0]["variant"] == "comment_prompt"
+    assert payoff_overlays[0]["text"] == "VOCÊ ESCOLHEU QUAL?"
+    assert payoff_overlays[0]["secondary_text"] == "CHAVE OU LIVRO?"
 
 
 @pytest.mark.parametrize("scene_duration_ms", [500, 2_620])
@@ -949,7 +1030,7 @@ def test_survival_finish_plan_keeps_short_overlay_windows_frame_visible(scene_du
         "O perigo se aproxima.",
         "A escolha precisa acontecer.",
         "A escolha está travada.",
-        "A corda dá errado, mas a semente revela a saída.",
+        "A corda dá errado, mas a semente revela a saída real.",
     ]
     scenes = [
         {
@@ -1072,6 +1153,7 @@ def test_remotion_survival_overlay_variants_are_frame_driven() -> None:
     assert "bottom: safeArea.bottom + 240" in overlay_source
     assert "left: Math.max(108, safeArea.x)" in overlay_source
     assert "right: Math.max(108, safeArea.x)" in overlay_source
+    assert "Math.round(progress * 100)" not in overlay_source
     assert "transition:" not in overlay_source
     assert "animation:" not in overlay_source
     assert "@keyframes" not in source
@@ -1114,7 +1196,6 @@ def test_survival_overlay_labels_fall_back_neutrally_without_changing_generic_pl
     assert [overlay["text"] for overlay in survival["scenes"][0]["overlays"]] == [
         "OPÇÃO A",
         "OPÇÃO B",
-        "PERIGO AUMENTANDO",
     ]
     assert generic["scenes"][0]["overlays"] == []
 
