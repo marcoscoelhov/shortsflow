@@ -8,7 +8,7 @@ from typing import Iterable
 
 ASTRONOMY_NICHE = "astronomia"
 MICRODRAMA_NICHE = "fiction_microdrama"
-MICRODRAMA_ALLOWED_KEYWORDS = ("microdrama", "ficção", "suspense", "história")
+MICRODRAMA_ALLOWED_KEYWORDS = ("microdrama", "ficção", "drama", "reviravolta", "segredo")
 ASTRONOMY_ALLOWED_KEYWORDS = (
     "astronomia",
     "universo",
@@ -117,10 +117,10 @@ def classify_niche_contract(*texts: object, fallback_niche: str = "curiosidades"
     if explicit_niche == MICRODRAMA_NICHE:
         return NicheClassification(
             niche=MICRODRAMA_NICHE,
-            subniche="suspense_emocional",
+            subniche="drama_chocante_reviravolta",
             allowed_keywords=MICRODRAMA_ALLOWED_KEYWORDS,
             forbidden_keywords=(),
-            matched_terms=("microdrama", "ficção"),
+            matched_terms=("microdrama", "ficção", "reviravolta"),
             source="explicit_request_niche",
         )
 

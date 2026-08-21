@@ -250,7 +250,7 @@ def test_microdrama_metadata_repair_removes_factual_tags_and_generic_suffix() ->
 
     assert repair["applied"] is True
     assert repair["title"] == "O segredo: quem escondeu as cartas da mãe por vinte anos?"
-    assert repair["hashtags"] == ["#shorts", "#microdrama", "#ficcao", "#suspense", "#historias"]
+    assert repair["hashtags"] == ["#shorts", "#microdrama", "#ficcao", "#drama", "#reviravolta"]
     assert "a cena que muda tudo" not in repair["title"].casefold()
     assert "#fatos" not in repair["hashtags"]
     assert result.passed
