@@ -35,7 +35,10 @@ def test_microdrama_request_accepts_manual_creation_and_restores_policy_notes() 
             "fiction_format=novela_copiada\n"
             "automatic_publication_allowed=true\n"
             "human_review_required=false\n"
-            "originality_review_required=false"
+            "originality_review_required=false\n"
+            "twist_required=false\n"
+            "twist_must_reinterpret_story=false\n"
+            "shock_without_graphic_violence=false"
         ),
         requested_angle="Uma filha reconhece a letra da mãe desaparecida.",
         job_origin="manual_title",
@@ -56,6 +59,9 @@ def test_microdrama_request_accepts_manual_creation_and_restores_policy_notes() 
         "fictional_scenario",
         "human_review_required",
         "originality_review_required",
+        "twist_required",
+        "twist_must_reinterpret_story",
+        "shock_without_graphic_violence",
     })
     assert any(
         "tramas originais" in line
