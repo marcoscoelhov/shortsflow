@@ -35,6 +35,9 @@ class TopicRequestCreate(BaseModel):
                 "automatic_publication_allowed",
                 "human_review_required",
                 "originality_review_required",
+                "twist_required",
+                "twist_must_reinterpret_story",
+                "shock_without_graphic_violence",
             }
             existing_notes = "\n".join(
                 line
