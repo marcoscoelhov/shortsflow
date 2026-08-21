@@ -53,7 +53,7 @@ from app.job_origin import (
     resolve_creation_via,
     resolve_job_origin,
 )
-from app.hub_prompt import build_viral_prompt_note, hub_settings_path, load_viral_prompt_template
+from app.hub_prompt import build_niche_viral_prompt_note, hub_settings_path, load_viral_prompt_template
 from app.models import (
     AutomationAttempt,
     AutomationRun,
@@ -229,7 +229,10 @@ class JobOrchestrator:
             return payload
         if "prompt viral customizado do hub" in lower_notes:
             return payload
-        viral_note = build_viral_prompt_note(load_viral_prompt_template(hub_settings_path(self.settings.data_dir)))
+        viral_note = build_niche_viral_prompt_note(
+            str(payload.get("niche_id") or ""),
+            load_viral_prompt_template(hub_settings_path(self.settings.data_dir)),
+        )
         payload = dict(payload)
         payload["notes"] = "\n".join(part for part in [notes, viral_note] if part)
         return payload

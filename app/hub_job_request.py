@@ -10,7 +10,7 @@ from app.job_origin import (
     JOB_ORIGIN_MANUAL_THEME,
     JOB_ORIGIN_MANUAL_TITLE,
 )
-from app.hub_prompt import build_viral_prompt_note
+from app.hub_prompt import build_niche_viral_prompt_note
 from app.manual_script import build_ready_script_notes, parse_ready_script
 from app.microdrama_pilot import MICRODRAMA_NICHE_ID
 from app.schemas import TopicRequestCreate
@@ -50,6 +50,7 @@ def compose_hub_notes(
     *,
     retention_optimized_duration_sec: int,
     viral_prompt_template: str,
+    niche_id: str | None = None,
     learned_retention_guidance: str | None = None,
 ) -> str:
     normalized_mode = normalize_hub_input_mode(input_mode)
@@ -67,7 +68,7 @@ def compose_hub_notes(
         f"Duracao alvo padrao do hub: {retention_optimized_duration_sec}s, otimizada para retencao e viralizacao; "
         "roteiro direto, sem enrolacao, com entrega rapida da promessa."
     )
-    viral_template_note = build_viral_prompt_note(viral_prompt_template)
+    viral_template_note = build_niche_viral_prompt_note(niche_id, viral_prompt_template)
     learned_retention_note = None
     if learned_retention_guidance and learned_retention_guidance.strip():
         learned_retention_note = (
@@ -145,6 +146,7 @@ def build_hub_job_request(
             combined_notes,
             retention_optimized_duration_sec=retention_optimized_duration_sec,
             viral_prompt_template=viral_prompt_template,
+            niche_id=selected_niche,
             learned_retention_guidance=learned_retention_guidance,
         ),
         requested_angle=angle or None,

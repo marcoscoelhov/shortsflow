@@ -2165,6 +2165,8 @@ def test_human_review_checklist_marks_required_completed_and_pending_items() -> 
     assert "youtube_ai_disclosure_toggle_required" in checklist["pending_codes"]
     assert "metadata_review_required" in checklist["pending_codes"]
     assert "originality_review_required" in checklist["completed_codes"]
+    originality = next(item for item in checklist["items"] if item["code"] == "originality_review_required")
+    assert originality["source"] == "channel_repetition_report"
     assert "fact_review_required" not in checklist["required_codes"]
 
 def test_human_review_checklist_auto_completes_channel_ai_disclosure() -> None:

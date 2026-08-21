@@ -12,6 +12,7 @@ def build_human_review_checklist(
     publish_audit_required: bool,
     confirmations: set[str],
     visual_review_required: bool = False,
+    originality_review_required: bool = False,
 ) -> dict[str, Any]:
     items = [
         {
@@ -51,9 +52,10 @@ def build_human_review_checklist(
             "code": "originality_review_required",
             "confirmation_code": "originality_confirmed",
             "label": "Originalidade em relação ao canal confirmada",
-            "required": channel_repetition_report.get("repetition_risk") in {"medium", "high"},
+            "required": originality_review_required
+            or channel_repetition_report.get("repetition_risk") in {"medium", "high"},
             "completed": "originality_confirmed" in confirmations,
-            "source": "channel_repetition_report",
+            "source": "microdrama_policy" if originality_review_required else "channel_repetition_report",
         },
         {
             "code": "publish_audit_required",

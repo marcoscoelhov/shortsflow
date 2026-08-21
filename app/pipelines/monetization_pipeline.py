@@ -119,11 +119,15 @@ class MonetizationPipeline(BasePipeline):
         ready_script_input = self._ready_script_input(fact_pack, script_artifact)
         ready_script_bank_input = self._ready_script_bank_input(job, fact_pack, script_artifact)
         microdrama = (request.niche_id if request else job.niche_id) == MICRODRAMA_NICHE_ID
+        if microdrama:
+            fact_pack = self.normalize_microdrama_fact_pack_policy(fact_pack)
         tags = self.microdrama_publish_hashtags() if microdrama else self.build_publish_hashtags(topic_plan, script)
         confirmations = self.manual_monetization_confirmations(session, job.job_id)
         confirmations.update(extra_confirmations or set())
         if ready_script_input:
-            confirmations.update({"fact_review_confirmed", "publish_audit_confirmed", "originality_confirmed"})
+            confirmations.update({"fact_review_confirmed", "publish_audit_confirmed"})
+            if not microdrama:
+                confirmations.add("originality_confirmed")
         if ready_script_bank_input:
             confirmations.update({"metadata_confirmed", "visual_review_confirmed"})
 
@@ -244,6 +248,8 @@ class MonetizationPipeline(BasePipeline):
         if channel_repetition_report["repetition_risk"] != "low":
             # Similarity remains visible for operators but cannot block a finished original job.
             warnings.append("channel_repetition_warning")
+        if microdrama and "originality_confirmed" not in confirmations:
+            manual_required.append("originality_review_required")
         publish_audit_required = "text_publish_audit_skipped" in publish_readiness["reasons"]
         if publish_audit_required:
             manual_required.append("publish_audit_required")
@@ -333,11 +339,14 @@ class MonetizationPipeline(BasePipeline):
             publish_audit_required=publish_audit_required,
             confirmations=confirmations,
             visual_review_required=visual_review_required,
+            originality_review_required=microdrama,
         )
         passed, final_status = self.resolve_monetization_status(
             hard_blockers=hard_blockers,
             manual_required=manual_required,
         )
+        if microdrama and "originality_confirmed" not in confirmations and not hard_blockers:
+            passed, final_status = False, JOB_STATUS_MONETIZATION_REVIEW
         return {
             "schema_version": self.settings.schema_version,
             "job_id": job.job_id,
@@ -378,6 +387,13 @@ class MonetizationPipeline(BasePipeline):
         # Other manual items are completed in YouTube Studio and remain
         # operational diagnostics rather than internal upload blockers.
         return True, JOB_STATUS_READY_FOR_UPLOAD
+
+    def normalize_microdrama_fact_pack_policy(self, fact_pack: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(fact_pack or {})
+        viral_truth_policy = dict(normalized.get("viral_truth_policy") or {})
+        viral_truth_policy["automatic_publish_allowed"] = False
+        normalized["viral_truth_policy"] = viral_truth_policy
+        return normalized
 
     def automatic_publish_blockers(self, publish_readiness: dict[str, Any], *, ready_script_bank_input: bool = False) -> list[str]:
         automatic_reasons = {
@@ -453,6 +469,7 @@ class MonetizationPipeline(BasePipeline):
         publish_audit_required: bool,
         confirmations: set[str],
         visual_review_required: bool = False,
+        originality_review_required: bool = False,
     ) -> dict[str, Any]:
         return build_human_review_checklist(
             rights_registry=rights_registry,
@@ -463,6 +480,7 @@ class MonetizationPipeline(BasePipeline):
             publish_audit_required=publish_audit_required,
             confirmations=confirmations,
             visual_review_required=visual_review_required,
+            originality_review_required=originality_review_required,
         )
 
     def build_rights_registry(
@@ -956,6 +974,8 @@ class MonetizationPipeline(BasePipeline):
         if survival_decisions:
             title = self._survival_publish_title(request, title)
         fact_pack = self.read_job_json(job.job_id, "fact_pack.json")
+        if microdrama:
+            fact_pack = self.normalize_microdrama_fact_pack_policy(fact_pack)
         script_artifact = self.read_job_json(job.job_id, "script.json")
         monetization_report = self.read_job_json(job.job_id, ARTIFACT_MONETIZATION_REPORT)
         tags = self.microdrama_publish_hashtags() if microdrama else self.build_publish_hashtags(topic_plan, script)

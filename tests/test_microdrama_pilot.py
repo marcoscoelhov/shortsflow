@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 import json
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -11,6 +12,7 @@ from app import cli
 from app.automation import AutomationService
 from app.db import SessionLocal
 from app.hub_job_request import build_hub_job_request
+from app.hub_prompt import DEFAULT_VIRAL_PROMPT_TEMPLATE, extract_viral_prompt_contract
 from app.microdrama_pilot import (
     MICRODRAMA_NICHE_ID,
     build_microdrama_pilot_plan,
@@ -19,7 +21,7 @@ from app.microdrama_pilot import (
 from app.niche_classification import classify_niche_contract
 from app.editorial.topic_mode import resolve_editorial_mode
 from app.models import ChannelPublication, Job, PublicationSchedule, RetentionExperiment, RetentionExperimentAssignment, TopicRequest
-from app.orchestrator import JobOrchestrator
+from app.orchestrator import JobOrchestrator, RecoverableStepError
 from app.schemas import TopicRequestCreate
 from app.survival_experiment import select_niche_policy
 
@@ -181,6 +183,294 @@ def test_microdrama_hub_requires_manual_theme_title_or_script() -> None:
             viral_prompt_template="",
             trend_seed_resolver=forbidden_trend_resolution,
         )
+
+
+def test_microdrama_hub_replaces_astronomy_default_with_editorial_contract() -> None:
+    result = build_hub_job_request(
+        seed_theme="A chave da casa vazia no buquê da noiva",
+        input_mode="theme",
+        niche_id=MICRODRAMA_NICHE_ID,
+        language="pt-BR",
+        target_duration_sec=40,
+        tone="drama_chocante_reviravolta",
+        cta_style="soft",
+        notes=None,
+        requested_angle="No casamento, a chave revela um segredo familiar.",
+        custom_angle=None,
+        ready_script_text=None,
+        default_niche_id="curiosidades",
+        retention_optimized_duration_sec=40,
+        viral_prompt_template=DEFAULT_VIRAL_PROMPT_TEMPLATE,
+        trend_seed_resolver=lambda _: (_ for _ in ()).throw(AssertionError("unexpected trend resolution")),
+    )
+
+    notes = result.payload.notes or ""
+    assert "MICRODRAMAS BRASILEIROS DE SUSPENSE EMOCIONAL" in notes
+    assert "Escreva trama, personagens, situações e falas do zero" in notes
+    assert "Hook em até 8 palavras" in notes
+    assert "espaço/astronomia" not in notes
+    assert "SISTEMA SOLAR" not in notes
+    assert "Modelos de hook para astronomia" not in notes
+    assert extract_viral_prompt_contract(notes)["source"] == "niche_default"
+
+
+def test_microdrama_create_job_injects_editorial_contract_without_prompt_marker() -> None:
+    job_id = JobOrchestrator().create_job(
+        TopicRequestCreate(
+            seed_theme="A chave da casa vazia no buquê da noiva",
+            niche_id=MICRODRAMA_NICHE_ID,
+            target_duration_sec=40,
+            requested_angle="No casamento, a chave revela um segredo familiar.",
+            job_origin="manual_theme",
+            creation_via="api",
+        ).model_dump()
+    )
+
+    with SessionLocal() as session:
+        request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job_id))
+        job = session.get(Job, job_id)
+        assert request is not None
+        assert "MICRODRAMAS BRASILEIROS DE SUSPENSE EMOCIONAL" in (request.notes or "")
+        assert "espaço/astronomia" not in (request.notes or "")
+        assert job is not None
+        job.status = "cancelled"
+        session.commit()
+
+
+def test_microdrama_topic_drift_repairs_then_fails_before_downstream_work(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    calls = 0
+
+    def saturn_plan(*_args, **_kwargs) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {
+            "canonical_topic": "Saturno e seus anéis de gelo",
+            "angle": "A colisão de luas criou os anéis do planeta",
+            "hook_promise": "Saturno não usa joia, usa destroços em órbita",
+            "title_candidates": ["Saturno não usa joia"],
+            "entities": ["Saturno"],
+            "search_terms": ["anéis de Saturno"],
+            "quality_metrics": {},
+        }
+
+    monkeypatch.setattr(orchestrator.providers.creative, "plan_topic", saturn_plan)
+    request = TopicRequest(
+        job_id="microdrama-topic-drift",
+        topic_request_id="microdrama-topic-drift-request",
+        schema_version="1.0.0",
+        content_hash="test",
+        niche_id=MICRODRAMA_NICHE_ID,
+        seed_theme="A chave da casa vazia no buquê da noiva",
+        requested_angle="No casamento, a chave revela um segredo familiar.",
+        language="pt-BR",
+        target_duration_sec=40,
+        tone="drama_chocante_reviravolta",
+        cta_style="soft",
+        notes="fictional_scenario=true",
+    )
+
+    with pytest.raises(RecoverableStepError, match="microdrama_topic_alignment_failed"):
+        orchestrator.topic_pipeline.generate_topic_plan_with_repair(request, history=[], attempt=1)
+
+    assert calls == orchestrator.settings.llm_topic_repair_attempts + 1
+
+
+def test_microdrama_topic_alignment_accepts_a_valid_paraphrase_after_repair(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    plans = iter(
+        [
+            {
+                "canonical_topic": "Saturno e seus anéis de gelo",
+                "angle": "A colisão de luas criou os anéis do planeta",
+                "hook_promise": "Saturno não usa joia, usa destroços em órbita",
+                "title_candidates": ["Saturno não usa joia"],
+                "entities": ["Saturno"],
+                "search_terms": ["anéis de Saturno"],
+                "quality_metrics": {},
+            },
+            {
+                "canonical_topic": "A chave escondida no buquê leva a noiva à casa vazia",
+                "angle": "O objeto interrompe o casamento e expõe o segredo da família",
+                "hook_promise": "Antes do sim, a noiva precisa decidir se abre a casa abandonada",
+                "title_candidates": ["A chave antes do sim"],
+                "entities": ["noiva", "chave", "casa vazia"],
+                "search_terms": ["microdrama chave noiva"],
+                "quality_metrics": {},
+            },
+        ]
+    )
+    monkeypatch.setattr(orchestrator.providers.creative, "plan_topic", lambda *_args, **_kwargs: next(plans))
+    request = TopicRequest(
+        job_id="microdrama-topic-repaired",
+        topic_request_id="microdrama-topic-repaired-request",
+        schema_version="1.0.0",
+        content_hash="test",
+        niche_id=MICRODRAMA_NICHE_ID,
+        seed_theme="A chave da casa vazia no buquê da noiva",
+        requested_angle="No casamento, a chave revela um segredo familiar.",
+        language="pt-BR",
+        target_duration_sec=40,
+        tone="drama_chocante_reviravolta",
+        cta_style="soft",
+        notes="fictional_scenario=true",
+    )
+
+    plan, metrics = orchestrator.topic_pipeline.generate_topic_plan_with_repair(request, history=[], attempt=1)
+
+    assert plan["canonical_topic"].startswith("A chave escondida")
+    assert metrics["microdrama_topic_alignment_pass"] is True
+    assert metrics["microdrama_topic_alignment_similarity"] >= metrics["microdrama_topic_alignment_min_similarity"]
+    assert metrics["topic_repair_used"] is True
+    assert metrics["topic_repair_attempts_log"][0]["reason_codes"] == ["microdrama_topic_alignment_failed"]
+    assert metrics["topic_repair_attempts_log"][1]["reason_codes"] == []
+
+
+def test_microdrama_originality_is_required_even_when_repetition_risk_is_low() -> None:
+    pipeline = JobOrchestrator().monetization_pipeline
+    checklist = pipeline.build_human_review_checklist(
+        rights_registry={"all_commercial_rights_confirmed": True},
+        ai_disclosure={"youtube_disclosure_required": False},
+        fact_claims_report={"requires_fact_review": False},
+        metadata_review={"requires_metadata_review": False},
+        channel_repetition_report={"repetition_risk": "low"},
+        publish_audit_required=False,
+        confirmations={"visual_review_confirmed"},
+        visual_review_required=True,
+        originality_review_required=True,
+    )
+
+    originality = next(item for item in checklist["items"] if item["code"] == "originality_review_required")
+    assert originality["required"] is True
+    assert originality["completed"] is False
+    assert originality["source"] == "microdrama_policy"
+    assert "originality_review_required" in checklist["pending_codes"]
+
+
+def test_non_microdrama_originality_diagnostic_preserves_ready_status() -> None:
+    pipeline = JobOrchestrator().monetization_pipeline
+
+    assert pipeline.resolve_monetization_status(
+        hard_blockers=[], manual_required=["originality_review_required"]
+    ) == (True, "ready_for_upload")
+
+
+def test_microdrama_viral_truth_policy_never_allows_automatic_publish() -> None:
+    orchestrator = JobOrchestrator()
+    request = TopicRequest(
+        niche_id=MICRODRAMA_NICHE_ID,
+        seed_theme="A chave da casa vazia no buquê da noiva",
+        requested_angle="No casamento, a chave revela um segredo familiar.",
+        notes="fictional_scenario=true",
+    )
+    topic_plan = type(
+        "TopicPlanStub",
+        (),
+        {
+            "canonical_topic": "A chave escondida no buquê leva a noiva à casa vazia",
+            "angle": "O segredo familiar interrompe o casamento",
+            "hook_promise": "A chave obriga a noiva a escolher antes do sim",
+            "quality_metrics": {"editorial_mode": "viral_curiosidades", "topic_niche": MICRODRAMA_NICHE_ID},
+        },
+    )()
+
+    policy = orchestrator.script_pipeline.fact_pack_domain._viral_truth_policy(
+        topic_plan,
+        request,
+        {
+            "claim_scope": "general_curiosity",
+            "evidence_profile": "cotidiano_observacional",
+            "required_evidence_term_groups": [],
+        },
+        source_status="verified",
+    )
+
+    assert policy["automatic_publish_allowed"] is False
+
+
+def test_microdrama_monetization_report_normalizes_legacy_automatic_publish_flag(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    job_id = orchestrator.create_job(
+        TopicRequestCreate(
+            seed_theme="A chave da casa vazia no buquê da noiva",
+            niche_id=MICRODRAMA_NICHE_ID,
+            requested_angle="No casamento, a chave revela um segredo familiar.",
+            job_origin="manual_theme",
+            creation_via="api",
+        ).model_dump()
+    )
+    orchestrator.storage.persist_json(
+        job_id,
+        "fact_pack.json",
+        {
+            "status": "verified",
+            "provider": "legacy_canary",
+            "viral_truth_policy": {"automatic_publish_allowed": True},
+        },
+    )
+    pipeline = orchestrator.monetization_pipeline
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(pipeline, "build_rights_registry", lambda *_args: {"all_commercial_rights_confirmed": True})
+    monkeypatch.setattr(
+        pipeline,
+        "build_ai_disclosure_report",
+        lambda *_args: {"youtube_disclosure_required": False, "contains_synthetic_visuals": False},
+    )
+
+    def fact_claims(*args) -> dict[str, object]:
+        fact_pack = args[2]
+        observed.update(fact_pack["viral_truth_policy"])
+        return {
+            "requires_fact_review": False,
+            "viral_truth_policy": fact_pack["viral_truth_policy"],
+        }
+
+    monkeypatch.setattr(pipeline, "build_fact_claims_report", fact_claims)
+    monkeypatch.setattr(
+        pipeline,
+        "build_channel_repetition_report",
+        lambda *_args: {"repetition_risk": "low", "matches": []},
+    )
+    monkeypatch.setattr(pipeline, "build_metadata_review", lambda *_args: {"requires_metadata_review": False})
+    monkeypatch.setattr(pipeline, "build_growth_metadata_repair", lambda *_args, **_kwargs: {"applied": False})
+    monkeypatch.setattr(
+        pipeline.metadata_ctr_gate,
+        "validate",
+        lambda *_args: SimpleNamespace(passed=True, reasons=[], metrics={"metadata_ctr_gate_pass": True}),
+    )
+    monkeypatch.setattr(pipeline, "build_quality_checklist", lambda *_args: {"script": True})
+    monkeypatch.setattr(pipeline, "provider_publish_audit", lambda *_args, **_kwargs: {"passed": True, "reasons": []})
+    monkeypatch.setattr(
+        pipeline,
+        "publish_readiness_report",
+        lambda *_args, **_kwargs: {"passed": True, "reasons": []},
+    )
+    monkeypatch.setattr(pipeline, "visual_review_required_for_assets", lambda *_args: False)
+    monkeypatch.setattr(pipeline, "narration_publishability_blockers", lambda *_args: [])
+    monkeypatch.setattr(pipeline, "automatic_publish_blockers", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        pipeline.growth_score_gate,
+        "evaluate",
+        lambda *_args: SimpleNamespace(
+            passed=True,
+            decision="ready_for_growth_review",
+            reasons=[],
+            metrics={"growth_score": 1.0, "growth_score_gate_pass": True},
+        ),
+    )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        report = pipeline.build_monetization_report(session, job, extra_confirmations={"visual_review_confirmed"})
+        job.status = "cancelled"
+        session.commit()
+
+    assert observed["automatic_publish_allowed"] is False
+    assert report["fact_claims_report"]["viral_truth_policy"]["automatic_publish_allowed"] is False
+    assert report["manual_required"] == ["originality_review_required"]
+    assert report["final_status"] == "monetization_review"
 
 
 def test_microdrama_plan_is_deterministic_interleaved_and_diverse() -> None:

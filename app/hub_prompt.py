@@ -59,6 +59,40 @@ Modelos de hook para astronomia:
 - "A Lua não cresceu. Você caiu."
 - "Saturno não usa joia. Usa destroço."
 """
+MICRODRAMA_VIRAL_PROMPT_TEMPLATE = """Crie pautas e roteiros de YouTube Shorts em pt-BR para o canal Jarvis, dedicado a MICRODRAMAS BRASILEIROS DE SUSPENSE EMOCIONAL.
+
+POSICIONAMENTO DO CANAL
+Histórias ficcionais originais, curtas e cinematográficas, sobre segredos, vingança, escolhas impossíveis e mistérios brasileiros. Cada Short deve funcionar sozinho, mesmo quando pertencer a um arco curto.
+
+PILARES EDITORIAIS
+- Traição, vingança, injustiça e segredo familiar, com consequência emocional e virada menos óbvia que o hook.
+- Decisões impossíveis e dilemas morais, com duas opções compreensíveis e uma pista que muda o julgamento.
+- Folclore brasileiro e suspense sobrenatural psicológico, sem gore e sem apresentar lenda como evento real.
+
+ORIGINALIDADE E MONETIZAÇÃO
+- Escreva trama, personagens, situações e falas do zero.
+- Não adapte nem resuma Reddit, novelas, filmes, livros, notícias ou vídeos de terceiros.
+- Varie conflito, motivação, progressão, payoff, estrutura visual e desfecho; trocar apenas nomes não conta.
+- Apresente claramente como ficção e não faça cena inventada parecer notícia ou depoimento real.
+- Sem gore, violência gráfica, exploração sexual, crianças em risco como espetáculo ou instruções perigosas.
+
+FORMATO
+- Duração alvo de 40 segundos, dentro da faixa de 35 a 55 segundos.
+- Hook em até 8 palavras nos primeiros 1 a 2 segundos, com o conflito compreensível imediatamente.
+- Use 3 a 5 beats em escalada causal: conflito → pista → escolha/ação → consequência → virada.
+- Guarde a revelação mais forte para o último terço e entregue um mini-payoff no próprio Short.
+- Termine com pergunta específica sobre decisão, culpa, segredo ou consequência; não use CTA genérica.
+
+DIREÇÃO VISUAL E TOM
+- O primeiro quadro mostra o conflito, objeto ou escolha central sem revelar antecipadamente o payoff.
+- Preserve continuidade de local, personagens, roupas, objetos e direção espacial entre cenas.
+- Cada beat muda a informação visual; texto legível deve ser overlay, nunca letras geradas na imagem.
+- Use título curto, específico e emocional e tom brasileiro, direto, humano e cinematográfico.
+- Proibido começar com “você sabia”, “já imaginou”, “nesse vídeo” ou equivalentes.
+
+CRITÉRIO DE REJEIÇÃO
+Rejeite e reescreva antes de gerar mídia se a história repetir o molde de outro episódio, se o payoff estiver óbvio no hook, se depender de contexto anterior, se parecer conteúdo massificado por IA ou se a ficção não estiver claramente identificada.
+"""
 HUB_SETTINGS_FILENAME = "hub_settings.json"
 MAX_VIRAL_PROMPT_TEMPLATE_CHARS = 12000
 HUB_VIRAL_PROMPT_NOTE_MARKER = "Prompt viral customizado do hub"
@@ -99,14 +133,20 @@ def viral_prompt_source_label(template: str | None) -> str:
     return "default_explicit" if sanitize_viral_prompt_template(template) == DEFAULT_VIRAL_PROMPT_TEMPLATE else "hub_settings"
 
 
-def build_viral_prompt_note(template: str | None) -> str:
+def build_viral_prompt_note(template: str | None, *, source: str | None = None) -> str:
     prompt = sanitize_viral_prompt_template(template)
     return (
-        f"{HUB_VIRAL_PROMPT_NOTE_MARKER} (contrato obrigatorio; source={viral_prompt_source_label(prompt)}). "
+        f"{HUB_VIRAL_PROMPT_NOTE_MARKER} (contrato obrigatorio; source={source or viral_prompt_source_label(prompt)}). "
         "Use como contrato editorial real em todas as etapas de pauta, hook, roteiro, cenas, metadados e gates; "
         "se pedir formato de saida diferente, ignore o formato e mantenha o JSON interno obrigatorio do app.\n"
         f"{prompt}"
     )
+
+
+def build_niche_viral_prompt_note(niche_id: str | None, template: str | None) -> str:
+    prompt = MICRODRAMA_VIRAL_PROMPT_TEMPLATE if niche_id == "fiction_microdrama" else template
+    source = "niche_default" if niche_id == "fiction_microdrama" else None
+    return build_viral_prompt_note(prompt, source=source)
 
 
 def extract_viral_prompt_contract(notes: str | None) -> dict[str, Any]:

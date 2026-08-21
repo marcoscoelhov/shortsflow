@@ -13,12 +13,16 @@ from app.editorial.research_brief import build_research_brief
 from app.editorial.topic_mode import resolve_editorial_mode
 from app.automation_topics import COSMOS_CURIOSITY_POOL, WINNER_SEED_MIN_SCORE, has_recognizable_hook_object, select_cosmos_topics
 from app.job_origin import JOB_ORIGIN_AUTOMATIC_TOPIC
+from app.microdrama_pilot import MICRODRAMA_NICHE_ID
 from app.models import Job, PerformanceMetric, Script, TopicPlan, TopicRegistry, TopicRequest
 from app.niche_classification import classify_niche_contract
 from app.pipelines.base import BasePipeline
 from app.pipelines.common import RecoverableStepError, model_payload
 from app.providers.errors import ProviderFailure
 from app.utils import cosineish_similarity, jaccard_bigrams, new_id, stable_hash, utcnow
+
+
+MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY = 0.20
 
 
 def _identity_key(value: Any) -> str:
@@ -497,6 +501,10 @@ class TopicPipeline(BasePipeline):
         last_metrics: dict[str, Any] | None = None
         last_plan: dict[str, Any] | None = None
         attempts_log: list[dict[str, Any]] = []
+        microdrama_alignment_required = request.niche_id == MICRODRAMA_NICHE_ID
+        manual_topic_surface = " ".join(
+            part.strip() for part in [request.seed_theme, request.requested_angle or ""] if part and part.strip()
+        )
         for repair_attempt in range(1, topic_attempts + 1):
             plan = self.providers.creative.plan_topic(
                 request.seed_theme,
@@ -509,6 +517,12 @@ class TopicPipeline(BasePipeline):
             plan = self.normalize_topic_plan_payload(plan, request)
             last_plan = plan
             candidate_topic_surface = f"{plan['canonical_topic']} {plan['angle']}"
+            candidate_alignment_surface = f"{candidate_topic_surface} {plan['hook_promise']}"
+            topic_alignment_similarity = cosineish_similarity(manual_topic_surface, candidate_alignment_surface)
+            topic_alignment_pass = (
+                not microdrama_alignment_required
+                or topic_alignment_similarity >= MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY
+            )
             topic_similarity = max(
                 [cosineish_similarity(candidate_topic_surface, f"{row['canonical_topic']} {row['title']}") for row in history],
                 default=0.0,
@@ -519,10 +533,19 @@ class TopicPipeline(BasePipeline):
             )
             last_metrics = {
                 "topic_uniqueness_pass": topic_similarity < 0.82 and hook_similarity < 0.88,
+                "microdrama_topic_alignment_required": microdrama_alignment_required,
+                "microdrama_topic_alignment_pass": topic_alignment_pass,
+                "microdrama_topic_alignment_similarity": round(topic_alignment_similarity, 3),
+                "microdrama_topic_alignment_min_similarity": MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY,
                 "topic_similarity_max": round(topic_similarity, 3),
                 "hook_similarity_max": round(hook_similarity, 3),
                 "topic_repair_loop_attempt": repair_attempt,
             }
+            attempt_reason_codes: list[str] = []
+            if not last_metrics["topic_uniqueness_pass"]:
+                attempt_reason_codes.append("topic_too_similar_to_history")
+            if not topic_alignment_pass:
+                attempt_reason_codes.append("microdrama_topic_alignment_failed")
             attempts_log.append(
                 {
                     "repair_attempt": repair_attempt,
@@ -531,26 +554,48 @@ class TopicPipeline(BasePipeline):
                     "hook_promise": plan["hook_promise"],
                     "topic_similarity_max": round(topic_similarity, 3),
                     "hook_similarity_max": round(hook_similarity, 3),
-                    "passed": last_metrics["topic_uniqueness_pass"],
-                    "reason_codes": [] if last_metrics["topic_uniqueness_pass"] else ["topic_too_similar_to_history"],
+                    "microdrama_topic_alignment_similarity": round(topic_alignment_similarity, 3),
+                    "microdrama_topic_alignment_min_similarity": MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY,
+                    "passed": last_metrics["topic_uniqueness_pass"] and topic_alignment_pass,
+                    "reason_codes": attempt_reason_codes,
                 }
             )
-            if last_metrics["topic_uniqueness_pass"]:
+            if last_metrics["topic_uniqueness_pass"] and topic_alignment_pass:
                 if repair_attempt > 1:
                     last_metrics["topic_repair_used"] = True
                 last_metrics["topic_repair_attempts_log"] = attempts_log
                 return plan, last_metrics
             notes_suffix = (
-                "REPAIR TOPIC FOR UNIQUENESS:\n"
+                "REPAIR TOPIC BEFORE SCRIPT OR ASSET GENERATION:\n"
                 f"- previous canonical_topic: {plan['canonical_topic']}\n"
                 f"- previous angle: {plan['angle']}\n"
                 f"- previous hook_promise: {plan['hook_promise']}\n"
                 f"- similarity thresholds exceeded: topic={topic_similarity:.3f}, hook={hook_similarity:.3f}\n"
-                "- choose a distinctly different angle, hook promise and title set while preserving the seed theme.\n"
+                f"- microdrama origin alignment: score={topic_alignment_similarity:.3f}, minimum={MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY:.3f}\n"
+                "- preserve the seed theme and requested angle, including their central objects, relationships, conflict and promised choice.\n"
+                "- choose a distinctly different angle, hook promise and title set only when history similarity failed.\n"
                 "- avoid repeating recently approved topic surfaces or hooks."
             )
         assert last_plan is not None and last_metrics is not None
         last_metrics["topic_repair_attempts_log"] = attempts_log
+        self._persist_repair_telemetry(
+            request.job_id,
+            "topic_plan",
+            {
+                "job_id": request.job_id,
+                "attempt": attempt,
+                "final_passed": False,
+                "repair_attempts": topic_attempts,
+                "reason_codes": attempts_log[-1]["reason_codes"],
+                "attempts": attempts_log,
+            },
+        )
+        if not last_metrics["microdrama_topic_alignment_pass"]:
+            raise RecoverableStepError(
+                "microdrama_topic_alignment_failed before script/assets "
+                f"(similarity={last_metrics['microdrama_topic_alignment_similarity']}, "
+                f"minimum={MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY})"
+            )
         raise RecoverableStepError(
             f"topic too similar to approved history (topic_similarity={last_metrics['topic_similarity_max']}, hook_similarity={last_metrics['hook_similarity_max']})"
         )

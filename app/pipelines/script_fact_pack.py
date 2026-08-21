@@ -11,6 +11,7 @@ import httpx
 from app.editorial.research_brief import audit_source_relevance, build_research_brief, research_tokens
 from app.editorial.topic_mode import resolve_editorial_mode
 from app.manual_script import extract_ready_script_from_notes
+from app.microdrama_pilot import MICRODRAMA_NICHE_ID
 from app.models import TopicPlan, TopicRequest
 from app.pipelines.base import BasePipeline
 from app.utils import word_tokens
@@ -54,6 +55,16 @@ class ScriptFactPackDomain(BasePipeline):
         specific claims.
         """
         editorial_mode = self._editorial_mode(topic_plan, request)
+        if getattr(request, "niche_id", None) == MICRODRAMA_NICHE_ID:
+            return {
+                "mode": "fiction_microdrama_human_review",
+                "factual_status": "fictional",
+                "source_requirement": "not_applicable_to_original_fiction",
+                "automatic_publish_allowed": False,
+                "copywriting_allowed": True,
+                "allowed_framing": ["clearly_labeled_fiction", "dramatic_framing"],
+                "must_repair_or_block": ["fiction_presented_as_real", "invented_sources"],
+            }
         scope = str(research_brief.get("claim_scope") or "general_curiosity")
         evidence_profile = str(research_brief.get("evidence_profile") or "cotidiano_observacional")
         topic_text = " ".join(
