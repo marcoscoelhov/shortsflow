@@ -12,15 +12,16 @@ from app.utils import stable_hash
 
 
 MICRODRAMA_NICHE_ID = "fiction_microdrama"
-MICRODRAMA_LABEL_PT_BR = "Microdramas brasileiros de suspense emocional"
-MICRODRAMA_PILOT_ID_PREFIX = "jarvis_fiction_microdrama_pilot"
+MICRODRAMA_LABEL_PT_BR = "Dramas chocantes com reviravolta"
+MICRODRAMA_PILOT_ID_PREFIX = "jarvis_shocking_twist_drama_pilot_v2"
 MICRODRAMA_PILOT_DURATION_SEC = 40
-MICRODRAMA_FICTIONAL_UNIVERSE = "Bairro da Estação"
+MICRODRAMA_FICTIONAL_UNIVERSE = "universos_variados"
+MICRODRAMA_POSITIONING = "dramas_chocantes_com_reviravolta"
 
 _ARM_FOCUS = {
-    "A": "betrayal_revenge_family_secret_emotional_suspense",
-    "B": "impossible_decisions_moral_dilemmas",
-    "C": "brazilian_folklore_psychological_supernatural_no_gore",
+    "A": "betrayal_family_secret_shocking_twist",
+    "B": "injustice_impossible_choice_consequence_twist",
+    "C": "dark_mystery_supernatural_twist_no_gore",
 }
 
 
@@ -39,7 +40,7 @@ _ARM_A = (
         "A",
         "a_carta_da_mae",
         "A carta da mãe que chegou vinte anos tarde",
-        "No Bairro da Estação, uma filha reconhece a letra da mãe desaparecida e descobre quem escondeu suas cartas.",
+        "Uma filha reconhece a letra da mãe desaparecida e descobre que a pessoa que guardou as cartas também a criou.",
         "arc_2_parts",
     ),
     MicrodramaConcept(
@@ -120,35 +121,35 @@ _ARM_B = (
 _ARM_C = (
     MicrodramaConcept(
         "C",
-        "c_assobio_do_saci",
-        "O assobio do Saci que vinha de dentro do armário",
-        "Uma costureira do Bairro da Estação percebe que o assobio marca toda mentira contada dentro de sua casa.",
+        "c_retrato_que_piscava",
+        "O retrato de família que piscava depois de cada mentira",
+        "Uma mulher culpa a moldura antiga até perceber que apenas a pessoa apagada da fotografia permanece imóvel.",
         "arc_2_parts",
     ),
     MicrodramaConcept(
         "C",
-        "c_pegadas_do_curupira",
-        "As pegadas ao contrário na horta da escola",
-        "Uma zeladora segue rastros inspirados no Curupira e encontra uma mensagem sobre uma promessa ambiental esquecida.",
+        "c_quarto_atras_do_espelho",
+        "O espelho que mostrava um quarto inexistente",
+        "Uma inquilina vê alguém repetir seus movimentos do outro lado até descobrir que o reflexo tenta impedir sua próxima escolha.",
     ),
     MicrodramaConcept(
         "C",
-        "c_canto_da_iara",
-        "A voz da Iara no encanamento do prédio",
-        "Uma cantora ouve no encanamento a própria voz confessando algo que ela ainda não fez.",
+        "c_mensagem_do_numero_desativado",
+        "A mensagem enviada pelo próprio número desativado",
+        "Um homem recebe um áudio com sua voz pedindo que não abra a porta e percebe que a gravação foi feita dentro da casa.",
         "arc_3_parts",
     ),
     MicrodramaConcept(
         "C",
-        "c_matinta_na_janela",
-        "O pedido da Matinta deixado na janela",
-        "Bilhetes surgem após um assobio noturno e obrigam uma família a encarar pequenas crueldades que preferia negar.",
+        "c_chave_do_hotel",
+        "A chave de hotel que abria uma porta da infância",
+        "Uma hóspede encontra atrás da porta um quarto idêntico ao que jurava ter esquecido, mas com uma fotografia tirada naquela manhã.",
     ),
     MicrodramaConcept(
         "C",
-        "c_boto_no_retrato",
-        "O homem de branco que desaparecia do retrato",
-        "Inspirada na lenda do Boto, uma fotografia muda quando alguém romantiza uma memória que nunca aconteceu.",
+        "c_convidado_que_sumia_das_fotos",
+        "O convidado que desaparecia de todas as fotos",
+        "Depois da festa, uma fotógrafa percebe que o desconhecido some das imagens sempre que a anfitriã aparece sorrindo.",
         "arc_2_parts",
     ),
     MicrodramaConcept(
@@ -169,9 +170,14 @@ def microdrama_policy_notes() -> tuple[str, ...]:
         "automatic_publication_allowed=false",
         "human_review_required=true",
         "originality_review_required=true",
+        "twist_required=true",
+        "twist_must_reinterpret_story=true",
+        "shock_without_graphic_violence=true",
         (
             "Política: usar apenas tramas originais, rotular explicitamente como ficção, não copiar textos do Reddit "
-            "ou de novelas, sem gore e sem enganar o público como se fossem eventos reais."
+            "ou de novelas, sem gore e sem enganar o público como se fossem eventos reais. O choque deve vir de "
+            "uma revelação, traição, identidade, escolha ou consequência; a reviravolta precisa ser preparada por "
+            "pistas e reinterpretar o começo, não apenas acrescentar informação aleatória no final."
         ),
     )
 
@@ -191,7 +197,9 @@ def build_microdrama_pilot_plan(*, seed: int) -> dict[str, Any]:
                     "target_duration_sec": MICRODRAMA_PILOT_DURATION_SEC,
                     "language": "pt-BR",
                     "arm_focus": _ARM_FOCUS[arm],
+                    "positioning": MICRODRAMA_POSITIONING,
                     "fictional_universe": MICRODRAMA_FICTIONAL_UNIVERSE,
+                    "twist_required": True,
                     "human_review_required": True,
                     "automatic_publication_allowed": False,
                 }
@@ -222,7 +230,7 @@ def start_microdrama_pilot(orchestrator: Any, *, seed: int) -> dict[str, Any]:
                 profile_id="default",
                 content_hash=stable_hash(plan),
                 status="planned",
-                line_id="jarvis_fiction_microdrama_pilot",
+                line_id="jarvis_shocking_twist_drama_pilot_v2",
                 target_job_count=18,
                 result_summary={"plan": plan, "seed": seed},
             )
@@ -272,7 +280,7 @@ def start_microdrama_pilot(orchestrator: Any, *, seed: int) -> dict[str, Any]:
                 "niche_id": MICRODRAMA_NICHE_ID,
                 "language": "pt-BR",
                 "target_duration_sec": MICRODRAMA_PILOT_DURATION_SEC,
-                "tone": "suspense_emocional",
+                "tone": "drama_chocante_reviravolta",
                 "cta_style": "soft",
                 "notes": _microdrama_job_notes(experiment_id, assignment_id, item),
                 "requested_angle": item["requested_angle"],

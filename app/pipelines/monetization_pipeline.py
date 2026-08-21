@@ -1213,7 +1213,7 @@ class MonetizationPipeline(BasePipeline):
 
     @staticmethod
     def microdrama_publish_hashtags() -> list[str]:
-        return ["#shorts", "#microdrama", "#ficcao", "#suspense", "#historias"]
+        return ["#shorts", "#microdrama", "#ficcao", "#drama", "#reviravolta"]
 
     def build_publish_hashtags(self, topic_plan: TopicPlan | None, script: Script | None) -> list[str]:
         declared_hashtags = dict(getattr(script, "qa_metrics", None) or {}).get("declared_hashtags") if script else None

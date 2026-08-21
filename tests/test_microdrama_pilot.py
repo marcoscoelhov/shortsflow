@@ -49,6 +49,9 @@ def test_microdrama_request_accepts_manual_creation_and_restores_policy_notes() 
     assert notes.count("automatic_publication_allowed=false") == 1
     assert notes.count("human_review_required=true") == 1
     assert notes.count("originality_review_required=true") == 1
+    assert notes.count("twist_required=true") == 1
+    assert notes.count("twist_must_reinterpret_story=true") == 1
+    assert notes.count("shock_without_graphic_violence=true") == 1
     assert not any(line.endswith("=false") for line in notes if line.split("=", 1)[0] in {
         "fictional_scenario",
         "human_review_required",
@@ -72,9 +75,9 @@ def test_microdrama_explicit_niche_wins_over_incidental_astronomy_terms() -> Non
     )
 
     assert classification.niche == MICRODRAMA_NICHE_ID
-    assert classification.subniche == "suspense_emocional"
+    assert classification.subniche == "drama_chocante_reviravolta"
     assert classification.source == "explicit_request_niche"
-    assert classification.allowed_keywords == ("microdrama", "ficção", "suspense", "história")
+    assert classification.allowed_keywords == ("microdrama", "ficção", "drama", "reviravolta", "segredo")
 
 
 def test_microdrama_editorial_mode_stays_entertainment_even_with_surgery_word() -> None:
@@ -161,7 +164,7 @@ def test_microdrama_hub_requires_manual_theme_title_or_script() -> None:
             niche_id=MICRODRAMA_NICHE_ID,
             language="pt-BR",
             target_duration_sec=40,
-            tone="suspense_emocional",
+            tone="drama_chocante_reviravolta",
             cta_style="soft",
             notes=None,
             requested_angle=None,
@@ -191,21 +194,25 @@ def test_microdrama_plan_is_deterministic_interleaved_and_diverse() -> None:
     assert all(item["language"] == "pt-BR" for item in first["items"])
     assert all(item["human_review_required"] is True for item in first["items"])
     assert all(item["automatic_publication_allowed"] is False for item in first["items"])
+    assert all(item["twist_required"] is True for item in first["items"])
+    assert all(item["positioning"] == "dramas_chocantes_com_reviravolta" for item in first["items"])
     assert all(item["requested_angle"] for item in first["items"])
     assert all(item["story_format"] in {"standalone", "arc_2_parts", "arc_3_parts", "arc_4_parts"} for item in first["items"])
-    assert all(item["fictional_universe"] == "Bairro da Estação" for item in first["items"])
+    assert all(item["fictional_universe"] == "universos_variados" for item in first["items"])
     assert {item["arm_focus"] for item in first["items"] if item["arm"] == "A"} == {
-        "betrayal_revenge_family_secret_emotional_suspense"
+        "betrayal_family_secret_shocking_twist"
     }
     assert {item["arm_focus"] for item in first["items"] if item["arm"] == "B"} == {
-        "impossible_decisions_moral_dilemmas"
+        "injustice_impossible_choice_consequence_twist"
     }
     assert {item["arm_focus"] for item in first["items"] if item["arm"] == "C"} == {
-        "brazilian_folklore_psychological_supernatural_no_gore"
+        "dark_mystery_supernatural_twist_no_gore"
     }
+    assert first["experiment_id"].startswith("jarvis_shocking_twist_drama_pilot_v2_")
     combined_text = json.dumps(first, ensure_ascii=False).casefold()
     assert "ceo" not in combined_text
     assert "bilionário" not in combined_text
+    assert not any(term in combined_text for term in ("saci", "curupira", "iara", "matinta", "boto"))
 
 
 def test_microdrama_plan_cli_is_json_only_and_has_no_database_side_effects(capsys) -> None:
