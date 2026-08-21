@@ -11,6 +11,7 @@ from app.editorial.visual_style import public_visual_style_profile
 from app.hub_prompt import extract_viral_prompt_contract
 from app.job_origin import JOB_ORIGIN_READY_SCRIPT_BANK
 from app.manual_script import extract_ready_script_from_notes
+from app.microdrama_pilot import MICRODRAMA_NICHE_ID
 from app.models import Job, Script, TopicPlan, TopicRequest
 from app.pipelines.common import FatalStepError, RecoverableStepError, model_payload
 from app.pipelines.base import BasePipeline
@@ -97,6 +98,11 @@ class ScriptPipeline(BasePipeline):
             }
         else:
             fact_pack = self._build_fact_pack(topic_plan, request, research_brief)
+        if request.niche_id == MICRODRAMA_NICHE_ID:
+            fact_pack = dict(fact_pack)
+            viral_truth_policy = dict(fact_pack.get("viral_truth_policy") or {})
+            viral_truth_policy["automatic_publish_allowed"] = False
+            fact_pack["viral_truth_policy"] = viral_truth_policy
         stage_timings_ms["fact_pack_ms"] = round((time.monotonic() - fact_started) * 1000, 1)
         plan_dict["fact_pack"] = fact_pack
         self.storage.persist_json(job.job_id, "fact_pack.json", self._serialize_for_json(fact_pack))
