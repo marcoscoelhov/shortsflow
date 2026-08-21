@@ -89,6 +89,18 @@ def test_microdrama_editorial_mode_stays_entertainment_even_with_surgery_word() 
     )()
 
     assert resolve_editorial_mode(None, request) == "viral_curiosidades"
+    assert resolve_editorial_mode(
+        {
+            "canonical_topic": "Microdrama sobre uma escolha diante do perigo fictício",
+            "angle": "Suspense emocional sem instrução real",
+            "hook_promise": "Uma decisão muda a família",
+            "quality_metrics": {
+                "editorial_mode": "viral_curiosidades",
+                "topic_niche": MICRODRAMA_NICHE_ID,
+            },
+        },
+        None,
+    ) == "viral_curiosidades"
 
 
 @pytest.mark.parametrize(
