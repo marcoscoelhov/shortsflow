@@ -96,6 +96,53 @@ def test_microdrama_hook_word_limit_is_explicit_and_inclusive() -> None:
     assert at_limit.metrics["hook_word_count"] == 8
 
 
+def test_microdrama_share_trigger_reaches_staging_threshold() -> None:
+    from app.config import Settings
+
+    settings = Settings()
+    gate = ViralIntensityGate(
+        min_viral_intensity=settings.viral_intensity_min_score,
+        min_hook_scroll_stop=settings.viral_intensity_min_hook_scroll_stop,
+        min_curiosity_gap=settings.viral_intensity_min_curiosity_gap,
+        min_escalation=settings.viral_intensity_min_escalation,
+        min_payoff_surprise=settings.viral_intensity_min_payoff_surprise,
+        min_share_trigger=settings.viral_intensity_min_share_trigger,
+    )
+    script = {
+        "title": "A carta que ele escreveu antes de sumir",
+        "hook": "A carta pedia: leia se eu não voltar.",
+        "loop": "Mas quem subiu ao palco não era o pai de Bia.",
+        "body_beats": [
+            "O texto contradizia a história que a família já tinha superado.",
+            "Ela achou a prova no próprio bolso do paletó.",
+            "O sócio ia discursar na frente de todos em instantes.",
+            "Expor a verdade salvaria o nome do pai e afundaria a mãe.",
+        ],
+        "payoff": "O impostor era o irmão do pai, e o segredo escondia outra dívida.",
+        "ending": (
+            "Da próxima vez que alguém disser que esqueceu do passado, "
+            "olha de novo para quem está do seu lado."
+        ),
+        "full_narration": (
+            "A carta pedia: leia se eu não voltar. "
+            "Mas quem subiu ao palco não era o pai de Bia. "
+            "O texto contradizia a história que a família já tinha superado. "
+            "Ela achou a prova no próprio bolso do paletó. "
+            "O sócio ia discursar na frente de todos em instantes. "
+            "Expor a verdade salvaria o nome do pai e afundaria a mãe. "
+            "O impostor era o irmão do pai, e o segredo escondia outra dívida. "
+            "Da próxima vez que alguém disser que esqueceu do passado, "
+            "olha de novo para quem está do seu lado."
+        ),
+    }
+
+    result = gate.validate(script, max_hook_words=8)
+
+    assert result.passed, result.reasons
+    assert result.metrics["share_trigger_score"] >= settings.viral_intensity_min_share_trigger
+    assert "weak_share_trigger" not in result.reasons
+
+
 def test_viral_intensity_gate_accepts_common_sense_visual_conflict_scripts() -> None:
     scripts = [
         {
