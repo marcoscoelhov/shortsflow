@@ -82,6 +82,7 @@ FORMATO
 - Use 3 a 5 beats em escalada causal: conflito → pista → escolha/ação → consequência → virada.
 - Guarde a revelação mais forte para o último terço e entregue um mini-payoff no próprio Short.
 - Termine com pergunta específica sobre decisão, culpa, segredo ou consequência; não use CTA genérica.
+- Inclua no final um share trigger implícito concreto, que faça a pessoa pensar “vou mandar isso para alguém” ou rever o início com novo significado (ex.: “olha de novo”, “da próxima vez que”, “você vai lembrar”, “repara”). Mantenha a pergunta de comentário obrigatória; compartilhamento e comentário devem coexistir.
 
 DIREÇÃO VISUAL E TOM
 - O primeiro quadro mostra o conflito, objeto ou escolha central sem revelar antecipadamente o payoff.

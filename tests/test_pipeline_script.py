@@ -4123,6 +4123,15 @@ def test_default_viral_prompt_uses_competitor_scale_fear_pattern() -> None:
     assert any("Netuno parece calmo" in item for item in criteria["hook_models"])
 
 
+def test_microdrama_prompt_instructs_implicit_share_trigger() -> None:
+    from app.hub_prompt import MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+
+    assert "share trigger" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+    assert "vou mandar isso para alguém" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+    assert "olha de novo" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+    assert "pergunta de comentário obrigatória" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+
+
 def test_automatic_topic_payload_uses_cosmos_focus() -> None:
     from app.hub_prompt import hub_settings_path, save_viral_prompt_template
 
