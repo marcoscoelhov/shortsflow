@@ -4132,6 +4132,8 @@ def test_microdrama_prompt_instructs_implicit_share_trigger() -> None:
     assert "pergunta de comentário obrigatória" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
     assert "nunca com nome genérico de personagem seguido de ação neutra" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
     assert "use literalmente uma destas frases no fechamento" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+    assert "Escreva o hook com 7 a 9 palavras" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+    assert "palavra de choque concreta" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
     for literal in ("olha de novo", "da próxima vez que", "você vai lembrar", "repara", "manda isso", "mostra isso"):
         assert literal in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
 
