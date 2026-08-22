@@ -66,6 +66,36 @@ def test_viral_intensity_gate_accepts_scroll_stopping_script() -> None:
     assert result.metrics["curiosity_gap_score"] >= 0.85
 
 
+def test_microdrama_hook_word_limit_is_explicit_and_inclusive() -> None:
+    gate = ViralIntensityGate()
+    script = {
+        "title": "A carta que ninguém deveria abrir",
+        "hook": "Ninguém viu o fogo roubar aquela carta secreta hoje.",
+        "loop": "Mas quem escondeu o segredo antes da primeira cena?",
+        "body_beats": [
+            "A sombra atravessa o corredor enquanto a carta desaparece.",
+            "Depois, o reflexo revela uma armadilha na sala escura.",
+            "A luz vermelha volta e mostra quem insiste no segredo.",
+            "Então o rosto some antes que alguém consiga gritar.",
+        ],
+        "payoff": "A carta nunca esteve escondida; o reflexo roubou a verdade.",
+        "ending": "Olha de novo a primeira cena e manda isso para quem nunca percebeu o segredo.",
+    }
+
+    too_long = gate.validate(script, max_hook_words=8)
+
+    assert not too_long.passed
+    assert "hook_exceeds_max_words" in too_long.reasons
+    assert too_long.metrics["hook_word_count"] == 9
+    assert too_long.metrics["hook_max_words"] == 8
+
+    script["hook"] = "Ninguém viu o fogo roubar aquela carta secreta."
+    at_limit = gate.validate(script, max_hook_words=8)
+
+    assert "hook_exceeds_max_words" not in at_limit.reasons
+    assert at_limit.metrics["hook_word_count"] == 8
+
+
 def test_viral_intensity_gate_accepts_common_sense_visual_conflict_scripts() -> None:
     scripts = [
         {

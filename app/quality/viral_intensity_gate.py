@@ -85,7 +85,7 @@ class ViralIntensityGate:
         self.min_payoff_surprise = min_payoff_surprise
         self.min_share_trigger = min_share_trigger
 
-    def validate(self, script: dict[str, Any]) -> ViralIntensityResult:
+    def validate(self, script: dict[str, Any], *, max_hook_words: int | None = None) -> ViralIntensityResult:
         title = str(script.get("title") or "")
         hook = str(script.get("hook") or "")
         loop = str(script.get("loop") or self._retention_loop_text(script) or "")
@@ -159,6 +159,8 @@ class ViralIntensityGate:
         )
 
         reasons: list[str] = []
+        if max_hook_words is not None and hook_word_count > max_hook_words:
+            reasons.append("hook_exceeds_max_words")
         if didactic_hits >= 3 or (didactic_hits >= 2 and NEUTRAL_OPENING_PATTERN.search(first_sentence)):
             reasons.append("didactic_or_neutral_tone")
         if hook_scroll_stop_score < self.min_hook_scroll_stop:
@@ -189,6 +191,9 @@ class ViralIntensityGate:
             "implicit_gap_signal": implicit_gap,
             "contrast_gap_signal": contrast_gap,
         }
+        if max_hook_words is not None:
+            metrics["hook_word_count"] = hook_word_count
+            metrics["hook_max_words"] = max_hook_words
         return ViralIntensityResult(passed=not reasons, reasons=list(dict.fromkeys(reasons)), metrics=metrics)
 
     def _retention_loop_text(self, script: dict[str, Any]) -> str:
