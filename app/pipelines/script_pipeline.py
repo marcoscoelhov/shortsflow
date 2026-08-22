@@ -38,6 +38,7 @@ class ScriptPipeline(BasePipeline):
         editorial_mode = self._editorial_mode(topic_plan, request)
         research_brief = self._build_research_brief(topic_plan, request)
         plan_dict = {
+            "niche_id": request.niche_id,
             "canonical_topic": topic_plan.canonical_topic,
             "angle": topic_plan.angle,
             "hook_promise": topic_plan.hook_promise,
@@ -211,6 +212,23 @@ class ScriptPipeline(BasePipeline):
                 cta_style=resolved_cta_style,
                 topic_context=audit_topic_context,
             )
+        if audit_repair_file is not None and text_audit.get("passed") is True:
+            # The text-audit repair can replace the script, so microdrama must
+            # not bypass the deterministic viral gate after that substitution.
+            script, viral_metrics, viral_repair_file = self._validate_or_repair_viral_intensity(
+                script,
+                plan_dict=plan_dict,
+                ready_script_mode=ready_script is not None,
+                ready_script_bank_mode=job.job_origin == JOB_ORIGIN_READY_SCRIPT_BANK,
+                job_id=job.job_id,
+            )
+            metrics = {**metrics, "viral_intensity": viral_metrics}
+            if structured_contract_file is not None:
+                gate_decisions["viral_intensity"] = {
+                    "passed": bool(viral_metrics.get("viral_intensity_gate_pass", not viral_metrics.get("viral_intensity_hard_block"))),
+                    "hard_block": bool(viral_metrics.get("viral_intensity_hard_block")),
+                    "reasons": viral_metrics.get("viral_intensity_reasons") or [],
+                }
         stage_timings_ms["text_publish_audit_ms"] = round((time.monotonic() - audit_started) * 1000, 1)
         if structured_contract_file is not None:
             gate_decisions["text_publish_audit"] = {
@@ -340,11 +358,17 @@ class ScriptPipeline(BasePipeline):
         job_id: str,
         ready_script_bank_mode: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
-        result = self.viral_intensity_gate.validate(script)
+        niche_id = str(plan_dict.get("niche_id") or "")
+        is_microdrama = niche_id == MICRODRAMA_NICHE_ID
+        result = (
+            self.viral_intensity_gate.validate(script, max_hook_words=8)
+            if is_microdrama
+            else self.viral_intensity_gate.validate(script)
+        )
         if result.passed:
-            return script, self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode), None
+            return script, self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode, niche_id=niche_id), None
         repair_reasons = [str(reason) for reason in result.reasons]
-        if self.llm_judge.may_consider_override(repair_reasons):
+        if not is_microdrama and self.llm_judge.may_consider_override(repair_reasons):
             judge = self.llm_judge.judge_editorial(
                 build_editorial_judge_payload(
                     script=script,
@@ -366,10 +390,20 @@ class ScriptPipeline(BasePipeline):
             metrics["ready_script_bank_policy"] = "viral_intensity_diagnostic_only"
             return script, metrics, None
         if ready_script_mode:
-            metrics = self._viral_intensity_metrics(result, ready_script_mode=ready_script_mode, raise_on_fail=False)
+            metrics = self._viral_intensity_metrics(
+                result,
+                ready_script_mode=ready_script_mode,
+                raise_on_fail=False,
+                niche_id=niche_id,
+            )
             self._persist_script_rejection(job_id, script, {"viral_intensity": metrics}, ["script_viral_intensity_low"])
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(result.reasons[:6])}")
-        original_metrics = self._viral_intensity_metrics(result, ready_script_mode=False, raise_on_fail=False)
+        original_metrics = self._viral_intensity_metrics(
+            result,
+            ready_script_mode=ready_script_mode,
+            raise_on_fail=False,
+            niche_id=niche_id,
+        )
         repair_context = {
             **plan_dict,
             "viral_intensity_repair": {
@@ -387,14 +421,24 @@ class ScriptPipeline(BasePipeline):
                 {"viral_intensity": original_metrics, "viral_intensity_repair_error": f"{type(exc).__name__}: {exc}"},
                 repair_reasons,
             )
-            if self._viral_intensity_is_warning_only():
+            original_metrics["viral_intensity_repair_error"] = f"{type(exc).__name__}: {exc}"
+            if self._viral_intensity_is_warning_only(niche_id):
                 original_metrics["viral_intensity_warning_only"] = True
-                original_metrics["viral_intensity_repair_error"] = f"{type(exc).__name__}: {exc}"
                 return script, original_metrics, self._persist_viral_intensity_repair(job_id, repair_reasons, original_metrics, False)
+            self._persist_viral_intensity_repair(job_id, repair_reasons, original_metrics, False)
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(repair_reasons[:6])}") from exc
-        repaired_result = self.viral_intensity_gate.validate(candidate)
+        repaired_result = (
+            self.viral_intensity_gate.validate(candidate, max_hook_words=8)
+            if is_microdrama
+            else self.viral_intensity_gate.validate(candidate)
+        )
         if not repaired_result.passed:
-            repaired_metrics = self._viral_intensity_metrics(repaired_result, ready_script_mode=False, raise_on_fail=False)
+            repaired_metrics = self._viral_intensity_metrics(
+                repaired_result,
+                ready_script_mode=ready_script_mode,
+                raise_on_fail=False,
+                niche_id=niche_id,
+            )
             repaired_metrics["viral_intensity_repair_attempted"] = True
             repaired_metrics["viral_intensity_original_reasons"] = repair_reasons
             self._persist_script_rejection(
@@ -403,16 +447,23 @@ class ScriptPipeline(BasePipeline):
                 {"viral_intensity": repaired_metrics, "viral_intensity_original": original_metrics},
                 repaired_result.reasons,
             )
-            if self._viral_intensity_is_warning_only():
+            if self._viral_intensity_is_warning_only(niche_id):
                 repaired_metrics["viral_intensity_warning_only"] = True
                 return candidate, repaired_metrics, self._persist_viral_intensity_repair(job_id, repair_reasons, repaired_metrics, False)
+            self._persist_viral_intensity_repair(job_id, repair_reasons, repaired_metrics, False)
             raise RecoverableStepError(f"viral intensity gate failed: {', '.join(repaired_result.reasons[:6])}")
-        repaired_metrics = self._viral_intensity_metrics(repaired_result, ready_script_mode=False)
+        repaired_metrics = self._viral_intensity_metrics(
+            repaired_result,
+            ready_script_mode=ready_script_mode,
+            niche_id=niche_id,
+        )
         repaired_metrics["viral_intensity_repair_attempted"] = True
         repaired_metrics["viral_intensity_original_reasons"] = repair_reasons
         return candidate, repaired_metrics, self._persist_viral_intensity_repair(job_id, repair_reasons, repaired_metrics, True)
 
-    def _viral_intensity_is_warning_only(self) -> bool:
+    def _viral_intensity_is_warning_only(self, niche_id: str | None = None) -> bool:
+        if niche_id == MICRODRAMA_NICHE_ID:
+            return False
         settings = getattr(self.owner, "settings", None)
         return settings is not None and not bool(getattr(settings, "viral_intensity_hard_block", True))
 
@@ -438,10 +489,17 @@ class ScriptPipeline(BasePipeline):
                 pass
         return "viral_intensity_repair.json"
 
-    def _viral_intensity_metrics(self, result: Any, *, ready_script_mode: bool, raise_on_fail: bool = True) -> dict[str, Any]:
+    def _viral_intensity_metrics(
+        self,
+        result: Any,
+        *,
+        ready_script_mode: bool,
+        raise_on_fail: bool = True,
+        niche_id: str | None = None,
+    ) -> dict[str, Any]:
         metrics = dict(result.metrics)
         metrics["viral_intensity_reasons"] = result.reasons
-        metrics["viral_intensity_hard_block"] = bool(not result.passed and not self._viral_intensity_is_warning_only())
+        metrics["viral_intensity_hard_block"] = bool(not result.passed and not self._viral_intensity_is_warning_only(niche_id))
         if ready_script_mode and not result.passed:
             metrics["viral_intensity_ready_script_blocked"] = True
         if not result.passed and raise_on_fail:

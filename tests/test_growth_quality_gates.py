@@ -2,6 +2,7 @@ import re
 
 import pytest
 
+from app.microdrama_pilot import MICRODRAMA_NICHE_ID
 from app.pipelines.common import RecoverableStepError
 from app.pipelines.monetization_pipeline import MonetizationPipeline
 from app.pipelines.script_pipeline import ScriptPipeline
@@ -9,6 +10,7 @@ from app.quality.growth_score_gate import GrowthScoreGate
 from app.quality.metadata_ctr_gate import MetadataCTRGate
 from app.quality.visual_impact_gate import VisualImpactGate
 from app.quality.viral_intensity_gate import ViralIntensityGate
+from app.orchestrator import JobOrchestrator
 
 
 def test_visual_impact_gate_rejects_generic_opening_asset() -> None:
@@ -281,6 +283,42 @@ class _RepairingProvider:
         return self.repaired_script
 
 
+class _FailingRepairProvider:
+    def repair_script(self, script: dict, reasons: list[str], plan_dict: dict) -> dict:
+        raise RuntimeError("provider 500")
+
+
+class _RecordingStorage:
+    def __init__(self) -> None:
+        self.payloads: dict[str, dict] = {}
+
+    def persist_json(self, job_id: str, filename: str, payload: dict) -> None:
+        self.payloads[filename] = payload
+
+
+class _ForbiddenOverrideJudge:
+    def may_consider_override(self, reasons: list[str]) -> bool:
+        raise AssertionError("microdrama deterministic failures must not reach the judge")
+
+
+def _warning_only_pipeline(provider: object) -> tuple[ScriptPipeline, _RecordingStorage]:
+    storage = _RecordingStorage()
+    owner = type(
+        "Owner",
+        (),
+        {
+            "settings": type("Settings", (), {"viral_intensity_hard_block": False})(),
+            "viral_intensity_gate": ViralIntensityGate(),
+            "providers": type("Providers", (), {"creative": provider})(),
+            "storage": storage,
+            "llm_judge": _ForbiddenOverrideJudge(),
+            "_serialize_for_json": staticmethod(lambda payload: payload),
+        },
+    )()
+    pipeline = ScriptPipeline(owner)
+    return pipeline, storage
+
+
 def test_script_pipeline_repairs_generated_script_when_viral_intensity_fails() -> None:
     repaired_script = {
         "title": "O céu laranja não vem do Sol",
@@ -365,3 +403,150 @@ def test_script_pipeline_routes_low_viral_script_to_review_when_hard_block_is_di
     assert metrics["viral_intensity_warning_only"] is True
     assert metrics["viral_intensity_hard_block"] is False
     assert repair_file == "viral_intensity_repair.json"
+
+
+def test_microdrama_blocks_when_warning_only_setting_and_viral_repair_raises() -> None:
+    pipeline, storage = _warning_only_pipeline(_FailingRepairProvider())
+    weak_script = {
+        "title": "A carta atrasada",
+        "hook": "Quando a carta chegou, ela ficou surpresa.",
+        "full_narration": "Quando a carta chegou, ela ficou surpresa.",
+    }
+
+    with pytest.raises(RecoverableStepError, match="viral intensity gate failed"):
+        pipeline._validate_or_repair_viral_intensity(
+            weak_script,
+            plan_dict={"niche_id": MICRODRAMA_NICHE_ID},
+            ready_script_mode=False,
+            job_id="microdrama-repair-error",
+        )
+
+    repair_payload = storage.payloads["viral_intensity_repair.json"]
+    assert repair_payload["repaired_passed"] is False
+    assert repair_payload["metrics"]["viral_intensity_hard_block"] is True
+
+
+def test_ready_script_microdrama_blocks_without_calling_repair_provider() -> None:
+    weak_script = {
+        "title": "A carta atrasada",
+        "hook": "Quando a carta chegou, ela ficou surpresa.",
+        "full_narration": "Quando a carta chegou, ela ficou surpresa.",
+    }
+    provider = _RepairingProvider(weak_script)
+    pipeline, storage = _warning_only_pipeline(provider)
+
+    with pytest.raises(RecoverableStepError, match="viral intensity gate failed"):
+        pipeline._validate_or_repair_viral_intensity(
+            weak_script,
+            plan_dict={"niche_id": MICRODRAMA_NICHE_ID},
+            ready_script_mode=True,
+            job_id="ready-script-microdrama",
+        )
+
+    assert provider.calls == []
+    rejected_metrics = storage.payloads["script_rejected.json"]["gate_metrics"]["viral_intensity"]
+    assert rejected_metrics["viral_intensity_ready_script_blocked"] is True
+    assert rejected_metrics["viral_intensity_hard_block"] is True
+
+
+def test_microdrama_text_audit_repair_cannot_bypass_viral_gate(monkeypatch) -> None:
+    from app.db import SessionLocal
+    from app.models import Job, TopicPlan
+
+    orchestrator = JobOrchestrator()
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "A chave da casa vazia no buquê da noiva",
+            "niche_id": MICRODRAMA_NICHE_ID,
+            "language": "pt-BR",
+            "target_duration_sec": 40,
+            "tone": "drama_chocante_reviravolta",
+            "cta_style": "soft",
+            "job_origin": "manual_theme",
+            "creation_via": "api",
+        }
+    )
+    strong_script = {
+        "title": "A chave que abre uma culpa",
+        "hook": "A chave abriu a vingança da irmã.",
+        "loop": "Quem plantou a chave antes do sim?",
+        "body_beats": [
+            "Marina abriu a casa vazia e achou a pastas da irmã.",
+            "O projetor revelava o segredo do noivo diante dos convidados.",
+            "A gravação mostrou Marina esvaziando a casa por dívida.",
+            "O documento transforma a vingança na culpa da própria noiva.",
+        ],
+        "payoff": "A primeira pasta não acusava Caio: mostrava a culpa de Marina.",
+        "ending": "Olha de novo o buquê e lembra quem escolheu a chave. Você confessaria?",
+        "full_narration": (
+            "A chave abriu a vingança da irmã. Quem plantou a chave antes do sim. "
+            "Marina abriu a casa vazia e achou a pastas da irmã. "
+            "O projetor revelava o segredo do noivo diante dos convidados. "
+            "A gravação mostrou Marina esvaziando a casa por dívida. "
+            "O documento transforma a vingança na culpa da própria noiva. "
+            "A primeira pasta não acusava Caio: mostrava a culpa de Marina. "
+            "Olha de novo o buquê e lembra quem escolheu a chave. Você confessaria?"
+        ),
+        "estimated_duration_sec": 40,
+        "key_facts": [],
+        "source_fact_ids": [],
+        "claim_trace": [],
+        "token_count": 90,
+        "language": "pt-BR",
+        "retention_map": {},
+        "visual_opening": {},
+        "qa_metrics": {},
+        "prompt_version": "test",
+    }
+    weak_script = {
+        **strong_script,
+        "title": "A carta atrasada",
+        "hook": "Quando a carta chegou, ela ficou surpresa.",
+        "full_narration": "Quando a carta chegou, ela ficou surpresa.",
+    }
+
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic",
+                canonical_topic="A chave da casa vazia no buquê da noiva",
+                angle="noiva decide expor a vingança preparada pela irmã",
+                hook_promise="chave anônima muda o casamento",
+                entities=["chave", "noiva"],
+                search_terms=["microdrama chave noiva"],
+                title_candidates=["Chave no buquê"],
+                quality_metrics={"editorial_mode": "viral_curiosidades", "topic_niche": MICRODRAMA_NICHE_ID},
+            )
+        )
+        session.commit()
+        job = session.get(Job, job_id)
+        assert job is not None
+
+        pipeline = orchestrator.script_pipeline
+        monkeypatch.setattr(orchestrator.providers.creative, "generate_script", lambda _plan: strong_script)
+        monkeypatch.setattr(
+            pipeline,
+            "_validate_or_repair_script",
+            lambda script, *_args, **_kwargs: (
+                script,
+                {"script_quality_gate_pass": True, "fact_pack_consistency_pass": True},
+            ),
+        )
+
+        def fake_text_audit(*_args, **_kwargs) -> dict[str, object]:
+            return {"passed": False, "reasons": ["weak_ending"]}
+
+        def fake_repair_after_text_audit(*_args, **kwargs) -> tuple[dict[str, object], dict[str, object], dict[str, object], str]:
+            return weak_script, kwargs["metrics"], {"passed": True, "reasons": []}, "text_publish_audit_repair.json"
+
+        monkeypatch.setattr(pipeline, "_text_publish_audit", fake_text_audit)
+        monkeypatch.setattr(pipeline, "_repair_after_text_audit", fake_repair_after_text_audit)
+
+        with pytest.raises(RecoverableStepError, match="viral intensity gate failed"):
+            pipeline.step_script(session, job, 1)
+
+        job.status = "cancelled"
+        session.commit()
