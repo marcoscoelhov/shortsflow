@@ -79,9 +79,9 @@ ORIGINALIDADE E MONETIZAÇÃO
 FORMATO
 - Duração alvo de 40 segundos, dentro da faixa de 35 a 55 segundos.
 - Hook em até 8 palavras nos primeiros 1 a 2 segundos, com o conflito compreensível imediatamente.
-- O hook deve abrir com choque ou contraste imediato usando uma palavra forte e concreta (ex.: “não”, “nunca”, “ninguém”, “segredo”, “esconde”, “rouba”, “desaparece”, “fogo”, “luz”, “sombra”, “rosto”), nunca com nome genérico de personagem seguido de ação neutra; o conflito precisa vir na primeira frase.
+- O hook deve abrir com choque ou contraste imediato usando uma palavra forte e concreta (ex.: “não”, “nunca”, “ninguém”, “segredo”, “esconde”, “rouba”, “desaparece”, “fogo”, “luz”, “sombra”, “rosto”), nunca com nome genérico de personagem seguido de ação neutra; o conflito precisa vir na primeira frase. Escreva o hook com 7 a 9 palavras.
 - Use 3 a 5 beats em escalada causal: conflito → pista → escolha/ação → consequência → virada.
-- Guarde a revelação mais forte para o último terço e entregue um mini-payoff no próprio Short.
+- Guarde a revelação mais forte para o último terço e entregue um mini-payoff no próprio Short. Na frase do payoff (a virada), inclua uma palavra de choque concreta (ex.: “segredo”, “nunca”, “ninguém”, “escondeu”, “desapareceu”, “roubou”, “truque”, “armadilha”), não apenas “a virada” ou “a verdade”.
 - Termine com pergunta específica sobre decisão, culpa, segredo ou consequência; não use CTA genérica.
 - Inclua no final um share trigger implícito concreto, que faça a pessoa pensar “vou mandar isso para alguém” ou rever o início com novo significado. Para isso, use literalmente uma destas frases no fechamento: “olha de novo”, “da próxima vez que”, “você vai lembrar”, “repara”, “isso muda”, “manda isso”, “mostra isso”. Mantenha a pergunta de comentário obrigatória; compartilhamento e comentário devem coexistir.
 
