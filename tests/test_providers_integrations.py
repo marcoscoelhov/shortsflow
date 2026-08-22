@@ -305,36 +305,42 @@ def test_qwen_provider_cannot_audit_or_judge_publication() -> None:
 def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class FakeResponses:
+    class FakeCompletions:
         def create(self, **kwargs):
             captured.update(kwargs)
             return SimpleNamespace(
-                output_text=json.dumps(
-                    {
-                        "title": "Cafe mascara a fadiga",
-                        "hook": "Cafe nao cria energia do nada.",
-                        "body_beats": ["A cafeina atrasa a percepcao do cansaco."],
-                        "ending": "Na segunda olhada, o primeiro aviso vira pista.",
-                        "cta": None,
-                        "full_narration": "Cafe nao cria energia do nada. A cafeina atrasa a percepcao do cansaco. Na segunda olhada, o primeiro aviso vira pista.",
-                        "estimated_duration_sec": 35,
-                        "key_facts": ["A cafeina atrasa a percepcao do cansaco."],
-                        "source_fact_ids": ["F1"],
-                        "claim_trace": [{"text": "A cafeina atrasa a percepcao do cansaco.", "source_fact_ids": ["F1"], "grounding": "fact_pack"}],
-                        "token_count": 20,
-                        "language": "pt-BR",
-                        "retention_map": {},
-                        "visual_opening": {},
-                        "qa_metrics": {},
-                        "prompt_version": EDITORIAL_PROMPT_VERSION,
-                    }
-                )
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {
+                                    "title": "Cafe mascara a fadiga",
+                                    "hook": "Cafe nao cria energia do nada.",
+                                    "body_beats": ["A cafeina atrasa a percepcao do cansaco."],
+                                    "ending": "Na segunda olhada, o primeiro aviso vira pista.",
+                                    "cta": None,
+                                    "full_narration": "Cafe nao cria energia do nada. A cafeina atrasa a percepcao do cansaco. Na segunda olhada, o primeiro aviso vira pista.",
+                                    "estimated_duration_sec": 35,
+                                    "key_facts": ["A cafeina atrasa a percepcao do cansaco."],
+                                    "source_fact_ids": ["F1"],
+                                    "claim_trace": [{"text": "A cafeina atrasa a percepcao do cansaco.", "source_fact_ids": ["F1"], "grounding": "fact_pack"}],
+                                    "token_count": 20,
+                                    "language": "pt-BR",
+                                    "retention_map": {},
+                                    "visual_opening": {},
+                                    "qa_metrics": {},
+                                    "prompt_version": EDITORIAL_PROMPT_VERSION,
+                                }
+                            )
+                        )
+                    )
+                ]
             )
 
     class FakeOpenAI:
         def __init__(self, **kwargs):
             captured["client_kwargs"] = kwargs
-            self.responses = FakeResponses()
+            self.chat = SimpleNamespace(completions=FakeCompletions())
 
     monkeypatch.setattr(
         "app.providers.llm.get_settings",
@@ -354,28 +360,30 @@ def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> Non
 
     assert captured["client_kwargs"]["api_key"] == "openai-key"
     assert captured["model"] == "gpt-5.4"
-    assert captured["reasoning"] == {"effort": "max"}
-    assert captured["max_output_tokens"] == 2048
-    assert captured["text"] == {"format": {"type": "json_object"}}
-    assert "cada valor textual de retention_map deve ser cópia literal" in str(captured["input"])
-    assert "repetition_score usa escala 0.0 a 1.0" in str(captured["input"])
-    assert "meta editorial: retenção máxima, replay, compartilhamento orgânico e espanto genuíno" in str(captured["input"])
-    assert "body_beats equivale aos Beats em escalada" in str(captured["input"])
+    assert captured["reasoning_effort"] == "max"
+    assert captured["max_tokens"] == 2048
+    assert captured["response_format"] == {"type": "json_object"}
+    assert "cada valor textual de retention_map deve ser cópia literal" in str(captured["messages"])
+    assert "repetition_score usa escala 0.0 a 1.0" in str(captured["messages"])
+    assert "meta editorial: retenção máxima, replay, compartilhamento orgânico e espanto genuíno" in str(captured["messages"])
+    assert "body_beats equivale aos Beats em escalada" in str(captured["messages"])
     assert result["qa_metrics"]["source_provider"] == "openai"
 
 
 def test_openai_scene_planning_uses_responses_api(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class FakeResponses:
+    class FakeCompletions:
         def create(self, **kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(output_text='[{"scene_id":"scene-1","order":1}]')
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='[{"scene_id":"scene-1","order":1}]'))]
+            )
 
     class FakeOpenAI:
         def __init__(self, **kwargs):
             captured["client_kwargs"] = kwargs
-            self.responses = FakeResponses()
+            self.chat = SimpleNamespace(completions=FakeCompletions())
 
     monkeypatch.setattr(
         "app.providers.llm.get_settings",
@@ -394,33 +402,39 @@ def test_openai_scene_planning_uses_responses_api(monkeypatch) -> None:
 
     assert captured["client_kwargs"]["base_url"] == "https://opencode.ai/zen/go/v1"
     assert captured["model"] == "gpt-5.6-luna"
-    assert captured["instructions"] == "Return ONLY the final JSON array. No markdown fences."
+    assert captured["messages"][0]["content"] == "Return ONLY the final JSON array. No reasoning, prose, or markdown fences."
     assert scenes == [{"scene_id": "scene-1", "order": 1}]
 
 def test_openai_provider_topic_prompt_uses_hub_viral_ruler(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class FakeResponses:
+    class FakeCompletions:
         def create(self, **kwargs):
             captured.update(kwargs)
             return SimpleNamespace(
-                output_text=json.dumps(
-                    {
-                        "canonical_topic": "flamingos rosa",
-                        "angle": "pigmento que muda a cor",
-                        "hook_promise": "o prato muda a pena",
-                        "title_candidates": ["Flamingos rosa: a comida muda a cor deles"],
-                        "entities": ["flamingos", "pigmentos"],
-                        "search_terms": ["flamingo carotenoids plumage"],
-                        "quality_metrics": {},
-                    }
-                )
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {
+                                    "canonical_topic": "flamingos rosa",
+                                    "angle": "pigmento que muda a cor",
+                                    "hook_promise": "o prato muda a pena",
+                                    "title_candidates": ["Flamingos rosa: a comida muda a cor deles"],
+                                    "entities": ["flamingos", "pigmentos"],
+                                    "search_terms": ["flamingo carotenoids plumage"],
+                                    "quality_metrics": {},
+                                }
+                            )
+                        )
+                    )
+                ]
             )
 
     class FakeOpenAI:
         def __init__(self, **kwargs):
             captured["client_kwargs"] = kwargs
-            self.responses = FakeResponses()
+            self.chat = SimpleNamespace(completions=FakeCompletions())
 
     monkeypatch.setattr(
         "app.providers.llm.get_settings",
@@ -437,11 +451,11 @@ def test_openai_provider_topic_prompt_uses_hub_viral_ruler(monkeypatch) -> None:
     result = provider.plan_topic("Por que os flamingos ficam rosa?", 1, [], None)
 
     assert captured["client_kwargs"]["api_key"] == "openai-key"
-    assert captured["text"] == {"format": {"type": "json_object"}}
-    assert "Crie pautas de curiosidades globais para YouTube Shorts em pt-BR." in str(captured["input"])
-    assert "Loop: pergunta mental de tensão que só fecha no payoff" in str(captured["input"])
-    assert "exceto search_terms quando pesquisa factual em ingles ajudar" in str(captured["input"])
-    assert "search_terms em ingles para pesquisa factual" in str(captured["input"])
+    assert captured["response_format"] == {"type": "json_object"}
+    assert "Crie pautas de curiosidades globais para YouTube Shorts em pt-BR." in str(captured["messages"])
+    assert "Loop: pergunta mental de tensão que só fecha no payoff" in str(captured["messages"])
+    assert "exceto search_terms quando pesquisa factual em ingles ajudar" in str(captured["messages"])
+    assert "search_terms em ingles para pesquisa factual" in str(captured["messages"])
     assert result["quality_metrics"]["source_provider"] == "openai"
 
 def test_llm_registry_supports_openai_primary_provider(monkeypatch) -> None:
@@ -1000,16 +1014,18 @@ def test_luna_batch_route_passes_topic_batch_max_tokens(monkeypatch) -> None:
     provider.timeout_sec = 60.0
     captured: dict[str, object] = {}
 
-    class FakeResponses:
+    class FakeCompletions:
         def create(self, **kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(output_text=json.dumps({"drafts": []}))
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"drafts": []})))]
+            )
 
-    provider.client = SimpleNamespace(responses=FakeResponses())
+    provider.client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
 
     provider.plan_topic_batch([{"topic": "Lua"}], 10, 1, [])
 
-    assert captured["max_output_tokens"] == 12000
+    assert captured["max_tokens"] == 12000
 
 
 def test_deepseek_batch_route_passes_topic_batch_max_tokens(monkeypatch) -> None:
@@ -1044,16 +1060,18 @@ def test_ordinary_completions_still_use_llm_json_max_tokens(monkeypatch) -> None
     provider.timeout_sec = 60.0
     captured: dict[str, object] = {}
 
-    class FakeResponses:
+    class FakeCompletions:
         def create(self, **kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(output_text=json.dumps({"ok": True}))
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"ok": True})))]
+            )
 
-    provider.client = SimpleNamespace(responses=FakeResponses())
+    provider.client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
 
     provider._json_completion("prompt comum")
 
-    assert captured["max_output_tokens"] == 4096
+    assert captured["max_tokens"] == 4096
 
 
 def test_shared_judge_has_topic_draft_selection_prompt(monkeypatch) -> None:

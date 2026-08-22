@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from typing import Any
 
 from google import genai
 from google.genai import types as genai_types
@@ -169,18 +169,20 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
 
     def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
         try:
-            response = self.client.responses.create(
+            response = self.client.chat.completions.create(
                 model=self.model_name,
-                instructions="Return valid JSON only. No markdown fences.",
-                input=prompt,
-                reasoning=cast(Any, {"effort": self.reasoning_effort}),
-                text={"format": {"type": "json_object"}},
-                max_output_tokens=int(max_tokens if max_tokens is not None else self.max_output_tokens),
+                messages=[
+                    {"role": "system", "content": "Return ONLY the final JSON object. No reasoning, prose, or markdown fences."},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                reasoning_effort=self.reasoning_effort,
+                max_tokens=int(max_tokens if max_tokens is not None else self.max_output_tokens),
                 timeout=self.timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = (getattr(response, "output_text", None) or "").strip()
+        raw = (response.choices[0].message.content or "").strip()
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
@@ -199,17 +201,19 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
 
     def _json_array_completion(self, prompt: str) -> Any:
         try:
-            response = self.client.responses.create(
+            response = self.client.chat.completions.create(
                 model=self.model_name,
-                instructions="Return ONLY the final JSON array. No markdown fences.",
-                input=prompt,
-                reasoning=cast(Any, {"effort": self.reasoning_effort}),
-                max_output_tokens=self.max_output_tokens,
+                messages=[
+                    {"role": "system", "content": "Return ONLY the final JSON array. No reasoning, prose, or markdown fences."},
+                    {"role": "user", "content": prompt},
+                ],
+                reasoning_effort=self.reasoning_effort,
+                max_tokens=self.max_output_tokens,
                 timeout=self.timeout_sec,
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = (getattr(response, "output_text", None) or "").strip()
+        raw = (response.choices[0].message.content or "").strip()
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
