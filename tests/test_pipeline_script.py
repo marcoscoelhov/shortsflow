@@ -4130,6 +4130,23 @@ def test_microdrama_prompt_instructs_implicit_share_trigger() -> None:
     assert "vou mandar isso para alguém" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
     assert "olha de novo" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
     assert "pergunta de comentário obrigatória" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+    assert "nunca com nome genérico de personagem seguido de ação neutra" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+    assert "use literalmente uma destas frases no fechamento" in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+    for literal in ("olha de novo", "da próxima vez que", "você vai lembrar", "repara", "manda isso", "mostra isso"):
+        assert literal in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
+
+
+def test_viral_intensity_repair_prompt_instructs_literal_share_trigger_phrases() -> None:
+    from app.providers.llm import OpenAICreativeProvider
+
+    import inspect
+
+    source = inspect.getsource(OpenAICreativeProvider.repair_script)
+    assert "viral_intensity_repair existir" in source
+    assert "olha de novo" in source
+    assert "da próxima vez que" in source
+    assert "você vai lembrar" in source
+    assert "nunca com nome de personagem seguido de ação neutra" in source
 
 
 def test_automatic_topic_payload_uses_cosmos_focus() -> None:

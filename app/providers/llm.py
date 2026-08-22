@@ -884,7 +884,7 @@ Regras obrigatórias:
 - a primeira palavra do hook deve ser, quando natural, um número, nome próprio ou verbo de ação
 - se o hook ou full_narration começar com "você sabia", "voce sabia", "já imaginou", "ja imaginou", "nesse vídeo" ou equivalente, reescreva para começar direto por contraste, consequência, conflito ou fato específico
 - aumente retenção sem inventar fatos: hook mais agressivo, loop aberto, escalada de curiosidade, payoff no ultimo terço e final memoravel
-- se Contexto da pauta JSON.viral_intensity_repair existir, trate reasons e metrics como critérios objetivos: corrija cada motivo, use contraste/conflito visual no hook e termine com uma frase concreta de reassistência ou compartilhamento, como “da próxima vez que...” ou “quando você vir...”
+- se Contexto da pauta JSON.viral_intensity_repair existir, trate reasons e metrics como critérios objetivos: corrija cada motivo, use contraste/conflito visual no hook e termine com uma frase concreta de reassistência ou compartilhamento. Para o compartilhamento, use literalmente uma destas frases: “olha de novo”, “da próxima vez que”, “você vai lembrar”, “repara”, “isso muda”, “manda isso”, “mostra isso”; para o hook, comece com uma palavra forte (ex.: “não”, “nunca”, “ninguém”, “segredo”, “esconde”, “rouba”, “desaparece”, “fogo”, “luz”, “sombra”, “rosto”), nunca com nome de personagem seguido de ação neutra
 - cada beat precisa justificar o próximo; remova frase neutra, didática demais, enciclopédica ou decorativa
 - cada beat deve ficar mais estranho, visual ou impactante que o anterior
 - fatos acima de viralidade: remova números, nacionalidades, planos, materiais, causas técnicas ou soluções de engenharia que não estejam bem sustentados pelo contexto
