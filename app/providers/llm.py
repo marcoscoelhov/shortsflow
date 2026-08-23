@@ -784,45 +784,25 @@ Não use markdown nem texto fora do objeto JSON.
         return "8 a 12 frases independentes em escalada, mantendo o eixo da história"
 
     def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
-        target_duration_sec = self._target_duration_sec(topic_plan)
-        duration_rules = self._duration_rules(target_duration_sec)
-        prompt = f"""
-Crie um lote de {draft_count} roteiros completos e distintos de YouTube Shorts pt-BR de ficção.
-Tema e contexto JSON: {json.dumps(topic_plan, ensure_ascii=False)}
+        """Gera cada track em uma chamada individual (como o mock).
 
-Gere exatamente {draft_count} roteiros independentes (tracks), cada um com história própria,
-eixo narrativo claro, personagens, reviravolta preparada e CTA no final. Nenhum roteiro pode ser
-uma variação cosmética de outro: varie conflito, motivação, progressão, payoff e desfecho.
-{duration_rules['words_text']}
-
-Responda JSON estrito {{"tracks": [...]}} com exatamente {draft_count} itens, cada um com os mesmos campos
-de roteiro: title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_duration_sec,
-key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, story_arc, visual_opening,
-qa_metrics, prompt_version.
-{duration_rules['beat_hint']}
-- Duração: {duration_rules['range_text']}
-- Cada roteiro deve satisfazer o contrato viral do tema: hook em até 8 palavras com choque, loop aberto,
-  beats em escalada, payoff no último terço com palavra de choque, fechamento que provoca replay e CTA de comentário.
-- full_narration deve concatenar hook + loop + todos os body_beats + payoff + ending + cta, sem perder blocos.
-- Sem markdown; apenas o objeto JSON.
-"""
-        payload = self._json_completion(
-            prompt,
-            max_tokens=int(getattr(get_settings(), "llm_topic_batch_max_tokens", 24000) or 24000),
-        )
-        if not isinstance(payload, dict):
-            raise ProviderFailure(self.failure_provider_name, "script batch generator returned non-object json")
-        tracks = payload.get("tracks")
-        if not isinstance(tracks, list) or len(tracks) != draft_count:
-            return {"tracks": tracks if isinstance(tracks, list) else []}
-        normalized = []
-        for track in tracks:
-            if not isinstance(track, dict):
-                normalized.append(track)
-                continue
-            track = {**track, "qa_metrics": {**track.get("qa_metrics", {}), "source_provider": self.provider_name}}
-            normalized.append(track)
-        return {"tracks": normalized}
+        Um único JSON com N roteiros completos estoura o max_tokens do provider
+        real (default 12000) e o modelo não mantém JSON válido em resposta longa
+        (observado com gpt-5.6-luna: saída truncada, sintaxe quebrada e contagem
+        de tracks divergente). Chamadas individuais reutilizam o caminho robusto
+        e validado de generate_script para cada variante.
+        """
+        tracks = []
+        for index in range(draft_count):
+            variant_plan = dict(topic_plan)
+            variant_plan["angle"] = f"{topic_plan.get('angle')} variante {index + 1}"
+            track = self.generate_script(variant_plan)
+            title = track.get("title") or ""
+            track = {**track, "title": f"{title} (variante {index + 1})"}
+            track["_track_index"] = index
+            track["qa_metrics"] = {**track.get("qa_metrics", {}), "source_provider": self.provider_name}
+            tracks.append(track)
+        return {"tracks": tracks}
 
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         target_duration_sec = self._target_duration_sec(topic_plan)
