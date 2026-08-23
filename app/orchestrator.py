@@ -1064,7 +1064,7 @@ class JobOrchestrator:
         normalized_theme = str(request.seed_theme or "").strip()
         if len(normalized_theme) < 3:
             raise FatalStepError("seed_theme too short after normalization")
-        if request.target_duration_sec < 35 or request.target_duration_sec > 55:
+        if request.target_duration_sec < 35 or request.target_duration_sec > 150:
             raise FatalStepError(f"target_duration_sec outside supported range: {request.target_duration_sec}")
         render_preflight: dict[str, object] = {"ready": True, "backend": "remotion"}
         if not self.settings.use_mock_providers:

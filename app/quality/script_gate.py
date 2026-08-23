@@ -337,16 +337,26 @@ class ScriptQualityGate:
         avg_sentence = avg_words_per_sentence(full_narration)
         max_sentence = max_words_single_sentence(full_narration)
         words_per_second = round(word_count / estimated_duration, 2) if estimated_duration else 0.0
-        target_min = max(34.5, target_duration_sec - 10)
-        target_max = min(56.5, target_duration_sec + 10)
+        is_long_form = target_duration_sec > 55
+        if is_long_form:
+            target_min = max(35.0, target_duration_sec - 20)
+            target_max = min(175.0, target_duration_sec + 20)
+            min_duration, max_duration = 35, 175
+        else:
+            target_min = max(34.5, target_duration_sec - 10)
+            target_max = min(56.5, target_duration_sec + 10)
+            min_duration, max_duration = 35, 55
         natural_min_wpm = 135
         natural_max_wpm = 155
         natural_min_words = max(105, math.ceil(target_duration_sec * natural_min_wpm / 60))
-        natural_max_words = min(130, math.floor(min(55, target_duration_sec + 10) * natural_max_wpm / 60))
+        if is_long_form:
+            natural_max_words = min(500, math.floor(min(max_duration, target_duration_sec + 10) * natural_max_wpm / 60))
+        else:
+            natural_max_words = min(130, math.floor(min(55, target_duration_sec + 10) * natural_max_wpm / 60))
         natural_duration_at_fast_pace = round(word_count / (natural_max_wpm / 60), 2) if word_count else 0.0
         natural_duration_at_slow_pace = round(word_count / (natural_min_wpm / 60), 2) if word_count else 0.0
 
-        if not 35 <= estimated_duration <= 55:
+        if not min_duration <= estimated_duration <= max_duration:
             reasons.append("estimated_duration_outside_absolute_range")
         if not target_min <= estimated_duration <= target_max:
             reasons.append("estimated_duration_outside_target_window")
@@ -391,6 +401,7 @@ class ScriptQualityGate:
             "max_words_single_sentence": max_sentence,
             "words_per_second": words_per_second,
             "target_duration_sec": target_duration_sec,
+            "long_form": is_long_form,
             "natural_min_wpm": natural_min_wpm,
             "natural_max_wpm": natural_max_wpm,
             "natural_min_words": natural_min_words,
@@ -439,6 +450,8 @@ class ScriptQualityGate:
         retention_map_entries = self._retention_map_entries(retention_map)
         story_arc = script.get("story_arc") if isinstance(script.get("story_arc"), dict) else {}
         ungrounded_keys: list[str] = []
+        estimated_sec = float(script.get("estimated_duration_sec") or 0)
+        long_form = estimated_sec > 55 or len(word_tokens(full_narration)) > 200
         for key in RETENTION_MAP_REQUIRED_KEYS & set(retention_map_entries):
             texts = retention_map_entries[key]
             if any(self._normalize(text) not in full_narration for text in texts if text):
@@ -449,11 +462,16 @@ class ScriptQualityGate:
             if str(story_arc.get(key) or "").strip()
             and self._normalize_story_excerpt(str(story_arc.get(key))) not in normalized_story_narration
         ]
+        if long_form:
+            body_beat_count_valid = 6 <= len(body_beats) <= 14
+        else:
+            body_beat_count_valid = 3 <= len(body_beats) <= 5
         return {
             "hook_first_word": first_word,
             "hook_first_word_weak": first_word in WEAK_HOOK_FIRST_WORDS,
             "body_beat_count": len(body_beats),
-            "body_beat_count_valid": 3 <= len(body_beats) <= 5,
+            "body_beat_count_valid": body_beat_count_valid,
+            "long_form": long_form,
             "retention_map_complete": RETENTION_MAP_REQUIRED_KEYS.issubset(set(retention_map_entries))
             and all(retention_map_entries.get(key) for key in RETENTION_MAP_REQUIRED_KEYS),
             "retention_map_ungrounded_keys": sorted(ungrounded_keys),

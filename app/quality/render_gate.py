@@ -89,7 +89,14 @@ class RenderGate:
             reasons.append("unexpected_audio_sample_rate")
         if abs(duration_ms - int(expected_duration_ms)) > 1200:
             reasons.append("duration_drift_too_high")
-        if not 35_000 <= duration_ms <= 55_000:
+        expected_sec = int(expected_duration_ms) / 1000
+        if expected_sec > 55:
+            min_duration_ms = 35_000
+            max_duration_ms = 175_000
+        else:
+            min_duration_ms = 35_000
+            max_duration_ms = 55_000
+        if not min_duration_ms <= duration_ms <= max_duration_ms:
             reasons.append("duration_outside_publish_range")
         if size < 250_000:
             reasons.append("render_file_too_small")

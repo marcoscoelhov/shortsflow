@@ -4459,3 +4459,134 @@ def test_script_gate_viral_perfection_reasons_are_warnings_not_blocking() -> Non
     # repeated_clause is a real textual defect (the actual fix lives in the
     # deterministic dedupe in postprocess), so it must remain blocking here.
     assert "repeated_clause" not in SOFT_GATE_REASONS
+
+
+def test_mock_generate_script_batch_returns_exactly_draft_count_tracks() -> None:
+    provider = MockCreativeProvider()
+    plan = {
+        "canonical_topic": "microdrama de suspense",
+        "angle": "segredo de família com reviravolta",
+        "title_candidates": ["O segredo que mudou a família"],
+        "cta_style": "soft",
+        "retention_map": build_retention_map(120),
+        "fact_pack": {"status": "disabled", "facts": []},
+    }
+    batch = provider.generate_script_batch(plan, 10)
+    tracks = batch["tracks"]
+    assert len(tracks) == 10
+    assert all(isinstance(track, dict) and str(track.get("full_narration") or "").strip() for track in tracks)
+    assert all(int(track["_track_index"]) == index for index, track in enumerate(tracks))
+
+
+def test_mock_judge_script_draft_selection_returns_descending_ranking() -> None:
+    provider = MockCreativeProvider()
+    result = provider.judge_quality_gate(
+        "script_draft_selection",
+        {"tracks": [{"title": f"track-{i}"} for i in range(10)]},
+    )
+    assert result["gate_kind"] == "script_draft_selection"
+    assert 0 <= result["selected_index"] <= 9
+    assert result["selected_reason"]
+    assert len(result["ranking"]) == 10
+    assert [entry["index"] for entry in result["ranking"]] == list(range(10))
+    scores = [entry["script_score"] for entry in result["ranking"]]
+    assert all(left >= right for left, right in zip(scores, scores[1:], strict=False))
+    assert result["ranking"][0]["index"] == result["selected_index"]
+
+
+def test_script_pipeline_validate_script_draft_selection_accepts_valid_judge() -> None:
+    pipeline = orchestrator.script_pipeline
+    result = {
+        "selected_index": 3,
+        "selected_reason": "História com eixo claro e reviravolta preparada.",
+        "ranking": [
+            {"index": 3, "script_score": 0.91, "reason": "Melhor arco narrativo."},
+            {"index": 1, "script_score": 0.88, "reason": "Bom conflito."},
+            {"index": 0, "script_score": 0.85, "reason": "Hook forte."},
+            {"index": 2, "script_score": 0.82, "reason": "CTA claro."},
+            {"index": 4, "script_score": 0.8, "reason": "Replay possível."},
+            {"index": 5, "script_score": 0.78, "reason": "Personagem com objetivo."},
+            {"index": 6, "script_score": 0.74, "reason": "Tensão crescente."},
+            {"index": 7, "script_score": 0.7, "reason": "Desfecho aceitável."},
+            {"index": 8, "script_score": 0.66, "reason": "Eixo presente."},
+            {"index": 9, "script_score": 0.6, "reason": "Reviravolta simples."},
+        ],
+        "confidence": 0.9,
+        "provider": "grok",
+        "model": "grok-4.5",
+        "judge_provider_role": "gate_judge",
+    }
+    selection, failure = pipeline._validate_script_draft_selection(result, 10)
+    assert failure is None
+    assert selection["selected_index"] == 3
+    assert selection["ranking"][0]["script_score"] == 0.91
+
+
+def test_script_pipeline_validate_script_draft_selection_rejects_bad_ranking() -> None:
+    pipeline = orchestrator.script_pipeline
+    result = {
+        "selected_index": 1,
+        "selected_reason": "ok",
+        "ranking": [
+            {"index": 1, "script_score": 0.9, "reason": "melhor"},
+            {"index": 0, "script_score": 0.95, "reason": "deveria vir antes"},
+            {"index": 2, "script_score": 0.8, "reason": "ok"},
+            {"index": 3, "script_score": 0.7, "reason": "ok"},
+            {"index": 4, "script_score": 0.6, "reason": "ok"},
+            {"index": 5, "script_score": 0.5, "reason": "ok"},
+            {"index": 6, "script_score": 0.4, "reason": "ok"},
+            {"index": 7, "script_score": 0.3, "reason": "ok"},
+            {"index": 8, "script_score": 0.2, "reason": "ok"},
+            {"index": 9, "script_score": 0.1, "reason": "ok"},
+        ],
+        "confidence": 0.8,
+    }
+    selection, failure = pipeline._validate_script_draft_selection(result, 10)
+    assert selection is None
+    assert failure == "ranking_not_descending"
+
+
+def test_script_gate_accepts_long_form_microdrama_120s() -> None:
+    words = [f"palavra{i}" for i in range(290)]
+    narration = " ".join(words) + "."
+    body_beats = [f"Beat com pista e consequência {i}." for i in range(9)]
+    script = {
+        "title": "O segredo escondido no paletó",
+        "hook": "Ninguém sabia o nome da carta.",
+        "loop": "Mas por que a carta foi escondida?",
+        "body_beats": body_beats,
+        "payoff": "O segredo era a identidade do sócio.",
+        "ending": "Olha de novo quem abriu a porta.",
+        "cta": "Você exporia o impostor ou ficaria em silêncio?",
+        "full_narration": narration,
+        "estimated_duration_sec": 120.0,
+        "language": "pt-BR",
+        "key_facts": [],
+        "source_fact_ids": [],
+        "claim_trace": [],
+        "retention_map": {
+            "visual_hook": {"text": "Ninguém sabia o nome da carta."},
+            "proof_or_tension": {"text": "Mas por que a carta foi escondida?"},
+            "escalation": {"text": f"palavra{20}"},
+            "turn_or_payoff": {"text": "O segredo era a identidade do sócio."},
+            "loop_close": {"text": "Olha de novo quem abriu a porta."},
+        },
+        "qa_metrics": {
+            "hook_score": 0.92,
+            "clarity_score": 0.9,
+            "information_density_score": 0.85,
+            "repetition_score": 0.2,
+            "ending_strength_score": 0.88,
+        },
+        "story_arc": {
+            "setup": "Ninguém sabia o nome da carta.",
+            "tension": "Mas por que a carta foi escondida?",
+            "turn": "O segredo era a identidade do sócio.",
+            "consequence": "Olha de novo quem abriu a porta.",
+        },
+    }
+    result = ScriptQualityGate().validate(script, target_duration_sec=120)
+    assert "estimated_duration_outside_absolute_range" not in result.reasons
+    assert "estimated_duration_outside_target_window" not in result.reasons
+    assert "body_beat_count_invalid" not in result.reasons
+    assert result.metrics["long_form"] is True

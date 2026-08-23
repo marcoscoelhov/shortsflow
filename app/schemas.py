@@ -88,8 +88,8 @@ class TopicRequestCreate(BaseModel):
     @field_validator("target_duration_sec")
     @classmethod
     def validate_duration(cls, value: int) -> int:
-        if not 35 <= value <= 55:
-            raise ValueError("target_duration_sec must be between 35 and 55")
+        if not 35 <= value <= 150:
+            raise ValueError("target_duration_sec must be between 35 and 150")
         return value
 
     @field_validator("niche_id")

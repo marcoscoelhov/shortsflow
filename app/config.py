@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     language: str = "pt-BR"
     target_duration_sec: int = 45
     scene_target_count: int = 7
+    microdrama_script_track_count: int = 10
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
@@ -282,8 +283,8 @@ class Settings(BaseSettings):
     @field_validator("target_duration_sec")
     @classmethod
     def validate_duration(cls, value: int) -> int:
-        if not 35 <= value <= 55:
-            raise ValueError("target_duration_sec must be between 35 and 55")
+        if not 35 <= value <= 150:
+            raise ValueError("target_duration_sec must be between 35 and 150")
         return value
 
     @field_validator("sqlite_busy_timeout_ms")

@@ -1636,7 +1636,7 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     assert 'name="niche_id" value="curiosidades"' in page.text
     assert 'name="seed_theme" value=""' in page.text
     assert "Vazio = pesquisar tendências reais" in page.text
-    assert 'name="target_duration_sec" type="number" min="35" max="55" value="45"' in page.text
+    assert 'name="target_duration_sec" type="number" min="35" max="150" value="45"' in page.text
 
     response = client.post("/jobs", data={"seed_theme": "", "input_mode": "theme"}, follow_redirects=False)
     assert response.status_code == 303

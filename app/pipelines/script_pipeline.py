@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 from sqlalchemy import delete, select
@@ -117,9 +118,18 @@ class ScriptPipeline(BasePipeline):
             self.storage.persist_json(job.job_id, "structured_viral_contract.json", self._serialize_for_json(structured_contract))
             structured_contract_file = "structured_viral_contract.json"
         generation_started = time.monotonic()
+        track_metrics: dict[str, Any] = {}
         if ready_script is not None:
             script = ready_script.script
             generation_elapsed_ms = 0.0
+        elif getattr(request, "niche_id", None) == "fiction_microdrama":
+            script, track_metrics = self._generate_script_with_track_selection(
+                job_id=job.job_id,
+                plan_dict=plan_dict,
+                attempt=attempt,
+            )
+            generation_elapsed_ms = round((time.monotonic() - generation_started) * 1000, 1)
+            stage_timings_ms["track_selection_ms"] = generation_elapsed_ms
         else:
             try:
                 script = self.providers.creative.generate_script(plan_dict)
@@ -144,6 +154,8 @@ class ScriptPipeline(BasePipeline):
         validation_started = time.monotonic()
         try:
             script, metrics = self._validate_or_repair_script(script, plan_dict, job.target_duration_sec, resolved_cta_style, job.job_id)
+            if track_metrics:
+                metrics = {**metrics, "script_track_selection": track_metrics}
             gate_decisions: dict[str, Any] = {}
             if structured_contract_file is not None:
                 gate_decisions["script_quality"] = {
@@ -343,7 +355,170 @@ class ScriptPipeline(BasePipeline):
             artifacts.append("ready_script_input.json")
         if structured_contract_file is not None:
             artifacts.append(structured_contract_file)
+        if track_metrics:
+            artifacts.append("script_tracks.json")
         return artifacts
+
+    def _generate_script_with_track_selection(
+        self,
+        *,
+        job_id: str,
+        plan_dict: dict[str, Any],
+        attempt: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Gera 10 tracks de roteiro (baratas, texto) e seleciona a melhor via judge,
+        antes de qualquer gasto de mídia (cenas, assets, TTS, render)."""
+        draft_count = int(getattr(self.settings, "microdrama_script_track_count", 10) or 10)
+        batch = self.providers.creative.generate_script_batch(plan_dict, draft_count)
+        tracks = batch.get("tracks") if isinstance(batch, dict) else None
+        if not isinstance(tracks, list) or len(tracks) != draft_count:
+            raise RecoverableStepError("script track batch must contain exactly 10 tracks before media generation")
+        summaries: list[dict[str, Any]] = []
+        valid_tracks: list[dict[str, Any]] = []
+        seen_titles: set[str] = set()
+        for index, track in enumerate(tracks):
+            if not isinstance(track, dict) or not str(track.get("full_narration") or "").strip():
+                summaries.append({"index": index, "valid": False, "rejection_reason": "script_track_schema_invalid"})
+                continue
+            title = str(track.get("title") or "").strip().casefold()
+            if title in seen_titles:
+                summaries.append({"index": index, "valid": False, "rejection_reason": "script_track_not_distinct"})
+                continue
+            seen_titles.add(title)
+            summaries.append(
+                {
+                    "index": index,
+                    "title": track.get("title"),
+                    "hook": track.get("hook"),
+                    "estimated_duration_sec": track.get("estimated_duration_sec"),
+                    "valid": True,
+                    "rejection_reason": None,
+                }
+            )
+            valid_tracks.append(track)
+        if len(valid_tracks) != draft_count:
+            audit = {
+                "draft_count": draft_count,
+                "drafts": summaries,
+                "selected_index": None,
+                "failure_reason": "invalid_or_repeating_script_tracks",
+            }
+            self.storage.persist_json(job_id, "script_tracks.json", self._serialize_for_json(audit))
+            raise RecoverableStepError("script track batch contains an invalid or repeating track before judge/media")
+        try:
+            judge_result = self.providers.creative.select_script_draft(valid_tracks)
+        except Exception as exc:  # noqa: BLE001
+            audit = {
+                "draft_count": draft_count,
+                "drafts": summaries,
+                "selected_index": None,
+                "failure_reason": "independent_script_track_judge_failed",
+                "judge_error": f"{type(exc).__name__}: {exc}",
+            }
+            self.storage.persist_json(job_id, "script_tracks.json", self._serialize_for_json(audit))
+            raise RecoverableStepError("independent script track judge failed before media generation") from exc
+        selection, failure_reason = self._validate_script_draft_selection(judge_result, draft_count)
+        if selection is None:
+            audit = {
+                "draft_count": draft_count,
+                "drafts": summaries,
+                "selected_index": None,
+                "failure_reason": failure_reason,
+                "judge_result": judge_result,
+            }
+            self.storage.persist_json(job_id, "script_tracks.json", self._serialize_for_json(audit))
+            raise RecoverableStepError("script track judge selection malformed before media generation")
+        selected_index = selection["selected_index"]
+        selected_track = valid_tracks[selected_index]
+        selected_track["qa_metrics"] = {
+            **selected_track.get("qa_metrics", {}),
+            "script_track_selected_index": selected_index,
+            "script_track_selected_title": selected_track.get("title"),
+            "script_track_selected_judge_score": selection["ranking"][0]["script_score"],
+            "script_track_selected_reason": selection["selected_reason"],
+            "script_track_judge_confidence": selection["confidence"],
+            "script_track_judge_provider": selection["provider"],
+            "script_track_judge_model": selection["model"],
+            "script_track_judge_provider_role": selection["judge_provider_role"],
+        }
+        audit = {
+            "draft_count": draft_count,
+            "drafts": summaries,
+            "selected_index": selected_index,
+            "selected_title": selected_track.get("title"),
+            "selected_reason": selection["selected_reason"],
+            "selected_judge_score": selection["ranking"][0]["script_score"],
+            "ranking": selection["ranking"],
+            "confidence": selection["confidence"],
+            "judge_provider": selection["provider"],
+            "judge_model": selection["model"],
+            "judge_provider_role": selection["judge_provider_role"],
+        }
+        self.storage.persist_json(job_id, "script_tracks.json", self._serialize_for_json(audit))
+        metrics = {
+            "script_track_selected_index": selected_index,
+            "script_track_draft_count": draft_count,
+            "script_track_selected_judge_score": audit["selected_judge_score"],
+            "script_track_selected_reason": selection["selected_reason"],
+            "script_track_judge_confidence": selection["confidence"],
+            "script_track_judge_provider": selection["provider"],
+            "script_track_judge_model": selection["model"],
+        }
+        return selected_track, metrics
+
+    def _validate_script_draft_selection(self, result: Any, draft_count: int) -> tuple[dict[str, Any] | None, str | None]:
+        if not isinstance(result, dict):
+            return None, "judge_result_not_object"
+        selected_index = result.get("selected_index")
+        if isinstance(selected_index, bool) or not isinstance(selected_index, int) or not 0 <= selected_index < draft_count:
+            return None, "selected_index_invalid"
+        selected_reason = str(result.get("selected_reason") or "").strip()
+        if not selected_reason:
+            return None, "selected_reason_missing"
+        ranking = result.get("ranking")
+        if not isinstance(ranking, list) or len(ranking) != draft_count:
+            return None, "ranking_count_invalid"
+        normalized_ranking: list[dict[str, Any]] = []
+        indices: list[int] = []
+        for entry in ranking:
+            if not isinstance(entry, dict):
+                return None, "ranking_entry_invalid"
+            index = entry.get("index")
+            if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < draft_count:
+                return None, "ranking_indices_invalid"
+            score = entry.get("script_score")
+            if isinstance(score, bool) or not isinstance(score, (int, float)):
+                return None, "ranking_score_invalid"
+            score = float(score)
+            if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+                return None, "ranking_score_invalid"
+            reason = str(entry.get("reason") or "").strip()
+            if not reason:
+                return None, "ranking_reason_missing"
+            indices.append(index)
+            normalized_ranking.append({"index": index, "script_score": round(score, 4), "reason": reason})
+        if set(indices) != set(range(draft_count)) or len(indices) != len(set(indices)):
+            return None, "ranking_indices_invalid"
+        scores = [entry["script_score"] for entry in normalized_ranking]
+        if any(left < right for left, right in zip(scores, scores[1:], strict=False)):
+            return None, "ranking_not_descending"
+        if normalized_ranking[0]["index"] != selected_index:
+            return None, "selected_index_ranking_mismatch"
+        confidence = result.get("confidence")
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+            return None, "judge_confidence_invalid"
+        confidence = float(confidence)
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            return None, "judge_confidence_invalid"
+        return {
+            "selected_index": selected_index,
+            "selected_reason": selected_reason,
+            "ranking": normalized_ranking,
+            "confidence": round(confidence, 4),
+            "provider": str(result.get("provider") or "").strip(),
+            "model": str(result.get("model") or "").strip(),
+            "judge_provider_role": str(result.get("judge_provider_role") or "").strip(),
+        }, None
 
     def _validate_viral_intensity(self, script: dict[str, Any], *, ready_script_mode: bool) -> dict[str, Any]:
         result = self.viral_intensity_gate.validate(script)

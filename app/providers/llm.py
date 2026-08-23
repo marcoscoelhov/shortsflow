@@ -65,6 +65,9 @@ class LLMProvider(Protocol):
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         ...
 
+    def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
+        ...
+
     def generate_visual_contract(self, script: dict[str, Any]) -> dict[str, Any]:
         ...
 
@@ -93,7 +96,7 @@ class MockCreativeProvider:
         retention_map = topic_plan.get("retention_map")
         configured_target = retention_map.get("target_duration_sec") if isinstance(retention_map, dict) else None
         target = configured_target or getattr(self.settings, "target_duration_sec", 45)
-        return max(35, min(55, int(target)))
+        return max(35, min(150, int(target)))
 
     def _concise_subject(self, subject: str) -> str:
         if subject.strip().endswith("?"):
@@ -102,6 +105,25 @@ class MockCreativeProvider:
         return " ".join(words) or "o tema"
 
     def _duration_profile(self, angle: str, target_duration_sec: int) -> tuple[bool, str, list[str], str, str]:
+        if target_duration_sec > 55:
+            angle_label = " ".join(word_tokens(angle)[:3]) or "outro ângulo"
+            return (
+                True,
+                "Se parece tão conhecido, por que o primeiro detalhe muda tudo? "
+                "A resposta só aparece quando a imagem final devolve sentido à pista do começo.",
+                [
+                    "O detalhe surge como pista discreta antes da resposta aparecer na tela.",
+                    f"O recorte em {angle_label} transforma a pista em tensão sem antecipar a resposta.",
+                    "O entorno muda a cena e revela uma consequência maior que parecia.",
+                    "A comparação confirma o mecanismo e transforma a dúvida em imagem concreta.",
+                    "A última evidência aproxima a virada e preserva o detalhe decisivo.",
+                    "Uma nova pista mostra que a primeira leitura era incompleta.",
+                    "O mesmo detalhe reaparece com peso diferente quando o contexto muda.",
+                    "O conflito entre o que parecia e o que é cresce até o limite.",
+                ],
+                "A virada final chega. A pista rouba a cena e fica difícil de ignorar.",
+                "Quando você rever, observe: a primeira cena já entregava tudo em tempo real.",
+            )
         if target_duration_sec >= 45:
             angle_label = " ".join(word_tokens(angle)[:3]) or "outro ângulo"
             return (
@@ -130,6 +152,17 @@ class MockCreativeProvider:
             "A virada final: a pista rouba a cena diante do olho, parece fogo e fica difícil de ignorar.",
             "Quando você rever o começo, lembra: a primeira cena já entregava tudo em tempo real.",
         )
+
+    def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
+        tracks = []
+        for index in range(draft_count):
+            variant_plan = dict(topic_plan)
+            variant_plan["angle"] = f"{topic_plan.get('angle')} variante {index + 1}"
+            track = self.generate_script(variant_plan)
+            track["title"] = f"{track['title']} (variante {index + 1})"
+            track["_track_index"] = index
+            tracks.append(track)
+        return {"tracks": tracks}
 
     def plan_topic(
         self,
@@ -256,7 +289,7 @@ class MockCreativeProvider:
         narration_parts = [hook, loop, *body, payoff, ending, cta]
         full_narration = " ".join(part for part in narration_parts if part)
         token_count = len(tokenize(full_narration))
-        estimated_duration_sec = round(max(35.0, min(55.0, len(word_tokens(full_narration)) / 2.55)), 2)
+        estimated_duration_sec = round(min(175.0, max(35.0, len(word_tokens(full_narration)) / 2.55)), 2)
         retention_map = topic_plan.get("retention_map") or build_retention_map(round(estimated_duration_sec))
         visual_opening = topic_plan.get("visual_opening") or build_visual_opening_brief(topic_plan)
         qa_metrics = {
@@ -420,6 +453,26 @@ class MockCreativeProvider:
                 "model": "mock",
                 "gate_kind": gate_kind,
             }
+        if gate_kind == "script_draft_selection":
+            tracks = payload.get("tracks") if isinstance(payload.get("tracks"), list) else []
+            count = len(tracks) or 10
+            ranking = [
+                {
+                    "index": index,
+                    "script_score": round(max(0.55, 0.95 - index * 0.03), 2),
+                    "reason": f"Track {index} tem narrativa com eixo, reviravolta e CTA claros.",
+                }
+                for index in range(count)
+            ]
+            return {
+                "selected_index": 0,
+                "selected_reason": "É a track com história mais compreensível e reviravolta mais forte.",
+                "ranking": ranking,
+                "confidence": 0.9,
+                "provider": "mock",
+                "model": "mock",
+                "gate_kind": gate_kind,
+            }
         local_reasons = [str(item) for item in (payload.get("local_reasons") or [])]
         editorial_pass = gate_kind == "editorial" and (
             not local_reasons or local_reasons == ["weak_ending"] or "weak_ending" in local_reasons
@@ -436,7 +489,11 @@ class MockCreativeProvider:
     def plan_scenes(self, script: dict[str, Any], target_scene_count: int) -> list[dict[str, Any]]:
         words = word_tokens(script["full_narration"])
         total_words = len(words)
-        scene_count = max(5, min(8, target_scene_count))
+        estimated_sec = float(script.get("estimated_duration_sec") or 45)
+        if estimated_sec > 55:
+            scene_count = max(10, min(16, target_scene_count))
+        else:
+            scene_count = max(5, min(8, target_scene_count))
         chunk_size = math.ceil(total_words / scene_count)
         subject = (
             script.get("canonical_topic")
@@ -687,7 +744,89 @@ Não use markdown nem texto fora do objeto JSON.
             ),
         }
 
+    def _target_duration_sec(self, topic_plan: dict[str, Any]) -> int:
+        retention_map = topic_plan.get("retention_map")
+        configured_target = retention_map.get("target_duration_sec") if isinstance(retention_map, dict) else None
+        try:
+            configured = getattr(self, "settings", None)
+            if configured is None:
+                configured = get_settings()
+            target = configured_target or getattr(configured, "target_duration_sec", 45)
+        except Exception:  # noqa: BLE001
+            target = configured_target or 45
+        return max(35, min(150, int(target)))
+
+    def _duration_rules(self, target_duration_sec: int) -> dict[str, str]:
+        if target_duration_sec > 55:
+            return {
+                "range_text": f"{target_duration_sec - 20} a {target_duration_sec + 20} segundos (forma longa: história completa com arco, reviravolta e CTA)",
+                "words_text": f"para target_duration_sec={target_duration_sec}, gere {int(target_duration_sec * 2.4)} a {int(target_duration_sec * 2.7)} palavras no total; nunca abaixo de {int(target_duration_sec * 2.2)} palavras",
+                "beat_hint": "para forma longa, amplie para 6 a 9 beats independentes em escalada, sem compactar",
+            }
+        return {
+            "range_text": "35 a 55 segundos",
+            "words_text": "para target_duration_sec=45, gere 105 a 130 palavras no total; para outros alvos, mire cerca de 150 a 172 WPM naturais, nunca abaixo de 115 palavras",
+            "beat_hint": "",
+        }
+
+    def _duration_rules_repair(self, duration_rules: dict[str, str]) -> str:
+        if duration_rules["range_text"].startswith("35 a 55"):
+            return "mantenha duração estimada entre 35 e 55 segundos"
+        return (
+            "mantenha duração estimada na forma longa: "
+            "história completa com arco, reviravolta e CTA no intervalo "
+            f"{duration_rules['range_text'].split(' (')[0]}"
+        )
+
+    def _beat_count_rule(self, duration_rules: dict[str, str]) -> str:
+        if duration_rules["range_text"].startswith("35 a 55"):
+            return "exatamente 3 a 5 frases independentes"
+        return "8 a 12 frases independentes em escalada, mantendo o eixo da história"
+
+    def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
+        target_duration_sec = self._target_duration_sec(topic_plan)
+        duration_rules = self._duration_rules(target_duration_sec)
+        prompt = f"""
+Crie um lote de {draft_count} roteiros completos e distintos de YouTube Shorts pt-BR de ficção.
+Tema e contexto JSON: {json.dumps(topic_plan, ensure_ascii=False)}
+
+Gere exatamente {draft_count} roteiros independentes (tracks), cada um com história própria,
+eixo narrativo claro, personagens, reviravolta preparada e CTA no final. Nenhum roteiro pode ser
+uma variação cosmética de outro: varie conflito, motivação, progressão, payoff e desfecho.
+{duration_rules['words_text']}
+
+Responda JSON estrito {{"tracks": [...]}} com exatamente {draft_count} itens, cada um com os mesmos campos
+de roteiro: title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_duration_sec,
+key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, story_arc, visual_opening,
+qa_metrics, prompt_version.
+{duration_rules['beat_hint']}
+- Duração: {duration_rules['range_text']}
+- Cada roteiro deve satisfazer o contrato viral do tema: hook em até 8 palavras com choque, loop aberto,
+  beats em escalada, payoff no último terço com palavra de choque, fechamento que provoca replay e CTA de comentário.
+- full_narration deve concatenar hook + loop + todos os body_beats + payoff + ending + cta, sem perder blocos.
+- Sem markdown; apenas o objeto JSON.
+"""
+        payload = self._json_completion(
+            prompt,
+            max_tokens=int(getattr(get_settings(), "llm_topic_batch_max_tokens", 24000) or 24000),
+        )
+        if not isinstance(payload, dict):
+            raise ProviderFailure(self.failure_provider_name, "script batch generator returned non-object json")
+        tracks = payload.get("tracks")
+        if not isinstance(tracks, list) or len(tracks) != draft_count:
+            return {"tracks": tracks if isinstance(tracks, list) else []}
+        normalized = []
+        for track in tracks:
+            if not isinstance(track, dict):
+                normalized.append(track)
+                continue
+            track = {**track, "qa_metrics": {**track.get("qa_metrics", {}), "source_provider": self.provider_name}}
+            normalized.append(track)
+        return {"tracks": normalized}
+
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
+        target_duration_sec = self._target_duration_sec(topic_plan)
+        duration_rules = self._duration_rules(target_duration_sec)
         prompt = f"""
 Escreva um roteiro viral de curiosidades em pt-BR.
 Entrada JSON: {json.dumps(topic_plan, ensure_ascii=False)}
@@ -699,7 +838,7 @@ Mapeamento editorial obrigatório:
 - title equivale ao Título
 - hook equivale ao Hook de 0 a 2 segundos
 - loop equivale ao Loop/curiosity gap explícito; uma frase curta que abre uma pergunta mental sem entregar a resposta
-- body_beats equivale aos Beats em escalada; deve conter exatamente 3 a 5 frases independentes, nunca uma frase única compactada
+- body_beats equivale aos Beats em escalada; deve conter exatamente 3 a 5 frases independentes ({duration_rules['beat_hint']}), nunca uma frase única compactada
 - payoff equivale à virada no último terço: a explicação/recontextualização que paga a promessa sem virar aula
 - full_narration deve ser a concatenação fiel de hook + loop + todos os body_beats + payoff + ending, sem perder nenhum bloco
 - ending equivale ao Fechamento; ele deve recontextualizar o hook e provocar replay mental
@@ -708,7 +847,8 @@ Mapeamento editorial obrigatório:
 - se Entrada JSON.structured_viral_contract existir, trate esse contrato como obrigatório: o JSON interno deve satisfazer Título, Hook, Loop, Beats, Payoff, Fechamento e Hashtags conforme os internal_target descritos no contrato
 
 Regras:
-- 35 a 55 segundos
+- {duration_rules['range_text']}
+- {duration_rules['words_text']}
 - meta editorial: retenção máxima, replay, compartilhamento orgânico e espanto genuíno, sem clickbait falso
 - prompt_version deve ser "{EDITORIAL_PROMPT_VERSION}" salvo se a Entrada JSON trouxer versão editorial mais nova
 - se Entrada JSON.editorial_mode for "viral_curiosidades", priorize simplicidade viral, clareza e wording seguro; não force explicação mecanística específica quando o fact_pack não sustentar isso
@@ -720,7 +860,7 @@ Regras:
 - use golden_sample_brief como régua editorial: aproxime-se dos padrões bons e evite os padrões ruins
 - primeira frase com no maximo 12 palavras
 - media por frase <= 14
-- para target_duration_sec=45, gere 105 a 130 palavras no total; para outros alvos, mire cerca de 150 a 172 WPM naturais, nunca abaixo de 115 palavras
+- {duration_rules['words_text']}
 - a narração deve soar natural em pt-BR, sem correr e sem arrastar; não compense roteiro curto com pausas longas de TTS
 - use estrutura agressiva de retenção: hook de choque, loop aberto, escalada de fatos, payoff atrasado e fechamento memoravel
 - cada frase deve criar uma pergunta mental ou tensão para a frase seguinte
@@ -837,6 +977,8 @@ Regras:
         )
 
     def repair_script(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any]:
+        target_duration_sec = self._target_duration_sec(topic_plan)
+        duration_rules = self._duration_rules(target_duration_sec)
         prompt = f"""
 Corrija este roteiro de Short para passar no gate de qualidade do app.
 Roteiro atual JSON: {json.dumps(script, ensure_ascii=False)}
@@ -860,7 +1002,7 @@ Regras obrigatórias:
 - `payoff` deve ser frase de virada no último terço; não pode ser null
 - full_narration deve concatenar hook + loop + body_beats + payoff + ending
 - se os motivos incluírem weak_loop_closure ou ending_not_connected_to_hook, corrija o bloco loop_close sem criar final genérico repetitivo
-- se os motivos incluírem body_beat_count_invalid, reestruture body_beats para exatamente 3 a 5 frases independentes e faça full_narration incluir hook + todos os body_beats + ending
+- se os motivos incluírem body_beat_count_invalid, reestruture body_beats para {self._beat_count_rule(duration_rules)} e faça full_narration incluir hook + todos os body_beats + ending
 - se os motivos incluírem weak_ending, reescreva o ending para pagar a promessa do hook e apontar concretamente de volta ao início
 - se os motivos incluírem off_topic, remova desvios e alinhe título, hook, beats, payoff e ending ao canonical_topic, angle e hook_promise do contexto
 - se os motivos incluírem unsupported_claim, remova a afirmação sem lastro ou substitua por formulação diretamente sustentada por facts[].claim
@@ -875,10 +1017,10 @@ Regras obrigatórias:
 - corrija palavras coladas e erros como "ummini", "independiente", "right"
 - corrija pontuação quebrada como "no. centro", "a. refletância" e palavras coladas como "unidadede"
 - remova frases com cara de IA ou meta-roteiro, como "No replay", "agora tudo faz sentido", "isso muda como você olha", "holograma biológico" ou equivalentes prontos
-- mantenha duração estimada entre 35 e 55 segundos
+- {self._duration_rules_repair(duration_rules)}
 - primeira frase com no máximo 12 palavras
 - média por frase <= 14 e frase máxima <= 20 palavras
-- para target_duration_sec=45, mantenha 105 a 130 palavras no total; para outros alvos, mire cerca de 150 a 172 WPM naturais, nunca abaixo de 115 palavras
+- {duration_rules['words_text']}
 - a narração deve soar natural em pt-BR, sem correr e sem arrastar; não compense roteiro curto com pausas longas de TTS
 - preserve a promessa central e os fatos úteis, mas reescreva o necessário
 - a primeira palavra do hook deve ser, quando natural, um número, nome próprio ou verbo de ação
@@ -953,6 +1095,25 @@ Responda JSON estrito com:
 - ranking exatamente 10 entradas, ordenadas por viral_potential_score decrescente
 - cada entrada de ranking: index inteiro, viral_potential_score numérico de 0.0 a 1.0, reason não vazio em pt-BR
 - cada índice de 0 a 9 deve aparecer exatamente uma vez
+- ranking[0].index deve ser igual a selected_index
+- confidence numérico de 0.0 a 1.0
+Sem markdown.
+""",
+            "script_draft_selection": f"""
+Você é o juiz independente de tracks de roteiro de microdrama para YouTube Shorts em pt-BR.
+Compare o lote inteiro de tracks. Não aceite a autoavaliação do gerador como autoridade.
+Avalie cada track por: história compreensível e com eixo (não fragmentos truncados), conflito claro,
+personagem com objetivo e decisão, escalada narrativa, reviravolta preparada que reinterpreta o começo,
+CTA final e chance de reter por dois minutos. Prefira a track mais vívida, com imagem mental forte e
+consequência emocional, mesmo que outra tenha hook mais agressivo mas história rasa.
+Entrada JSON: {compact}
+
+Responda JSON estrito com:
+- selected_index: inteiro dentro do range das tracks
+- selected_reason: texto não vazio em pt-BR explicando por que essa track tem mais chance de views
+- ranking com uma entrada por track, ordenadas por script_score decrescente
+- cada entrada de ranking: index inteiro, script_score numérico de 0.0 a 1.0, reason não vazio em pt-BR
+- cada índice deve aparecer exatamente uma vez
 - ranking[0].index deve ser igual a selected_index
 - confidence numérico de 0.0 a 1.0
 Sem markdown.

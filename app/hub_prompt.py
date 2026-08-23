@@ -77,11 +77,14 @@ ORIGINALIDADE E MONETIZAÇÃO
 - Sem gore, violência gráfica, exploração sexual, crianças em risco como espetáculo ou instruções perigosas.
 
 FORMATO
-- Duração alvo de 40 segundos, dentro da faixa de 35 a 55 segundos.
+- Duração alvo de 120 segundos (dois minutos), dentro da faixa de 100 a 150 segundos.
+- História completa com eixo narrativo claro: situação inicial, conflito, pistas, escalada, ponto de decisão, reviravolta e consequência. Nada de fragmentos truncados ou beats soltos sem amarração.
 - Hook em até 8 palavras nos primeiros 1 a 2 segundos, com o conflito compreensível imediatamente.
 - O hook deve abrir com choque ou contraste imediato usando pelo menos duas palavras fortes e concretas (ex.: “não”, “nunca”, “ninguém”, “segredo”, “esconde”, “rouba”, “desaparece”, “fogo”, “luz”, “sombra”, “rosto”), nunca com nome genérico de personagem seguido de ação neutra; o conflito precisa vir na primeira frase. Escreva o hook com 7 a 8 palavras no máximo.
-- Use 3 a 5 beats em escalada causal: conflito → pista → escolha/ação → consequência → virada.
-- Guarde a revelação mais forte para o último terço e entregue um mini-payoff no próprio Short. Na frase do payoff (a virada), inclua uma palavra de choque concreta (ex.: “segredo”, “nunca”, “ninguém”, “escondeu”, “desapareceu”, “roubou”, “truque”, “armadilha”), não apenas “a virada” ou “a verdade”.
+- Use 8 a 12 beats em escalada causal: conflito → pista → escolha/ação → consequência → nova pista → reviravolta → consequência emocional. Cada beat precisa justificar o próximo e manter o eixo da história; proibido lista de fatos soltos ou cenas intercambiáveis.
+- Cada beat entrega uma imagem mental concreta e avanço narrativo, como drama real: personagem com objetivo, obstáculo, decisão e preço da escolha.
+- Guarde a revelação mais forte para o último terço e entregue um mini-payoff antes dela. Na frase do payoff (a virada), inclua uma palavra de choque concreta (ex.: “segredo”, “nunca”, “ninguém”, “escondeu”, “desapareceu”, “roubou”, “truque”, “armadilha”), não apenas “a virada” ou “a verdade”.
+- A reviravolta precisa reinterpretar o começo: pistas plantadas nos primeiros beats ganham novo significado quando o espectador revê.
 - Termine com pergunta específica sobre decisão, culpa, segredo ou consequência; não use CTA genérica.
 - Inclua no final um share trigger implícito concreto, que faça a pessoa pensar “vou mandar isso para alguém” ou rever o início com novo significado. Para isso, use literalmente uma destas frases no fechamento: “olha de novo”, “da próxima vez que”, “você vai lembrar”, “repara”, “isso muda”, “manda isso”, “mostra isso”. Mantenha a pergunta de comentário obrigatória; compartilhamento e comentário devem coexistir.
 
