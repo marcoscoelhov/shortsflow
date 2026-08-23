@@ -41,7 +41,10 @@ const PremiumCaption: React.FC<{
   const localProgress = Math.min(0.999, Math.max(0, (frame - start) / Math.max(1, end - start)));
   const activeWordIndex = weightedActiveWordIndex(textParts, localProgress);
   const fontSize = captionFontSize(caption.text);
-  const sideInset = Math.max(108, Number(plan.style.safe_area?.x || 0));
+  const safeAreaX = Math.max(108, Number(plan.style.safe_area?.x || 0));
+  const sideInset = safeAreaX;
+  const bottomInset = plan.style.safe_area?.bottom ? Math.max(292, Number(plan.style.safe_area.bottom)) : 292;
+  const maxLines = plan.caption_track?.max_lines ?? 1;
 
   return (
     <div
@@ -49,7 +52,7 @@ const PremiumCaption: React.FC<{
         position: 'absolute',
         left: sideInset,
         right: sideInset,
-        bottom: 292,
+        bottom: bottomInset,
         display: 'flex',
         justifyContent: 'center',
         translate: `0 ${interpolate(frame, [start, start + Math.round(fps * 0.12)], [20, 0], {
@@ -73,10 +76,12 @@ const PremiumCaption: React.FC<{
           color: plan.style.palette.text,
           fontSize,
           fontWeight: 900,
-          lineHeight: 1,
+          lineHeight: 1.14,
           letterSpacing: 0,
           textAlign: 'center',
-          whiteSpace: 'pre',
+          whiteSpace: maxLines > 1 ? 'normal' : 'pre',
+          overflowWrap: maxLines > 1 ? 'anywhere' : 'normal',
+          wordBreak: maxLines > 1 ? 'break-word' : 'normal',
           textTransform: 'uppercase',
           WebkitTextStroke: '8px rgba(5, 5, 7, 0.92)',
           paintOrder: 'stroke fill',

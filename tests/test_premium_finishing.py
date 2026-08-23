@@ -23,7 +23,8 @@ from tests.e2e_support import (
     orchestrator,
 )
 
-from app.models import ScenePlan
+from app.models import ScenePlan, Script, TopicPlan
+from app.utils import word_tokens
 from app.pipelines.common import FatalStepError
 from app.pipelines.finish_plan import build_finish_plan, public_finish_plan
 from app.premium_finishing import RemotionCliRenderer
@@ -1573,3 +1574,175 @@ def test_every_youtube_flow_fails_preflight_for_non_publishable_final_status(mon
         schedule = session.query(PublicationSchedule).filter_by(job_id=job_id).one_or_none()
         assert job and job.status == "blocked_for_monetization"
         assert schedule is None
+
+
+def test_finish_plan_long_form_uses_larger_safe_area_and_two_caption_lines() -> None:
+    job_id = "premium-longform-layout"
+    _create_rendered_job(job_id)
+    _add_premium_generation_inputs(job_id)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job
+        job.target_duration_sec = 120
+        session.commit()
+        job = session.get(Job, job_id)
+        scene_plan = session.query(ScenePlan).filter_by(job_id=job_id).one()
+        assets = session.query(SceneAsset).filter_by(job_id=job_id, selected=True).all()
+        narration = session.query(NarrationAsset).filter_by(job_id=job_id).one()
+        subtitles = session.query(SubtitleTrack).filter_by(job_id=job_id).one()
+        render = session.query(RenderOutput).filter_by(job_id=job_id).one()
+        plan = build_finish_plan(
+            schema_version="1.0.0",
+            job=job,
+            scene_plan=scene_plan,
+            selected_assets=assets,
+            narration=narration,
+            subtitles=subtitles,
+            background_music=None,
+            render=render,
+            visual_contract={},
+        )
+
+    assert plan["style"]["safe_area"] == {"x": 148, "top": 176, "bottom": 340}
+    assert plan["caption_track"]["max_lines"] == 2
+
+
+def test_finish_plan_short_form_keeps_original_safe_area_and_single_caption_line() -> None:
+    job_id = "premium-short-layout"
+    _create_rendered_job(job_id)
+    _add_premium_generation_inputs(job_id)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job
+        job.target_duration_sec = 45
+        session.commit()
+        job = session.get(Job, job_id)
+        scene_plan = session.query(ScenePlan).filter_by(job_id=job_id).one()
+        assets = session.query(SceneAsset).filter_by(job_id=job_id, selected=True).all()
+        narration = session.query(NarrationAsset).filter_by(job_id=job_id).one()
+        subtitles = session.query(SubtitleTrack).filter_by(job_id=job_id).one()
+        render = session.query(RenderOutput).filter_by(job_id=job_id).one()
+        plan = build_finish_plan(
+            schema_version="1.0.0",
+            job=job,
+            scene_plan=scene_plan,
+            selected_assets=assets,
+            narration=narration,
+            subtitles=subtitles,
+            background_music=None,
+            render=render,
+            visual_contract={},
+        )
+
+    assert plan["style"]["safe_area"] == {"x": 108, "top": 132, "bottom": 250}
+    assert plan["caption_track"]["max_lines"] == 1
+
+
+def test_premium_caption_component_wraps_long_form_text_centered() -> None:
+    source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumCaption.tsx").read_text(encoding="utf-8")
+
+    assert "whiteSpace: maxLines > 1 ? 'normal' : 'pre'" in source
+    assert "overflowWrap: maxLines > 1 ? 'anywhere' : 'normal'" in source
+    assert "lineHeight: 1.14" in source
+    assert "const bottomInset" in source
+    assert "maxLines > 1" in source
+
+
+def test_scene_pipeline_long_form_derives_scene_count_from_script_beats(monkeypatch) -> None:
+    """2min (target > 55s) não usa cenas fixas: deriva do roteiro (~1 por beat)."""
+    from app.pipelines.scene_pipeline import ScenePipeline
+
+    job_id = "scene-longform-derived"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="running", current_step="scene_plan", seed_theme="A carta escondida no paletó do pai")
+        session.commit()
+        job = session.get(Job, job_id)
+        assert job
+        job.target_duration_sec = 120
+        session.add(
+            TopicPlan(
+                topic_id=job_id,
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="tp",
+                canonical_topic="A carta escondida no paletó do pai",
+                angle="segredo de família com reviravolta",
+                hook_promise="alguém escondeu a carta",
+                entities=["filha", "pai", "sócio"],
+                search_terms=["carta no paletó"],
+                title_candidates=["Carta veneno antes do discurso"],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id=job_id,
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="s",
+                title="Carta escondida no paletó revela o segredo do pai",
+                hook="Segredo no paletó: filha interrompe o discurso.",
+                body_beats=[
+                    "A filha achou a carta.",
+                    "O envelope tinha o nome dela.",
+                    "A primeira linha acusava o sócio.",
+                    "A segunda página citava a mãe.",
+                    "A gravação mostrou a verdade.",
+                    "O pai armou a armadilha.",
+                    "O sócio era o pai biológico.",
+                    "Ela protegeu Augusto sem revelar nada.",
+                ],
+                ending="O paletó guardava a confissão do pai.",
+                cta="Você revelaria o segredo?",
+                full_narration="Segredo no paletó: filha interrompe o discurso. A filha achou a carta. O envelope tinha o nome dela. A primeira linha acusava o sócio. A segunda página citava a mãe. A gravação mostrou a verdade. O pai armou a armadilha. O sócio era o pai biológico. Ela protegeu Augusto sem revelar nada. O paletó guardava a confissão do pai. Você revelaria o segredo?",
+                estimated_duration_sec=120,
+                key_facts=[],
+                token_count=90,
+                language="pt-BR",
+                qa_metrics={},
+            )
+        )
+        session.commit()
+
+    captured: list[int] = []
+
+    def fake_plan_scenes(script_dict, target_scene_count):
+        captured.append(target_scene_count)
+        # devolve o nº exato de cenas pra passar o gate
+        words = word_tokens(script_dict["full_narration"])
+        chunk = max(1, len(words) // target_scene_count)
+        scenes = []
+        for i in range(target_scene_count):
+            start = i * chunk
+            end = len(words) if i == target_scene_count - 1 else min(len(words), (i + 1) * chunk)
+            scenes.append(
+                {
+                    "scene_id": f"scene-{i + 1}",
+                    "order": i + 1,
+                    "narration_text": " ".join(words[start:end]) or "frase",
+                    "token_start": start,
+                    "token_end": max(end - 1, start),
+                    "estimated_duration_sec": 120 / target_scene_count,
+                    "visual_intent": "deceptive_establishing" if i == 0 else "concrete_evidence",
+                    "primary_subject": "carta",
+                    "topic_hint": "carta",
+                    "image_prompt": "vertical cinematic documentary realism",
+                    "fallback_queries": ["carta"],
+                }
+            )
+        return scenes
+
+    monkeypatch.setattr(orchestrator.scene_pipeline.providers.creative, "plan_scenes", fake_plan_scenes)
+    monkeypatch.setattr(orchestrator.scene_pipeline, "scene_fallback_planner", lambda: None)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        orchestrator.scene_pipeline.step_scene_plan(session, job, 1)
+        session.commit()
+
+    assert captured == [8]  # 8 body_beats -> 8 cenas (faixa 8-14)
+    with SessionLocal() as session:
+        plan = session.query(ScenePlan).filter_by(job_id=job_id).one()
+        assert plan.scene_count == 8

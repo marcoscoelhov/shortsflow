@@ -39,7 +39,13 @@ class ScenePipeline(BasePipeline):
             "hub_viral_prompt_source": request.notes if request else None,
             "downstream_rule": "Scenes, images, subtitles and TTS must derive from full_narration. Do not invent new beats or split tiny punchlines into standalone render scenes.",
         }
-        scenes = self.providers.creative.plan_scenes(script_dict, self.settings.scene_target_count)
+        # Formato longo (2min) não usa número fixo de cenas: deriva do roteiro
+        # (~1 imagem por beat, faixa 8-14). Curto mantém o target configurado.
+        target_scene_count = self.settings.scene_target_count
+        if job.target_duration_sec > 55:
+            beat_count = len(script.body_beats or [])
+            target_scene_count = max(8, min(14, beat_count))
+        scenes = self.providers.creative.plan_scenes(script_dict, target_scene_count)
         self.storage.persist_json(job.job_id, "scene_plan_raw.json", self._serialize_for_json({"scenes": scenes}))
         tokens = word_tokens(script.full_narration)
         scenes = self.normalize_scene_token_coverage(scenes, script.full_narration)
@@ -47,7 +53,7 @@ class ScenePipeline(BasePipeline):
         if not scenes or scenes[0]["token_start"] != 0 or scenes[-1]["token_end"] != len(tokens) - 1:
             fallback_planner = self.scene_fallback_planner()
             if fallback_planner is not None:
-                scenes = fallback_planner.plan_scenes(script_dict, self.settings.scene_target_count)
+                scenes = fallback_planner.plan_scenes(script_dict, target_scene_count)
                 self.storage.persist_json(job.job_id, "scene_plan_raw.json", self._serialize_for_json({"scenes": scenes}))
                 scenes = self.normalize_scene_token_coverage(scenes, script.full_narration)
                 scenes = self.annotate_scene_retention_roles(scenes, script_dict)
@@ -55,17 +61,17 @@ class ScenePipeline(BasePipeline):
                 raise RecoverableStepError("scene coverage invalid")
         scenes = [self.normalize_scene_semantics(scene, topic_plan.canonical_topic, visual_contract=visual_contract) for scene in scenes]
         scenes = self.align_scenes_with_visual_contract(scenes, visual_contract)
-        scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count, visual_contract=visual_contract)
+        scene_gate = self.scene_gate.validate(scenes, target_scene_count, visual_contract=visual_contract)
         if not scene_gate.passed:
             fallback_planner = self.scene_fallback_planner()
             if fallback_planner is not None:
-                scenes = fallback_planner.plan_scenes(script_dict, self.settings.scene_target_count)
+                scenes = fallback_planner.plan_scenes(script_dict, target_scene_count)
                 self.storage.persist_json(job.job_id, "scene_plan_raw.json", self._serialize_for_json({"scenes": scenes}))
                 scenes = self.normalize_scene_token_coverage(scenes, script.full_narration)
                 scenes = self.annotate_scene_retention_roles(scenes, script_dict)
                 scenes = [self.normalize_scene_semantics(scene, topic_plan.canonical_topic, visual_contract=visual_contract) for scene in scenes]
                 scenes = self.align_scenes_with_visual_contract(scenes, visual_contract)
-                scene_gate = self.scene_gate.validate(scenes, self.settings.scene_target_count, visual_contract=visual_contract)
+                scene_gate = self.scene_gate.validate(scenes, target_scene_count, visual_contract=visual_contract)
             if not scene_gate.passed:
                 self.storage.persist_json(
                     job.job_id,
