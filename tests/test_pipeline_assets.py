@@ -2913,3 +2913,167 @@ def test_simple_amix_keeps_audible_bed_ratio(tmp_path: Path) -> None:
     assert gate.metrics["music_source"]["rms_dbfs"] > -120  # real bed present
     ratio = gate.metrics["bed_relative_rms_ratio"]
     assert 0.02 <= ratio <= 1.2  # audible but does not overwhelm
+
+
+def test_step_tts_accepts_long_form_duration_for_target_120s(monkeypatch) -> None:
+    """Microdrama long-form (target > 55s) deve aceitar audio ~120s no gate de TTS.
+
+    O gate tinha faixa hardcoded 35-55s (bug: PR #36 adaptou script/render gates,
+    mas o TTS ficou curto). Um audio de ~121.5s é valido para target 120s.
+    """
+    from app.models import NarrationAsset, Script, TopicPlan
+
+    job_id = f"tts-longform-{time.time_ns()}"
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="running",
+            current_step="tts",
+            seed_theme="A carta escondida no paletó do pai",
+        )
+        session.commit()
+        job = session.get(Job, job_id)
+        job.target_duration_sec = 120
+        session.add_all(
+            [
+                TopicPlan(
+                    topic_id=job_id,
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash="tp",
+                    canonical_topic="A carta escondida no paletó do pai",
+                    angle="segredo de família com reviravolta",
+                    hook_promise="alguém escondeu a carta",
+                    entities=["filha", "pai", "sócio"],
+                    search_terms=["carta no paletó"],
+                    title_candidates=["Carta veneno antes do discurso"],
+                    quality_metrics={},
+                ),
+                Script(
+                    script_id=job_id,
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash="s",
+                    title="Carta escondida no paletó revela o segredo do pai",
+                    hook="Segredo no paletó: filha interrompe o discurso.",
+                    body_beats=["A filha achou a carta.", "O sócio negou tudo.", "A gravação mostrou a verdade."],
+                    ending="O paletó guardava a confissão do pai.",
+                    cta="Você revelaria o segredo?",
+                    full_narration="Segredo no paletó: filha interrompe o discurso. A filha achou a carta. O sócio negou tudo. A gravação mostrou a verdade. O paletó guardava a confissão do pai. Você revelaria o segredo?",
+                    estimated_duration_sec=120,
+                    key_facts=[],
+                    token_count=40,
+                    language="pt-BR",
+                    qa_metrics={},
+                ),
+            ]
+        )
+        session.commit()
+
+    def fake_synthesize(text, audio_path, srt_path, context=None):
+        audio_path.parent.mkdir(parents=True, exist_ok=True)
+        srt_path.parent.mkdir(parents=True, exist_ok=True)
+        srt_path.write_text("1\n00:00:00,000 --> 00:01:00,000\nlegenda\n", encoding="utf-8")
+        return {
+            "provider": "edge_tts",
+            "voice": "pt-BR-FranciscaNeural",
+            "audio_uri": audio_path.resolve().as_uri(),
+            "raw_subtitles_uri": srt_path.resolve().as_uri(),
+            "duration_ms": 121_500,
+            "sample_rate_hz": 24000,
+            "channels": 1,
+            "provider_metadata": {"mode": "edge", "cue_count": 1, "fallback_used": False},
+        }
+
+    monkeypatch.setattr(
+        orchestrator.asset_pipeline.providers.tts, "synthesize", fake_synthesize
+    )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        artifacts = orchestrator.asset_pipeline.step_tts(session, job, 1)
+        session.commit()
+
+    assert "narration_asset.json" in artifacts
+    with SessionLocal() as session:
+        narration = session.query(NarrationAsset).filter_by(job_id=job_id).first()
+        assert narration is not None
+        assert 115_000 <= narration.duration_ms <= 130_000
+
+
+def test_step_tts_still_rejects_overlong_audio_for_short_target(monkeypatch) -> None:
+    """Curiosidades curtas (target <= 55s) devem manter o range 35-55s no TTS."""
+    job_id = f"tts-short-{time.time_ns()}"
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id=job_id,
+            status="running",
+            current_step="tts",
+            seed_theme="polvos",
+        )
+        session.commit()
+        job = session.get(Job, job_id)
+        job.target_duration_sec = 45
+        session.add_all(
+            [
+                TopicPlan(
+                    topic_id=job_id,
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash="tp",
+                    canonical_topic="Polvos e a cor",
+                    angle="por que mudam de cor",
+                    hook_promise="a cor esconde",
+                    entities=["polvo"],
+                    search_terms=["polvo cor"],
+                    title_candidates=["Polvo que muda de cor"],
+                    quality_metrics={},
+                ),
+                Script(
+                    script_id=job_id,
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash="s",
+                    title="Polvo muda de cor",
+                    hook="O polvo some na areia.",
+                    body_beats=["A pele muda em segundos.", "Os cromatóforos abrem e fecham."],
+                    ending="A cor é disfarce instantâneo.",
+                    cta=None,
+                    full_narration="O polvo some na areia. A pele muda em segundos. Os cromatóforos abrem e fecham. A cor é disfarce instantâneo.",
+                    estimated_duration_sec=45,
+                    key_facts=[],
+                    token_count=30,
+                    language="pt-BR",
+                    qa_metrics={},
+                ),
+            ]
+        )
+        session.commit()
+
+    def fake_synthesize(text, audio_path, srt_path, context=None):
+        audio_path.parent.mkdir(parents=True, exist_ok=True)
+        srt_path.parent.mkdir(parents=True, exist_ok=True)
+        srt_path.write_text("1\n00:00:00,000 --> 00:00:03,000\nlegenda\n", encoding="utf-8")
+        return {
+            "provider": "edge_tts",
+            "voice": "pt-BR-FranciscaNeural",
+            "audio_uri": audio_path.resolve().as_uri(),
+            "raw_subtitles_uri": srt_path.resolve().as_uri(),
+            "duration_ms": 90_000,
+            "sample_rate_hz": 24000,
+            "channels": 1,
+            "provider_metadata": {"mode": "edge", "cue_count": 1, "fallback_used": False},
+        }
+
+    monkeypatch.setattr(
+        orchestrator.asset_pipeline.providers.tts, "synthesize", fake_synthesize
+    )
+
+    from app.pipelines.asset_pipeline import RecoverableStepError as AssetRecoverable
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        with pytest.raises(AssetRecoverable, match="tts duration outside allowed range"):
+            orchestrator.asset_pipeline.step_tts(session, job, 1)

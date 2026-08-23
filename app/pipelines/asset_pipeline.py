@@ -457,7 +457,15 @@ class AssetPipeline(BasePipeline):
         voice_direction = self._build_voice_direction(script, topic_plan, script_artifact)
         result = self.providers.tts.synthesize(script.full_narration, audio_path, srt_path, voice_direction)
         result = self.tts.fit_tts_duration(audio_path, srt_path, result)
-        if not 35_000 <= result["duration_ms"] <= 55_000:
+        # Microdrama long-form (target > 55s) precisa de faixa de duração maior;
+        # o padrão segue o render_gate (35s-175s para long-form).
+        if job.target_duration_sec > 55:
+            min_duration_ms = 35_000
+            max_duration_ms = min(175_000, (job.target_duration_sec + 25) * 1000)
+        else:
+            min_duration_ms = 35_000
+            max_duration_ms = 55_000
+        if not min_duration_ms <= result["duration_ms"] <= max_duration_ms:
             raise RecoverableStepError("tts duration outside allowed range")
         created_at = utcnow()
         payload = {
