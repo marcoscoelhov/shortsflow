@@ -178,6 +178,65 @@ class ResilientCreativeProvider:
         result["model"] = str(result.get("model") or getattr(provider, "model_name", ""))
         return result
 
+    def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
+        candidates = self._script_generation_candidates()
+        if not candidates:
+            raise ProviderFailure("llm_registry", "no script batch llm provider is available")
+        failures: list[str] = []
+        for index, (role, provider, timeout_sec) in enumerate(candidates):
+            try:
+                payload = self._run_primary_with_timeout(
+                    lambda provider=provider: provider.generate_script_batch(topic_plan, draft_count),
+                    timeout_sec=timeout_sec,
+                )
+                tracks = payload.get("tracks") if isinstance(payload, dict) else None
+                if not isinstance(tracks, list) or len(tracks) != draft_count or not all(
+                    isinstance(track, dict) and str(track.get("full_narration") or "").strip()
+                    for track in tracks
+                ):
+                    provider_name = getattr(provider, "provider_name", role)
+                    raise ProviderFailure(str(provider_name), f"{provider_name}: script batch malformed")
+                for track in tracks:
+                    metrics = track.setdefault("qa_metrics", {})
+                    metrics["generation_provider_role"] = role
+                    metrics["generation_provider"] = getattr(provider, "provider_name", role)
+                    metrics["script_batch_fallback_used"] = index > 0
+                    if failures:
+                        metrics["script_batch_fallback_reasons"] = failures
+                return payload
+            except concurrent.futures.TimeoutError as exc:
+                message = f"{getattr(provider, 'provider_name', role)} script batch timed out after {timeout_sec}s"
+                failures.append(message)
+                if self.strict_minimax_validation and provider is self.primary:
+                    raise ProviderFailure(getattr(provider, "failure_provider_name", role), message) from exc
+            except ProviderFailure as exc:
+                failures.append(str(exc))
+                if self.strict_minimax_validation and provider is self.primary:
+                    raise
+        raise ProviderFailure("llm_registry", f"script batch generation failed across llm providers: {'; '.join(failures)}")
+
+    def select_script_draft(self, tracks: list[dict[str, Any]]) -> dict[str, Any]:
+        provider = self.gate_judge_provider
+        if provider is None or not hasattr(provider, "judge_quality_gate"):
+            raise ProviderFailure("llm_registry", "independent script draft judge is unavailable")
+        timeout_sec = float(getattr(self.settings, "llm_gate_judge_timeout_sec", 60.0))
+        try:
+            result = self._run_primary_with_timeout(
+                lambda: provider.judge_quality_gate("script_draft_selection", {"tracks": tracks}),
+                timeout_sec=timeout_sec,
+            )
+        except concurrent.futures.TimeoutError as exc:
+            raise ProviderFailure(
+                self._provider_failure_name(provider),
+                f"script draft judge timed out after {timeout_sec}s",
+            ) from exc
+        if not isinstance(result, dict):
+            raise ProviderFailure(self._provider_failure_name(provider), "script draft judge returned non-object json")
+        result["judge_provider_role"] = "gate_judge"
+        result["provider"] = str(result.get("provider") or getattr(provider, "provider_name", ""))
+        result["model"] = str(result.get("model") or getattr(provider, "model_name", ""))
+        return result
+
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         candidates = self._script_generation_candidates()
         if not candidates:

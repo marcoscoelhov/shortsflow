@@ -12,7 +12,7 @@ from app.job_origin import (
 )
 from app.hub_prompt import build_niche_viral_prompt_note
 from app.manual_script import build_ready_script_notes, parse_ready_script
-from app.microdrama_pilot import MICRODRAMA_NICHE_ID
+from app.microdrama_pilot import MICRODRAMA_NICHE_ID, MICRODRAMA_PILOT_DURATION_SEC
 from app.schemas import TopicRequestCreate
 from app.survival_experiment import SURVIVAL_NICHE_ID
 
@@ -106,6 +106,9 @@ def build_hub_job_request(
     normalized_mode = normalize_hub_input_mode(input_mode)
     angle = selected_angle(custom_angle, requested_angle)
     selected_niche = niche_id or default_niche_id
+    selected_duration = target_duration_sec
+    if selected_niche == MICRODRAMA_NICHE_ID and selected_duration == retention_optimized_duration_sec:
+        selected_duration = MICRODRAMA_PILOT_DURATION_SEC
     trend_report: dict[str, object] | None = None
 
     if selected_niche in {SURVIVAL_NICHE_ID, MICRODRAMA_NICHE_ID} and normalized_mode != "script" and not seed_theme.strip():
@@ -138,7 +141,7 @@ def build_hub_job_request(
         seed_theme=selected_seed_theme,
         niche_id=selected_niche,
         language=language,
-        target_duration_sec=target_duration_sec,
+        target_duration_sec=selected_duration,
         tone=tone,
         cta_style=cta_style,
         notes=compose_hub_notes(

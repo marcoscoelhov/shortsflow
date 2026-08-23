@@ -12,9 +12,11 @@ from app import cli
 from app.automation import AutomationService
 from app.db import SessionLocal
 from app.hub_job_request import build_hub_job_request
+from app.editorial.retention import build_retention_map
 from app.hub_prompt import DEFAULT_VIRAL_PROMPT_TEMPLATE, extract_viral_prompt_contract
 from app.microdrama_pilot import (
     MICRODRAMA_NICHE_ID,
+    MICRODRAMA_PILOT_DURATION_SEC,
     build_microdrama_pilot_plan,
     get_microdrama_pilot,
 )
@@ -486,7 +488,7 @@ def test_microdrama_plan_is_deterministic_interleaved_and_diverse() -> None:
     assert len({item["concept_id"] for item in first["items"]}) == 18
     assert len({item["seed_theme"] for item in first["items"]}) == 18
     assert all(item["niche_id"] == MICRODRAMA_NICHE_ID for item in first["items"])
-    assert all(item["target_duration_sec"] == 40 for item in first["items"])
+    assert all(item["target_duration_sec"] == MICRODRAMA_PILOT_DURATION_SEC for item in first["items"])
     assert all(item["language"] == "pt-BR" for item in first["items"])
     assert all(item["human_review_required"] is True for item in first["items"])
     assert all(item["automatic_publication_allowed"] is False for item in first["items"])
@@ -569,3 +571,45 @@ def _table_counts() -> tuple[int, int, int]:
             session.scalar(select(func.count()).select_from(RetentionExperiment)) or 0,
             session.scalar(select(func.count()).select_from(RetentionExperimentAssignment)) or 0,
         )
+
+
+def test_microdrama_script_pipeline_generates_ten_tracks_and_selects_winner_before_media() -> None:
+    orchestrator = JobOrchestrator()
+    job_id = orchestrator.create_job(
+        TopicRequestCreate(
+            seed_theme="A carta escondida no paletó do pai",
+            niche_id=MICRODRAMA_NICHE_ID,
+            target_duration_sec=120,
+            requested_angle="A filha encontra a carta antes do discurso do sócio.",
+            job_origin="manual_theme",
+            creation_via="api",
+        ).model_dump()
+    )
+    pipeline = orchestrator.script_pipeline
+    plan_dict = {
+        "canonical_topic": "A carta escondida no paletó do pai",
+        "angle": "A filha encontra a carta antes do discurso do sócio.",
+        "hook_promise": "A carta revela que o sócio esconde a identidade do pai.",
+        "title_candidates": ["A carta que ninguém devia ler"],
+        "tone": "drama_chocante_reviravolta",
+        "cta_style": "soft",
+        "hub_notes": "fictional_scenario=true",
+        "original_input": "A carta escondida no paletó do pai",
+        "editorial_mode": "viral_curiosidades",
+        "retention_map": build_retention_map(120),
+        "fact_pack": {
+            "status": "disabled",
+            "facts": [],
+            "viral_truth_policy": {"automatic_publish_allowed": True},
+        },
+    }
+    script, metrics = pipeline._generate_script_with_track_selection(
+        job_id=job_id,
+        plan_dict=plan_dict,
+        attempt=1,
+    )
+    assert str(script.get("full_narration") or "").strip()
+    assert metrics["script_track_draft_count"] == 10
+    assert metrics["script_track_selected_judge_score"] > 0
+    artifact_dir = orchestrator.storage.job_dir(job_id, create=False)
+    assert (artifact_dir / "script_tracks.json").exists()

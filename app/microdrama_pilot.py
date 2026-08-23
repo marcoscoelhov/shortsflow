@@ -14,7 +14,8 @@ from app.utils import stable_hash
 MICRODRAMA_NICHE_ID = "fiction_microdrama"
 MICRODRAMA_LABEL_PT_BR = "Dramas chocantes com reviravolta"
 MICRODRAMA_PILOT_ID_PREFIX = "jarvis_shocking_twist_drama_pilot_v2"
-MICRODRAMA_PILOT_DURATION_SEC = 40
+MICRODRAMA_PILOT_DURATION_SEC = 120
+MICRODRAMA_SCRIPT_TRACK_COUNT = 10
 MICRODRAMA_FICTIONAL_UNIVERSE = "universos_variados"
 MICRODRAMA_POSITIONING = "dramas_chocantes_com_reviravolta"
 

@@ -32,7 +32,56 @@ GOLDEN_SCRIPT_SAMPLES = {
 
 
 def build_retention_map(target_duration_sec: int) -> dict[str, Any]:
-    duration = max(35, min(55, int(target_duration_sec or 50)))
+    duration = max(35, min(150, int(target_duration_sec or 50)))
+    if duration > 55:
+        # Microdrama/forma longa: segmentos proporcionais ao alvo, com o
+        # hook fixo nos primeiros segundos e virada no último terço.
+        turn_start = max(20, round(duration * 0.45))
+        return {
+            "prompt_version": EDITORIAL_PROMPT_VERSION,
+            "target_duration_sec": duration,
+            "segments": [
+                {
+                    "code": "visual_hook",
+                    "start_sec": 0,
+                    "end_sec": 2,
+                    "goal": "mostrar resultado, contraste ou tensão visual antes de explicar",
+                },
+                {
+                    "code": "proof_or_tension",
+                    "start_sec": 2,
+                    "end_sec": min(8, duration),
+                    "goal": "provar que a promessa é concreta e reduzir swipe",
+                },
+                {
+                    "code": "escalation",
+                    "start_sec": 8,
+                    "end_sec": turn_start,
+                    "goal": "entregar micro-recompensas com fatos visuais progressivos",
+                },
+                {
+                    "code": "turn_or_payoff",
+                    "start_sec": turn_start,
+                    "end_sec": max(duration - 5, turn_start),
+                    "goal": "revelar a virada principal sem inflar fato não verificado",
+                },
+                {
+                    "code": "loop_close",
+                    "start_sec": max(duration - 5, 0),
+                    "end_sec": duration,
+                    "goal": "fechar o loop conectando final ao primeiro hook",
+                },
+            ],
+            "rules": [
+                "uma ideia central por short",
+                "primeiro frame precisa ser visualmente legível sem contexto",
+                "cada beat deve subir estranheza, imagem mental ou impacto",
+                "loop fica aberto até o payoff no último terço",
+                "final deve recontextualizar o começo e provocar replay sem parecer template repetido",
+                "cada cena precisa de imagem mental concreta; evitar beats abstratos ou genéricos",
+                "hook visual nos primeiros 2s sem texto renderizado na tela",
+            ],
+        }
     return {
         "prompt_version": EDITORIAL_PROMPT_VERSION,
         "target_duration_sec": duration,
