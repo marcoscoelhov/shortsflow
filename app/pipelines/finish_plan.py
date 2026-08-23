@@ -137,12 +137,15 @@ def build_finish_plan(
             # Keep kinetic captions inside a real lateral safe area. The Remotion
             # component adds stroke + highlight scaling, so the plan must reserve
             # more than the visible text box width or the glyph outline can clip
-            # against the 9:16 canvas edges.
-            "safe_area": {"x": 108, "top": 132, "bottom": 250},
+            # against the 9:16 canvas edges. Long-form (2min) reserves larger
+            # margins so captions breathe and never drift to the canvas edge.
+            "safe_area": (
+                {"x": 148, "top": 176, "bottom": 340} if int(getattr(job, "target_duration_sec", 45) or 45) > 55 else {"x": 108, "top": 132, "bottom": 250}
+            ),
         },
         "caption_track": {
             "mode": "one_line_kinetic",
-            "max_lines": 1,
+            "max_lines": 2 if int(getattr(job, "target_duration_sec", 45) or 45) > 55 else 1,
             "items": captions,
         },
         "scenes": scenes,

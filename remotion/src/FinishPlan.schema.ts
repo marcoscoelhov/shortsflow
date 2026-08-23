@@ -108,7 +108,7 @@ export const FinishPlanSchema = z.object({
     safe_area: z.object({x: nonNegativeInteger, top: nonNegativeInteger, bottom: nonNegativeInteger}),
     visual_style_profile: VisualStyleProfileSchema.optional()
   }),
-  caption_track: z.object({mode: z.literal('one_line_kinetic'), max_lines: z.literal(1), items: z.array(CaptionItemSchema)}),
+  caption_track: z.object({mode: z.literal('one_line_kinetic'), max_lines: z.union([z.literal(1), z.literal(2)]), items: z.array(CaptionItemSchema)}),
   scenes: z.array(ScenePlanSchema),
   summary: z.object({scene_count: nonNegativeInteger, caption_count: nonNegativeInteger, premium_features: z.array(z.string())})
 }).superRefine((plan, context) => {
