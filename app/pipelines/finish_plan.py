@@ -93,6 +93,8 @@ def build_finish_plan(
         else narration.normalized_audio_uri or narration.audio_uri
     )
     captions = [_caption_item(item) for item in subtitles.items or []]
+    long_form = int(getattr(job, "target_duration_sec", 45) or 45) > 55
+    caption_format = "two_line_kinetic" if long_form else "one_line_kinetic"
     plan = {
         "schema_version": schema_version,
         "finish_plan_version": FINISH_PLAN_VERSION,
@@ -124,7 +126,7 @@ def build_finish_plan(
         },
         "style": {
             "component_policy": "free_only",
-            "caption_style": "one_line_kinetic",
+            "caption_style": caption_format,
             "font_family": "Inter, system-ui, sans-serif",
             **({"visual_style_profile": visual_style_profile} if visual_style_profile is not None else {}),
             "palette": {
@@ -140,12 +142,12 @@ def build_finish_plan(
             # against the 9:16 canvas edges. Long-form (2min) reserves larger
             # margins so captions breathe and never drift to the canvas edge.
             "safe_area": (
-                {"x": 148, "top": 176, "bottom": 340} if int(getattr(job, "target_duration_sec", 45) or 45) > 55 else {"x": 108, "top": 132, "bottom": 250}
+                {"x": 148, "top": 176, "bottom": 340} if long_form else {"x": 108, "top": 132, "bottom": 250}
             ),
         },
         "caption_track": {
-            "mode": "one_line_kinetic",
-            "max_lines": 2 if int(getattr(job, "target_duration_sec", 45) or 45) > 55 else 1,
+            "mode": caption_format,
+            "max_lines": 2 if long_form else 1,
             "items": captions,
         },
         "scenes": scenes,

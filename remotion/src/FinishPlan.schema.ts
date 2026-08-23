@@ -102,16 +102,34 @@ export const FinishPlanSchema = z.object({
   visual_contract_summary: z.object({visual_thesis: z.string(), visual_domain: z.string(), visual_world: z.string()}),
   style: z.object({
     component_policy: z.literal('free_only'),
-    caption_style: z.literal('one_line_kinetic'),
+    caption_style: z.union([z.literal('one_line_kinetic'), z.literal('two_line_kinetic')]),
     font_family: z.string(),
     palette: z.record(z.string(), z.string()),
     safe_area: z.object({x: nonNegativeInteger, top: nonNegativeInteger, bottom: nonNegativeInteger}),
     visual_style_profile: VisualStyleProfileSchema.optional()
   }),
-  caption_track: z.object({mode: z.literal('one_line_kinetic'), max_lines: z.union([z.literal(1), z.literal(2)]), items: z.array(CaptionItemSchema)}),
+  caption_track: z.object({
+    mode: z.union([z.literal('one_line_kinetic'), z.literal('two_line_kinetic')]),
+    max_lines: z.union([z.literal(1), z.literal(2)]),
+    items: z.array(CaptionItemSchema)
+  }),
   scenes: z.array(ScenePlanSchema),
   summary: z.object({scene_count: nonNegativeInteger, caption_count: nonNegativeInteger, premium_features: z.array(z.string())})
 }).superRefine((plan, context) => {
+  const captionFormatIsCoherent =
+    (plan.style.caption_style === 'one_line_kinetic' &&
+      plan.caption_track.mode === 'one_line_kinetic' &&
+      plan.caption_track.max_lines === 1) ||
+    (plan.style.caption_style === 'two_line_kinetic' &&
+      plan.caption_track.mode === 'two_line_kinetic' &&
+      plan.caption_track.max_lines === 2);
+  if (!captionFormatIsCoherent) {
+    context.addIssue({
+      code: 'custom',
+      message: 'caption style, mode, and max_lines must describe the same format',
+      path: ['caption_track']
+    });
+  }
   const sceneIds = new Set<string>();
   let previousSceneEnd = 0;
   for (const [index, scene] of plan.scenes.entries()) {

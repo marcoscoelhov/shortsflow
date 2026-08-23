@@ -2,6 +2,7 @@ import React, {useMemo} from 'react';
 import {fitText} from '@remotion/layout-utils';
 import {interpolate, useCurrentFrame, useVideoConfig} from 'remotion';
 import type {CaptionItem, FinishPlan} from './FinishPlan.schema';
+import {captionLineClampStyle} from './captionLayout';
 import {fontFamily} from './fonts';
 
 type CaptionFrame = {
@@ -79,7 +80,7 @@ const PremiumCaption: React.FC<{
           lineHeight: 1.14,
           letterSpacing: 0,
           textAlign: 'center',
-          whiteSpace: maxLines > 1 ? 'normal' : 'pre',
+          ...captionLineClampStyle(maxLines, fontSize),
           overflowWrap: maxLines > 1 ? 'anywhere' : 'normal',
           wordBreak: maxLines > 1 ? 'break-word' : 'normal',
           textTransform: 'uppercase',

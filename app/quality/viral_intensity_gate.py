@@ -7,7 +7,7 @@ from typing import Any
 from app.utils import word_tokens
 
 SHOCK_SIGNAL_PATTERN = re.compile(
-    r"\b(?:não|nunca|ningu[eé]m|parece|imposs[ií]vel|estranho|segredo|rouba|esconde|fogo|incendia|explode|mata|desaparece|antes|mesmo|s[oó]\s+que|quase|o\s+que\s+sobra|domina|prende|prendeu|persegu\w*|grud\w*|martela|trav[ao]|armadilha|vaza|molha|basta|nunca acaba|briga|luta|some|sumi[ur]|racha|estala|truque|atravessa|invis[ií]vel|pula[rr]?)\b",
+    r"\b(?:não|nunca|ningu[eé]m|parece|imposs[ií]vel|estranho|segredo|roub\w*|escond\w*|fogo|luz|sombra|rosto|incendia|explode|mata|desaparec\w*|antes|mesmo|s[oó]\s+que|quase|o\s+que\s+sobra|domina|prende|prendeu|persegu\w*|grud\w*|martela|trav[ao]|armadilha|vaza|molha|basta|nunca acaba|briga|luta|some|sumi[ur]|racha|estala|truque|atravessa|invis[ií]vel|pula[rr]?)\b",
     re.IGNORECASE,
 )
 QUESTION_PATTERN = re.compile(r"[?]|\b(?:por que|porque|como|se\b|o que|qual|quem)\b", re.IGNORECASE)

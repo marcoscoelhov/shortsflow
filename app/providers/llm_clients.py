@@ -11,6 +11,19 @@ from app.providers.errors import ProviderFailure
 from app.providers.llm import MinimaxCreativeProvider
 
 
+def _chat_completion_content(response: Any, provider_name: str) -> str:
+    choices = getattr(response, "choices", None)
+    if not isinstance(choices, (list, tuple)) or not choices:
+        raise ProviderFailure(provider_name, "malformed chat completion: choices is empty or invalid")
+    message = getattr(choices[0], "message", None)
+    if message is None:
+        raise ProviderFailure(provider_name, "malformed chat completion: message is missing")
+    content = getattr(message, "content", None)
+    if not isinstance(content, str):
+        raise ProviderFailure(provider_name, "malformed chat completion: content must be text")
+    return content.strip()
+
+
 class DeepSeekCreativeProvider(MinimaxCreativeProvider):
     provider_name = "deepseek"
     failure_provider_name = "deepseek_text"
@@ -46,7 +59,7 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = (response.choices[0].message.content or "").strip()
+        raw = _chat_completion_content(response, self.failure_provider_name)
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
@@ -79,7 +92,7 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = (response.choices[0].message.content or "").strip()
+        raw = _chat_completion_content(response, self.failure_provider_name)
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
@@ -182,7 +195,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = (response.choices[0].message.content or "").strip()
+        raw = _chat_completion_content(response, self.failure_provider_name)
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
@@ -213,7 +226,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = (response.choices[0].message.content or "").strip()
+        raw = _chat_completion_content(response, self.failure_provider_name)
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
@@ -267,7 +280,7 @@ class XAICreativeProvider(MinimaxCreativeProvider):
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = (response.choices[0].message.content or "").strip()
+        raw = _chat_completion_content(response, self.failure_provider_name)
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)

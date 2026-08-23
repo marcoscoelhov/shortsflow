@@ -8,7 +8,7 @@ from app.pipelines.base import BasePipeline
 from app.quality.llm_judge import build_editorial_judge_payload
 from app.pipelines.common import RecoverableStepError
 from app.pipelines.script_metrics import normalize_script_metrics
-from app.quality.script_gate import REWATCH_LOOP_PATTERN, ScriptGateResult
+from app.quality.script_gate import LONG_FORM_HARD_CONTRACT_REASONS, REWATCH_LOOP_PATTERN, SOFT_GATE_REASONS, ScriptGateResult
 from app.utils import sentence_split, stable_hash, tokenize, word_tokens
 
 
@@ -947,12 +947,65 @@ class ScriptRepairDomain(BasePipeline):
         ]
         if len(grounded_items) < int(trace_report.get("risky_claim_count") or 0):
             return gate_result
-        reasons = [reason for reason in gate_result.reasons if reason != "factual_risk_requires_conservative_rewrite"]
+        downgraded_reason = "factual_risk_requires_conservative_rewrite"
+        reasons = [reason for reason in gate_result.reasons if reason != downgraded_reason]
         metrics = dict(gate_result.metrics)
+        if "script_quality_gate_blocking" in metrics:
+            blocking_reasons = [
+                reason
+                for reason in metrics.get("script_quality_gate_blocking") or []
+                if reason != downgraded_reason
+            ]
+        else:
+            long_form = bool(metrics.get("long_form"))
+            blocking_reasons = [
+                reason
+                for reason in reasons
+                if reason not in SOFT_GATE_REASONS
+                or (long_form and reason in LONG_FORM_HARD_CONTRACT_REASONS)
+            ]
         metrics["script_quality_gate_reasons"] = reasons
-        metrics["script_quality_gate_pass"] = not reasons
+        metrics["script_quality_gate_blocking"] = blocking_reasons
+        metrics["script_quality_gate_pass"] = not blocking_reasons
         metrics["grounded_fact_risk_accepted"] = True
-        return ScriptGateResult(passed=not reasons, reasons=reasons, metrics=metrics)
+        return ScriptGateResult(passed=not blocking_reasons, reasons=reasons, metrics=metrics)
+
+    def validate_final_script_candidate_without_repair(
+        self,
+        script: dict[str, Any],
+        plan_dict: dict[str, Any],
+        target_duration_sec: int,
+        job_id: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        candidate = dict(script)
+        candidate["qa_metrics"] = normalize_script_metrics(dict(candidate.get("qa_metrics") or {}))
+        topic_plan_ctx, request_ctx = self._gate_context_from_plan(plan_dict)
+        gate_result = self.script_gate.validate(
+            candidate,
+            target_duration_sec,
+            topic_plan=topic_plan_ctx,
+            request=request_ctx,
+        )
+        fact_pack = plan_dict.get("fact_pack") if isinstance(plan_dict.get("fact_pack"), dict) else {}
+        gate_result = self._downgrade_grounded_fact_risk(candidate, fact_pack, gate_result)
+        consistency_reasons = self._fact_pack_consistency_reasons(candidate, fact_pack)
+        gate_blocking_reasons = list(gate_result.metrics.get("script_quality_gate_blocking") or [])
+        if not gate_result.passed and not gate_blocking_reasons:
+            gate_blocking_reasons = list(gate_result.reasons)
+        reasons = [*gate_blocking_reasons, *consistency_reasons]
+        metrics = {
+            **gate_result.metrics,
+            "script_quality_gate_pass": gate_result.passed,
+            "fact_pack_consistency_pass": not consistency_reasons,
+            "final_candidate_revalidated_without_repair": True,
+            "final_candidate_reasons": reasons,
+            **self._claim_trace_metrics(candidate),
+        }
+        if reasons:
+            self._persist_script_rejection(job_id, candidate, metrics, consistency_reasons)
+            raise RecoverableStepError(f"final script quality gate failed: {', '.join(reasons)}")
+        candidate["qa_metrics"] = metrics
+        return candidate, metrics
 
     def _validate_ready_script_without_repair(
         self,

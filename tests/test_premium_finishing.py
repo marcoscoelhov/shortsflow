@@ -518,8 +518,8 @@ def test_premium_finishing_gate_accepts_controlled_editorial_motion(tmp_path: Pa
     video_path = tmp_path / "premium.mp4"
     video_path.write_bytes(b"video")
     plan = {
-        "style": {"component_policy": "free_only"},
-        "caption_track": {"max_lines": 1, "items": [{"text": "Legenda curta"}]},
+        "style": {"component_policy": "free_only", "caption_style": "one_line_kinetic"},
+        "caption_track": {"mode": "one_line_kinetic", "max_lines": 1, "items": [{"text": "Legenda curta"}]},
         "scenes": [
             {
                 "scene_id": "scene-1",
@@ -536,6 +536,100 @@ def test_premium_finishing_gate_accepts_controlled_editorial_motion(tmp_path: Pa
     assert result.reasons == []
 
 
+def test_premium_finishing_gate_accepts_long_caption_contract_even_when_render_duration_is_short(tmp_path: Path) -> None:
+    class PassingRenderGate:
+        def validate(self, video_path: Path, expected_duration_ms: int) -> RenderGateResult:
+            return RenderGateResult(True, [], {"duration_ms": expected_duration_ms})
+
+    video_path = tmp_path / "premium.mp4"
+    video_path.write_bytes(b"video")
+    plan = {
+        "style": {"component_policy": "free_only", "caption_style": "two_line_kinetic"},
+        "caption_track": {"mode": "two_line_kinetic", "max_lines": 2, "items": [{"text": "Legenda curta"}]},
+        "scenes": [
+            {
+                "scene_id": "scene-1",
+                "transition": {"kind": "soft_cut"},
+                "motion": {"kind": "stable_hold"},
+                "overlays": [],
+            }
+        ],
+    }
+
+    result = PremiumFinishingGate(PassingRenderGate()).validate(video_path, 54_000, plan)
+
+    assert result.passed is True
+    assert result.reasons == []
+    assert result.metrics["premium_finishing_gate"]["caption_max_lines"] == 2
+    assert result.metrics["premium_finishing_gate"]["caption_style"] == "two_line_kinetic"
+    assert result.metrics["premium_finishing_gate"]["caption_mode"] == "two_line_kinetic"
+
+
+def test_premium_finishing_gate_accepts_short_caption_contract(tmp_path: Path) -> None:
+    class PassingRenderGate:
+        def validate(self, video_path: Path, expected_duration_ms: int) -> RenderGateResult:
+            return RenderGateResult(True, [], {"duration_ms": expected_duration_ms})
+
+    video_path = tmp_path / "premium.mp4"
+    video_path.write_bytes(b"video")
+    plan = {
+        "style": {"component_policy": "free_only", "caption_style": "one_line_kinetic"},
+        "caption_track": {"mode": "one_line_kinetic", "max_lines": 1, "items": [{"text": "Legenda curta"}]},
+        "scenes": [
+            {
+                "scene_id": "scene-1",
+                "transition": {"kind": "soft_cut"},
+                "motion": {"kind": "stable_hold"},
+                "overlays": [],
+            }
+        ],
+    }
+
+    result = PremiumFinishingGate(PassingRenderGate()).validate(video_path, 45_000, plan)
+
+    assert result.passed is True
+    assert result.reasons == []
+
+
+@pytest.mark.parametrize(
+    ("caption_style", "caption_mode", "max_lines"),
+    [
+        ("one_line_kinetic", "one_line_kinetic", 2),
+        ("one_line_kinetic", "two_line_kinetic", 1),
+        ("unknown", "unknown", 1),
+    ],
+)
+def test_premium_finishing_gate_rejects_incoherent_caption_contract(
+    tmp_path: Path,
+    caption_style: str,
+    caption_mode: str,
+    max_lines: int,
+) -> None:
+    class PassingRenderGate:
+        def validate(self, video_path: Path, expected_duration_ms: int) -> RenderGateResult:
+            return RenderGateResult(True, [], {"duration_ms": expected_duration_ms})
+
+    video_path = tmp_path / "premium.mp4"
+    video_path.write_bytes(b"video")
+    plan = {
+        "style": {"component_policy": "free_only", "caption_style": caption_style},
+        "caption_track": {"mode": caption_mode, "max_lines": max_lines, "items": [{"text": "Legenda curta"}]},
+        "scenes": [
+            {
+                "scene_id": "scene-1",
+                "transition": {"kind": "soft_cut"},
+                "motion": {"kind": "stable_hold"},
+                "overlays": [],
+            }
+        ],
+    }
+
+    result = PremiumFinishingGate(PassingRenderGate()).validate(video_path, 54_000, plan)
+
+    assert result.passed is False
+    assert result.reasons == ["premium_caption_format_mismatch"]
+
+
 def test_premium_finishing_gate_rejects_excessive_motion(tmp_path: Path) -> None:
     class PassingRenderGate:
         def validate(self, video_path: Path, expected_duration_ms: int) -> RenderGateResult:
@@ -544,8 +638,8 @@ def test_premium_finishing_gate_rejects_excessive_motion(tmp_path: Path) -> None
     video_path = tmp_path / "premium.mp4"
     video_path.write_bytes(b"video")
     plan = {
-        "style": {"component_policy": "free_only"},
-        "caption_track": {"max_lines": 1, "items": [{"text": "Legenda curta"}]},
+        "style": {"component_policy": "free_only", "caption_style": "one_line_kinetic"},
+        "caption_track": {"mode": "one_line_kinetic", "max_lines": 1, "items": [{"text": "Legenda curta"}]},
         "scenes": [
             {
                 "scene_id": "scene-1",
@@ -570,8 +664,8 @@ def test_premium_finishing_gate_rejects_excessive_visual_event_motion(tmp_path: 
     video_path = tmp_path / "premium.mp4"
     video_path.write_bytes(b"video")
     plan = {
-        "style": {"component_policy": "free_only"},
-        "caption_track": {"max_lines": 1, "items": [{"text": "Legenda curta"}]},
+        "style": {"component_policy": "free_only", "caption_style": "one_line_kinetic"},
+        "caption_track": {"mode": "one_line_kinetic", "max_lines": 1, "items": [{"text": "Legenda curta"}]},
         "scenes": [
             {
                 "scene_id": "scene-1",
@@ -1605,6 +1699,8 @@ def test_finish_plan_long_form_uses_larger_safe_area_and_two_caption_lines() -> 
         )
 
     assert plan["style"]["safe_area"] == {"x": 148, "top": 176, "bottom": 340}
+    assert plan["style"]["caption_style"] == "two_line_kinetic"
+    assert plan["caption_track"]["mode"] == "two_line_kinetic"
     assert plan["caption_track"]["max_lines"] == 2
 
 
@@ -1637,15 +1733,23 @@ def test_finish_plan_short_form_keeps_original_safe_area_and_single_caption_line
         )
 
     assert plan["style"]["safe_area"] == {"x": 108, "top": 132, "bottom": 250}
+    assert plan["style"]["caption_style"] == "one_line_kinetic"
+    assert plan["caption_track"]["mode"] == "one_line_kinetic"
     assert plan["caption_track"]["max_lines"] == 1
 
 
 def test_premium_caption_component_wraps_long_form_text_centered() -> None:
     source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "PremiumCaption.tsx").read_text(encoding="utf-8")
+    layout_source = (Path(__file__).resolve().parent.parent / "remotion" / "src" / "captionLayout.ts").read_text(encoding="utf-8")
 
-    assert "whiteSpace: maxLines > 1 ? 'normal' : 'pre'" in source
     assert "overflowWrap: maxLines > 1 ? 'anywhere' : 'normal'" in source
     assert "lineHeight: 1.14" in source
+    assert "captionLineClampStyle(maxLines, fontSize)" in source
+    assert "WebkitLineClamp: maxLines" in layout_source
+    assert "WebkitBoxOrient: 'vertical'" in layout_source
+    assert "overflow: 'hidden'" in layout_source
+    assert "boxSizing: 'border-box'" in layout_source
+    assert "maxHeight: Math.ceil(fontSize * 1.14 * maxLines) + 18" in layout_source
     assert "const bottomInset" in source
     assert "maxLines > 1" in source
 

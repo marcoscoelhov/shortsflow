@@ -526,7 +526,11 @@ def test_microdrama_text_audit_repair_cannot_bypass_viral_gate(monkeypatch) -> N
         assert job is not None
 
         pipeline = orchestrator.script_pipeline
-        monkeypatch.setattr(orchestrator.providers.creative, "generate_script", lambda _plan: strong_script)
+        monkeypatch.setattr(
+            pipeline,
+            "_generate_script_with_track_selection",
+            lambda **_kwargs: (strong_script, {}),
+        )
         monkeypatch.setattr(
             pipeline,
             "_validate_or_repair_script",

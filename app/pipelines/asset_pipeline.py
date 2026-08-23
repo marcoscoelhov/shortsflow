@@ -19,7 +19,7 @@ from app.pipelines.image_assets import ImageAssetDomain
 from app.pipelines.music_assets import MusicDomain
 from app.pipelines.subtitle_assets import SubtitleDomain
 from app.pipelines.timeline import normalize_scene_timings
-from app.pipelines.tts_assets import TTSDomain
+from app.pipelines.tts_assets import TTSDomain, tts_duration_bounds_ms
 from app.quality.background_music_gate import BackgroundMusicGate
 from app.traction_pilot import build_programmatic_pilot_asset
 from app.utils import file_uri, new_id, parse_srt, path_from_uri, stable_hash, utcnow, word_tokens
@@ -456,15 +456,13 @@ class AssetPipeline(BasePipeline):
         script_artifact = self._read_job_json(job.job_id, "script.json")
         voice_direction = self._build_voice_direction(script, topic_plan, script_artifact)
         result = self.providers.tts.synthesize(script.full_narration, audio_path, srt_path, voice_direction)
-        result = self.tts.fit_tts_duration(audio_path, srt_path, result)
-        # Microdrama long-form (target > 55s) precisa de faixa de duração maior;
-        # o padrão segue o render_gate (35s-175s para long-form).
-        if job.target_duration_sec > 55:
-            min_duration_ms = 35_000
-            max_duration_ms = min(175_000, (job.target_duration_sec + 25) * 1000)
-        else:
-            min_duration_ms = 35_000
-            max_duration_ms = 55_000
+        result = self.tts.fit_tts_duration(
+            audio_path,
+            srt_path,
+            result,
+            target_duration_sec=job.target_duration_sec,
+        )
+        min_duration_ms, max_duration_ms = tts_duration_bounds_ms(job.target_duration_sec)
         if not min_duration_ms <= result["duration_ms"] <= max_duration_ms:
             raise RecoverableStepError("tts duration outside allowed range")
         created_at = utcnow()
@@ -683,6 +681,28 @@ class AssetPipeline(BasePipeline):
             target_duration_ms=narration.duration_ms,
             gain_db=self.settings.background_music_gain_db,
         )
+        gain_db_used = mixed_result.get("gain_db_used")
+        if gain_db_used is None:
+            gain_db_used = self.settings.background_music_gain_db
+        gate_result = self.background_music_gate.validate(
+            narration_path=path_from_uri(narration.audio_uri),
+            music_path=raw_music_path,
+            mixed_audio_path=mixed_audio_path,
+            expected_duration_ms=narration.duration_ms,
+            gain_db=float(gain_db_used),
+        )
+        self.storage.persist_json(
+            job.job_id,
+            "background_music_quality_report.json",
+            {
+                "job_id": job.job_id,
+                "passed": gate_result.passed,
+                "reasons": gate_result.reasons,
+                "metrics": self._serialize_for_json(gate_result.metrics),
+            },
+        )
+        if not gate_result.passed:
+            raise RecoverableStepError(f"background music quality gate failed: {', '.join(gate_result.reasons[:6])}")
         sound_design_metadata = None
         sound_design_file = None
         if self.settings.sound_design_enabled and subtitles and scene_plan:
@@ -708,25 +728,6 @@ class AssetPipeline(BasePipeline):
                 "enabled": True,
             }
             self.storage.persist_json(job.job_id, "sound_design.json", self._serialize_for_json(sound_design_metadata))
-        gate_result = self.background_music_gate.validate(
-            narration_path=path_from_uri(narration.audio_uri),
-            music_path=raw_music_path,
-            mixed_audio_path=mixed_audio_path,
-            expected_duration_ms=narration.duration_ms,
-            gain_db=float(mixed_result.get("gain_db_used") or self.settings.background_music_gain_db),
-        )
-        self.storage.persist_json(
-            job.job_id,
-            "background_music_quality_report.json",
-            {
-                "job_id": job.job_id,
-                "passed": gate_result.passed,
-                "reasons": gate_result.reasons,
-                "metrics": self._serialize_for_json(gate_result.metrics),
-            },
-        )
-        if not gate_result.passed:
-            raise RecoverableStepError(f"background music quality gate failed: {', '.join(gate_result.reasons[:6])}")
         created_at = utcnow()
         payload = {
             "schema_version": self.settings.schema_version,

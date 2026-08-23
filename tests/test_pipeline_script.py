@@ -2016,6 +2016,252 @@ def test_text_publish_audit_ignores_early_weak_hashtags(monkeypatch) -> None:
     assert audit["reasons"] == []
     assert audit["ignored_reasons"] == ["weak_hashtags"]
 
+
+def test_final_script_is_reaudited_when_viral_repair_replaces_audited_text(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    audited_scripts: list[dict] = []
+
+    def audit(_job_id, script, _fact_pack, _topic_context):
+        audited_scripts.append(script)
+        return {"passed": False, "reasons": ["unsupported_claim"]}
+
+    monkeypatch.setattr(pipeline.audit_domain, "_text_publish_audit", audit)
+    final_script = {"hook": "A luz desapareceu, mas a explicação inventou um fato."}
+
+    result = pipeline.audit_domain.audit_final_script_after_repair(
+        job_id="final-audit-job",
+        script=final_script,
+        fact_pack={"facts": []},
+        topic_context={"canonical_topic": "A luz desaparecida"},
+        repair_applied=True,
+        previous_audit={"passed": True, "reasons": []},
+    )
+
+    assert result == {"passed": False, "reasons": ["unsupported_claim"]}
+    assert audited_scripts == [final_script]
+
+
+def test_step_script_blocks_final_viral_repair_candidate_that_breaks_script_contract(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "uma luz some dentro da casa",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 45,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste integrado do candidato final",
+            "requested_angle": None,
+        }
+    )
+    initial_script = _base_script(
+        "A luz sumiu sem aviso. A porta continuou fechada. A sombra revelou a pista. "
+        "Na segunda olhada, o interruptor já explicava tudo."
+    )
+    audit_repaired = {**initial_script, "ending": "Olhe de novo: o interruptor já entregava tudo."}
+    final_viral_candidate = {
+        key: value
+        for key, value in audit_repaired.items()
+        if key != "qa_metrics"
+    }
+    final_viral_candidate["language"] = "en-US"
+    viral_calls = {"count": 0}
+    repair_calls = {"count": 0}
+
+    def viral_validation(script, **_kwargs):
+        viral_calls["count"] += 1
+        if viral_calls["count"] == 1:
+            return script, {"viral_intensity_gate_pass": True}, None
+        return final_viral_candidate, {"viral_intensity_gate_pass": True}, "viral_intensity_repair.json"
+
+    def repair_script(_script, _reasons, _plan):
+        repair_calls["count"] += 1
+        return audit_repaired
+
+    def audit(_job_id, script, _fact_pack, _topic_context):
+        if script is initial_script:
+            return {"passed": False, "reasons": ["weak_ending"]}
+        return {"passed": True, "reasons": []}
+
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic",
+                canonical_topic="a luz que some dentro da casa",
+                angle="o interruptor escondia a pista",
+                hook_promise="a sombra revela por que a luz sumiu",
+                entities=["luz", "casa", "interruptor"],
+                search_terms=["luz casa interruptor"],
+                title_candidates=["A luz que sumiu"],
+                quality_metrics={"editorial_mode": "viral_curiosidades"},
+            )
+        )
+        session.commit()
+        job = session.get(Job, job_id)
+        assert job is not None
+        monkeypatch.setattr(pipeline.settings, "fact_pack_enabled", False)
+        monkeypatch.setattr(orchestrator.providers.creative, "generate_script", lambda _plan: initial_script)
+        monkeypatch.setattr(orchestrator.providers.creative, "repair_script", repair_script)
+        monkeypatch.setattr(
+            pipeline,
+            "_validate_or_repair_script",
+            lambda script, *_args, **_kwargs: (
+                script,
+                {"script_quality_gate_pass": True, "fact_pack_consistency_pass": True},
+            ),
+        )
+        monkeypatch.setattr(pipeline, "_validate_or_repair_viral_intensity", viral_validation)
+        monkeypatch.setattr(pipeline, "_text_publish_audit", audit)
+
+        with pytest.raises(RecoverableStepError, match="final script quality gate failed"):
+            pipeline.step_script(session, job, 1)
+
+    assert viral_calls["count"] == 2
+    assert repair_calls["count"] == 1
+
+
+def test_step_script_blocks_initial_viral_repair_candidate_before_text_audit(monkeypatch) -> None:
+    pipeline = orchestrator.script_pipeline
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": "uma carta escondida no paletó do pai",
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 45,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "teste integrado do repair viral inicial",
+            "requested_angle": None,
+        }
+    )
+    initial_script = _base_script(
+        "A carta apareceu no paletó do pai. O bolso escondia uma pista. "
+        "A dobra revelou o conflito. Na segunda olhada, o envelope já explicava tudo."
+    )
+    invalid_viral_candidate = {key: value for key, value in initial_script.items() if key != "qa_metrics"}
+    invalid_viral_candidate.update(
+        {
+            "language": "en-US",
+            "full_narration": "The letter proves an unsupported medical cure with absolute certainty.",
+        }
+    )
+    audit_calls = {"count": 0}
+
+    def text_audit(*_args, **_kwargs):
+        audit_calls["count"] += 1
+        return {"passed": True, "reasons": []}
+
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic",
+                canonical_topic="a carta escondida no paletó do pai",
+                angle="a dobra do envelope revela o conflito",
+                hook_promise="a carta muda a leitura sobre o pai",
+                entities=["carta", "paletó", "pai"],
+                search_terms=["carta paletó pai"],
+                title_candidates=["A carta no paletó"],
+                quality_metrics={"editorial_mode": "viral_curiosidades"},
+            )
+        )
+        session.commit()
+        job = session.get(Job, job_id)
+        assert job is not None
+        monkeypatch.setattr(pipeline.settings, "fact_pack_enabled", False)
+        monkeypatch.setattr(orchestrator.providers.creative, "generate_script", lambda _plan: initial_script)
+        monkeypatch.setattr(
+            pipeline,
+            "_validate_or_repair_script",
+            lambda script, *_args, **_kwargs: (
+                script,
+                {"script_quality_gate_pass": True, "fact_pack_consistency_pass": True},
+            ),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_validate_or_repair_viral_intensity",
+            lambda _script, **_kwargs: (
+                invalid_viral_candidate,
+                {"viral_intensity_gate_pass": True},
+                "viral_intensity_repair.json",
+            ),
+        )
+        monkeypatch.setattr(pipeline, "_text_publish_audit", text_audit)
+
+        with pytest.raises(RecoverableStepError, match="final script quality gate failed"):
+            pipeline.step_script(session, job, 1)
+
+    assert audit_calls["count"] == 0
+
+
+def test_final_candidate_revalidation_preserves_short_form_soft_warnings(monkeypatch) -> None:
+    from app.quality.script_gate import ScriptGateResult
+
+    warning = "body_beat_count_invalid"
+    gate_result = ScriptGateResult(
+        passed=True,
+        reasons=[warning],
+        metrics={
+            "script_quality_gate_pass": True,
+            "script_quality_gate_blocking": [],
+            "script_quality_gate_warnings": [warning],
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator.script_pipeline.repair_domain.script_gate,
+        "validate",
+        lambda *_args, **_kwargs: gate_result,
+    )
+
+    candidate, metrics = orchestrator.script_pipeline.repair_domain.validate_final_script_candidate_without_repair(
+        _base_script("A sombra revelou a pista. O rosto escondia a resposta. A luz mudou tudo."),
+        {"fact_pack": {"status": "disabled", "facts": []}},
+        45,
+    )
+
+    assert candidate["qa_metrics"] == metrics
+    assert metrics["script_quality_gate_pass"] is True
+    assert metrics["script_quality_gate_blocking"] == []
+    assert metrics["script_quality_gate_warnings"] == [warning]
+    assert metrics["final_candidate_reasons"] == []
+
+
+def test_grounded_fact_risk_downgrade_keeps_soft_warnings_non_blocking() -> None:
+    from app.quality.script_gate import ScriptGateResult
+
+    fact_reason = "factual_risk_requires_conservative_rewrite"
+    warning = "body_beat_count_invalid"
+    result = orchestrator.script_pipeline.repair_domain._downgrade_grounded_fact_risk(
+        {"claim_trace": [{"grounding": "common_knowledge", "source_fact_ids": []}]},
+        {"status": "verified", "facts": []},
+        ScriptGateResult(
+            passed=False,
+            reasons=[fact_reason, warning],
+            metrics={
+                "claim_trace": {"risky_claim_count": 1, "missing_risky_claim_trace": False},
+                "script_quality_gate_pass": False,
+                "script_quality_gate_blocking": [fact_reason],
+                "script_quality_gate_warnings": [warning],
+                "script_quality_gate_reasons": [fact_reason, warning],
+            },
+        ),
+    )
+
+    assert result.passed is True
+    assert result.reasons == [warning]
+    assert result.metrics["script_quality_gate_pass"] is True
+    assert result.metrics["script_quality_gate_blocking"] == []
+    assert result.metrics["script_quality_gate_warnings"] == [warning]
+    assert result.metrics["script_quality_gate_reasons"] == [warning]
+
+
 def test_text_publish_audit_runs_even_when_fact_pack_is_limited(monkeypatch) -> None:
     pipeline = orchestrator.script_pipeline
     calls = {"count": 0}
@@ -3988,6 +4234,28 @@ def test_build_publish_description_prefers_concise_summary_over_full_narration()
     assert "Imagens ilustrativas geradas por IA." in description
     assert "#shorts #curiosidades #danakil #etiopia #geografia" in description
 
+
+def test_build_publish_description_uses_the_actual_microdrama_story() -> None:
+    description = orchestrator.monetization_pipeline.build_publish_description(
+        SimpleNamespace(
+            canonical_topic="A chave da casa vazia no buquê da noiva",
+            angle="A chave interrompe o casamento e expõe o segredo da família",
+        ),
+        SimpleNamespace(
+            hook="A chave apareceu dentro do buquê.",
+            body_beats=["A noiva abandonou o altar e abriu a casa vazia."],
+            ending="Você abriria a porta antes do sim?",
+        ),
+        "A chave antes do sim",
+        ["#shorts", "#microdrama", "#ficcao"],
+        "Conteúdo ficcional com imagens geradas por IA.",
+        niche_id="fiction_microdrama",
+    )
+
+    assert description.startswith("Microficção original: A chave apareceu dentro do buquê.")
+    assert "A noiva abandonou o altar" in description
+    assert "Bairro da Estação" not in description
+
 def test_publish_readiness_blocks_limited_fact_pack_with_invented_source_ids(monkeypatch) -> None:
     script_artifact = {
         **_base_script(
@@ -4139,17 +4407,27 @@ def test_microdrama_prompt_instructs_implicit_share_trigger() -> None:
         assert literal in MICRODRAMA_VIRAL_PROMPT_TEMPLATE
 
 
-def test_viral_intensity_repair_prompt_instructs_literal_share_trigger_phrases() -> None:
+def test_viral_intensity_repair_prompt_isolates_microdrama_instructions_by_niche() -> None:
     from app.providers.llm import OpenAICreativeProvider
 
-    import inspect
+    provider = object.__new__(OpenAICreativeProvider)
+    prompts: list[str] = []
 
-    source = inspect.getsource(OpenAICreativeProvider.repair_script)
-    assert "viral_intensity_repair existir" in source
-    assert "olha de novo" in source
-    assert "da próxima vez que" in source
-    assert "você vai lembrar" in source
-    assert "nunca com nome de personagem seguido de ação neutra" in source
+    def completion(prompt: str):
+        prompts.append(prompt)
+        return {"qa_metrics": {}}
+
+    provider._json_completion = completion
+    base_context = {"retention_map": {"target_duration_sec": 45}, "viral_intensity_repair": {"reasons": []}}
+
+    provider.repair_script({}, [], {**base_context, "niche_id": "fiction_microdrama"})
+    provider.repair_script({}, [], {**base_context, "niche_id": "curiosidades"})
+
+    assert "INSTRUÇÕES ESPECÍFICAS DE MICRODRAMA" in prompts[0]
+    assert "olha de novo" in prompts[0]
+    assert "nunca com nome de personagem seguido de ação neutra" in prompts[0]
+    assert "INSTRUÇÕES ESPECÍFICAS DE MICRODRAMA" not in prompts[1]
+    assert "olha de novo" not in prompts[1]
 
 
 def test_automatic_topic_payload_uses_cosmos_focus() -> None:
@@ -4478,6 +4756,88 @@ def test_mock_generate_script_batch_returns_exactly_draft_count_tracks() -> None
     assert all(int(track["_track_index"]) == index for index, track in enumerate(tracks))
 
 
+def test_mock_script_batch_produces_ten_distinct_valid_long_form_tracks() -> None:
+    provider = MockCreativeProvider()
+    plan = {
+        "canonical_topic": "A chave no buquê da noiva",
+        "angle": "a casa vazia revela uma escolha impossível",
+        "title_candidates": ["A chave antes do sim"],
+        "cta_style": "soft",
+        "retention_map": build_retention_map(120),
+        "fact_pack": {"status": "disabled", "facts": []},
+    }
+
+    tracks = provider.generate_script_batch(plan, draft_count=10)["tracks"]
+    valid_tracks, summaries = orchestrator.script_pipeline._validate_script_track_batch(tracks, draft_count=10)
+
+    assert len(valid_tracks) == 10
+    assert all(summary["valid"] for summary in summaries)
+    assert all(summary["max_lexical_similarity"] < 0.92 for summary in summaries)
+    assert all(8 <= len(track["body_beats"]) <= 12 for track in valid_tracks)
+    assert all(288 <= len(word_tokens(track["full_narration"])) <= 324 for track in valid_tracks)
+
+
+@pytest.mark.parametrize(
+    ("target_duration_sec", "beat_range", "word_range"),
+    [
+        (120, range(8, 13), range(288, 325)),
+        (40, range(3, 6), range(80, 121)),
+    ],
+)
+def test_mock_script_batch_keeps_every_distinct_track_aligned_to_topic_plan(
+    target_duration_sec: int,
+    beat_range: range,
+    word_range: range,
+) -> None:
+    provider = MockCreativeProvider()
+    plan = {
+        "canonical_topic": "carta no paletó do pai",
+        "angle": "o filho encontra uma mensagem que muda a memória da família",
+        "hook_promise": "a carta no paletó do pai revela por que ele guardou silêncio",
+        "entities": ["carta", "paletó", "pai", "filho"],
+        "title_candidates": ["A carta no paletó do pai"],
+        "cta_style": "none",
+        "retention_map": build_retention_map(target_duration_sec),
+        "fact_pack": {"status": "disabled", "facts": []},
+    }
+
+    tracks = provider.generate_script_batch(plan, draft_count=10)["tracks"]
+    valid_tracks, summaries = orchestrator.script_pipeline._validate_script_track_batch(tracks, draft_count=10)
+
+    assert len(valid_tracks) == 10
+    assert all(summary["valid"] for summary in summaries)
+    assert all(summary["max_lexical_similarity"] < 0.92 for summary in summaries)
+    assert all(len(track["body_beats"]) in beat_range for track in valid_tracks)
+    assert all(len(word_tokens(track["full_narration"])) in word_range for track in valid_tracks)
+    assert all("carta no paletó do pai" in track["hook"].casefold() for track in valid_tracks)
+    assert all("carta no paletó do pai" in track["full_narration"].casefold() for track in valid_tracks)
+    forbidden = ("chave enferrujada", "noiva", "casa abandonada")
+    assert all(not any(item in track["full_narration"].casefold() for item in forbidden) for track in valid_tracks)
+
+    selected_result = ScriptQualityGate().validate(valid_tracks[0], target_duration_sec=target_duration_sec)
+    assert selected_result.passed, selected_result.metrics["script_quality_gate_blocking"]
+
+
+def test_mock_long_form_script_obeys_the_same_word_and_beat_contract() -> None:
+    provider = MockCreativeProvider()
+    script = provider.generate_script(
+        {
+            "canonical_topic": "A chave no buquê da noiva",
+            "angle": "a casa vazia revela uma escolha impossível",
+            "title_candidates": ["A chave antes do sim"],
+            "cta_style": "soft",
+            "retention_map": build_retention_map(120),
+            "fact_pack": {"status": "disabled", "facts": []},
+        }
+    )
+
+    assert 288 <= len(word_tokens(script["full_narration"])) <= 324
+    assert 8 <= len(script["body_beats"]) <= 12
+    result = ScriptQualityGate().validate(script, target_duration_sec=120)
+    assert "avg_sentence_too_long" not in result.reasons
+    assert "sentence_too_long" not in result.reasons
+
+
 def test_mock_judge_script_draft_selection_returns_descending_ranking() -> None:
     provider = MockCreativeProvider()
     result = provider.judge_quality_gate(
@@ -4590,3 +4950,95 @@ def test_script_gate_accepts_long_form_microdrama_120s() -> None:
     assert "estimated_duration_outside_target_window" not in result.reasons
     assert "body_beat_count_invalid" not in result.reasons
     assert result.metrics["long_form"] is True
+    assert result.metrics["natural_min_words"] == 288
+    assert result.metrics["natural_max_words"] == 324
+
+
+def test_script_gate_makes_long_form_structure_and_pacing_contracts_blocking() -> None:
+    def script_with(*, word_count: int, beat_count: int, estimated_sec: float) -> dict[str, object]:
+        narration = " ".join(f"pista{i}" for i in range(word_count)) + "."
+        return {
+            "title": "A carta escondida no paletó do pai",
+            "hook": "Ninguém esperava encontrar a carta naquele bolso.",
+            "loop": "A dobra escondia o motivo do silêncio.",
+            "body_beats": [f"A pista {i} muda a decisão do filho." for i in range(beat_count)],
+            "payoff": "A carta revela quem protegeu o pai.",
+            "ending": "O mesmo bolso agora explica a primeira cena.",
+            "cta": None,
+            "full_narration": narration,
+            "estimated_duration_sec": estimated_sec,
+            "language": "pt-BR",
+            "key_facts": [],
+            "source_fact_ids": [],
+            "claim_trace": [],
+            "retention_map": {},
+            "qa_metrics": {
+                "hook_score": 0.92,
+                "clarity_score": 0.9,
+                "information_density_score": 0.85,
+                "repetition_score": 0.2,
+                "ending_strength_score": 0.88,
+            },
+        }
+
+    undersized = ScriptQualityGate().validate(
+        script_with(word_count=200, beat_count=4, estimated_sec=120),
+        target_duration_sec=120,
+    )
+    outside_window = ScriptQualityGate().validate(
+        script_with(word_count=300, beat_count=8, estimated_sec=90),
+        target_duration_sec=120,
+    )
+
+    assert undersized.passed is False
+    assert undersized.metrics["structured_viral_gate"]["long_form"] is True
+    assert "body_beat_count_invalid" in undersized.metrics["script_quality_gate_blocking"]
+    assert "word_count_too_low_for_natural_pace" in undersized.metrics["script_quality_gate_blocking"]
+    assert outside_window.passed is False
+    assert "estimated_duration_outside_target_window" in outside_window.metrics["script_quality_gate_blocking"]
+
+
+def test_script_gate_keeps_short_form_structure_and_pacing_reasons_soft() -> None:
+    narration = " ".join(f"detalhe{i}" for i in range(100)) + "."
+    script = {
+        "title": "O detalhe no bolso muda tudo",
+        "hook": "Ninguém percebeu o detalhe no primeiro olhar.",
+        "loop": "O bolso ainda escondia a resposta.",
+        "body_beats": ["A pista aparece.", "A dobra muda a leitura."],
+        "payoff": "O detalhe revela a escolha.",
+        "ending": "O bolso explica a cena inicial.",
+        "full_narration": narration,
+        "estimated_duration_sec": 45,
+        "language": "pt-BR",
+        "qa_metrics": {
+            "hook_score": 0.92,
+            "clarity_score": 0.9,
+            "information_density_score": 0.85,
+            "repetition_score": 0.2,
+            "ending_strength_score": 0.88,
+        },
+    }
+
+    result = ScriptQualityGate().validate(script, target_duration_sec=45)
+
+    assert result.passed is True
+    assert result.metrics["structured_viral_gate"]["long_form"] is False
+    assert "body_beat_count_invalid" in result.metrics["script_quality_gate_warnings"]
+
+
+def test_structured_contract_uses_one_long_form_word_and_beat_range() -> None:
+    contract = orchestrator.script_pipeline._structured_viral_contract(
+        {"niche_id": "fiction_microdrama"},
+        120,
+    )
+
+    assert contract["word_count_range"] == [288, 324]
+    assert "8-12" in contract["fields"]["beats"]["rule"]
+    assert "3-5" not in contract["fields"]["beats"]["rule"]
+
+
+def test_short_form_structured_contract_keeps_original_limits() -> None:
+    contract = orchestrator.script_pipeline._structured_viral_contract({"niche_id": "curiosidades"}, 45)
+
+    assert contract["word_count_range"] == [80, 120]
+    assert "3-5" in contract["fields"]["beats"]["rule"]

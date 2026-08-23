@@ -4,6 +4,8 @@ from sqlalchemy.exc import OperationalError
 from app.models import ScenePlan, StepExecution
 from app.utils import stable_hash
 from app.runtime_execution import AdmissionDecision, RuntimeAdmissionRefused
+from app.schemas import TopicRequestCreate
+from app.pipelines.common import FatalStepError
 
 
 def _create_direct_pipeline_job(seed_theme: str = "polvos") -> str:
@@ -634,6 +636,40 @@ def test_orchestrator_create_job_rejects_unsupported_niche() -> None:
     else:
         raise AssertionError("expected ValidationError")
 
+
+@pytest.mark.parametrize("niche_id", ["curiosidades", "survival_decisions"])
+def test_long_form_duration_is_restricted_to_microdrama_regardless_of_field_order(niche_id: str) -> None:
+    payload = {
+        "seed_theme": "Uma pauta manual",
+        "target_duration_sec": 120,
+        "niche_id": niche_id,
+        "job_origin": "manual_theme",
+        "creation_via": "api",
+    }
+
+    with pytest.raises(ValidationError, match="only supported for fiction_microdrama"):
+        TopicRequestCreate.model_validate(payload)
+
+    reordered = {"niche_id": niche_id, "target_duration_sec": 120, "seed_theme": "Uma pauta manual"}
+    with pytest.raises(ValidationError, match="only supported for fiction_microdrama"):
+        TopicRequestCreate.model_validate(reordered)
+
+
+def test_input_gate_rejects_persisted_non_microdrama_long_form() -> None:
+    job_id = "invalid-long-form-input-gate"
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="queued", seed_theme="Polvos")
+        session.flush()
+        request = session.query(TopicRequest).filter_by(job_id=job_id).one()
+        job = session.get(Job, job_id)
+        request.niche_id = "curiosidades"
+        request.target_duration_sec = 120
+        job.target_duration_sec = 120
+        session.commit()
+
+        with pytest.raises(FatalStepError, match="long-form duration requires fiction_microdrama"):
+            orchestrator._step_input_gate(session, job, 1)
+
 def test_run_step_cancels_job_when_shutdown_is_requested_during_retry(monkeypatch) -> None:
     job_id = orchestrator.create_job(
         {
@@ -1094,8 +1130,9 @@ def test_regenerate_scene_runs_only_render_downstream(monkeypatch) -> None:
 
     def fake_handler(step_name: str):
         def handler(session, job, attempt):
-            ran_steps.append(step_name)
-            if step_name == "monetization_readiness_gate":
+            if job.job_id == job_id:
+                ran_steps.append(step_name)
+            if job.job_id == job_id and step_name == "monetization_readiness_gate":
                 quality_summary = dict(job.quality_summary or {})
                 quality_summary["monetization"] = {
                     "passed": True,

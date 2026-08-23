@@ -1066,6 +1066,8 @@ class JobOrchestrator:
             raise FatalStepError("seed_theme too short after normalization")
         if request.target_duration_sec < 35 or request.target_duration_sec > 150:
             raise FatalStepError(f"target_duration_sec outside supported range: {request.target_duration_sec}")
+        if request.target_duration_sec > 55 and request.niche_id != "fiction_microdrama":
+            raise FatalStepError("long-form duration requires fiction_microdrama")
         render_preflight: dict[str, object] = {"ready": True, "backend": "remotion"}
         if not self.settings.use_mock_providers:
             render_preflight = self.premium_finishing.renderer.preflight_environment()

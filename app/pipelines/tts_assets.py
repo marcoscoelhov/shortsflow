@@ -10,11 +10,28 @@ import imageio_ffmpeg
 from app.utils import ms_to_srt, parse_srt
 
 
+def tts_duration_bounds_ms(target_duration_sec: int) -> tuple[int, int]:
+    if target_duration_sec <= 55:
+        return 35_000, 55_000
+    minimum = max(35_000, round(target_duration_sec * 0.80 * 1000))
+    maximum = min(175_000, (target_duration_sec + 25) * 1000)
+    return minimum, maximum
+
+
 class TTSDomain:
     def __init__(self, pipeline: Any) -> None:
         self.pipeline = pipeline
 
-    def fit_tts_duration(self, audio_path: Path, srt_path: Path, result: dict[str, Any]) -> dict[str, Any]:
+    def fit_tts_duration(
+        self,
+        audio_path: Path,
+        srt_path: Path,
+        result: dict[str, Any],
+        *,
+        target_duration_sec: int,
+    ) -> dict[str, Any]:
+        if target_duration_sec > 55:
+            return result
         duration_ms = int(result["duration_ms"])
         target_ms: int | None = None
         if duration_ms > 55_000:

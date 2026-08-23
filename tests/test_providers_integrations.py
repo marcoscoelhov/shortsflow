@@ -1,7 +1,45 @@
 from tests.e2e_support import *  # noqa: F403
 from app.config import Settings
 from app.providers.errors import ProviderFailure
-from app.providers.llm_clients import OpenAICreativeProvider, QwenCreativeProvider, XAICreativeProvider
+from app.providers.llm_clients import DeepSeekCreativeProvider, OpenAICreativeProvider, QwenCreativeProvider, XAICreativeProvider
+
+
+@pytest.mark.parametrize(
+    ("provider_class", "expected_provider", "method_name"),
+    [
+        (DeepSeekCreativeProvider, "deepseek_text", "_json_completion"),
+        (DeepSeekCreativeProvider, "deepseek_text", "_json_array_completion"),
+        (OpenAICreativeProvider, "openai_text", "_json_completion"),
+        (OpenAICreativeProvider, "openai_text", "_json_array_completion"),
+        (XAICreativeProvider, "xai_text", "_json_completion"),
+    ],
+)
+@pytest.mark.parametrize(
+    "response",
+    [
+        SimpleNamespace(choices=[]),
+        SimpleNamespace(choices=[SimpleNamespace(message=None)]),
+        SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=123))]),
+    ],
+)
+def test_chat_completion_malformed_response_becomes_provider_failure(
+    provider_class, expected_provider: str, method_name: str, response: object
+) -> None:
+    provider = object.__new__(provider_class)
+    provider.model_name = "test-model"
+    provider.reasoning_effort = "medium"
+    provider.max_output_tokens = 4096
+    provider.timeout_sec = 10.0
+    provider.client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=lambda **_kwargs: response),
+        )
+    )
+
+    with pytest.raises(ProviderFailure) as exc_info:
+        getattr(provider, method_name)("prompt")
+
+    assert exc_info.value.provider == expected_provider
 
 
 def test_llm_facade_preserves_public_provider_imports() -> None:

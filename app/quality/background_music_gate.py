@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import math
+import subprocess
+import tempfile
 import wave
 from array import array
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import imageio_ffmpeg
 
 
 @dataclass(frozen=True)
@@ -71,8 +75,35 @@ class BackgroundMusicGate:
         if source_rms_dbfs < -55.0:
             reasons.append("music_source_too_quiet")
 
-        bed_ratio = self._bed_relative_rms_ratio(narration["samples"], mixed["samples"])
+        bed_ratio = self._bed_relative_rms_ratio(
+            narration_rms_dbfs=float(narration["metrics"]["rms_dbfs"]),
+            music_source_rms_dbfs=source_rms_dbfs,
+            gain_db=gain_db,
+        )
         metrics["bed_relative_rms_ratio"] = round(bed_ratio, 4)
+        metrics["bed_relative_rms_measurement"] = "music_source_rms_plus_gain_vs_narration_rms"
+        raw_residual = self._optimal_gain_residual_ratio(mixed["samples"], narration["samples"])
+        loudnorm_reference = self._loudnorm_reference_stats(narration_path)
+        if loudnorm_reference["error"]:
+            reasons.append("music_mix_reference_generation_failed")
+            metrics["observed_mix_contribution_error"] = loudnorm_reference["error"]
+            return BackgroundMusicGateResult(False, reasons, metrics)
+        loudnorm_residual = self._optimal_gain_residual_ratio(
+            mixed["samples"],
+            loudnorm_reference["samples"],
+        )
+        observed_contribution = min(raw_residual, loudnorm_residual)
+        observed_reference = "raw_narration" if raw_residual <= loudnorm_residual else "loudnorm_narration"
+        metrics["observed_mix_contribution_ratio"] = round(observed_contribution, 6)
+        metrics["observed_mix_contribution_reference"] = observed_reference
+        metrics["observed_mix_contribution_reference_ratios"] = {
+            "raw_narration": round(raw_residual, 6),
+            "loudnorm_narration": round(loudnorm_residual, 6),
+        }
+        metrics["observed_mix_contribution_method"] = "minimum_optimal_gain_residual_vs_raw_and_loudnorm_narration"
+        metrics["observed_mix_contribution_min_ratio"] = 0.01
+        if observed_contribution < 0.01:
+            reasons.append("music_bed_missing_from_mix")
         # Faixas largas de sanidade: o ajuste fino do nível do bed é feito pela
         # calibração dinâmica (music_bed_relative_rms_target). O gate aqui só barra
         # casos absurdos — bed praticamente ausente ou claramente mais alto que a voz —
@@ -82,6 +113,63 @@ class BackgroundMusicGate:
         elif bed_ratio > 1.2:
             reasons.append("music_bed_overwhelms_narration")
         return BackgroundMusicGateResult(not reasons, reasons, metrics)
+
+    def _loudnorm_reference_stats(self, narration_path: Path) -> dict[str, Any]:
+        reference_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as reference_file:
+                reference_path = Path(reference_file.name)
+            result = subprocess.run(
+                [
+                    imageio_ffmpeg.get_ffmpeg_exe(),
+                    "-y",
+                    "-i",
+                    str(narration_path),
+                    "-filter:a",
+                    "loudnorm=I=-16:LRA=11:TP=-1.5",
+                    "-ar",
+                    "24000",
+                    "-ac",
+                    "1",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(reference_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                return {"error": f"ffmpeg_exit_{result.returncode}", "samples": array("h")}
+            stats = self._read_wave_stats(reference_path)
+            if stats["error"]:
+                return {"error": str(stats["error"]), "samples": array("h")}
+            return {"error": None, "samples": stats["samples"]}
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"error": f"{type(exc).__name__}: {exc}", "samples": array("h")}
+        finally:
+            if reference_path is not None:
+                reference_path.unlink(missing_ok=True)
+
+    def _optimal_gain_residual_ratio(self, mixed: array, reference: array) -> float:
+        sample_count = min(len(mixed), len(reference))
+        if sample_count <= 0:
+            return 0.0
+        mixed_values = mixed[:sample_count]
+        reference_values = reference[:sample_count]
+        reference_energy = sum(float(sample) * float(sample) for sample in reference_values)
+        mixed_energy = sum(float(sample) * float(sample) for sample in mixed_values)
+        if reference_energy <= 0.0 or mixed_energy <= 0.0:
+            return 0.0
+        optimal_gain = sum(
+            float(mixed_sample) * float(reference_sample)
+            for mixed_sample, reference_sample in zip(mixed_values, reference_values, strict=True)
+        ) / reference_energy
+        residual_energy = sum(
+            (float(mixed_sample) - optimal_gain * float(reference_sample)) ** 2
+            for mixed_sample, reference_sample in zip(mixed_values, reference_values, strict=True)
+        )
+        return math.sqrt(residual_energy / mixed_energy)
 
     def _read_wave_stats(self, path: Path) -> dict[str, Any]:
         metrics: dict[str, Any] = {"path": str(path)}
@@ -124,23 +212,17 @@ class BackgroundMusicGate:
         )
         return {"error": None, "metrics": metrics, "samples": samples}
 
-    def _bed_relative_rms_ratio(self, narration_samples: array, mixed_samples: array) -> float:
-        length = min(len(narration_samples), len(mixed_samples))
-        if length <= 0:
+    def _bed_relative_rms_ratio(
+        self,
+        *,
+        narration_rms_dbfs: float,
+        music_source_rms_dbfs: float,
+        gain_db: float,
+    ) -> float:
+        if narration_rms_dbfs <= -120.0 or music_source_rms_dbfs <= -120.0:
             return 0.0
-        residual_sum = 0.0
-        narration_sum = 0.0
-        for idx in range(length):
-            narration_sample = int(narration_samples[idx])
-            mixed_sample = int(mixed_samples[idx])
-            residual = mixed_sample - narration_sample
-            residual_sum += residual * residual
-            narration_sum += narration_sample * narration_sample
-        if narration_sum <= 0:
-            return 0.0
-        residual_rms = math.sqrt(residual_sum / length)
-        narration_rms = math.sqrt(narration_sum / length)
-        return residual_rms / narration_rms if narration_rms else 0.0
+        relative_db = music_source_rms_dbfs + float(gain_db) - narration_rms_dbfs
+        return 10 ** (relative_db / 20)
 
     def _dbfs(self, amplitude: float) -> float:
         if amplitude <= 0:
