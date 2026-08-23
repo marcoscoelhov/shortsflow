@@ -185,9 +185,12 @@ class ResilientCreativeProvider:
         failures: list[str] = []
         for index, (role, provider, timeout_sec) in enumerate(candidates):
             try:
+                # Batch gera cada track em chamada individual; o timeout total
+                # precisa escalar com o número de tracks (ex.: 10 × 150s).
+                batch_timeout = float(timeout_sec) * max(1, draft_count)
                 payload = self._run_primary_with_timeout(
                     lambda provider=provider: provider.generate_script_batch(topic_plan, draft_count),
-                    timeout_sec=timeout_sec,
+                    timeout_sec=batch_timeout,
                 )
                 tracks = payload.get("tracks") if isinstance(payload, dict) else None
                 if not isinstance(tracks, list) or len(tracks) != draft_count or not all(

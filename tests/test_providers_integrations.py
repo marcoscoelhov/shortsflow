@@ -1108,3 +1108,96 @@ def test_job_lease_delta_has_floor_for_real_provider_steps(monkeypatch) -> None:
     monkeypatch.setattr(test_orchestrator.settings, "job_lease_seconds", 60)
 
     assert test_orchestrator._lease_delta().total_seconds() == 3600
+
+
+def test_minimax_generate_script_batch_uses_individual_calls_not_single_giant_json(monkeypatch) -> None:
+    """O lote real deve gerar cada track em chamada individual (como o mock).
+
+    Um único JSON com N roteiros completos estoura max_tokens e produz JSON
+    inválido no provider real; tracks individuais reutilizam generate_script.
+    """
+    from app.providers.llm import MinimaxCreativeProvider
+
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.provider_name = "minimax"
+    provider.failure_provider_name = "minimax_text"
+    provider.settings = SimpleNamespace(target_duration_sec=120)
+
+    generated_angles: list[str] = []
+    completion_calls: list[str] = []
+
+    def fake_json_completion(prompt: str, *, max_tokens: int | None = None):
+        completion_calls.append(prompt)
+        return {
+            "title": f"Track gerada {len(completion_calls)}",
+            "hook": "A carta mudou tudo.",
+            "loop": "Quem escondia a verdade?",
+            "body_beats": [
+                "A filha leu a carta antes do discurso.",
+                "O sócio negou a assinatura.",
+                "A gravação mostrava o pai confessando.",
+            ],
+            "payoff": "A primeira página não acusava o sócio.",
+            "ending": "O paletó guardava a confissão do pai.",
+            "cta": "Você revelaria o segredo?",
+            "full_narration": "A carta mudou tudo. Quem escondia a verdade? A filha leu a carta antes do discurso. O sócio negou a assinatura. A gravação mostrava o pai confessando. A primeira página não acusava o sócio. O paletó guardava a confissão do pai. Você revelaria o segredo?",
+            "estimated_duration_sec": 120,
+            "key_facts": [],
+            "source_fact_ids": [],
+            "claim_trace": [],
+            "token_count": 60,
+            "language": "pt-BR",
+            "retention_map": {},
+            "story_arc": {"setup": "A carta mudou tudo.", "tension": "Quem escondia a verdade?", "turn": "A primeira página não acusava o sócio.", "consequence": "O paletó guardava a confissão do pai."},
+            "visual_opening": {},
+            "qa_metrics": {},
+            "prompt_version": "test",
+        }
+
+    def fake_generate_script(topic_plan):
+        generated_angles.append(str(topic_plan.get("angle") or ""))
+        payload = fake_json_completion("script")
+        payload["qa_metrics"] = {**payload.get("qa_metrics", {}), "source_provider": provider.provider_name}
+        return payload
+
+    monkeypatch.setattr(provider, "_json_completion", fake_json_completion)
+    monkeypatch.setattr(provider, "generate_script", fake_generate_script)
+
+    batch = provider.generate_script_batch({"angle": "segredo da carta"}, 10)
+
+    tracks = batch["tracks"]
+    assert len(tracks) == 10
+    assert generated_angles == [f"segredo da carta variante {i + 1}" for i in range(10)]
+    assert [int(track["_track_index"]) for track in tracks] == list(range(10))
+    assert all(str(track["title"]).endswith(f"(variante {i + 1})") for i, track in enumerate(tracks))
+    assert all(track["qa_metrics"]["source_provider"] == "minimax" for track in tracks)
+
+
+def test_resilient_generate_script_batch_scales_timeout_with_draft_count() -> None:
+    """O timeout do lote deve escalar com o nº de tracks (geração individual por track)."""
+    class BatchProvider:
+        provider_name = "openai"
+        model_name = "gpt-5.6-luna"
+
+        def generate_script_batch(self, topic_plan, draft_count):
+            return {"tracks": [{"title": f"t{i}", "full_narration": f"Narração {i}"} for i in range(draft_count)]}
+
+    captured_timeouts: list[float] = []
+
+    def fake_run_with_timeout(fn, timeout_sec):
+        captured_timeouts.append(float(timeout_sec))
+        return fn()
+
+    provider = object.__new__(ResilientCreativeProvider)
+    setattr(provider, "strict_minimax_validation", False)
+    setattr(provider, "primary", BatchProvider())
+    setattr(provider, "fallback", None)
+    setattr(provider, "script_draft_provider", None)
+    setattr(provider, "_script_generation_candidates", lambda: [("primary", provider.primary, 150.0)])
+    setattr(provider, "_run_primary_with_timeout", fake_run_with_timeout)
+
+    result = provider.generate_script_batch({"canonical_topic": "microdrama"}, 10)
+
+    assert captured_timeouts == [1500.0]
+    assert len(result["tracks"]) == 10
+    assert result["tracks"][3]["qa_metrics"]["generation_provider"] == "openai"
