@@ -59,13 +59,13 @@ SHORTSFLOW_OPENAI_BASE_URL=https://opencode.ai/zen/go/v1
 SHORTSFLOW_OPENAI_MODEL=gpt-5.6-luna
 SHORTSFLOW_OPENAI_REASONING_EFFORT=high
 SHORTSFLOW_LLM_GATE_JUDGE_PROVIDER=xai
-SHORTSFLOW_LLM_GATE_JUDGE_MODEL=kimi-k3
+SHORTSFLOW_LLM_GATE_JUDGE_MODEL=kimi-k2.6
 SHORTSFLOW_LLM_FALLBACK_PROVIDER=deepseek
 SHORTSFLOW_LLM_ENABLE_FALLBACK=true
 SHORTSFLOW_OPENAI_API_KEY=<redigido>
 SHORTSFLOW_XAI_API_KEY=<redigido>
 SHORTSFLOW_XAI_BASE_URL=https://opencode.ai/zen/go/v1
-SHORTSFLOW_XAI_MODEL=kimi-k3
+SHORTSFLOW_XAI_MODEL=kimi-k2.6
 SHORTSFLOW_XAI_REASONING_EFFORT=high
 SHORTSFLOW_LLM_JSON_MAX_TOKENS=4096
 SHORTSFLOW_LLM_TOPIC_BATCH_MAX_TOKENS=12000
@@ -78,7 +78,7 @@ SHORTSFLOW_MINIMAX_TEXT_API_KEY=<redigido>
 SHORTSFLOW_MINIMAX_IMAGE_API_KEY=<redigido>
 ```
 
-Politica LLM operacional: a conta OpenCode Go em `https://opencode.ai/zen/go/v1` transporta as chamadas de texto. GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho e planejamento de cenas. O repair dedicado usa o mesmo modelo com `reasoning.effort=max`. DeepSeek v4 Flash atua como fallback criativo quando a invocacao primaria falha. Kimi K3, no papel logico `xai` mas no mesmo endpoint OpenCode Go, julga os gates. DeepSeek v4 Pro faz a revisao premium. Grok nao faz parte da rota operacional. Qwen remoto permanece apenas como provider textual opcional; o serviço visual Qwen local foi removido. A revisão visual de publicação é humana.
+Politica LLM operacional: a conta OpenCode Go em `https://opencode.ai/zen/go/v1` transporta as chamadas de texto. GPT-5.6 Luna com `reasoning.effort=high` gera pauta, rascunho e planejamento de cenas. O repair dedicado usa o mesmo modelo com `reasoning.effort=max`. DeepSeek v4 Flash atua como fallback criativo quando a invocacao primaria falha. Kimi K2.6, no papel logico `xai` mas no mesmo endpoint OpenCode Go, julga os gates. DeepSeek v4 Pro faz a revisao premium. Grok nao faz parte da rota operacional. Qwen remoto permanece apenas como provider textual opcional; o serviço visual Qwen local foi removido. A revisão visual de publicação é humana.
 
 A politica completa, incluindo a separacao entre score premium diagnostico e Score de Autoaprovacao, esta em
 `docs/adr/0002-reconcile-2026-07-31-publication-vision-and-llm-policy.md`. Enquanto o gate premium nao for
@@ -142,7 +142,7 @@ curl http://127.0.0.1:8080/healthz
 Resposta esperada:
 
 ```json
-{"status":"ok","app":"ShortsFlow","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","providers":{"mode":"production","llm_primary":"openai","llm_gate_judge":"xai","llm_gate_judge_model":"kimi-k3","tts_primary":"gemini_tts","render_backend":"remotion"},"render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
+{"status":"ok","app":"ShortsFlow","bind":"127.0.0.1:8080","tailnet_url":"https://shorts-hub.example.ts.net","providers":{"mode":"production","llm_primary":"openai","llm_gate_judge":"xai","llm_gate_judge_model":"kimi-k2.6","tts_primary":"gemini_tts","render_backend":"remotion"},"render":{"primary_backend":"remotion","remotion_ready":true,"remotion_missing_items":[]}}
 ```
 
 Se estiver usando outra porta, ajuste a URL do `curl`.

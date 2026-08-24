@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     target_duration_sec: int = 45
     scene_target_count: int = 7
     microdrama_script_track_count: int = 10
-    microdrama_script_generation_parallelism: int = 2
+    microdrama_script_generation_parallelism: int = 4
     microdrama_script_max_tokens: int = 4096
 
     use_mock_providers: bool = False
@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     llm_publish_audit_timeout_sec: float = 75.0
     llm_gate_judge_enabled: bool = True
     llm_gate_judge_provider: str = "xai"
-    llm_gate_judge_model: str | None = "kimi-k3"
+    llm_gate_judge_model: str | None = "kimi-k2.6"
     llm_gate_judge_timeout_sec: float = 120.0
     llm_premium_review_enabled: bool = True
     llm_premium_review_provider: str = "deepseek"
@@ -249,7 +249,7 @@ class Settings(BaseSettings):
     openai_timeout_sec: float = 180.0
     xai_api_key: str | None = None
     xai_base_url: str = "https://opencode.ai/zen/go/v1"
-    xai_model: str = "kimi-k3"
+    xai_model: str = "kimi-k2.6"
     xai_reasoning_effort: str = "high"
     xai_timeout_sec: float = 180.0
     deepseek_api_key: str | None = None
