@@ -411,17 +411,15 @@ def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> Non
 def test_openai_scene_planning_uses_responses_api(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class FakeCompletions:
+    class FakeResponses:
         def create(self, **kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content='[{"scene_id":"scene-1","order":1}]'))]
-            )
+            return SimpleNamespace(output_text='[{"scene_id":"scene-1","order":1}]')
 
     class FakeOpenAI:
         def __init__(self, **kwargs):
             captured["client_kwargs"] = kwargs
-            self.chat = SimpleNamespace(completions=FakeCompletions())
+            self.responses = FakeResponses()
 
     monkeypatch.setattr(
         "app.providers.llm.get_settings",
@@ -440,7 +438,9 @@ def test_openai_scene_planning_uses_responses_api(monkeypatch) -> None:
 
     assert captured["client_kwargs"]["base_url"] == "https://opencode.ai/zen/go/v1"
     assert captured["model"] == "gpt-5.6-luna"
-    assert captured["messages"][0]["content"] == "Return ONLY the final JSON array. No reasoning, prose, or markdown fences."
+    assert captured["instructions"] == "Return ONLY the final JSON array. No reasoning, prose, or markdown fences."
+    assert captured["reasoning"] == {"effort": "high"}
+    assert captured["max_output_tokens"] == 4096
     assert scenes == [{"scene_id": "scene-1", "order": 1}]
 
 def test_openai_provider_topic_prompt_uses_hub_viral_ruler(monkeypatch) -> None:
