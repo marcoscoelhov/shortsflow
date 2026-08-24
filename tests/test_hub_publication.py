@@ -1710,7 +1710,7 @@ def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
     assert "Página 2 de 2" in second_page.text
 
 
-def test_hub_keeps_cosmos_and_microdrama_in_separate_editorial_lanes() -> None:
+def test_hub_keeps_editorial_niches_in_separate_lanes() -> None:
     client = TestClient(app)
     with SessionLocal() as session:
         _create_basic_job(
@@ -1725,17 +1725,31 @@ def test_hub_keeps_cosmos_and_microdrama_in_separate_editorial_lanes() -> None:
             status="monetization_review",
             seed_theme="Microdrama exclusivo da lane",
         )
+        _create_basic_job(
+            session,
+            job_id="lane-experiment-job",
+            status="monetization_review",
+            seed_theme="Experimento exclusivo da lane",
+        )
         session.flush()
         microdrama_job = session.get(Job, "lane-microdrama-job")
         microdrama_request = session.scalar(
             select(TopicRequest).where(TopicRequest.job_id == "lane-microdrama-job")
         )
+        experiment_job = session.get(Job, "lane-experiment-job")
+        experiment_request = session.scalar(
+            select(TopicRequest).where(TopicRequest.job_id == "lane-experiment-job")
+        )
         assert microdrama_job is not None
         assert microdrama_request is not None
+        assert experiment_job is not None
+        assert experiment_request is not None
         microdrama_job.niche_id = "fiction_microdrama"
         microdrama_job.target_duration_sec = 120
         microdrama_request.niche_id = "fiction_microdrama"
         microdrama_request.target_duration_sec = 120
+        experiment_job.niche_id = "survival_decisions"
+        experiment_request.niche_id = "survival_decisions"
         session.commit()
 
     cosmos_page = client.get("/")
@@ -1743,6 +1757,7 @@ def test_hub_keeps_cosmos_and_microdrama_in_separate_editorial_lanes() -> None:
     assert 'data-editorial-lane="cosmos"' in cosmos_page.text
     assert "Cosmos exclusivo da lane" in cosmos_page.text
     assert "Microdrama exclusivo da lane" not in cosmos_page.text
+    assert "Experimento exclusivo da lane" not in cosmos_page.text
     assert 'href="/microdramas"' in cosmos_page.text
     assert '<input type="hidden" name="niche_id" value="curiosidades">' in cosmos_page.text
     assert '<select id="niche_id"' not in cosmos_page.text
@@ -1752,11 +1767,24 @@ def test_hub_keeps_cosmos_and_microdrama_in_separate_editorial_lanes() -> None:
     assert 'data-editorial-lane="microdramas"' in microdrama_page.text
     assert "Microdrama exclusivo da lane" in microdrama_page.text
     assert "Cosmos exclusivo da lane" not in microdrama_page.text
+    assert "Experimento exclusivo da lane" not in microdrama_page.text
     assert '<input type="hidden" name="niche_id" value="fiction_microdrama">' in microdrama_page.text
     assert 'name="target_duration_sec" type="number" min="100" max="150" value="120"' in microdrama_page.text
     assert "tema explícito" in microdrama_page.text
     assert "Vazio = pesquisar tendências reais" not in microdrama_page.text
     assert '/jobs?niche=fiction_microdrama' in microdrama_page.text
+
+    experiment_page = client.get("/experimentos")
+    assert experiment_page.status_code == 200
+    assert 'data-editorial-lane="experimentos"' in experiment_page.text
+    assert "Experimento exclusivo da lane" in experiment_page.text
+    assert "Cosmos exclusivo da lane" not in experiment_page.text
+    assert "Microdrama exclusivo da lane" not in experiment_page.text
+    assert '<input type="hidden" name="niche_id" value="survival_decisions">' in experiment_page.text
+    assert 'name="target_duration_sec" type="number" min="35" max="55" value="45"' in experiment_page.text
+    assert 'name="tone" value="narrativo_misterioso"' in experiment_page.text
+    assert "tema explícito" in experiment_page.text
+    assert "Vazio = pesquisar tendências reais" not in experiment_page.text
 
 
 def test_microdrama_job_detail_identifies_its_editorial_lane() -> None:

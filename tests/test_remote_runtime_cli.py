@@ -109,8 +109,6 @@ def test_validate_command_submits_long_form_microdrama_lane(monkeypatch, capsys)
             "A carta da mãe que chegou vinte anos tarde",
             "--niche",
             "fiction_microdrama",
-            "--duration",
-            "120",
             "--angle",
             "A filha descobre quem escondeu as cartas.",
         ]
