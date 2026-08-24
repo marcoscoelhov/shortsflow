@@ -745,7 +745,7 @@ def _table_counts() -> tuple[int, int, int]:
         )
 
 
-def test_microdrama_script_pipeline_generates_ten_tracks_and_selects_winner_before_media() -> None:
+def test_microdrama_script_pipeline_generates_ten_tracks_and_selects_winner_before_media(monkeypatch) -> None:
     orchestrator = JobOrchestrator()
     job_id = orchestrator.create_job(
         TopicRequestCreate(
@@ -758,6 +758,11 @@ def test_microdrama_script_pipeline_generates_ten_tracks_and_selects_winner_befo
         ).model_dump()
     )
     pipeline = orchestrator.script_pipeline
+    monkeypatch.setattr(
+        pipeline,
+        "_validate_or_repair_script",
+        lambda script, *_args, **_kwargs: (script, {"script_quality_gate_pass": True}),
+    )
     plan_dict = {
         "canonical_topic": "A carta escondida no paletó do pai",
         "angle": "A filha encontra a carta antes do discurso do sócio.",
@@ -818,6 +823,40 @@ def test_microdrama_track_diversity_ignores_title_variant_suffixes(monkeypatch) 
         )
     )
     assert audit["drafts"][1]["rejection_reason"] == "script_track_not_distinct"
+
+
+def test_microdrama_reuses_next_ranked_track_when_judge_winner_fails_quality(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    pipeline = orchestrator.script_pipeline
+    ranked_tracks = [
+        {"_track_index": 6, "title": "Primeira", "full_narration": "Primeira candidata."},
+        {"_track_index": 8, "title": "Segunda", "full_narration": "Segunda candidata."},
+    ]
+    validated_indices: list[int] = []
+
+    def fake_validate(script, *_args, **_kwargs):
+        validated_indices.append(int(script["_track_index"]))
+        if script["_track_index"] == 6:
+            raise RecoverableStepError("script quality gate failed: weak_loop_closure")
+        return script, {"script_quality_gate_pass": True}
+
+    monkeypatch.setattr(pipeline, "_validate_or_repair_script", fake_validate)
+
+    script, metrics, attempts = pipeline._select_ranked_script_candidate(
+        ranked_tracks,
+        plan_dict={"niche_id": MICRODRAMA_NICHE_ID},
+        target_duration_sec=120,
+        cta_style="soft",
+        job_id="ranked-quality-fallback",
+    )
+
+    assert script["_track_index"] == 8
+    assert validated_indices == [6, 8]
+    assert metrics["script_quality_gate_pass"] is True
+    assert attempts == [
+        {"rank": 1, "index": 6, "passed": False, "reason": "script quality gate failed: weak_loop_closure"},
+        {"rank": 2, "index": 8, "passed": True, "reason": None},
+    ]
 
 
 def test_microdrama_track_diversity_rejects_isolated_pista_numbers_in_narration(monkeypatch) -> None:
