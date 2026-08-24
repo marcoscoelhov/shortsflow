@@ -34,6 +34,7 @@
         <span>{{ job.created_at }}</span>
         <span>{% if duration_ms %}{{ (duration_ms / 1000)|round(1) }} s{% else %}-{% endif %}</span>
         <span>{{ fallback_count }} fallback{% if fallback_count != 1 %}s{% endif %}</span>
+        <span class="badge editorial-lane-badge">Linha: {{ row.editorial_lane.label }}</span>
         <span class="badge origin-badge" title="{{ row.job_origin.description }}">Origem: {{ row.job_origin.label }}</span>
         <span class="badge origin-badge muted" title="{{ row.creation_via.description }}">Via: {{ row.creation_via.label }}</span>
       </div>
@@ -78,7 +79,7 @@
   {% else %}
   <article class="job-row-card empty">
     <strong>Nenhum job encontrado.</strong>
-    <p>Limpe os filtros ou crie um vídeo novo.</p>
+    <p>Limpe os filtros ou crie um Job de Video em {{ active_lane.label }}.</p>
   </article>
   {% endfor %}
 </div>
@@ -88,12 +89,12 @@
 </div>
 <nav class="pagination" aria-label="Paginação de jobs">
   {% if pagination.has_previous %}
-  <a href="/?{{ pagination.previous_query }}" hx-get="/jobs?{{ pagination.previous_query }}" hx-target="#jobs-table" hx-swap="outerHTML">Anterior</a>
+  <a href="{{ active_lane.route }}?{{ pagination.previous_query }}" hx-get="/jobs?{{ pagination.previous_query }}" hx-target="#jobs-table" hx-swap="outerHTML">Anterior</a>
   {% else %}
   <span class="disabled">Anterior</span>
   {% endif %}
   {% if pagination.has_next %}
-  <a href="/?{{ pagination.next_query }}" hx-get="/jobs?{{ pagination.next_query }}" hx-target="#jobs-table" hx-swap="outerHTML">Próxima</a>
+  <a href="{{ active_lane.route }}?{{ pagination.next_query }}" hx-get="/jobs?{{ pagination.next_query }}" hx-target="#jobs-table" hx-swap="outerHTML">Próxima</a>
   {% else %}
   <span class="disabled">Próxima</span>
   {% endif %}

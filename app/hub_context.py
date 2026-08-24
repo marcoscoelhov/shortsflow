@@ -278,6 +278,7 @@ class HubContext:
     def job_list_context(
         self,
         *,
+        niche_id: str,
         status: str | None,
         search: str | None,
         fallback: str | None,
@@ -288,6 +289,7 @@ class HubContext:
         per_page: int,
     ) -> dict[str, object]:
         return self._jobs.job_list_context(
+            niche_id=niche_id,
             status=status,
             search=search,
             fallback=fallback,

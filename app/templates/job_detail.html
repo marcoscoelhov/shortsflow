@@ -99,7 +99,7 @@
     <section class="panel detail-header-panel">
       <div class="detail-header">
         <div>
-          <p class="eyebrow">Job {{ job.job_id[:8] }}</p>
+          <p class="eyebrow"><a href="{{ active_lane.route }}">Linha editorial: {{ active_lane.label }}</a> · Job {{ job.job_id[:8] }}</p>
           <h2>{{ request_data.seed_theme }}</h2>
           <p class="detail-subtitle">{{ job_flow_stage(job.status, schedule_status) }}</p>
         </div>

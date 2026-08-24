@@ -1,22 +1,31 @@
 {% extends "base.html" %}
 {% import "components.html" as ui %}
 {% block content %}
-<section class="jobs-control-hero">
+<nav class="editorial-lane-switcher" aria-label="Linhas editoriais">
+  {% for lane in editorial_lanes %}
+  <a href="{{ lane.route }}" class="{% if lane.slug == active_lane.slug %}active{% endif %}" {% if lane.slug == active_lane.slug %}aria-current="page"{% endif %}>
+    <strong>{{ lane.label }}</strong>
+    <span>{{ lane.description }}</span>
+  </a>
+  {% endfor %}
+</nav>
+
+<section class="jobs-control-hero" data-editorial-lane="{{ active_lane.slug }}">
   <div class="jobs-hero-copy">
-    <p class="eyebrow">ShortsFlow</p>
-    <h2>Fila de produção</h2>
-    <p>Roteiro, render, revisão e publicação em um fluxo único. Duração padrão: {{ hub_defaults.target_duration_sec }}s.</p>
+    <p class="eyebrow">Linha editorial: {{ active_lane.label }}</p>
+    <h2>{{ active_lane.queue_title }}</h2>
+    <p>{{ active_lane.description }} Duração padrão: {{ hub_defaults.target_duration_sec }}s.</p>
   </div>
   <ul class="jobs-operation-summary" aria-label="Resumo de operação">
     <li>
-      <a class="jobs-summary-link {% if filters.status == 'needs_action' %}active{% endif %}" href="/jobs?status=needs_action&per_page={{ pagination.per_page }}" {% if filters.status == 'needs_action' %}aria-current="page"{% endif %}>
+      <a class="jobs-summary-link {% if filters.status == 'needs_action' %}active{% endif %}" href="{{ active_lane.route }}?status=needs_action&per_page={{ pagination.per_page }}" {% if filters.status == 'needs_action' %}aria-current="page"{% endif %}>
         <span>Precisam de ação</span>
         <strong>{{ workflow_summary.needs_action_count }}</strong>
       </a>
     </li>
     <li>
       <span>Na fila</span>
-      <strong>{{ pagination.total }}</strong>
+      <strong>{{ workflow_summary.total_count }}</strong>
     </li>
     <li>
       <span>Modo</span>
@@ -34,13 +43,13 @@
 
 <section class="jobs-action-row" aria-label="Ações de jobs">
   <div class="jobs-filter-pills" aria-label="Filtros rápidos">
-    <a class="{% if not filters.status %}active{% endif %}" href="/?per_page={{ pagination.per_page }}" {% if not filters.status %}aria-current="page"{% endif %}>Todos</a>
-    <a class="{% if filters.status == 'needs_action' %}active{% endif %}" href="/jobs?status=needs_action&per_page={{ pagination.per_page }}" {% if filters.status == 'needs_action' %}aria-current="page"{% endif %}>Ação pendente</a>
-    <a class="{% if filters.status == 'running' %}active{% endif %}" href="/?status=running&per_page={{ pagination.per_page }}" {% if filters.status == 'running' %}aria-current="page"{% endif %}>Renderizando</a>
-    <a class="{% if filters.status == 'unscheduled_approved' %}active{% endif %}" href="/?status=unscheduled_approved&per_page={{ pagination.per_page }}" {% if filters.status == 'unscheduled_approved' %}aria-current="page"{% endif %}>Sem agenda</a>
-    <a class="{% if filters.status == 'scheduled_publication' %}active{% endif %}" href="/?status=scheduled_publication&per_page={{ pagination.per_page }}" {% if filters.status == 'scheduled_publication' %}aria-current="page"{% endif %}>Agendados</a>
-    <a class="{% if filters.status == 'published' %}active{% endif %}" href="/?status=published&per_page={{ pagination.per_page }}" {% if filters.status == 'published' %}aria-current="page"{% endif %}>Publicados</a>
-    <a class="{% if filters.status == 'failed' %}active{% endif %}" href="/?status=failed&per_page={{ pagination.per_page }}" {% if filters.status == 'failed' %}aria-current="page"{% endif %}>Falhas</a>
+    <a class="{% if not filters.status %}active{% endif %}" href="{{ active_lane.route }}?per_page={{ pagination.per_page }}" {% if not filters.status %}aria-current="page"{% endif %}>Todos</a>
+    <a class="{% if filters.status == 'needs_action' %}active{% endif %}" href="{{ active_lane.route }}?status=needs_action&per_page={{ pagination.per_page }}" {% if filters.status == 'needs_action' %}aria-current="page"{% endif %}>Ação pendente</a>
+    <a class="{% if filters.status == 'running' %}active{% endif %}" href="{{ active_lane.route }}?status=running&per_page={{ pagination.per_page }}" {% if filters.status == 'running' %}aria-current="page"{% endif %}>Renderizando</a>
+    <a class="{% if filters.status == 'unscheduled_approved' %}active{% endif %}" href="{{ active_lane.route }}?status=unscheduled_approved&per_page={{ pagination.per_page }}" {% if filters.status == 'unscheduled_approved' %}aria-current="page"{% endif %}>Sem agenda</a>
+    <a class="{% if filters.status == 'scheduled_publication' %}active{% endif %}" href="{{ active_lane.route }}?status=scheduled_publication&per_page={{ pagination.per_page }}" {% if filters.status == 'scheduled_publication' %}aria-current="page"{% endif %}>Agendados</a>
+    <a class="{% if filters.status == 'published' %}active{% endif %}" href="{{ active_lane.route }}?status=published&per_page={{ pagination.per_page }}" {% if filters.status == 'published' %}aria-current="page"{% endif %}>Publicados</a>
+    <a class="{% if filters.status == 'failed' %}active{% endif %}" href="{{ active_lane.route }}?status=failed&per_page={{ pagination.per_page }}" {% if filters.status == 'failed' %}aria-current="page"{% endif %}>Falhas</a>
   </div>
   <button type="button" class="jobs-sort-control" data-open-filters>
     <span class="material-symbols-outlined" aria-hidden="true">filter_list</span>
@@ -60,9 +69,9 @@
 </section>
 
 <dialog id="filters-modal" class="schedule-picker-modal filters-modal" aria-labelledby="filters-title">
-  <form class="schedule-picker-card filters-card filters-grid" action="/" method="get" hx-get="/jobs" hx-target="#jobs-table" hx-swap="outerHTML" hx-trigger="change, keyup delay:300ms">
+  <form class="schedule-picker-card filters-card filters-grid" action="{{ active_lane.route }}" method="get" hx-get="/jobs?niche={{ active_lane.niche_id }}" hx-target="#jobs-table" hx-swap="outerHTML" hx-trigger="change, keyup delay:300ms">
     {{ ui.dialog_head("Fila", "Filtrar fila", "filters-title", "filters", "Fechar filtros", "filters-head") }}
-        <input type="hidden" name="niche" value="curiosidades">
+        <input type="hidden" name="niche" value="{{ active_lane.niche_id }}">
         <input type="hidden" name="page" value="1">
         <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
         <div class="field">

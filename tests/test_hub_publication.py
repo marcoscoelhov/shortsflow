@@ -1636,7 +1636,7 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     assert 'name="niche_id" value="curiosidades"' in page.text
     assert 'name="seed_theme" value=""' in page.text
     assert "Vazio = pesquisar tendências reais" in page.text
-    assert 'name="target_duration_sec" type="number" min="35" max="150" value="45"' in page.text
+    assert 'name="target_duration_sec" type="number" min="35" max="55" value="45"' in page.text
 
     response = client.post("/jobs", data={"seed_theme": "", "input_mode": "theme"}, follow_redirects=False)
     assert response.status_code == 303
@@ -1701,7 +1701,7 @@ def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
     assert "pagehub-job-1" in first_page.text
     assert "pagehub-job-0" not in first_page.text
     assert "Página 1 de 2" in first_page.text
-    assert "page=2&amp;per_page=2&amp;search=pagehub" in first_page.text
+    assert "page=2&amp;per_page=2&amp;niche=curiosidades&amp;search=pagehub" in first_page.text
 
     second_page = client.get("/jobs?search=pagehub&per_page=2&page=2")
     assert second_page.status_code == 200
@@ -2043,7 +2043,7 @@ def test_jobs_needs_action_filter_links_review_and_schedule_backlog() -> None:
         session.commit()
 
     full_page = client.get("/jobs")
-    assert 'href="/jobs?status=needs_action' in full_page.text
+    assert 'href="/?status=needs_action' in full_page.text
 
     response = client.get("/jobs?status=needs_action&per_page=20")
     assert response.status_code == 200
