@@ -179,44 +179,42 @@ class ResilientCreativeProvider:
         return result
 
     def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
-        candidates = self._script_generation_candidates()
-        if not candidates:
-            raise ProviderFailure("llm_registry", "no script batch llm provider is available")
-        failures: list[str] = []
-        for index, (role, provider, timeout_sec) in enumerate(candidates):
-            try:
-                # Batch gera cada track em chamada individual; o timeout total
-                # precisa escalar com o número de tracks (ex.: 10 × 150s).
-                batch_timeout = float(timeout_sec) * max(1, draft_count)
-                payload = self._run_primary_with_timeout(
-                    lambda provider=provider: provider.generate_script_batch(topic_plan, draft_count),
-                    timeout_sec=batch_timeout,
-                )
-                tracks = payload.get("tracks") if isinstance(payload, dict) else None
-                if not isinstance(tracks, list) or len(tracks) != draft_count or not all(
-                    isinstance(track, dict) and str(track.get("full_narration") or "").strip()
-                    for track in tracks
-                ):
-                    provider_name = getattr(provider, "provider_name", role)
-                    raise ProviderFailure(str(provider_name), f"{provider_name}: script batch malformed")
-                for track in tracks:
-                    metrics = track.setdefault("qa_metrics", {})
-                    metrics["generation_provider_role"] = role
-                    metrics["generation_provider"] = getattr(provider, "provider_name", role)
-                    metrics["script_batch_fallback_used"] = index > 0
-                    if failures:
-                        metrics["script_batch_fallback_reasons"] = failures
-                return payload
-            except concurrent.futures.TimeoutError as exc:
-                message = f"{getattr(provider, 'provider_name', role)} script batch timed out after {timeout_sec}s"
-                failures.append(message)
-                if self.strict_minimax_validation and provider is self.primary:
-                    raise ProviderFailure(getattr(provider, "failure_provider_name", role), message) from exc
-            except ProviderFailure as exc:
-                failures.append(str(exc))
-                if self.strict_minimax_validation and provider is self.primary:
-                    raise
-        raise ProviderFailure("llm_registry", f"script batch generation failed across llm providers: {'; '.join(failures)}")
+        if draft_count < 1:
+            raise ProviderFailure("llm_registry", "script batch requires at least one track")
+        primary = getattr(self, "primary", None)
+        if getattr(primary, "provider_name", None) == "mock" and hasattr(primary, "generate_script_batch"):
+            return primary.generate_script_batch(topic_plan, draft_count)
+
+        def generate_track(index: int) -> dict[str, Any]:
+            variant_plan = dict(topic_plan)
+            variant_plan["angle"] = f"{topic_plan.get('angle')} variante {index + 1}"
+            track = self.generate_script(variant_plan)
+            title = str(track.get("title") or "")
+            track = {**track, "title": f"{title} (variante {index + 1})", "_track_index": index}
+            metrics = track.setdefault("qa_metrics", {})
+            metrics.setdefault("source_provider", metrics.get("generation_provider"))
+            return track
+
+        parallelism = max(
+            1,
+            min(
+                int(getattr(self.settings, "microdrama_script_generation_parallelism", 2) or 2),
+                draft_count,
+            ),
+        )
+        if parallelism == 1:
+            return {"tracks": [generate_track(index) for index in range(draft_count)]}
+
+        tracks_by_index: dict[int, dict[str, Any]] = {}
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=parallelism,
+            thread_name_prefix="microdrama-script-track",
+        ) as executor:
+            futures = {executor.submit(generate_track, index): index for index in range(draft_count)}
+            for future in concurrent.futures.as_completed(futures):
+                index = futures[future]
+                tracks_by_index[index] = future.result()
+        return {"tracks": [tracks_by_index[index] for index in range(draft_count)]}
 
     def select_script_draft(self, tracks: list[dict[str, Any]]) -> dict[str, Any]:
         provider = self.gate_judge_provider

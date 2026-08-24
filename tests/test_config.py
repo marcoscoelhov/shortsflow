@@ -96,6 +96,17 @@ def test_visual_review_defaults_to_human_only(monkeypatch) -> None:
     assert settings.vision_verifier_provider == "disabled"
 
 
+def test_microdrama_script_generation_parallelism_is_bounded() -> None:
+    assert Settings(_env_file=None).microdrama_script_generation_parallelism == 2
+    assert Settings(
+        _env_file=None,
+        microdrama_script_generation_parallelism=4,
+    ).microdrama_script_generation_parallelism == 4
+
+    with pytest.raises(ValidationError, match="microdrama_script_generation_parallelism"):
+        Settings(_env_file=None, microdrama_script_generation_parallelism=5)
+
+
 def test_vision_verifier_provider_rejects_unknown_provider(monkeypatch) -> None:
     monkeypatch.delenv("SHORTSFLOW_VISION_VERIFIER_PROVIDER", raising=False)
 
