@@ -1710,6 +1710,82 @@ def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
     assert "Página 2 de 2" in second_page.text
 
 
+def test_hub_keeps_cosmos_and_microdrama_in_separate_editorial_lanes() -> None:
+    client = TestClient(app)
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id="lane-cosmos-job",
+            status="monetization_review",
+            seed_theme="Cosmos exclusivo da lane",
+        )
+        _create_basic_job(
+            session,
+            job_id="lane-microdrama-job",
+            status="monetization_review",
+            seed_theme="Microdrama exclusivo da lane",
+        )
+        session.flush()
+        microdrama_job = session.get(Job, "lane-microdrama-job")
+        microdrama_request = session.scalar(
+            select(TopicRequest).where(TopicRequest.job_id == "lane-microdrama-job")
+        )
+        assert microdrama_job is not None
+        assert microdrama_request is not None
+        microdrama_job.niche_id = "fiction_microdrama"
+        microdrama_job.target_duration_sec = 120
+        microdrama_request.niche_id = "fiction_microdrama"
+        microdrama_request.target_duration_sec = 120
+        session.commit()
+
+    cosmos_page = client.get("/")
+    assert cosmos_page.status_code == 200
+    assert 'data-editorial-lane="cosmos"' in cosmos_page.text
+    assert "Cosmos exclusivo da lane" in cosmos_page.text
+    assert "Microdrama exclusivo da lane" not in cosmos_page.text
+    assert 'href="/microdramas"' in cosmos_page.text
+    assert '<input type="hidden" name="niche_id" value="curiosidades">' in cosmos_page.text
+    assert '<select id="niche_id"' not in cosmos_page.text
+
+    microdrama_page = client.get("/microdramas")
+    assert microdrama_page.status_code == 200
+    assert 'data-editorial-lane="microdramas"' in microdrama_page.text
+    assert "Microdrama exclusivo da lane" in microdrama_page.text
+    assert "Cosmos exclusivo da lane" not in microdrama_page.text
+    assert '<input type="hidden" name="niche_id" value="fiction_microdrama">' in microdrama_page.text
+    assert 'name="target_duration_sec" type="number" min="100" max="150" value="120"' in microdrama_page.text
+    assert "tema explícito" in microdrama_page.text
+    assert "Vazio = pesquisar tendências reais" not in microdrama_page.text
+    assert '/jobs?niche=fiction_microdrama' in microdrama_page.text
+
+
+def test_microdrama_job_detail_identifies_its_editorial_lane() -> None:
+    client = TestClient(app)
+    with SessionLocal() as session:
+        _create_basic_job(
+            session,
+            job_id="lane-detail-microdrama",
+            status="monetization_review",
+            seed_theme="A chave no buquê da noiva",
+        )
+        session.flush()
+        job = session.get(Job, "lane-detail-microdrama")
+        request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == "lane-detail-microdrama"))
+        assert job is not None
+        assert request is not None
+        job.niche_id = "fiction_microdrama"
+        job.target_duration_sec = 120
+        request.niche_id = "fiction_microdrama"
+        request.target_duration_sec = 120
+        session.commit()
+
+    response = client.get("/jobs/lane-detail-microdrama")
+
+    assert response.status_code == 200
+    assert "Linha editorial: Microdramas" in response.text
+    assert 'href="/microdramas"' in response.text
+
+
 def test_jobs_route_serves_full_page_and_htmx_fragment() -> None:
     client = TestClient(app)
     with SessionLocal() as session:
