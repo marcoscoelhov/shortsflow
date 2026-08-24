@@ -9,8 +9,9 @@ from app.remote_runtime import SubmittedJob
 class FakeClient:
     instances: list["FakeClient"] = []
 
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, *, auth_token: str | None = None) -> None:
         self.base_url = base_url
+        self.auth_token = auth_token
         self.required_revision: tuple[str, str] | None = None
         self.submitted: dict[str, object] | None = None
         self.instances.append(self)
@@ -46,6 +47,7 @@ def test_job_command_always_targets_remote_production(monkeypatch, capsys) -> No
         lambda: SimpleNamespace(
             remote_production_url="https://prod.example.ts.net",
             remote_staging_url="https://staging.example.ts.net",
+            hub_auth_token="test-hub-token",
         ),
     )
 
@@ -72,6 +74,7 @@ def test_validate_command_checks_staging_revision_before_submission(monkeypatch,
         lambda: SimpleNamespace(
             remote_production_url="https://prod.example.ts.net",
             remote_staging_url="https://staging.example.ts.net",
+            hub_auth_token="test-hub-token",
         ),
     )
 
@@ -79,6 +82,7 @@ def test_validate_command_checks_staging_revision_before_submission(monkeypatch,
 
     client = FakeClient.instances[0]
     assert client.base_url == "https://staging.example.ts.net"
+    assert client.auth_token == "test-hub-token"
     assert client.required_revision == ("abc123", "staging")
     assert client.submitted == {
         "theme": "Teste remoto",

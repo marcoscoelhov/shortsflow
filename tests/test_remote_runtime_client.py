@@ -57,6 +57,19 @@ def test_remote_job_submission_returns_tailnet_job_url() -> None:
     assert b"cta_style=soft" in (transport.requests[0][3] or b"")
 
 
+def test_remote_job_submission_sends_configured_bearer_token() -> None:
+    transport = FakeTransport([FakeResponse(status=303, headers={"location": "/jobs/job-123"})])
+    client = RemoteRuntimeClient(
+        "https://staging.example.ts.net",
+        auth_token="test-hub-token",
+        transport=transport,
+    )
+
+    client.submit_job(theme="Teste autenticado")
+
+    assert transport.requests[0][2]["Authorization"] == "Bearer test-hub-token"
+
+
 def test_remote_microdrama_submission_preserves_editorial_lane() -> None:
     transport = FakeTransport([FakeResponse(status=303, headers={"location": "/jobs/drama-123"})])
     client = RemoteRuntimeClient("https://staging.example.ts.net", transport=transport)
@@ -138,12 +151,13 @@ def test_wait_for_job_returns_only_after_remote_terminal_status() -> None:
             ),
         ]
     )
-    client = RemoteRuntimeClient("https://prod.example.ts.net", transport=transport)
+    client = RemoteRuntimeClient("https://prod.example.ts.net", auth_token="test-hub-token", transport=transport)
 
     result = client.wait_for_job("job-123", poll_seconds=0)
 
     assert result["job"]["status"] == "ready_for_upload"
     assert len(transport.requests) == 2
+    assert all(request[2]["Authorization"] == "Bearer test-hub-token" for request in transport.requests)
 
 
 @pytest.mark.parametrize("terminal_status", ["monetization_review", "blocked_for_monetization"])
