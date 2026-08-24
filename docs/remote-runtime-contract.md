@@ -84,13 +84,14 @@ exigindo aprovação humana e prepara o release imutável diretamente do SHA já
 validado; aprovação de workflow não autoriza agentes a aprovar produção.
 
 O repositório deve manter um reviewer humano obrigatório nos environments
-`production-promotion` e `production`. A proteção de `staging` exige revisão e
-os checks `test` e `promotion-guard`. A proteção de `main` exige os checks
-`test`, `promotion-guard` e `authorize-promotion`, vinculados ao GitHub Actions;
-ela não exige uma PR adicional porque o último check já registra a aprovação
-humana do SHA imutável e precisa concluir antes do fast-forward. Durante a
-primeira reconciliação antes de o workflow existir no default branch, o operador
-executa o mesmo protocolo sem automação:
+`production-promotion` e `production`. Como este repositório pessoal tem um
+único colaborador, a proteção de `staging` não exige uma aprovação impossível
+do próprio autor; ela exige os checks `test` e `promotion-guard`, vinculados ao
+GitHub Actions. A proteção de `main` exige esses dois checks e também
+`authorize-promotion`; ela não exige uma PR adicional porque o último check já
+registra a aprovação humana do SHA imutável e precisa concluir antes do
+fast-forward. Durante a primeira reconciliação antes de o workflow existir no
+default branch, o operador executa o mesmo protocolo sem automação:
 
 ```bash
 git fetch --no-tags origin \
