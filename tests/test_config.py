@@ -36,10 +36,11 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
     assert settings.openai_base_url == "https://opencode.ai/zen/go/v1"
     assert settings.openai_model == "gpt-5.6-luna"
     assert settings.llm_primary_provider == "openai"
-    assert settings.llm_script_draft_provider == "openai"
+    assert settings.llm_script_draft_provider == "deepseek"
     assert settings.llm_repair_provider == "openai"
     assert settings.llm_repair_model == "gpt-5.6-luna"
     assert settings.llm_repair_reasoning_effort == "max"
+    assert settings.llm_script_reasoning_effort == "low"
     assert settings.llm_repair_timeout_sec == 360.0
     assert settings.llm_scene_provider == "openai"
     assert settings.llm_fallback_provider == "deepseek"
@@ -97,6 +98,7 @@ def test_visual_review_defaults_to_human_only(monkeypatch) -> None:
 
 
 def test_microdrama_script_generation_parallelism_is_bounded() -> None:
+    assert Settings(_env_file=None).microdrama_script_track_count == 3
     assert Settings(_env_file=None).microdrama_script_generation_parallelism == 4
     assert Settings(_env_file=None).microdrama_script_max_tokens == 4096
     assert Settings(

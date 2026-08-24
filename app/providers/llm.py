@@ -975,6 +975,9 @@ Contrato narrativo obrigatório:
             tracks.append(track)
         return {"tracks": tracks}
 
+    def _microdrama_json_completion(self, prompt: str, *, max_tokens: int) -> Any:
+        return self._json_completion(prompt, max_tokens=max_tokens)
+
     def generate_script(self, topic_plan: dict[str, Any]) -> dict[str, Any]:
         target_duration_sec = self._target_duration_sec(topic_plan)
         duration_rules = self._duration_rules(target_duration_sec)
@@ -1079,7 +1082,7 @@ Regras:
             settings = getattr(self, "settings", None) or get_settings()
             completion_max_tokens = int(getattr(settings, "microdrama_script_max_tokens", 4096) or 4096)
         payload = (
-            self._json_completion(prompt, max_tokens=completion_max_tokens)
+            self._microdrama_json_completion(prompt, max_tokens=completion_max_tokens)
             if completion_max_tokens is not None
             else self._json_completion(prompt)
         )

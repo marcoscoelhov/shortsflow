@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     language: str = "pt-BR"
     target_duration_sec: int = 45
     scene_target_count: int = 7
-    microdrama_script_track_count: int = 10
+    microdrama_script_track_count: int = 3
     microdrama_script_generation_parallelism: int = 4
     microdrama_script_max_tokens: int = 4096
 
@@ -75,7 +75,8 @@ class Settings(BaseSettings):
     llm_repair_timeout_sec: float = 360.0
     llm_scene_provider: str = "openai"
     llm_enable_fallback: bool = True
-    llm_script_draft_provider: str = "openai"
+    llm_script_draft_provider: str = "deepseek"
+    llm_script_reasoning_effort: str = "low"
     llm_script_repair_attempts: int = 1
     viral_intensity_hard_block: bool = False
     viral_intensity_min_score: float = 0.72
@@ -349,7 +350,12 @@ class Settings(BaseSettings):
             raise ValueError("minimax_text_thinking must be one of: auto, enabled, disabled")
         return normalized
 
-    @field_validator("openai_reasoning_effort", "xai_reasoning_effort", "llm_repair_reasoning_effort")
+    @field_validator(
+        "openai_reasoning_effort",
+        "xai_reasoning_effort",
+        "llm_repair_reasoning_effort",
+        "llm_script_reasoning_effort",
+    )
     @classmethod
     def validate_reasoning_effort(cls, value: str) -> str:
         normalized = value.strip().lower()

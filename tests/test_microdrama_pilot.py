@@ -760,7 +760,7 @@ def _table_counts() -> tuple[int, int, int]:
         )
 
 
-def test_microdrama_script_pipeline_generates_ten_tracks_and_selects_winner_before_media(monkeypatch) -> None:
+def test_microdrama_script_pipeline_generates_three_tracks_and_selects_winner_before_media(monkeypatch) -> None:
     orchestrator = JobOrchestrator()
     job_id = orchestrator.create_job(
         TopicRequestCreate(
@@ -801,7 +801,7 @@ def test_microdrama_script_pipeline_generates_ten_tracks_and_selects_winner_befo
         attempt=1,
     )
     assert str(script.get("full_narration") or "").strip()
-    assert metrics["script_track_draft_count"] == 10
+    assert metrics["script_track_draft_count"] == 3
     assert metrics["script_track_selected_judge_score"] > 0
     artifact_dir = orchestrator.storage.job_dir(job_id, create=False)
     assert (artifact_dir / "script_tracks.json").exists()
@@ -817,7 +817,7 @@ def test_microdrama_track_diversity_ignores_title_variant_suffixes(monkeypatch) 
             "body_beats": ["A filha abriu o mesmo paletó."],
             "full_narration": "Ninguém viu a carta desaparecer. A filha abriu o mesmo paletó.",
         }
-        for index in range(10)
+        for index in range(3)
     ]
     monkeypatch.setattr(
         pipeline.providers.creative,
@@ -934,7 +934,7 @@ def test_microdrama_track_diversity_rejects_isolated_pista_numbers_in_narration(
                 "A filha abriu o paletó e encontrou a mesma prova."
             ),
         }
-        for index in range(10)
+        for index in range(3)
     ]
     monkeypatch.setattr(
         pipeline.providers.creative,
