@@ -1298,6 +1298,36 @@ def test_minimax_generate_script_batch_uses_individual_calls_not_single_giant_js
     assert all(track["qa_metrics"]["source_provider"] == "minimax" for track in tracks)
 
 
+def test_real_text_provider_uses_isolated_microdrama_script_prompt(monkeypatch) -> None:
+    from app.providers.llm import MinimaxCreativeProvider
+
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.provider_name = "openai"
+    provider.failure_provider_name = "openai_text"
+    provider.settings = SimpleNamespace(target_duration_sec=120)
+    prompts: list[str] = []
+
+    def fake_json_completion(prompt: str, *, max_tokens: int | None = None):
+        prompts.append(prompt)
+        return {"title": "A carta", "full_narration": "Roteiro completo", "qa_metrics": {}}
+
+    monkeypatch.setattr(provider, "_json_completion", fake_json_completion)
+
+    provider.generate_script(
+        {
+            "niche_id": "fiction_microdrama",
+            "editorial_mode": "fiction_microdrama",
+            "canonical_topic": "A carta da mãe que chegou vinte anos tarde",
+            "angle": "A filha descobre quem escondeu as cartas.",
+            "retention_map": {"target_duration_sec": 120},
+        }
+    )
+
+    assert "MICRODRAMA FICCIONAL ORIGINAL" in prompts[0]
+    assert "roteiro viral de curiosidades" not in prompts[0]
+    assert "288 a 324 palavras" in prompts[0]
+
+
 def test_resilient_generate_script_batch_uses_bounded_parallelism_and_keeps_order() -> None:
     provider = object.__new__(ResilientCreativeProvider)
     provider.settings = SimpleNamespace(microdrama_script_generation_parallelism=2)

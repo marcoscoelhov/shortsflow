@@ -93,8 +93,9 @@ def resolve_editorial_mode(topic_plan: Any | None = None, request: Any | None = 
     hook_promise = str(_read_field(topic_plan, "hook_promise", "") or "")
     quality_metrics = _read_field(topic_plan, "quality_metrics", {}) or {}
     stored_niche = str(quality_metrics.get("topic_niche") or "").strip() if isinstance(quality_metrics, Mapping) else ""
-    if FICTION_MICRODRAMA_PATTERN.search(notes) or stored_niche == "fiction_microdrama":
-        return "viral_curiosidades"
+    requested_niche = str(_read_field(request, "niche_id", "") or "").strip()
+    if FICTION_MICRODRAMA_PATTERN.search(notes) or stored_niche == "fiction_microdrama" or requested_niche == "fiction_microdrama":
+        return "fiction_microdrama"
     override_text = " ".join(part for part in [notes, requested_angle] if part).strip()
     if override_text and STRICT_OVERRIDE_PATTERN.search(override_text):
         return "factual_strict"
@@ -123,7 +124,7 @@ def resolve_editorial_mode(topic_plan: Any | None = None, request: Any | None = 
             return "viral_curiosidades"
         if existing_mode == "factual_strict" and visual_craft_context:
             return "viral_curiosidades"
-        if existing_mode in {"viral_curiosidades", "factual_strict"}:
+        if existing_mode in {"viral_curiosidades", "factual_strict", "fiction_microdrama"}:
             return existing_mode
     return "viral_curiosidades"
 

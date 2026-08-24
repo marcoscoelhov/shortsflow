@@ -101,7 +101,7 @@ def test_microdrama_editorial_mode_stays_entertainment_even_with_surgery_word() 
         },
     )()
 
-    assert resolve_editorial_mode(None, request) == "viral_curiosidades"
+    assert resolve_editorial_mode(None, request) == "fiction_microdrama"
     assert resolve_editorial_mode(
         {
             "canonical_topic": "Microdrama sobre uma escolha diante do perigo fictício",
@@ -113,7 +113,22 @@ def test_microdrama_editorial_mode_stays_entertainment_even_with_surgery_word() 
             },
         },
         None,
-    ) == "viral_curiosidades"
+    ) == "fiction_microdrama"
+
+
+def test_microdrama_editorial_mode_uses_explicit_niche_without_policy_notes() -> None:
+    request = type(
+        "Request",
+        (),
+        {
+            "niche_id": MICRODRAMA_NICHE_ID,
+            "notes": "",
+            "requested_angle": "Uma filha encontra uma carta escondida.",
+            "seed_theme": "A carta atrasada",
+        },
+    )()
+
+    assert resolve_editorial_mode(None, request) == "fiction_microdrama"
 
 
 @pytest.mark.parametrize(

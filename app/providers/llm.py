@@ -916,6 +916,44 @@ Não use markdown nem texto fora do objeto JSON.
             return "exatamente 3 a 5 frases independentes"
         return "8 a 12 frases independentes em escalada, mantendo o eixo da história"
 
+    def _microdrama_script_prompt(
+        self,
+        topic_plan: dict[str, Any],
+        target_duration_sec: int,
+    ) -> str:
+        minimum_words = int(target_duration_sec * 2.4)
+        maximum_words = int(target_duration_sec * 2.7)
+        return f"""
+Escreva um MICRODRAMA FICCIONAL ORIGINAL em pt-BR. Este nicho é independente de Cosmos/curiosidades.
+Entrada JSON: {json.dumps(topic_plan, ensure_ascii=False)}
+
+Retorne somente JSON estrito com:
+title, hook, loop, body_beats, payoff, ending, cta, full_narration, estimated_duration_sec, key_facts, source_fact_ids, claim_trace, token_count, language, retention_map, story_arc, visual_opening, qa_metrics, prompt_version
+
+Contrato narrativo obrigatório:
+- ficção original claramente rotulada; nunca apresente a trama como fato real
+- target_duration_sec={target_duration_sec}; full_narration deve ter {minimum_words} a {maximum_words} palavras
+- body_beats deve conter 8 a 12 itens; cada item deve ter 2 frases curtas, concretas e em escalada
+- hook deve ter no máximo 8 palavras e abrir com conflito, segredo ou consequência visível
+- loop deve fazer uma pergunta mental específica sem revelar a resposta
+- payoff deve ocorrer somente no último terço e reinterpretar o início
+- ending deve apontar concretamente de volta ao hook e provocar reassistência
+- full_narration deve concatenar fielmente hook + loop + body_beats + payoff + ending + cta quando houver CTA
+- estimated_duration_sec deve refletir a contagem real de palavras, nunca apenas repetir o alvo
+- story_arc deve conter setup, tension, turn e consequence, todos copiados literalmente de full_narration
+- retention_map deve conter visual_hook, proof_or_tension, escalation, turn_or_payoff e loop_close, todos como trechos literais de full_narration
+- use nomes, relações e ações concretas; mantenha a mesma trama e personagens até o fim
+- cada beat precisa mudar a situação; não use exposição neutra, resumo, aula ou lista de fatos
+- não repita cláusulas, não compacte vários beats em uma frase e não trunque a lógica do ending
+- key_facts=[], source_fact_ids=[] e claim_trace=[] porque se trata de ficção original
+- visual_opening deve descrever um primeiro frame 9:16 concreto sem revelar o payoff
+- se structured_viral_contract existir, cumpra seus gates editoriais sem mudar de nicho
+- se cta_style="soft", use CTA curta e específica depois do ending; se "none", cta=null
+- todos os campos narrados em português do Brasil, sem markdown, SSML, HTML, travessão ou instruções de câmera
+- prompt_version="{EDITORIAL_PROMPT_VERSION}"
+- qa_metrics deve incluir estimated_duration_sec, word_count, avg_words_per_sentence, repetition_score e script_gate_pass
+"""
+
     def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
         """Gera cada track em uma chamada individual (como o mock).
 
@@ -1035,6 +1073,8 @@ Regras:
 - evite repetir aberturas listadas em recent_pattern_brief.avoid_hook_openings e padrões de título recentes
 - QA deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass, editorial_prompt_version
 """
+        if str(topic_plan.get("niche_id") or "") == "fiction_microdrama":
+            prompt = self._microdrama_script_prompt(topic_plan, target_duration_sec)
         payload = self._json_completion(prompt)
         if isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict):
             payload = payload[0]
@@ -1114,6 +1154,7 @@ Regras obrigatórias:
 - cada valor textual de retention_map deve ser cópia literal de um trecho existente em full_narration; não resuma nem parafraseie
 - se Contexto da pauta JSON.editorial_mode for "viral_curiosidades", prefira wording seguro, simples e forte em retenção, sem insistir em mecanismo específico não sustentado
 - se Contexto da pauta JSON.editorial_mode for "factual_strict", preserve o grounding factual e remova qualquer mecanismo sem lastro
+- se Contexto da pauta JSON.editorial_mode for "fiction_microdrama", preserve ficção original, relações entre personagens, conflito, payoff tardio e fechamento causal; não introduza curiosidades ou fatos de Cosmos
 - preserve a régua editorial do app: hook forte, loop aberto, beats em escalada, payoff no último terço e fechamento que provoque replay
 - faça o hook ser concreto e imediatamente compreensível, sem metáfora críptica ou fragmento publicitário
 - reestruture o texto como micro-história causal com situação, anomalia, escalada, virada e consequência; não devolva apenas fatos em sequência
