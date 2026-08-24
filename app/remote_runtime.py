@@ -83,12 +83,28 @@ class SubmittedJob:
 
 
 class RemoteRuntimeClient:
-    def __init__(self, base_url: str, *, transport: Transport | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        auth_token: str | None = None,
+        transport: Transport | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.auth_token = str(auth_token or "").strip() or None
         self.transport = transport or UrlTransport()
 
+    def _request_headers(self, **headers: str) -> dict[str, str]:
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+        return headers
+
     def health(self) -> dict[str, Any]:
-        response = self.transport.request("GET", f"{self.base_url}/healthz")
+        response = self.transport.request(
+            "GET",
+            f"{self.base_url}/healthz",
+            headers=self._request_headers(),
+        )
         if response.status != 200:
             raise RemoteRuntimeError(f"health remoto retornou HTTP {response.status}")
         return response.json()
@@ -139,10 +155,12 @@ class RemoteRuntimeClient:
             response = self.transport.request(
                 "POST",
                 f"{self.base_url}/jobs",
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Idempotency-Key": request_id,
-                },
+                headers=self._request_headers(
+                    **{
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Idempotency-Key": request_id,
+                    }
+                ),
                 body=payload,
             )
         except RemoteRuntimeError as exc:
@@ -181,7 +199,11 @@ class RemoteRuntimeClient:
         }
         deadline = time.monotonic() + timeout_seconds
         while True:
-            response = self.transport.request("GET", f"{self.base_url}/api/jobs/{job_id}")
+            response = self.transport.request(
+                "GET",
+                f"{self.base_url}/api/jobs/{job_id}",
+                headers=self._request_headers(),
+            )
             if response.status != 200:
                 raise RemoteRuntimeError(f"consulta do job retornou HTTP {response.status}")
             payload = response.json()
