@@ -74,6 +74,7 @@ def test_llm_defaults_match_quality_first_routing_policy() -> None:
     assert defaults["deepseek_model"] == "deepseek-v4-flash"
     assert defaults["openai_model"] == "gpt-5.6-luna"
     assert defaults["openai_reasoning_effort"] == "high"
+    assert defaults["llm_script_reasoning_effort"] == "low"
     assert defaults["llm_gate_judge_provider"] == "xai"
     assert defaults["llm_gate_judge_model"] == "kimi-k2.6"
     assert defaults["llm_premium_review_provider"] == "deepseek"
@@ -1222,6 +1223,40 @@ def test_opencode_go_luna_uses_responses_api_for_json_object(monkeypatch) -> Non
         "max_output_tokens": 4096,
         "timeout": 360.0,
     }
+
+
+def test_opencode_go_luna_uses_low_reasoning_for_microdrama_draft(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text=json.dumps({"title": "A carta", "full_narration": "A carta voltou."}))
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.responses = FakeResponses()
+            self.chat = SimpleNamespace(completions=SimpleNamespace())
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            openai_api_key="opencode-go-key",
+            openai_base_url="https://opencode.ai/zen/go/v1",
+            openai_model="gpt-5.6-luna",
+            openai_reasoning_effort="high",
+            llm_script_reasoning_effort="low",
+            openai_timeout_sec=360.0,
+            llm_json_max_tokens=4096,
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    result = OpenAICreativeProvider()._microdrama_json_completion("roteiro", max_tokens=4096)
+
+    assert result["title"] == "A carta"
+    assert captured["reasoning"] == {"effort": "low"}
+    assert captured["max_output_tokens"] == 4096
 
 
 def test_opencode_go_luna_uses_responses_api_for_json_array(monkeypatch) -> None:

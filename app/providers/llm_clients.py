@@ -187,8 +187,15 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
             timeout=self.timeout_sec,
         )
 
-    def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
+    def _json_completion(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Any:
         resolved_max_tokens = int(max_tokens if max_tokens is not None else self.max_output_tokens)
+        resolved_reasoning_effort = reasoning_effort or self.reasoning_effort
         try:
             if getattr(self, "use_responses_api", False):
                 response = self.client.responses.create(
@@ -196,7 +203,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
                     instructions="Return ONLY the final JSON object. No reasoning, prose, or markdown fences.",
                     input=prompt,
                     text={"format": {"type": "json_object"}},
-                    reasoning={"effort": self.reasoning_effort},
+                    reasoning={"effort": resolved_reasoning_effort},
                     max_output_tokens=resolved_max_tokens,
                     timeout=self.timeout_sec,
                 )
@@ -212,7 +219,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
                         {"role": "user", "content": prompt},
                     ],
                     response_format={"type": "json_object"},
-                    reasoning_effort=self.reasoning_effort,
+                    reasoning_effort=resolved_reasoning_effort,
                     max_tokens=resolved_max_tokens,
                     timeout=self.timeout_sec,
                 )
@@ -236,6 +243,11 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
                 except Exception:
                     pass
             raise ProviderFailure(self.failure_provider_name, f"invalid json: {raw[:300]}") from exc
+
+    def _microdrama_json_completion(self, prompt: str, *, max_tokens: int) -> Any:
+        settings = llm_facade.get_settings()
+        effort = str(getattr(settings, "llm_script_reasoning_effort", "low") or "low").strip().lower()
+        return self._json_completion(prompt, max_tokens=max_tokens, reasoning_effort=effort)
 
     def _json_array_completion(self, prompt: str) -> Any:
         try:
@@ -305,8 +317,15 @@ class XAICreativeProvider(MinimaxCreativeProvider):
             timeout=self.timeout_sec,
         )
 
-    def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
+    def _json_completion(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Any:
         settings = llm_facade.get_settings()
+        resolved_reasoning_effort = reasoning_effort or self.reasoning_effort
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
@@ -315,7 +334,7 @@ class XAICreativeProvider(MinimaxCreativeProvider):
                     {"role": "user", "content": prompt},
                 ],
                 response_format={"type": "json_object"},
-                reasoning_effort=self.reasoning_effort,
+                reasoning_effort=resolved_reasoning_effort,
                 max_tokens=int(max_tokens if max_tokens is not None else (getattr(settings, "llm_json_max_tokens", 4096) or 4096)),
                 timeout=self.timeout_sec,
             )
@@ -337,6 +356,11 @@ class XAICreativeProvider(MinimaxCreativeProvider):
                 except Exception:
                     pass
             raise ProviderFailure(self.failure_provider_name, f"invalid json: {raw[:300]}") from exc
+
+    def _microdrama_json_completion(self, prompt: str, *, max_tokens: int) -> Any:
+        settings = llm_facade.get_settings()
+        effort = str(getattr(settings, "llm_script_reasoning_effort", "low") or "low").strip().lower()
+        return self._json_completion(prompt, max_tokens=max_tokens, reasoning_effort=effort)
 
 
 class QwenCreativeProvider(MinimaxCreativeProvider):
