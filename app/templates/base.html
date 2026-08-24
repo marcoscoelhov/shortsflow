@@ -60,7 +60,7 @@
           <span class="brand-full">ShortsFlow</span>
           <span class="brand-compact">SF</span>
         </a>
-        <form class="topbar-search" action="/" method="get">
+        <form class="topbar-search" action="{{ active_lane.route }}" method="get">
           <span class="material-symbols-outlined" aria-hidden="true">search</span>
           <label class="sr-only" for="topbar_search">Buscar por título, tema ou job_id</label>
           <input id="topbar_search" name="search" value="{{ filters.search if filters is defined else '' }}" placeholder="Buscar por título, tema ou job_id">
@@ -150,7 +150,7 @@
       </main>
     </div>
     <dialog id="hub-search-modal" class="schedule-picker-modal hub-search-modal" aria-labelledby="hub-search-title">
-      <form class="schedule-picker-card hub-search-card" action="/" method="get">
+      <form class="schedule-picker-card hub-search-card" action="{{ active_lane.route }}" method="get">
         {{ ui.dialog_head("Busca", "Buscar jobs", "hub-search-title", "search", "Fechar busca") }}
         <div class="field full">
           <label for="hub_search_query">Título, tema ou job_id</label>
@@ -162,18 +162,17 @@
         <button type="submit">Buscar</button>
       </form>
     </dialog>
-    <dialog id="create-job-modal" class="schedule-picker-modal create-job-modal" aria-labelledby="create-job-title">
+    <dialog id="create-job-modal" class="schedule-picker-modal create-job-modal" aria-labelledby="create-job-title" data-editorial-lane="{{ active_lane.slug }}">
       <form method="post" action="/jobs" class="schedule-picker-card create-job-card job-form">
-        {{ ui.dialog_head("Entrada", "Criar vídeo", "create-job-title", "create-job", "Fechar criação", "modal-sticky-head") }}
-        <div class="field full">
-          <label for="niche_id">Nicho editorial</label>
-          <select id="niche_id" name="niche_id" value="{{ hub_defaults.niche_id }}">
-            <option value="{{ hub_defaults.niche_id }}" selected>Astronomia e cosmos (padrão)</option>
-            <option value="survival_decisions">Sobrevivência e decisões impossíveis (experimento)</option>
-            <option value="fiction_microdrama">Dramas chocantes com reviravolta (piloto manual)</option>
-          </select>
-          <p class="field-help">O experimento é sempre ficcional, exige tema explícito e não entra na automação de publicação.</p>
+        {{ ui.dialog_head("Entrada", "Criar em " ~ active_lane.label, "create-job-title", "create-job", "Fechar criação", "modal-sticky-head") }}
+        <div class="editorial-lane-context" aria-label="Linha editorial ativa">
+          <span class="material-symbols-outlined" aria-hidden="true">route</span>
+          <div>
+            <strong>Linha editorial: {{ active_lane.label }}</strong>
+            <p>{{ active_lane.description }}</p>
+          </div>
         </div>
+        <input type="hidden" name="niche_id" value="{{ active_lane.niche_id }}">
         <div class="field full">
           <label for="input_mode">Tipo de entrada</label>
           <select id="input_mode" name="input_mode" aria-describedby="input_mode_help_theme input_mode_help_title input_mode_help_script">
@@ -181,13 +180,15 @@
             <option value="title">Título completo</option>
             <option value="script">Roteiro pronto</option>
           </select>
-          <p id="input_mode_help_theme" class="field-help" data-mode-help="theme">Vazio = pesquisar tendências reais automaticamente. Preencha para partir de um tema específico.</p>
+          <p id="input_mode_help_theme" class="field-help" data-mode-help="theme">
+            {% if hub_defaults.allows_automatic_topic %}Vazio = pesquisar tendências reais automaticamente. Preencha para partir de um tema específico.{% else %}Este nicho exige tema explícito e criação manual. Descreva a premissa central antes de gerar.{% endif %}
+          </p>
           <p id="input_mode_help_title" class="field-help hidden" data-mode-help="title">Cole o título final; o app preserva a promessa e gera o roteiro a partir dele.</p>
           <p id="input_mode_help_script" class="field-help hidden" data-mode-help="script">Cole um roteiro rotulado; o app usa esse texto e não cria outro roteiro.</p>
         </div>
         <div class="field wide" data-mode-section="theme title">
           <label for="seed_theme">Tema ou título</label>
-          <input id="seed_theme" name="seed_theme" value="{{ hub_defaults.seed_theme }}" placeholder="Ex.: Danakil, polvos, cafeína. Deixe vazio para usar tendência real.">
+          <input id="seed_theme" name="seed_theme" value="{{ hub_defaults.seed_theme }}" placeholder="{{ hub_defaults.theme_placeholder }}" {% if not hub_defaults.allows_automatic_topic %}required{% endif %}>
         </div>
         <div class="field wide hidden" data-mode-section="script">
           <label for="ready_script_text">Roteiro pronto em texto rotulado</label>
@@ -195,9 +196,10 @@
         </div>
         <div class="field">
           <label for="target_duration_sec">Duração alvo (s)</label>
-          <input id="target_duration_sec" name="target_duration_sec" type="number" min="35" max="150" value="{{ hub_defaults.target_duration_sec }}">
-          <p class="field-help">Cosmos/curiosidades: 35–55s. Microdrama: 100–150s (alvo 120s).</p>
+          <input id="target_duration_sec" name="target_duration_sec" type="number" min="{{ hub_defaults.minimum_duration_sec }}" max="{{ hub_defaults.maximum_duration_sec }}" value="{{ hub_defaults.target_duration_sec }}">
+          <p class="field-help">Faixa desta linha: {{ hub_defaults.minimum_duration_sec }} a {{ hub_defaults.maximum_duration_sec }} segundos.</p>
         </div>
+        {% if active_lane.slug == "cosmos" %}
         <div class="field" data-mode-section="theme title">
           <label for="tone">Tom</label>
           <select id="tone" name="tone">
@@ -209,6 +211,14 @@
             <option value="lista_viral">Lista viral</option>
           </select>
         </div>
+        {% else %}
+        <input type="hidden" name="tone" value="{{ hub_defaults.tone }}">
+        <div class="field" data-mode-section="theme title">
+          <label>Tom editorial</label>
+          <p class="readonly-field">{{ hub_defaults.tone_label }}</p>
+        </div>
+        {% endif %}
+        {% if active_lane.slug == "cosmos" %}
         <div class="field" data-mode-section="theme title">
           <label for="requested_angle">Ângulo</label>
           <select id="requested_angle" name="requested_angle">
@@ -221,11 +231,12 @@
             <option value="ranking/lista">Ranking ou lista</option>
           </select>
         </div>
+        {% endif %}
         <div class="field wide" data-mode-section="theme title">
-          <label for="custom_angle">Ângulo manual</label>
-          <input id="custom_angle" name="custom_angle" placeholder="Opcional; substitui o ângulo escolhido acima.">
+          <label for="custom_angle">{% if active_lane.slug == "microdramas" %}Direção narrativa{% else %}Ângulo manual{% endif %}</label>
+          <input id="custom_angle" name="custom_angle" placeholder="{% if active_lane.slug == 'microdramas' %}Ex.: a revelação final muda o sentido da primeira cena.{% else %}Opcional; substitui o ângulo escolhido acima.{% endif %}">
         </div>
-        <button type="submit">Criar vídeo</button>
+        <button type="submit">Criar em {{ active_lane.label }}</button>
       </form>
     </dialog>
     {% if automation_alert_active %}

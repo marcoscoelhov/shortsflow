@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from sqlalchemy import and_, case, func, or_, select
 
 from app.db import SessionLocal
+from app.editorial_lanes import editorial_lane_for_niche
 from app.hub_status import NEEDS_ACTION_JOB_STATUSES
 from app.job_origin import (
     creation_via_display,
@@ -36,6 +37,7 @@ class HubJobsContext:
 
     def query_jobs(
         self,
+        niche_id: str,
         status: str | None,
         search: str | None,
         fallback: str | None,
@@ -82,6 +84,7 @@ class HubJobsContext:
                 .join(PublicationSchedule, PublicationSchedule.job_id == Job.job_id, isouter=True)
                 .join(automation_attempt, automation_attempt.c.job_id == Job.job_id, isouter=True)
                 .order_by(Job.created_at.desc())
+                .where(Job.niche_id == niche_id)
             )
             if status:
                 now = datetime.now(UTC)
@@ -143,6 +146,7 @@ class HubJobsContext:
                         "publication_schedule": publication_schedule,
                         "job_origin": origin_display,
                         "creation_via": via_display,
+                        "editorial_lane": editorial_lane_for_niche(job.niche_id).as_template_context(),
                         "action_summary": self.job_queue_action_summary(job, publication_schedule),
                     }
                 )
@@ -173,6 +177,7 @@ class HubJobsContext:
     def job_list_context(
         self,
         *,
+        niche_id: str,
         status: str | None,
         search: str | None,
         fallback: str | None,
@@ -182,8 +187,30 @@ class HubJobsContext:
         page: int,
         per_page: int,
     ) -> dict[str, object]:
-        filters = {"status": status or "", "search": search or "", "fallback": fallback or "", "review": review or "", "origin": origin or "", "via": via or ""}
-        pagination = self.query_jobs(status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
+        filters = {"niche": niche_id, "status": status or "", "search": search or "", "fallback": fallback or "", "review": review or "", "origin": origin or "", "via": via or ""}
+        pagination = self.query_jobs(niche_id=niche_id, status=status, search=search, fallback=fallback, review=review, origin=origin, via=via, page=page, per_page=per_page)
+        lane_total = self.query_jobs(
+            niche_id=niche_id,
+            status=None,
+            search=None,
+            fallback=None,
+            review=None,
+            origin=None,
+            via=None,
+            page=1,
+            per_page=1,
+        )["total"]
+        needs_action_count = self.query_jobs(
+            niche_id=niche_id,
+            status="needs_action",
+            search=None,
+            fallback=None,
+            review=None,
+            origin=None,
+            via=None,
+            page=1,
+            per_page=1,
+        )["total"]
         pagination["previous_query"] = self.jobs_query_string(filters, max(1, int(pagination["page"]) - 1), int(pagination["per_page"]))
         pagination["next_query"] = self.jobs_query_string(filters, int(pagination["page"]) + 1, int(pagination["per_page"]))
         pagination["current_query"] = self.jobs_query_string(filters, int(pagination["page"]), int(pagination["per_page"]))
@@ -193,4 +220,8 @@ class HubJobsContext:
             "filters": filters,
             "origin_options": job_origin_options(),
             "creation_via_options": creation_via_options(),
+            "lane_summary": {
+                "total_count": lane_total,
+                "needs_action_count": needs_action_count,
+            },
         }

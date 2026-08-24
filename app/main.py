@@ -20,6 +20,7 @@ from app.automation import AutomationService
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.domain_contracts import ARTIFACT_TREND_RESEARCH
+from app.editorial_lanes import EditorialLane, editorial_lane_for_niche, editorial_lanes_context
 from app.http_limits import content_length_exceeds, read_request_body_limited, replay_request_body
 from app.hub_forms import build_review_action_payload
 from app.hub_job_request import HubTrendSeed, build_hub_job_request
@@ -71,17 +72,25 @@ def _request_path_with_query(request: Request) -> str:
 
 
 def _shared_template_context(request: Request) -> dict[str, object]:
+    niche_id = getattr(request.state, "editorial_lane_niche", None)
+    if niche_id is None and request.url.path.startswith("/microdramas"):
+        niche_id = "fiction_microdrama"
+    elif niche_id is None and request.url.path.startswith("/experimentos"):
+        niche_id = "survival_decisions"
+    elif niche_id is None and request.url.path == "/jobs":
+        niche_id = request.query_params.get("niche")
+    try:
+        lane = editorial_lane_for_niche(str(niche_id or HUB_DEFAULT_NICHE))
+    except ValueError:
+        lane = editorial_lane_for_niche(HUB_DEFAULT_NICHE)
     return {
         "settings": settings,
         "automation": automation_service.dashboard_context(),
         "viral_prompt_template": load_viral_prompt_template(hub_settings_path(settings.data_dir)),
         "return_to": _request_path_with_query(request),
-        "hub_defaults": {
-            "niche_id": HUB_DEFAULT_NICHE,
-            "seed_theme": "",
-            "suggested_seed_theme": _default_seed_theme(),
-            "target_duration_sec": HUB_RETENTION_OPTIMIZED_DURATION_SEC,
-        },
+        "active_lane": lane.as_template_context(),
+        "editorial_lanes": editorial_lanes_context(),
+        "hub_defaults": _hub_defaults_for_lane(lane),
     }
 
 
@@ -105,6 +114,21 @@ HUB_JOBS_PER_PAGE = 4
 
 
 hub_context = HubContext(settings, orchestrator, automation_service)
+
+
+def _hub_defaults_for_lane(lane: EditorialLane) -> dict[str, object]:
+    return {
+        "niche_id": lane.niche_id,
+        "seed_theme": "",
+        "suggested_seed_theme": _default_seed_theme() if lane.allows_automatic_topic else "",
+        "target_duration_sec": lane.default_duration_sec,
+        "minimum_duration_sec": lane.minimum_duration_sec,
+        "maximum_duration_sec": lane.maximum_duration_sec,
+        "tone": lane.tone,
+        "tone_label": lane.tone_label,
+        "theme_placeholder": lane.theme_placeholder,
+        "allows_automatic_topic": lane.allows_automatic_topic,
+    }
 
 
 def artifact_url(uri: str | None) -> str:
@@ -286,24 +310,92 @@ publication_router = create_publication_router(
 app.include_router(publication_router)
 
 
-def _jobs_listing_page_context(request: Request, *, deleted_job: str | None, list_context: dict[str, object]) -> dict[str, object]:
+def _jobs_listing_page_context(
+    request: Request,
+    *,
+    lane: EditorialLane,
+    deleted_job: str | None,
+    list_context: dict[str, object],
+) -> dict[str, object]:
     publication_context = hub_context.publication_dashboard_context(request, limit=4)
     return {
         **list_context,
-        "workflow_summary": publication_context["metrics"],
+        "workflow_summary": list_context["lane_summary"],
         "youtube_integration": publication_context["integration"],
         "automation": publication_context["automation"],
-        "hub_defaults": {
-            "niche_id": HUB_DEFAULT_NICHE,
-            "seed_theme": "",
-            "suggested_seed_theme": _default_seed_theme(),
-            "target_duration_sec": HUB_RETENTION_OPTIMIZED_DURATION_SEC,
-        },
+        "active_lane": lane.as_template_context(),
+        "editorial_lanes": editorial_lanes_context(),
+        "hub_defaults": _hub_defaults_for_lane(lane),
         "viral_prompt_template": load_viral_prompt_template(hub_settings_path(settings.data_dir)),
         "calendar_url": "/calendar",
         "settings": settings,
         "deleted_job": deleted_job,
     }
+
+
+def _lane_job_list_context(
+    lane: EditorialLane,
+    *,
+    status: str | None,
+    search: str | None,
+    fallback: str | None,
+    review: str | None,
+    origin: str | None,
+    via: str | None,
+    page: int,
+    per_page: int,
+) -> dict[str, object]:
+    context = hub_context.job_list_context(
+        niche_id=lane.niche_id,
+        status=status,
+        search=search,
+        fallback=fallback,
+        review=review,
+        origin=origin,
+        via=via,
+        page=page,
+        per_page=per_page,
+    )
+    context.update(
+        {
+            "active_lane": lane.as_template_context(),
+            "editorial_lanes": editorial_lanes_context(),
+        }
+    )
+    return context
+
+
+def _render_jobs_lane(
+    request: Request,
+    lane: EditorialLane,
+    *,
+    status: str | None,
+    search: str | None,
+    fallback: str | None,
+    review: str | None,
+    origin: str | None,
+    via: str | None,
+    page: int,
+    per_page: int,
+    deleted_job: str | None,
+) -> HTMLResponse:
+    request.state.editorial_lane_niche = lane.niche_id
+    list_context = _lane_job_list_context(
+        lane,
+        status=status,
+        search=search,
+        fallback=fallback,
+        review=review,
+        origin=origin,
+        via=via,
+        page=page,
+        per_page=per_page,
+    )
+    return templates.TemplateResponse(
+        request,
+        "jobs.html",
+        _jobs_listing_page_context(request, lane=lane, deleted_job=deleted_job, list_context=list_context),
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -319,7 +411,9 @@ def jobs_page(
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
     deleted_job: str | None = Query(default=None),
 ):
-    list_context = hub_context.job_list_context(
+    return _render_jobs_lane(
+        request,
+        editorial_lane_for_niche(HUB_DEFAULT_NICHE),
         status=status,
         search=search,
         fallback=fallback,
@@ -328,11 +422,63 @@ def jobs_page(
         via=via,
         page=page,
         per_page=per_page,
+        deleted_job=deleted_job,
     )
-    return templates.TemplateResponse(
+
+
+@app.get("/microdramas", response_class=HTMLResponse)
+def microdrama_jobs_page(
+    request: Request,
+    status: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    fallback: str | None = Query(default=None),
+    review: str | None = Query(default=None),
+    origin: str | None = Query(default=None),
+    via: str | None = Query(default=None),
+    page: int = Query(default=1),
+    per_page: int = Query(default=HUB_JOBS_PER_PAGE),
+    deleted_job: str | None = Query(default=None),
+):
+    return _render_jobs_lane(
         request,
-        "jobs.html",
-        _jobs_listing_page_context(request, deleted_job=deleted_job, list_context=list_context),
+        editorial_lane_for_niche("fiction_microdrama"),
+        status=status,
+        search=search,
+        fallback=fallback,
+        review=review,
+        origin=origin,
+        via=via,
+        page=page,
+        per_page=per_page,
+        deleted_job=deleted_job,
+    )
+
+
+@app.get("/experimentos", response_class=HTMLResponse)
+def experiment_jobs_page(
+    request: Request,
+    status: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    fallback: str | None = Query(default=None),
+    review: str | None = Query(default=None),
+    origin: str | None = Query(default=None),
+    via: str | None = Query(default=None),
+    page: int = Query(default=1),
+    per_page: int = Query(default=HUB_JOBS_PER_PAGE),
+    deleted_job: str | None = Query(default=None),
+):
+    return _render_jobs_lane(
+        request,
+        editorial_lane_for_niche("survival_decisions"),
+        status=status,
+        search=search,
+        fallback=fallback,
+        review=review,
+        origin=origin,
+        via=via,
+        page=page,
+        per_page=per_page,
+        deleted_job=deleted_job,
     )
 
 
@@ -367,6 +513,7 @@ async def update_operational_settings(request: Request):
 @app.get("/jobs", response_class=HTMLResponse)
 def jobs_route(
     request: Request,
+    niche: str = Query(default=HUB_DEFAULT_NICHE),
     status: str | None = Query(default=None),
     search: str | None = Query(default=None),
     fallback: str | None = Query(default=None),
@@ -377,7 +524,13 @@ def jobs_route(
     per_page: int = Query(default=HUB_JOBS_PER_PAGE),
     deleted_job: str | None = Query(default=None),
 ):
-    list_context = hub_context.job_list_context(
+    try:
+        lane = editorial_lane_for_niche(niche)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="editorial lane not found") from exc
+    request.state.editorial_lane_niche = lane.niche_id
+    list_context = _lane_job_list_context(
+        lane,
         status=status,
         search=search,
         fallback=fallback,
@@ -391,7 +544,7 @@ def jobs_route(
         return templates.TemplateResponse(
             request,
             "jobs.html",
-            _jobs_listing_page_context(request, deleted_job=deleted_job, list_context=list_context),
+            _jobs_listing_page_context(request, lane=lane, deleted_job=deleted_job, list_context=list_context),
         )
     return templates.TemplateResponse(
         request,
@@ -567,12 +720,17 @@ def job_detail(request: Request, job_id: str):
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
     page_context = hub_context.job_detail_page_context(request, details)
+    lane = editorial_lane_for_niche(details["job"].niche_id)
+    request.state.editorial_lane_niche = lane.niche_id
     return templates.TemplateResponse(
         request,
         "job_detail.html",
         {
             "details": details,
             "settings": settings,
+            "active_lane": lane.as_template_context(),
+            "editorial_lanes": editorial_lanes_context(),
+            "hub_defaults": _hub_defaults_for_lane(lane),
             **page_context,
             "common_schedule_timezones": COMMON_SCHEDULE_TIMEZONES,
             "review_error": request.query_params.get("review_error"),
