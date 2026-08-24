@@ -13,6 +13,7 @@ from urllib.parse import urlencode, urljoin
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from app.editorial_lanes import editorial_lane_for_niche
+from app.job_progress import PROGRESS_COMPLETE_STATUSES, PROGRESS_FAILED_STATUSES
 
 
 class RemoteRuntimeError(RuntimeError):
@@ -187,6 +188,8 @@ class RemoteRuntimeClient:
         timeout_seconds: float = 7200.0,
     ) -> dict[str, Any]:
         terminal_statuses = {
+            *PROGRESS_COMPLETE_STATUSES,
+            *PROGRESS_FAILED_STATUSES,
             "monetization_review",
             "blocked_for_monetization",
             "ready_for_upload",
