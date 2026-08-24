@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from app.config import get_settings
+from app.editorial_lanes import editorial_lane_for_niche
 from app.microdrama_pilot import build_microdrama_pilot_plan, start_microdrama_pilot
 from app.remote_runtime import RemoteRuntimeClient, current_revision, resume_deployed_revision
 from app.runtime_execution import assert_real_execution_location
@@ -87,7 +88,7 @@ def main(argv: list[str] | None = None) -> None:
     ):
         remote_parser = subparsers.add_parser(command, help=help_text)
         remote_parser.add_argument("--theme", required=True, help="Tema do video")
-        remote_parser.add_argument("--duration", type=int, default=45, choices=range(35, 151))
+        remote_parser.add_argument("--duration", type=int, default=None, choices=range(35, 151))
         remote_parser.add_argument("--niche", choices=sorted(SUPPORTED_NICHES), default="curiosidades")
         remote_parser.add_argument("--angle", default=None, help="Angulo editorial solicitado")
         remote_parser.add_argument("--wait", action="store_true", help="Aguarda o estado terminal do job")
@@ -101,6 +102,13 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command in {"job", "validate"}:
         settings = get_settings()
+        lane = editorial_lane_for_niche(args.niche)
+        target_duration_sec = args.duration if args.duration is not None else lane.default_duration_sec
+        if not lane.minimum_duration_sec <= target_duration_sec <= lane.maximum_duration_sec:
+            parser.error(
+                f"--duration for {lane.niche_id} must be between "
+                f"{lane.minimum_duration_sec} and {lane.maximum_duration_sec} seconds"
+            )
         is_validation = args.command == "validate"
         base_url = settings.remote_staging_url if is_validation else settings.remote_production_url
         client = RemoteRuntimeClient(base_url)
@@ -108,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
             client.require_revision(current_revision(), environment="staging")
         submitted = client.submit_job(
             theme=args.theme,
-            target_duration_sec=args.duration,
+            target_duration_sec=target_duration_sec,
             niche_id=args.niche,
             requested_angle=args.angle,
             request_id=args.request_id,

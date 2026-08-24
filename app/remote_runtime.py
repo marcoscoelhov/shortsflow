@@ -12,6 +12,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode, urljoin
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from app.editorial_lanes import editorial_lane_for_niche
+
 
 class RemoteRuntimeError(RuntimeError):
     pass
@@ -108,19 +110,26 @@ class RemoteRuntimeClient:
         self,
         *,
         theme: str,
-        target_duration_sec: int = 45,
+        target_duration_sec: int | None = None,
         niche_id: str = "curiosidades",
         requested_angle: str | None = None,
         request_id: str | None = None,
     ) -> SubmittedJob:
         request_id = request_id or str(uuid.uuid4())
+        lane = editorial_lane_for_niche(niche_id)
+        resolved_duration_sec = target_duration_sec if target_duration_sec is not None else lane.default_duration_sec
+        if not lane.minimum_duration_sec <= resolved_duration_sec <= lane.maximum_duration_sec:
+            raise ValueError(
+                f"{niche_id} target_duration_sec must be between "
+                f"{lane.minimum_duration_sec} and {lane.maximum_duration_sec}"
+            )
         form_payload = {
             "seed_theme": theme,
             "input_mode": "theme",
             "niche_id": niche_id,
             "language": "pt-BR",
-            "target_duration_sec": target_duration_sec,
-            "tone": "drama_chocante_reviravolta" if niche_id == "fiction_microdrama" else "intrigante_direto",
+            "target_duration_sec": resolved_duration_sec,
+            "tone": lane.tone,
             "cta_style": "soft",
         }
         if requested_angle:
