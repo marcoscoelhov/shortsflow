@@ -951,7 +951,7 @@ Contrato narrativo obrigatório:
 - se cta_style="soft", use CTA curta e específica depois do ending; se "none", cta=null
 - todos os campos narrados em português do Brasil, sem markdown, SSML, HTML, travessão ou instruções de câmera
 - prompt_version="{EDITORIAL_PROMPT_VERSION}"
-- qa_metrics deve incluir estimated_duration_sec, word_count, avg_words_per_sentence, repetition_score e script_gate_pass
+- qa_metrics deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, word_count, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass e editorial_prompt_version
 """
 
     def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
@@ -1073,9 +1073,16 @@ Regras:
 - evite repetir aberturas listadas em recent_pattern_brief.avoid_hook_openings e padrões de título recentes
 - QA deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass, editorial_prompt_version
 """
+        completion_max_tokens: int | None = None
         if str(topic_plan.get("niche_id") or "") == "fiction_microdrama":
             prompt = self._microdrama_script_prompt(topic_plan, target_duration_sec)
-        payload = self._json_completion(prompt)
+            settings = getattr(self, "settings", None) or get_settings()
+            completion_max_tokens = int(getattr(settings, "microdrama_script_max_tokens", 8192) or 8192)
+        payload = (
+            self._json_completion(prompt, max_tokens=completion_max_tokens)
+            if completion_max_tokens is not None
+            else self._json_completion(prompt)
+        )
         if isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict):
             payload = payload[0]
         if not isinstance(payload, dict):

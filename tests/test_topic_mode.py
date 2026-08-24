@@ -73,6 +73,58 @@ def test_script_gate_relaxes_factual_block_for_space_entertainment() -> None:
     assert with_ctx.metrics.get("viral_space_entertainment_relaxed_factual_gate") is True
 
 
+def test_script_gate_does_not_treat_labeled_microdrama_as_factual_claim() -> None:
+    gate = ScriptQualityGate()
+    request = SimpleNamespace(
+        niche_id="fiction_microdrama",
+        seed_theme="A carta que chegou vinte anos tarde",
+        notes="fictional_scenario=true\nfiction_format=microdrama",
+        requested_angle=None,
+        cta_style="none",
+    )
+    topic_plan = {
+        "canonical_topic": "Uma filha encontra cartas escondidas por vinte anos",
+        "angle": "A tia que a criou confessa a mentira",
+        "hook_promise": "A carta revela quem apagou a mãe da história",
+        "quality_metrics": {"topic_niche": "fiction_microdrama"},
+    }
+    hook = "A carta chegou vinte anos tarde."
+    loop = "Quem decidiu esconder todas as outras?"
+    beats = [
+        "Lia reconheceu a letra da mãe desaparecida.",
+        "Na caixa azul, encontrou vinte envelopes já abertos.",
+        "Dora confessou que respondera alguns em nome da menina.",
+    ]
+    payoff = "A mulher que escondeu as cartas também criou Lia."
+    ending = "A primeira carta nunca atrasou. Dora é que escolheu o silêncio."
+    script = {
+        "title": "A carta que chegou vinte anos tarde",
+        "hook": hook,
+        "loop": loop,
+        "body_beats": beats,
+        "payoff": payoff,
+        "ending": ending,
+        "full_narration": " ".join([hook, loop, *beats, payoff, ending]),
+        "language": "pt-BR",
+        "claim_trace": [],
+        "retention_map": {},
+        "qa_metrics": {
+            "hook_score": 0.9,
+            "clarity_score": 0.9,
+            "information_density_score": 0.9,
+            "ending_strength_score": 0.9,
+            "repetition_score": 0.1,
+        },
+    }
+
+    result = gate.validate(script, 45, topic_plan=topic_plan, request=request)
+
+    assert "factual_claim_trace_missing" not in result.reasons
+    assert "factual_risk_requires_conservative_rewrite" not in result.reasons
+    assert "overconfident_or_unsupported_factual_claim" not in result.reasons
+    assert result.metrics.get("fiction_microdrama_relaxed_factual_gate") is True
+
+
 def test_viral_intensity_accepts_marte_style_closing_question() -> None:
     gate = ViralIntensityGate()
     script = {

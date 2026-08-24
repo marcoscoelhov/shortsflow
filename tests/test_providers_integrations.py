@@ -1304,11 +1304,13 @@ def test_real_text_provider_uses_isolated_microdrama_script_prompt(monkeypatch) 
     provider = object.__new__(MinimaxCreativeProvider)
     provider.provider_name = "openai"
     provider.failure_provider_name = "openai_text"
-    provider.settings = SimpleNamespace(target_duration_sec=120)
+    provider.settings = SimpleNamespace(target_duration_sec=120, microdrama_script_max_tokens=8192)
     prompts: list[str] = []
+    max_token_budgets: list[int | None] = []
 
     def fake_json_completion(prompt: str, *, max_tokens: int | None = None):
         prompts.append(prompt)
+        max_token_budgets.append(max_tokens)
         return {"title": "A carta", "full_narration": "Roteiro completo", "qa_metrics": {}}
 
     monkeypatch.setattr(provider, "_json_completion", fake_json_completion)
@@ -1326,6 +1328,11 @@ def test_real_text_provider_uses_isolated_microdrama_script_prompt(monkeypatch) 
     assert "MICRODRAMA FICCIONAL ORIGINAL" in prompts[0]
     assert "roteiro viral de curiosidades" not in prompts[0]
     assert "288 a 324 palavras" in prompts[0]
+    assert "hook_score" in prompts[0]
+    assert "clarity_score" in prompts[0]
+    assert "information_density_score" in prompts[0]
+    assert "ending_strength_score" in prompts[0]
+    assert max_token_budgets == [8192]
 
 
 def test_resilient_generate_script_batch_uses_bounded_parallelism_and_keeps_order() -> None:
