@@ -567,6 +567,13 @@ class ResilientCreativeProvider:
             ("primary", self.primary, primary_timeout),
             ("fallback", self.fallback, self._provider_timeout_sec(self.fallback, draft_timeout) if self.fallback else draft_timeout),
             ("draft", getattr(self, "script_draft_provider", None), draft_timeout),
+            (
+                "emergency",
+                getattr(self, "gate_judge_provider", None),
+                self._provider_timeout_sec(self.gate_judge_provider, draft_timeout)
+                if getattr(self, "gate_judge_provider", None)
+                else draft_timeout,
+            ),
         ]:
             if not provider:
                 continue
