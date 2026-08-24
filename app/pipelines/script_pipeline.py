@@ -588,11 +588,10 @@ class ScriptPipeline(BasePipeline):
         for rank, track in enumerate(ranked_tracks, start=1):
             track_index = int(track.get("_track_index", rank - 1))
             try:
-                candidate, metrics = self._validate_or_repair_script(
+                candidate, metrics = self.repair_domain.validate_final_script_candidate_without_repair(
                     track,
                     plan_dict,
                     target_duration_sec,
-                    cta_style,
                     job_id,
                 )
             except RecoverableStepError as exc:
@@ -608,10 +607,42 @@ class ScriptPipeline(BasePipeline):
                     **metrics,
                     "script_track_quality_selected_index": track_index,
                     "script_track_quality_selected_rank": rank,
+                    "script_track_quality_repair_used": False,
                 },
                 attempts,
             )
-        raise RecoverableStepError(f"all ranked script tracks failed quality: {'; '.join(failures)}")
+        if not ranked_tracks:
+            raise RecoverableStepError("all ranked script tracks failed quality: ranking is empty")
+
+        winner = ranked_tracks[0]
+        winner_index = int(winner.get("_track_index", 0))
+        try:
+            candidate, metrics = self._validate_or_repair_script(
+                winner,
+                plan_dict,
+                target_duration_sec,
+                cta_style,
+                job_id,
+            )
+        except RecoverableStepError as exc:
+            reason = str(exc)
+            attempts.append(
+                {"rank": 1, "index": winner_index, "passed": False, "reason": reason, "repair_used": True}
+            )
+            failures.append(f"repair rank=1 index={winner_index}: {reason}")
+            raise RecoverableStepError(f"all ranked script tracks failed quality: {'; '.join(failures)}") from exc
+        attempts.append({"rank": 1, "index": winner_index, "passed": True, "reason": None, "repair_used": True})
+        self._remove_stale_quality_report(job_id, "script_rejected.json")
+        return (
+            candidate,
+            {
+                **metrics,
+                "script_track_quality_selected_index": winner_index,
+                "script_track_quality_selected_rank": 1,
+                "script_track_quality_repair_used": True,
+            },
+            attempts,
+        )
 
     def _validate_script_draft_selection(self, result: Any, draft_count: int) -> tuple[dict[str, Any] | None, str | None]:
         if not isinstance(result, dict):
