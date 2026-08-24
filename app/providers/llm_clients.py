@@ -166,6 +166,9 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
     provider_name = "openai"
     failure_provider_name = "openai_text"
 
+    _OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
+    _OPENCODE_GO_RESPONSES_MODELS = frozenset({"gpt-5.6-luna"})
+
     def __init__(self) -> None:
         settings = llm_facade.get_settings()
         if not settings.openai_api_key:
@@ -174,6 +177,10 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
         self.model_name = settings.openai_model
         self.reasoning_effort: Any = str(getattr(settings, "openai_reasoning_effort", "medium") or "medium").strip().lower()
         self.max_output_tokens = int(getattr(settings, "llm_json_max_tokens", 4096) or 4096)
+        self.use_responses_api = (
+            str(settings.openai_base_url).rstrip("/") == self._OPENCODE_GO_BASE_URL
+            and self.model_name in self._OPENCODE_GO_RESPONSES_MODELS
+        )
         self.client = llm_facade.OpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
@@ -181,21 +188,39 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
         )
 
     def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
+        resolved_max_tokens = int(max_tokens if max_tokens is not None else self.max_output_tokens)
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": "Return ONLY the final JSON object. No reasoning, prose, or markdown fences."},
-                    {"role": "user", "content": prompt},
-                ],
-                response_format={"type": "json_object"},
-                reasoning_effort=self.reasoning_effort,
-                max_tokens=int(max_tokens if max_tokens is not None else self.max_output_tokens),
-                timeout=self.timeout_sec,
-            )
+            if getattr(self, "use_responses_api", False):
+                response = self.client.responses.create(
+                    model=self.model_name,
+                    instructions="Return ONLY the final JSON object. No reasoning, prose, or markdown fences.",
+                    input=prompt,
+                    text={"format": {"type": "json_object"}},
+                    reasoning={"effort": self.reasoning_effort},
+                    max_output_tokens=resolved_max_tokens,
+                    timeout=self.timeout_sec,
+                )
+                raw = getattr(response, "output_text", None)
+                if not isinstance(raw, str):
+                    raise ProviderFailure(self.failure_provider_name, "malformed Responses API output: output_text must be text")
+                raw = raw.strip()
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": "Return ONLY the final JSON object. No reasoning, prose, or markdown fences."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    reasoning_effort=self.reasoning_effort,
+                    max_tokens=resolved_max_tokens,
+                    timeout=self.timeout_sec,
+                )
+                raw = _chat_completion_content(response, self.failure_provider_name)
+        except ProviderFailure:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = _chat_completion_content(response, self.failure_provider_name)
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
@@ -214,19 +239,35 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
 
     def _json_array_completion(self, prompt: str) -> Any:
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": "Return ONLY the final JSON array. No reasoning, prose, or markdown fences."},
-                    {"role": "user", "content": prompt},
-                ],
-                reasoning_effort=self.reasoning_effort,
-                max_tokens=self.max_output_tokens,
-                timeout=self.timeout_sec,
-            )
+            if getattr(self, "use_responses_api", False):
+                response = self.client.responses.create(
+                    model=self.model_name,
+                    instructions="Return ONLY the final JSON array. No reasoning, prose, or markdown fences.",
+                    input=prompt,
+                    reasoning={"effort": self.reasoning_effort},
+                    max_output_tokens=self.max_output_tokens,
+                    timeout=self.timeout_sec,
+                )
+                raw = getattr(response, "output_text", None)
+                if not isinstance(raw, str):
+                    raise ProviderFailure(self.failure_provider_name, "malformed Responses API output: output_text must be text")
+                raw = raw.strip()
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": "Return ONLY the final JSON array. No reasoning, prose, or markdown fences."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    reasoning_effort=self.reasoning_effort,
+                    max_tokens=self.max_output_tokens,
+                    timeout=self.timeout_sec,
+                )
+                raw = _chat_completion_content(response, self.failure_provider_name)
+        except ProviderFailure:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = _chat_completion_content(response, self.failure_provider_name)
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
