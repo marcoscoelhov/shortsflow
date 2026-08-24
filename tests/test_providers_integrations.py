@@ -1112,6 +1112,91 @@ def test_ordinary_completions_still_use_llm_json_max_tokens(monkeypatch) -> None
     assert captured["max_tokens"] == 4096
 
 
+def test_opencode_go_luna_uses_responses_api_for_json_object(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text=json.dumps({"ok": True}))
+
+    class ForbiddenChatCompletions:
+        def create(self, **_kwargs):
+            raise AssertionError("OpenCode Go Luna must use the Responses API")
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.responses = FakeResponses()
+            self.chat = SimpleNamespace(completions=ForbiddenChatCompletions())
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            openai_api_key="opencode-go-key",
+            openai_base_url="https://opencode.ai/zen/go/v1",
+            openai_model="gpt-5.6-luna",
+            openai_reasoning_effort="high",
+            openai_timeout_sec=360.0,
+            llm_json_max_tokens=4096,
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    result = OpenAICreativeProvider()._json_completion("prompt comum")
+
+    assert result == {"ok": True}
+    assert captured == {
+        "model": "gpt-5.6-luna",
+        "instructions": "Return ONLY the final JSON object. No reasoning, prose, or markdown fences.",
+        "input": "prompt comum",
+        "text": {"format": {"type": "json_object"}},
+        "reasoning": {"effort": "high"},
+        "max_output_tokens": 4096,
+        "timeout": 360.0,
+    }
+
+
+def test_opencode_go_luna_uses_responses_api_for_json_array(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text=json.dumps([{"topic": "Lua"}]))
+
+    provider = object.__new__(OpenAICreativeProvider)
+    provider.model_name = "gpt-5.6-luna"
+    provider.reasoning_effort = "high"
+    provider.max_output_tokens = 4096
+    provider.timeout_sec = 360.0
+    provider.use_responses_api = True
+    provider.client = SimpleNamespace(responses=FakeResponses())
+
+    result = provider._json_array_completion("gere uma lista")
+
+    assert result == [{"topic": "Lua"}]
+    assert captured["max_output_tokens"] == 4096
+    assert captured["reasoning"] == {"effort": "high"}
+    assert "text" not in captured
+
+
+def test_opencode_go_luna_malformed_responses_output_becomes_provider_failure() -> None:
+    provider = object.__new__(OpenAICreativeProvider)
+    provider.model_name = "gpt-5.6-luna"
+    provider.reasoning_effort = "high"
+    provider.max_output_tokens = 4096
+    provider.timeout_sec = 360.0
+    provider.use_responses_api = True
+    provider.client = SimpleNamespace(
+        responses=SimpleNamespace(create=lambda **_kwargs: SimpleNamespace(output_text=None)),
+    )
+
+    with pytest.raises(ProviderFailure) as exc_info:
+        provider._json_completion("prompt comum")
+
+    assert exc_info.value.provider == "openai_text"
+
+
 def test_shared_judge_has_topic_draft_selection_prompt(monkeypatch) -> None:
     provider = object.__new__(MinimaxCreativeProvider)
     provider.provider_name = "xai"
