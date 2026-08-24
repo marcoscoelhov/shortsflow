@@ -1077,7 +1077,7 @@ Regras:
         if str(topic_plan.get("niche_id") or "") == "fiction_microdrama":
             prompt = self._microdrama_script_prompt(topic_plan, target_duration_sec)
             settings = getattr(self, "settings", None) or get_settings()
-            completion_max_tokens = int(getattr(settings, "microdrama_script_max_tokens", 8192) or 8192)
+            completion_max_tokens = int(getattr(settings, "microdrama_script_max_tokens", 4096) or 4096)
         payload = (
             self._json_completion(prompt, max_tokens=completion_max_tokens)
             if completion_max_tokens is not None

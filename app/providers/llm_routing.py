@@ -202,18 +202,49 @@ class ResilientCreativeProvider:
                 draft_count,
             ),
         )
-        if parallelism == 1:
-            return {"tracks": [generate_track(index) for index in range(draft_count)]}
-
         tracks_by_index: dict[int, dict[str, Any]] = {}
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=parallelism,
-            thread_name_prefix="microdrama-script-track",
-        ) as executor:
-            futures = {executor.submit(generate_track, index): index for index in range(draft_count)}
-            for future in concurrent.futures.as_completed(futures):
-                index = futures[future]
-                tracks_by_index[index] = future.result()
+        failures_by_index: dict[int, ProviderFailure] = {}
+
+        def collect_tracks(indexes: list[int]) -> tuple[dict[int, dict[str, Any]], dict[int, ProviderFailure]]:
+            collected: dict[int, dict[str, Any]] = {}
+            failures: dict[int, ProviderFailure] = {}
+            if parallelism == 1:
+                for index in indexes:
+                    try:
+                        collected[index] = generate_track(index)
+                    except ProviderFailure as exc:
+                        failures[index] = exc
+                return collected, failures
+
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(parallelism, len(indexes)),
+                thread_name_prefix="microdrama-script-track",
+            ) as executor:
+                futures = {executor.submit(generate_track, index): index for index in indexes}
+                for future in concurrent.futures.as_completed(futures):
+                    index = futures[future]
+                    try:
+                        collected[index] = future.result()
+                    except ProviderFailure as exc:
+                        failures[index] = exc
+            return collected, failures
+
+        tracks_by_index, failures_by_index = collect_tracks(list(range(draft_count)))
+        if failures_by_index:
+            retry_tracks, retry_failures = collect_tracks(sorted(failures_by_index))
+            for track in retry_tracks.values():
+                metrics = track.setdefault("qa_metrics", {})
+                metrics["script_track_generation_retry_used"] = True
+            tracks_by_index.update(retry_tracks)
+            failures_by_index = retry_failures
+        if failures_by_index:
+            failure_summary = "; ".join(
+                f"track {index + 1}: {failure}" for index, failure in sorted(failures_by_index.items())
+            )
+            raise ProviderFailure(
+                "llm_registry",
+                f"script tracks failed after selective retry: {failure_summary}",
+            )
         return {"tracks": [tracks_by_index[index] for index in range(draft_count)]}
 
     def select_script_draft(self, tracks: list[dict[str, Any]]) -> dict[str, Any]:
