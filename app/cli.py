@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> None:
             )
         is_validation = args.command == "validate"
         base_url = settings.remote_staging_url if is_validation else settings.remote_production_url
-        client = RemoteRuntimeClient(base_url)
+        client = RemoteRuntimeClient(base_url, auth_token=getattr(settings, "hub_auth_token", None))
         if is_validation:
             client.require_revision(current_revision(), environment="staging")
         submitted = client.submit_job(
@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> None:
         base_url = settings.remote_staging_url if args.environment == "staging" else settings.remote_production_url
         branch = resume_deployed_revision(
             args.environment,
-            client=RemoteRuntimeClient(base_url),
+            client=RemoteRuntimeClient(base_url, auth_token=getattr(settings, "hub_auth_token", None)),
             repo_path=args.repo.resolve(),
         )
         print(json.dumps({"branch": branch, "repo": str(args.repo.resolve()), "status": "ready"}, indent=2))
