@@ -2117,6 +2117,11 @@ def test_step_script_blocks_final_viral_repair_candidate_that_breaks_script_cont
         monkeypatch.setattr(pipeline, "_validate_or_repair_viral_intensity", viral_validation)
         monkeypatch.setattr(pipeline, "_text_publish_audit", audit)
 
+        deadline = time.time() + 2
+        while viral_calls["count"] == 0 and time.time() < deadline:
+            time.sleep(0.01)
+        assert viral_calls["count"] > 0
+
         with pytest.raises(RecoverableStepError, match="final script quality gate failed"):
             pipeline.step_script(session, job, 1)
 
