@@ -57,6 +57,24 @@ def test_remote_job_submission_returns_tailnet_job_url() -> None:
     assert b"cta_style=soft" in (transport.requests[0][3] or b"")
 
 
+def test_remote_microdrama_submission_preserves_editorial_lane() -> None:
+    transport = FakeTransport([FakeResponse(status=303, headers={"location": "/jobs/drama-123"})])
+    client = RemoteRuntimeClient("https://staging.example.ts.net", transport=transport)
+
+    client.submit_job(
+        theme="A carta da mãe que chegou vinte anos tarde",
+        target_duration_sec=120,
+        niche_id="fiction_microdrama",
+        requested_angle="A filha descobre quem escondeu as cartas.",
+    )
+
+    body = transport.requests[0][3] or b""
+    assert b"niche_id=fiction_microdrama" in body
+    assert b"target_duration_sec=120" in body
+    assert b"tone=drama_chocante_reviravolta" in body
+    assert b"requested_angle=A+filha+descobre+quem+escondeu+as+cartas." in body
+
+
 def test_transport_failure_reports_reusable_idempotency_key() -> None:
     client = RemoteRuntimeClient("https://prod.example.ts.net", transport=FailingTransport())
 
