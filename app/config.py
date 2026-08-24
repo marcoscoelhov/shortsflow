@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     scene_target_count: int = 7
     microdrama_script_track_count: int = 10
     microdrama_script_generation_parallelism: int = 2
-    microdrama_script_max_tokens: int = 8192
+    microdrama_script_max_tokens: int = 4096
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False

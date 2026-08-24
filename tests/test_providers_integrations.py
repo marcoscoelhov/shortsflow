@@ -1368,6 +1368,57 @@ def test_resilient_generate_script_batch_uses_bounded_parallelism_and_keeps_orde
     ]
 
 
+def test_resilient_generate_script_batch_retries_only_failed_tracks_and_keeps_full_batch() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(microdrama_script_generation_parallelism=2)
+    calls_by_angle: dict[str, int] = {}
+
+    def fake_generate_script(topic_plan):
+        angle = str(topic_plan["angle"])
+        calls_by_angle[angle] = calls_by_angle.get(angle, 0) + 1
+        if angle.endswith("variante 2") and calls_by_angle[angle] == 1:
+            raise ProviderFailure("llm_registry", "transient double-provider failure")
+        return {
+            "title": angle,
+            "full_narration": f"Narração para {angle}",
+            "qa_metrics": {},
+        }
+
+    provider.generate_script = fake_generate_script
+
+    result = provider.generate_script_batch({"angle": "segredo da carta"}, 4)
+
+    assert [track["_track_index"] for track in result["tracks"]] == [0, 1, 2, 3]
+    assert calls_by_angle == {
+        "segredo da carta variante 1": 1,
+        "segredo da carta variante 2": 2,
+        "segredo da carta variante 3": 1,
+        "segredo da carta variante 4": 1,
+    }
+
+
+def test_resilient_generate_script_batch_reports_tracks_that_fail_selective_retry() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(microdrama_script_generation_parallelism=2)
+    calls_by_angle: dict[str, int] = {}
+
+    def fake_generate_script(topic_plan):
+        angle = str(topic_plan["angle"])
+        calls_by_angle[angle] = calls_by_angle.get(angle, 0) + 1
+        if angle.endswith("variante 2"):
+            raise ProviderFailure("llm_registry", "persistent double-provider failure")
+        return {"title": angle, "full_narration": f"Narração para {angle}", "qa_metrics": {}}
+
+    provider.generate_script = fake_generate_script
+
+    with pytest.raises(ProviderFailure, match=r"track 2: persistent double-provider failure"):
+        provider.generate_script_batch({"angle": "segredo da carta"}, 3)
+
+    assert calls_by_angle["segredo da carta variante 2"] == 2
+    assert calls_by_angle["segredo da carta variante 1"] == 1
+    assert calls_by_angle["segredo da carta variante 3"] == 1
+
+
 def test_resilient_generate_script_batch_falls_back_per_track() -> None:
     class PrimaryProvider:
         provider_name = "openai"

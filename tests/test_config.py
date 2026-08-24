@@ -98,7 +98,7 @@ def test_visual_review_defaults_to_human_only(monkeypatch) -> None:
 
 def test_microdrama_script_generation_parallelism_is_bounded() -> None:
     assert Settings(_env_file=None).microdrama_script_generation_parallelism == 2
-    assert Settings(_env_file=None).microdrama_script_max_tokens == 8192
+    assert Settings(_env_file=None).microdrama_script_max_tokens == 4096
     assert Settings(
         _env_file=None,
         microdrama_script_generation_parallelism=4,
