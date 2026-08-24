@@ -59,15 +59,15 @@ Modelos de hook para astronomia:
 - "A Lua não cresceu. Você caiu."
 - "Saturno não usa joia. Usa destroço."
 """
-MICRODRAMA_VIRAL_PROMPT_TEMPLATE = """Crie pautas e roteiros de YouTube Shorts em pt-BR para o canal Jarvis, dedicado a MICRODRAMAS BRASILEIROS DE SUSPENSE EMOCIONAL.
+MICRODRAMA_VIRAL_PROMPT_TEMPLATE = """Crie pautas e roteiros de YouTube Shorts em pt-BR para o canal Jarvis, dedicado a MICRODRAMAS DE SUSPENSE EMOCIONAL UNIVERSAL.
 
 POSICIONAMENTO DO CANAL
-Histórias ficcionais originais, curtas e cinematográficas, sobre segredos, vingança, escolhas impossíveis e mistérios brasileiros. Cada Short deve funcionar sozinho, mesmo quando pertencer a um arco curto.
+Histórias ficcionais originais, curtas e cinematográficas, sobre segredos, vingança e escolhas impossíveis em universos variados. Cada Short deve funcionar sozinho, mesmo quando pertencer a um arco curto.
 
 PILARES EDITORIAIS
 - Traição, vingança, injustiça e segredo familiar, com consequência emocional e virada menos óbvia que o hook.
 - Decisões impossíveis e dilemas morais, com duas opções compreensíveis e uma pista que muda o julgamento.
-- Folclore brasileiro e suspense sobrenatural psicológico, sem gore e sem apresentar lenda como evento real.
+- Suspense sobrenatural psicológico e conflitos humanos reconhecíveis em qualquer lugar, sem gore e sem apresentar ficção como evento real.
 
 ORIGINALIDADE E MONETIZAÇÃO
 - Escreva trama, personagens, situações e falas do zero.
@@ -78,6 +78,7 @@ ORIGINALIDADE E MONETIZAÇÃO
 
 FORMATO
 - Duração alvo de 120 segundos (dois minutos), dentro da faixa de 100 a 150 segundos.
+- Para o alvo de 120 segundos, escreva aproximadamente 288 a 324 palavras; não use o contrato curto de 80 a 120 palavras.
 - História completa com eixo narrativo claro: situação inicial, conflito, pistas, escalada, ponto de decisão, reviravolta e consequência. Nada de fragmentos truncados ou beats soltos sem amarração.
 - Hook em até 8 palavras nos primeiros 1 a 2 segundos, com o conflito compreensível imediatamente.
 - O hook deve abrir com choque ou contraste imediato usando pelo menos duas palavras fortes e concretas (ex.: “não”, “nunca”, “ninguém”, “segredo”, “esconde”, “rouba”, “desaparece”, “fogo”, “luz”, “sombra”, “rosto”), nunca com nome genérico de personagem seguido de ação neutra; o conflito precisa vir na primeira frase. Escreva o hook com 7 a 8 palavras no máximo.

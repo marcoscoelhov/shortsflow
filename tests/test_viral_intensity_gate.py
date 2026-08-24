@@ -5,6 +5,16 @@ from app.pipelines.script_pipeline import ScriptPipeline
 from app.quality.viral_intensity_gate import ViralIntensityGate
 
 
+@pytest.mark.parametrize(
+    "signal",
+    ["luz", "sombra", "rosto", "esconde", "escondeu", "desaparece", "desapareceu", "rouba", "roubou"],
+)
+def test_prompt_shock_literals_and_relevant_forms_are_recognized(signal: str) -> None:
+    result = ViralIntensityGate().validate({"hook": f"A {signal} mudou tudo naquela noite."})
+
+    assert result.metrics["shock_signal_count"] >= 1
+
+
 def test_viral_intensity_gate_blocks_morno_didatico_script() -> None:
     script = {
         "title": "Por que o céu fica laranja no amanhecer",

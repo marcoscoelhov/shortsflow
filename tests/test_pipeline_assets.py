@@ -500,6 +500,99 @@ def test_background_music_gate_rejects_inaudible_bed(tmp_path: Path) -> None:
     assert "music_source_too_quiet" in result.reasons
     assert "music_bed_inaudible" in result.reasons
 
+
+def test_background_music_gate_rejects_mix_that_is_exact_narration_copy(tmp_path: Path) -> None:
+    narration_path = tmp_path / "narration.wav"
+    music_path = tmp_path / "music.wav"
+    mixed_path = tmp_path / "mixed.wav"
+    sample_rate = 24_000
+
+    def write_wave(path: Path, amplitude: int, freq_hz: float) -> None:
+        with wave.open(str(path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            frames = bytearray()
+            for idx in range(sample_rate * 2):
+                sample = int(amplitude * math.sin(2 * math.pi * freq_hz * idx / sample_rate))
+                frames.extend(sample.to_bytes(2, "little", signed=True))
+            wav_file.writeframes(frames)
+
+    write_wave(narration_path, amplitude=12_000, freq_hz=220.0)
+    write_wave(music_path, amplitude=1_680, freq_hz=110.0)
+    shutil.copyfile(narration_path, mixed_path)
+
+    result = BackgroundMusicGate().validate(
+        narration_path=narration_path,
+        music_path=music_path,
+        mixed_audio_path=mixed_path,
+        expected_duration_ms=2_000,
+        gain_db=0.0,
+    )
+
+    assert result.passed is False
+    assert "music_bed_missing_from_mix" in result.reasons
+    assert result.metrics["observed_mix_contribution_ratio"] < 0.01
+
+
+def test_background_music_gate_rejects_narration_processed_only_by_mixer_loudnorm(tmp_path: Path) -> None:
+    import subprocess
+
+    import imageio_ffmpeg
+
+    narration_path = tmp_path / "narration.wav"
+    music_path = tmp_path / "music.wav"
+    mixed_path = tmp_path / "loudnorm-only.wav"
+    sample_rate = 24_000
+
+    def write_wave(path: Path, amplitude: int, frequencies: tuple[float, ...]) -> None:
+        with wave.open(str(path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            frames = bytearray()
+            for idx in range(sample_rate * 2):
+                sample = sum(
+                    int((amplitude / len(frequencies)) * math.sin(2 * math.pi * frequency * idx / sample_rate))
+                    for frequency in frequencies
+                )
+                frames.extend(sample.to_bytes(2, "little", signed=True))
+            wav_file.writeframes(frames)
+
+    write_wave(narration_path, amplitude=12_000, frequencies=(180.0, 260.0, 410.0))
+    write_wave(music_path, amplitude=1_680, frequencies=(90.0, 120.0))
+    subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            "-y",
+            "-i",
+            str(narration_path),
+            "-filter:a",
+            "loudnorm=I=-16:LRA=11:TP=-1.5",
+            "-ar",
+            "24000",
+            "-ac",
+            "1",
+            str(mixed_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    result = BackgroundMusicGate().validate(
+        narration_path=narration_path,
+        music_path=music_path,
+        mixed_audio_path=mixed_path,
+        expected_duration_ms=2_000,
+        gain_db=0.0,
+    )
+
+    assert result.passed is False
+    assert "music_bed_missing_from_mix" in result.reasons
+    assert result.metrics["observed_mix_contribution_reference"] == "loudnorm_narration"
+    assert result.metrics["observed_mix_contribution_ratio"] < 0.01
+
 def test_render_gate_rejects_missing_file(tmp_path: Path) -> None:
     result = RenderGate().validate(tmp_path / "missing.mp4", expected_duration_ms=30_000)
     assert not result.passed
@@ -1954,12 +2047,43 @@ def test_tts_duration_fit_compresses_audio_and_subtitle_timings(tmp_path: Path) 
         audio_path,
         srt_path,
         {"duration_ms": 58_000, "provider_metadata": {"mode": "edge"}},
+        target_duration_sec=45,
     )
     cues = parse_srt(srt_path.read_text(encoding="utf-8"))
 
     assert 53_500 <= result["duration_ms"] <= 54_500
     assert result["provider_metadata"]["duration_fit_applied"] is True
     assert cues[-1]["end_ms"] <= 54_600
+
+
+def test_tts_duration_fit_leaves_long_form_target_untouched(tmp_path: Path) -> None:
+    audio_path = tmp_path / "voice.wav"
+    srt_path = tmp_path / "voice.srt"
+    sample_rate = 24_000
+    with wave.open(str(audio_path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(b"\0\0" * sample_rate * 60)
+    srt_path.write_text(
+        "1\n00:00:00,000 --> 00:01:00,000\nlong form intacto\n",
+        encoding="utf-8",
+    )
+    original_audio = audio_path.read_bytes()
+    original_srt = srt_path.read_text(encoding="utf-8")
+    original_result = {"duration_ms": 60_000, "provider_metadata": {"mode": "edge"}}
+
+    result = orchestrator.asset_pipeline.tts.fit_tts_duration(
+        audio_path,
+        srt_path,
+        original_result,
+        target_duration_sec=60,
+    )
+
+    assert result == original_result
+    assert audio_path.read_bytes() == original_audio
+    assert srt_path.read_text(encoding="utf-8") == original_srt
+
 
 def test_tts_duration_fit_expands_short_audio_and_subtitle_timings(tmp_path: Path) -> None:
     audio_path = tmp_path / "voice.wav"
@@ -1985,6 +2109,7 @@ def test_tts_duration_fit_expands_short_audio_and_subtitle_timings(tmp_path: Pat
         audio_path,
         srt_path,
         {"duration_ms": 27_000, "provider_metadata": {"mode": "edge"}},
+        target_duration_sec=45,
     )
     cues = parse_srt(srt_path.read_text(encoding="utf-8"))
 
@@ -2714,6 +2839,161 @@ def test_step_background_music_persists_debug_on_provider_failure(monkeypatch) -
     assert debug["provider_details"]["request_payload"]["model"] == "music-2.6"
     assert debug["provider_details"]["query"] == "polvos documentary"
 
+
+def _seed_background_music_step(job_id: str) -> None:
+    from app.models import ScenePlan
+
+    audio_dir = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    narration_path = audio_dir / "narration.wav"
+    narration_path.write_bytes(b"RIFFtest")
+    with SessionLocal() as session:
+        _create_basic_job(session, job_id=job_id, status="awaiting_review", current_step="background_music")
+        session.add_all(
+            [
+                TopicPlan(
+                    topic_id=f"topic-{job_id}",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash="topic",
+                    canonical_topic="a carta no paletó do pai",
+                    angle="a dobra revela a pista",
+                    hook_promise="a carta muda a história",
+                    entities=["carta", "paletó", "pai"],
+                    search_terms=["carta paletó pai"],
+                    title_candidates=["A carta no paletó"],
+                    quality_metrics={},
+                ),
+                Script(
+                    script_id=f"script-{job_id}",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash="script",
+                    title="A carta no paletó",
+                    hook="A carta apareceu no bolso do pai.",
+                    body_beats=["A dobra revelou uma pista."],
+                    ending="O bolso já mostrava tudo.",
+                    cta=None,
+                    full_narration="A carta apareceu no bolso do pai. A dobra revelou uma pista.",
+                    estimated_duration_sec=35,
+                    key_facts=[],
+                    token_count=12,
+                    language="pt-BR",
+                    qa_metrics={},
+                ),
+                NarrationAsset(
+                    narration_id=f"narration-{job_id}",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash="narration",
+                    provider="mock",
+                    voice="mock",
+                    audio_uri=narration_path.resolve().as_uri(),
+                    normalized_audio_uri=None,
+                    raw_subtitles_uri=None,
+                    duration_ms=35_000,
+                    sample_rate_hz=24_000,
+                    channels=1,
+                    loudness_lufs=-16.0,
+                    provider_metadata={},
+                ),
+                SubtitleTrack(
+                    subtitle_id=f"subtitles-{job_id}",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash="subtitles",
+                    format="internal",
+                    items=[{"start_ms": 0, "end_ms": 1000, "text": "A carta apareceu."}],
+                    coverage_ratio=1.0,
+                    p95_drift_ms=0,
+                    max_drift_ms=0,
+                    ass_uri=None,
+                    raw_srt_uri=None,
+                ),
+                ScenePlan(
+                    scene_plan_id=f"scenes-{job_id}",
+                    job_id=job_id,
+                    schema_version="1.0.0",
+                    content_hash="scenes",
+                    scene_count=1,
+                    scenes=[{"scene_id": "scene-1", "order": 1, "duration_ms": 35_000}],
+                ),
+            ]
+        )
+        session.commit()
+
+
+def test_step_background_music_passes_zero_gain_to_gate(monkeypatch) -> None:
+    from app.quality.background_music_gate import BackgroundMusicGateResult
+
+    job_id = f"music-zero-gain-{time.time_ns()}"
+    _seed_background_music_step(job_id)
+    captured: dict[str, float] = {}
+    monkeypatch.setattr(orchestrator.asset_pipeline.settings, "sound_design_enabled", False)
+    monkeypatch.setattr(
+        orchestrator.providers.music,
+        "select_track",
+        lambda *_args: {"provider": "mock", "audio_uri": "file:///mock-music.wav", "provider_metadata": {}},
+    )
+    monkeypatch.setattr(
+        orchestrator.asset_pipeline.music,
+        "mix_background_music_with_repair",
+        lambda **_kwargs: {"gain_db_used": 0.0, "mix_attempts_log": []},
+    )
+
+    def validate_music(**kwargs):
+        captured["gain_db"] = kwargs["gain_db"]
+        return BackgroundMusicGateResult(True, [], {"gain_db": kwargs["gain_db"]})
+
+    monkeypatch.setattr(orchestrator.asset_pipeline.background_music_gate, "validate", validate_music)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        orchestrator.asset_pipeline.step_background_music(session, job, 1)
+
+    assert captured["gain_db"] == 0.0
+
+
+def test_step_background_music_blocks_before_sound_design_when_bed_is_missing(monkeypatch) -> None:
+    from app.quality.background_music_gate import BackgroundMusicGateResult
+
+    job_id = f"music-gate-before-sfx-{time.time_ns()}"
+    _seed_background_music_step(job_id)
+    sound_design_calls = {"count": 0}
+    monkeypatch.setattr(orchestrator.asset_pipeline.settings, "sound_design_enabled", True)
+    monkeypatch.setattr(
+        orchestrator.providers.music,
+        "select_track",
+        lambda *_args: {"provider": "mock", "audio_uri": "file:///mock-music.wav", "provider_metadata": {}},
+    )
+    monkeypatch.setattr(
+        orchestrator.asset_pipeline.music,
+        "mix_background_music_with_repair",
+        lambda **_kwargs: {"gain_db_used": -17.0, "mix_attempts_log": []},
+    )
+    monkeypatch.setattr(
+        orchestrator.asset_pipeline.background_music_gate,
+        "validate",
+        lambda **_kwargs: BackgroundMusicGateResult(False, ["music_bed_missing_from_mix"], {"gain_db": -17.0}),
+    )
+
+    def generate_sound_design(*_args, **_kwargs):
+        sound_design_calls["count"] += 1
+        return {"audio_uri": "file:///residue.wav", "event_count": 1}
+
+    monkeypatch.setattr(orchestrator.asset_pipeline.music, "generate_sound_design_track", generate_sound_design)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        with pytest.raises(RecoverableStepError, match="background music quality gate failed"):
+            orchestrator.asset_pipeline.step_background_music(session, job, 1)
+
+    report_path = Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "background_music_quality_report.json"
+    assert json.loads(report_path.read_text(encoding="utf-8"))["passed"] is False
+    assert sound_design_calls["count"] == 0
+
 @pytest.fixture
 def minimax_music_provider(monkeypatch) -> MiniMaxBackgroundMusicProvider:
     settings = SimpleNamespace(
@@ -2913,6 +3193,73 @@ def test_simple_amix_keeps_audible_bed_ratio(tmp_path: Path) -> None:
     assert gate.metrics["music_source"]["rms_dbfs"] > -120  # real bed present
     ratio = gate.metrics["bed_relative_rms_ratio"]
     assert 0.02 <= ratio <= 1.2  # audible but does not overwhelm
+
+
+def test_music_gate_measures_espeak_loudnorm_bed_from_source_gain(tmp_path: Path) -> None:
+    from app.audio.music_mix import _wave_rms_db, mix_background_music
+    from app.providers.tts import LocalSpeechFallbackProvider
+    from app.quality.background_music_gate import BackgroundMusicGate
+
+    narration_path = tmp_path / "espeak-loudnorm.wav"
+    subtitles_path = tmp_path / "espeak.srt"
+    music_path = tmp_path / "music.wav"
+    mixed_path = tmp_path / "mixed.wav"
+    LocalSpeechFallbackProvider().synthesize(
+        "Ninguém viu a luz desaparecer. A sombra escondeu o rosto antes da porta fechar.",
+        narration_path,
+        subtitles_path,
+    )
+    with wave.open(str(narration_path), "rb") as narration_wave:
+        duration_ms = round(narration_wave.getnframes() / narration_wave.getframerate() * 1000)
+    narration_rms_db = _wave_rms_db(narration_path)
+    assert narration_rms_db is not None
+    target_music_rms = 32767 * (10 ** (narration_rms_db / 20)) * 0.14
+    music_amplitude = max(1, round(target_music_rms * math.sqrt(2)))
+    sample_rate = 24_000
+    with wave.open(str(music_path), "wb") as music_wave:
+        music_wave.setnchannels(1)
+        music_wave.setsampwidth(2)
+        music_wave.setframerate(sample_rate)
+        frames = bytearray()
+        for idx in range(sample_rate * 2):
+            sample = int(music_amplitude * math.sin(2 * math.pi * 110 * (idx / sample_rate)))
+            frames.extend(sample.to_bytes(2, "little", signed=True))
+        music_wave.writeframes(frames)
+
+    result = mix_background_music(
+        narration_path=narration_path,
+        music_path=music_path,
+        output_path=mixed_path,
+        target_duration_ms=duration_ms,
+        gain_db=-17.0,
+        strategy="sidechaincompress+amix+loudnorm",
+        target_ratio=0.14,
+        gain_min_db=-6.0,
+        gain_max_db=6.0,
+    )
+    gate = BackgroundMusicGate().validate(
+        narration_path=narration_path,
+        music_path=music_path,
+        mixed_audio_path=mixed_path,
+        expected_duration_ms=duration_ms,
+        gain_db=float(result["gain_db_used"]),
+    )
+
+    assert gate.passed, gate.reasons
+    assert gate.metrics["bed_relative_rms_ratio"] == pytest.approx(0.14, abs=0.025)
+
+
+def test_tts_long_form_duration_bounds_are_proportional_at_the_edges() -> None:
+    from app.pipelines.tts_assets import tts_duration_bounds_ms
+
+    minimum, maximum = tts_duration_bounds_ms(120)
+
+    assert (minimum, maximum) == (96_000, 145_000)
+    assert minimum <= 96_000 <= maximum
+    assert not minimum <= 95_999 <= maximum
+    assert minimum <= 145_000 <= maximum
+    assert not minimum <= 145_001 <= maximum
+    assert tts_duration_bounds_ms(55) == (35_000, 55_000)
 
 
 def test_step_tts_accepts_long_form_duration_for_target_120s(monkeypatch) -> None:

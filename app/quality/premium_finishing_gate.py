@@ -13,6 +13,10 @@ ALLOWED_OVERLAYS = {"hook_tag", "payoff_tag", "evidence_marker"}
 ALLOWED_VISUAL_EVENTS = {"reframe", "punch_in", "accent", "reveal"}
 MAX_SCALE_DELTA = 0.18
 MAX_TRANSLATION_DELTA = 60
+CAPTION_FORMATS = {
+    "one_line_kinetic": 1,
+    "two_line_kinetic": 2,
+}
 
 
 class PremiumFinishingGate:
@@ -30,6 +34,9 @@ class PremiumFinishingGate:
             "scene_count": plan_report["scene_count"],
             "caption_count": plan_report["caption_count"],
             "component_policy": plan_report["component_policy"],
+            "caption_style": plan_report["caption_style"],
+            "caption_mode": plan_report["caption_mode"],
+            "caption_max_lines": plan_report["caption_max_lines"],
         }
         return RenderGateResult(passed=not reasons, reasons=reasons, metrics=metrics)
 
@@ -38,7 +45,10 @@ class PremiumFinishingGate:
         scenes = edit_plan.get("scenes") if isinstance(edit_plan.get("scenes"), list) else []
         caption_track = edit_plan.get("caption_track") if isinstance(edit_plan.get("caption_track"), dict) else {}
         captions = caption_track.get("items") if isinstance(caption_track.get("items"), list) else []
+        caption_max_lines = caption_track.get("max_lines")
+        caption_mode = str(caption_track.get("mode") or "")
         style = edit_plan.get("style") if isinstance(edit_plan.get("style"), dict) else {}
+        caption_style = str(style.get("caption_style") or "")
         component_policy = str(style.get("component_policy") or "")
         if component_policy != ALLOWED_COMPONENT_POLICY:
             reasons.append("paid_or_unknown_component_policy")
@@ -46,8 +56,12 @@ class PremiumFinishingGate:
             reasons.append("missing_premium_scenes")
         if not captions:
             reasons.append("missing_premium_captions")
-        if caption_track.get("max_lines") != 1:
-            reasons.append("premium_captions_not_one_line")
+        if (
+            caption_style not in CAPTION_FORMATS
+            or caption_mode != caption_style
+            or caption_max_lines != CAPTION_FORMATS.get(caption_style)
+        ):
+            reasons.append("premium_caption_format_mismatch")
         for scene in scenes:
             scene_id = str(scene.get("scene_id") or "scene")
             transition = scene.get("transition") if isinstance(scene.get("transition"), dict) else {}
@@ -94,6 +108,9 @@ class PremiumFinishingGate:
             "scene_count": len(scenes),
             "caption_count": len(captions),
             "component_policy": component_policy,
+            "caption_style": caption_style,
+            "caption_mode": caption_mode,
+            "caption_max_lines": caption_max_lines,
         }
 
 

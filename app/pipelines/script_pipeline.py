@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 from typing import Any
 from sqlalchemy import delete, select
@@ -21,7 +22,20 @@ from app.pipelines.script_fact_pack import ScriptFactPackDomain
 from app.pipelines.script_metrics import normalize_script_metrics
 from app.pipelines.script_repair import ScriptRepairDomain
 from app.quality.llm_judge import build_editorial_judge_payload
-from app.utils import new_id, stable_hash, utcnow
+from app.utils import cosineish_similarity, new_id, stable_hash, utcnow, word_tokens
+
+
+SCRIPT_TRACK_MAX_LEXICAL_SIMILARITY = 0.92
+_SCRIPT_TRACK_VARIANT_MARKER = re.compile(
+    r"\b(?:pista|variante|vers[aã]o|track|faixa)\s*(?:n[º°o.]?\s*)?#?\s*\d+\b",
+    re.IGNORECASE,
+)
+
+
+def _normalized_track_narration(value: Any) -> str:
+    without_markers = _SCRIPT_TRACK_VARIANT_MARKER.sub(" ", str(value or "").casefold())
+    without_isolated_numbers = re.sub(r"\b\d+\b", " ", without_markers)
+    return " ".join(word_tokens(without_isolated_numbers))
 
 
 class ScriptPipeline(BasePipeline):
@@ -176,6 +190,14 @@ class ScriptPipeline(BasePipeline):
                 job_id=job.job_id,
             )
             metrics = {**metrics, "viral_intensity": viral_metrics}
+            if viral_repair_file is not None:
+                script, final_candidate_metrics = self.repair_domain.validate_final_script_candidate_without_repair(
+                    script,
+                    plan_dict,
+                    job.target_duration_sec,
+                    job.job_id,
+                )
+                metrics = {**metrics, **final_candidate_metrics, "viral_intensity": viral_metrics}
             if structured_contract_file is not None:
                 gate_decisions["viral_intensity"] = {
                     "passed": bool(viral_metrics.get("viral_intensity_gate_pass", not viral_metrics.get("viral_intensity_hard_block"))),
@@ -241,6 +263,22 @@ class ScriptPipeline(BasePipeline):
                     "hard_block": bool(viral_metrics.get("viral_intensity_hard_block")),
                     "reasons": viral_metrics.get("viral_intensity_reasons") or [],
                 }
+            text_audit = self.audit_domain.audit_final_script_after_repair(
+                job_id=job.job_id,
+                script=script,
+                fact_pack=fact_pack,
+                topic_context=audit_topic_context,
+                repair_applied=viral_repair_file is not None,
+                previous_audit=text_audit,
+            )
+            if viral_repair_file is not None:
+                script, final_candidate_metrics = self.repair_domain.validate_final_script_candidate_without_repair(
+                    script,
+                    plan_dict,
+                    job.target_duration_sec,
+                    job.job_id,
+                )
+                metrics = {**metrics, **final_candidate_metrics, "viral_intensity": viral_metrics}
         stage_timings_ms["text_publish_audit_ms"] = round((time.monotonic() - audit_started) * 1000, 1)
         if structured_contract_file is not None:
             gate_decisions["text_publish_audit"] = {
@@ -359,6 +397,57 @@ class ScriptPipeline(BasePipeline):
             artifacts.append("script_tracks.json")
         return artifacts
 
+    def _validate_script_track_batch(
+        self,
+        tracks: list[Any],
+        *,
+        draft_count: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        summaries: list[dict[str, Any]] = []
+        valid_tracks: list[dict[str, Any]] = []
+        seen_normalized_hashes: set[str] = set()
+        accepted_narrative_surfaces: list[str] = []
+        for index, track in enumerate(tracks):
+            if not isinstance(track, dict) or not str(track.get("full_narration") or "").strip():
+                summaries.append({"index": index, "valid": False, "rejection_reason": "script_track_schema_invalid"})
+                continue
+            narrative_identity = {
+                "hook": " ".join(str(track.get("hook") or "").casefold().split()),
+                "body_beats": [" ".join(str(beat or "").casefold().split()) for beat in track.get("body_beats") or []],
+                "full_narration": " ".join(str(track.get("full_narration") or "").casefold().split()),
+            }
+            narrative_hash = stable_hash(narrative_identity)
+            normalized_narrative = _normalized_track_narration(track.get("full_narration"))
+            normalized_narrative_hash = stable_hash(normalized_narrative)
+            max_lexical_similarity = max(
+                (
+                    cosineish_similarity(normalized_narrative, accepted_surface)
+                    for accepted_surface in accepted_narrative_surfaces
+                ),
+                default=0.0,
+            )
+            summary = {
+                "index": index,
+                "title": track.get("title"),
+                "hook": track.get("hook"),
+                "estimated_duration_sec": track.get("estimated_duration_sec"),
+                "narrative_hash": narrative_hash,
+                "normalized_narrative_hash": normalized_narrative_hash,
+                "max_lexical_similarity": round(max_lexical_similarity, 6),
+                "max_lexical_similarity_allowed": SCRIPT_TRACK_MAX_LEXICAL_SIMILARITY,
+            }
+            if (
+                normalized_narrative_hash in seen_normalized_hashes
+                or max_lexical_similarity >= SCRIPT_TRACK_MAX_LEXICAL_SIMILARITY
+            ):
+                summaries.append({**summary, "valid": False, "rejection_reason": "script_track_not_distinct"})
+                continue
+            seen_normalized_hashes.add(normalized_narrative_hash)
+            accepted_narrative_surfaces.append(normalized_narrative)
+            summaries.append({**summary, "valid": True, "rejection_reason": None})
+            valid_tracks.append(track)
+        return valid_tracks, summaries
+
     def _generate_script_with_track_selection(
         self,
         *,
@@ -373,29 +462,7 @@ class ScriptPipeline(BasePipeline):
         tracks = batch.get("tracks") if isinstance(batch, dict) else None
         if not isinstance(tracks, list) or len(tracks) != draft_count:
             raise RecoverableStepError("script track batch must contain exactly 10 tracks before media generation")
-        summaries: list[dict[str, Any]] = []
-        valid_tracks: list[dict[str, Any]] = []
-        seen_titles: set[str] = set()
-        for index, track in enumerate(tracks):
-            if not isinstance(track, dict) or not str(track.get("full_narration") or "").strip():
-                summaries.append({"index": index, "valid": False, "rejection_reason": "script_track_schema_invalid"})
-                continue
-            title = str(track.get("title") or "").strip().casefold()
-            if title in seen_titles:
-                summaries.append({"index": index, "valid": False, "rejection_reason": "script_track_not_distinct"})
-                continue
-            seen_titles.add(title)
-            summaries.append(
-                {
-                    "index": index,
-                    "title": track.get("title"),
-                    "hook": track.get("hook"),
-                    "estimated_duration_sec": track.get("estimated_duration_sec"),
-                    "valid": True,
-                    "rejection_reason": None,
-                }
-            )
-            valid_tracks.append(track)
+        valid_tracks, summaries = self._validate_script_track_batch(tracks, draft_count=draft_count)
         if len(valid_tracks) != draft_count:
             audit = {
                 "draft_count": draft_count,
@@ -767,6 +834,17 @@ class ScriptPipeline(BasePipeline):
                 "source": quality_metrics.get("niche_source"),
             }
         viral_prompt_contract = extract_viral_prompt_contract(plan_dict.get("hub_notes"))
+        long_form = target_duration_sec > 55
+        word_count_range = (
+            [math.ceil(target_duration_sec * 2.4), math.floor(target_duration_sec * 2.7)]
+            if long_form
+            else [80, 120]
+        )
+        beats_rule = (
+            "8-12 frases em escalada causal, mantendo conflito, pistas, virada e consequência"
+            if long_form
+            else "3-5 frases em escalada: fato, implicação, consequência, imagem visual e virada"
+        )
         return {
             "schema_version": self.settings.schema_version,
             "contract_name": "Pauta Viral Estruturada",
@@ -783,7 +861,7 @@ class ScriptPipeline(BasePipeline):
                 "niche_contract": niche_contract,
             },
             "target_duration_sec": target_duration_sec,
-            "word_count_range": [80, 120],
+            "word_count_range": word_count_range,
             "max_words_per_sentence": 15,
             "field_order": ["title", "hook", "loop", "beats", "payoff", "closing", "hashtags"],
             "fields": {
@@ -805,7 +883,7 @@ class ScriptPipeline(BasePipeline):
                 "beats": {
                     "source_label": "Beats",
                     "internal_target": "body_beats",
-                    "rule": "3-5 frases em escalada: fato, implicação, consequência, imagem visual e virada",
+                    "rule": beats_rule,
                 },
                 "payoff": {
                     "source_label": "Payoff",

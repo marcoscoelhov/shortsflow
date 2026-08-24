@@ -1,5 +1,19 @@
 import assert from 'node:assert/strict';
 import {FinishPlanSchema} from '../src/FinishPlan.schema.ts';
+import {captionLineClampStyle} from '../src/captionLayout.ts';
+
+const twoLineCaption = captionLineClampStyle(2, 50);
+assert.equal(twoLineCaption.display, '-webkit-box');
+assert.equal(twoLineCaption.WebkitLineClamp, 2);
+assert.equal(twoLineCaption.WebkitBoxOrient, 'vertical');
+assert.equal(twoLineCaption.overflow, 'hidden');
+assert.equal(twoLineCaption.boxSizing, 'border-box');
+assert.equal(twoLineCaption.maxHeight, 132);
+
+const shortCaption = captionLineClampStyle(1, 50);
+assert.equal(shortCaption.whiteSpace, 'pre');
+assert.equal(shortCaption.overflow, 'visible');
+assert.equal('WebkitLineClamp' in shortCaption, false);
 
 const validScene = {
   scene_id: 'scene-1',
@@ -42,6 +56,24 @@ const validPlan = {
 };
 
 assert.equal(FinishPlanSchema.safeParse(validPlan).success, true);
+const validLongPlan = {
+  ...validPlan,
+  style: {...validPlan.style, caption_style: 'two_line_kinetic'},
+  caption_track: {...validPlan.caption_track, mode: 'two_line_kinetic', max_lines: 2}
+};
+assert.equal(FinishPlanSchema.safeParse(validLongPlan).success, true);
+assert.equal(
+  FinishPlanSchema.safeParse({...validPlan, caption_track: {...validPlan.caption_track, max_lines: 2}}).success,
+  false
+);
+assert.equal(
+  FinishPlanSchema.safeParse({...validPlan, caption_track: {...validPlan.caption_track, mode: 'two_line_kinetic'}}).success,
+  false
+);
+assert.equal(
+  FinishPlanSchema.safeParse({...validPlan, style: {...validPlan.style, caption_style: 'unknown'}}).success,
+  false
+);
 assert.equal(FinishPlanSchema.safeParse({...validPlan, canvas: {...validPlan.canvas, width: 720}}).success, false);
 assert.equal(FinishPlanSchema.safeParse({...validPlan, finish_plan_version: 'unknown'}).success, false);
 assert.equal(FinishPlanSchema.safeParse({...validPlan, scenes: [{...validScene, scene_id: '../escape'}]}).success, false);

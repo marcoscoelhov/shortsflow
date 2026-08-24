@@ -24,6 +24,8 @@ class TopicRequestCreate(BaseModel):
 
     @model_validator(mode="after")
     def preserve_experiment_markers(self) -> TopicRequestCreate:
+        if self.target_duration_sec > 55 and self.niche_id != "fiction_microdrama":
+            raise ValueError("target_duration_sec above 55 is only supported for fiction_microdrama")
         if self.niche_id == "fiction_microdrama":
             if self.job_origin in {"automatic_topic", "ready_script_bank"} or self.creation_via == "daily_cycle":
                 raise ValueError("fiction_microdrama is manual-only and cannot enter automated creation lanes")

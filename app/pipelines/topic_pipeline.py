@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 import json
 import math
+import re
 import unicodedata
 from typing import Any
 
@@ -23,6 +24,15 @@ from app.utils import cosineish_similarity, jaccard_bigrams, new_id, stable_hash
 
 
 MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY = 0.20
+MICRODRAMA_CENTRAL_TERM_MIN_COVERAGE = 0.50
+MICRODRAMA_PROMISE_TERM_MIN_COVERAGE = 0.50
+MICRODRAMA_NO_ANGLE_MIN_SIMILARITY = 0.35
+MICRODRAMA_NO_ANGLE_MIN_CENTRAL_COVERAGE = 1 / 3
+_MANUAL_ALIGNMENT_STOPWORDS = {
+    "antes", "aquela", "aquele", "como", "com", "da", "das", "de", "do", "dos",
+    "ela", "ele", "em", "entre", "essa", "esse", "esta", "este", "no", "nos", "num", "numa",
+    "para", "pela", "pelo", "por", "que", "se", "sem", "uma", "um",
+}
 
 
 def _identity_key(value: Any) -> str:
@@ -31,6 +41,15 @@ def _identity_key(value: Any) -> str:
     text = unicodedata.normalize("NFKD", text)
     text = "".join(char for char in text if not unicodedata.combining(char))
     return " ".join(text.split())
+
+
+def _central_manual_terms(value: Any) -> set[str]:
+    normalized = _identity_key(value)
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", normalized.replace("-", " "))
+        if len(token) >= 4 and token not in _MANUAL_ALIGNMENT_STOPWORDS
+    }
 
 
 def _raw_topic_draft_schema_reason(raw: dict[str, Any]) -> str | None:
@@ -519,9 +538,37 @@ class TopicPipeline(BasePipeline):
             candidate_topic_surface = f"{plan['canonical_topic']} {plan['angle']}"
             candidate_alignment_surface = f"{candidate_topic_surface} {plan['hook_promise']}"
             topic_alignment_similarity = cosineish_similarity(manual_topic_surface, candidate_alignment_surface)
+            central_terms = _central_manual_terms(request.seed_theme)
+            candidate_terms = _central_manual_terms(candidate_alignment_surface)
+            central_term_coverage = (
+                len(central_terms & candidate_terms) / len(central_terms)
+                if central_terms
+                else 1.0
+            )
+            promise_terms = _central_manual_terms(request.requested_angle)
+            promise_term_coverage = (
+                len(promise_terms & candidate_terms) / len(promise_terms)
+                if promise_terms
+                else 1.0
+            )
+            has_requested_angle = bool(str(request.requested_angle or "").strip())
+            alignment_min_similarity = (
+                MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY
+                if has_requested_angle
+                else MICRODRAMA_NO_ANGLE_MIN_SIMILARITY
+            )
+            central_term_min_coverage = (
+                MICRODRAMA_CENTRAL_TERM_MIN_COVERAGE
+                if has_requested_angle
+                else MICRODRAMA_NO_ANGLE_MIN_CENTRAL_COVERAGE
+            )
             topic_alignment_pass = (
                 not microdrama_alignment_required
-                or topic_alignment_similarity >= MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY
+                or (
+                    topic_alignment_similarity >= alignment_min_similarity
+                    and central_term_coverage >= central_term_min_coverage
+                    and promise_term_coverage >= MICRODRAMA_PROMISE_TERM_MIN_COVERAGE
+                )
             )
             topic_similarity = max(
                 [cosineish_similarity(candidate_topic_surface, f"{row['canonical_topic']} {row['title']}") for row in history],
@@ -536,7 +583,11 @@ class TopicPipeline(BasePipeline):
                 "microdrama_topic_alignment_required": microdrama_alignment_required,
                 "microdrama_topic_alignment_pass": topic_alignment_pass,
                 "microdrama_topic_alignment_similarity": round(topic_alignment_similarity, 3),
-                "microdrama_topic_alignment_min_similarity": MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY,
+                "microdrama_topic_alignment_min_similarity": alignment_min_similarity,
+                "microdrama_central_term_coverage": round(central_term_coverage, 3),
+                "microdrama_central_term_min_coverage": central_term_min_coverage,
+                "microdrama_promise_term_coverage": round(promise_term_coverage, 3),
+                "microdrama_promise_term_min_coverage": MICRODRAMA_PROMISE_TERM_MIN_COVERAGE,
                 "topic_similarity_max": round(topic_similarity, 3),
                 "hook_similarity_max": round(hook_similarity, 3),
                 "topic_repair_loop_attempt": repair_attempt,
@@ -555,7 +606,9 @@ class TopicPipeline(BasePipeline):
                     "topic_similarity_max": round(topic_similarity, 3),
                     "hook_similarity_max": round(hook_similarity, 3),
                     "microdrama_topic_alignment_similarity": round(topic_alignment_similarity, 3),
-                    "microdrama_topic_alignment_min_similarity": MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY,
+                    "microdrama_topic_alignment_min_similarity": alignment_min_similarity,
+                    "microdrama_central_term_coverage": round(central_term_coverage, 3),
+                    "microdrama_promise_term_coverage": round(promise_term_coverage, 3),
                     "passed": last_metrics["topic_uniqueness_pass"] and topic_alignment_pass,
                     "reason_codes": attempt_reason_codes,
                 }
@@ -571,7 +624,7 @@ class TopicPipeline(BasePipeline):
                 f"- previous angle: {plan['angle']}\n"
                 f"- previous hook_promise: {plan['hook_promise']}\n"
                 f"- similarity thresholds exceeded: topic={topic_similarity:.3f}, hook={hook_similarity:.3f}\n"
-                f"- microdrama origin alignment: score={topic_alignment_similarity:.3f}, minimum={MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY:.3f}\n"
+                f"- microdrama origin alignment: score={topic_alignment_similarity:.3f}, minimum={alignment_min_similarity:.3f}\n"
                 "- preserve the seed theme and requested angle, including their central objects, relationships, conflict and promised choice.\n"
                 "- choose a distinctly different angle, hook promise and title set only when history similarity failed.\n"
                 "- avoid repeating recently approved topic surfaces or hooks."
@@ -594,7 +647,7 @@ class TopicPipeline(BasePipeline):
             raise RecoverableStepError(
                 "microdrama_topic_alignment_failed before script/assets "
                 f"(similarity={last_metrics['microdrama_topic_alignment_similarity']}, "
-                f"minimum={MICRODRAMA_TOPIC_ALIGNMENT_MIN_SIMILARITY})"
+                f"minimum={last_metrics['microdrama_topic_alignment_min_similarity']})"
             )
         raise RecoverableStepError(
             f"topic too similar to approved history (topic_similarity={last_metrics['topic_similarity_max']}, hook_similarity={last_metrics['hook_similarity_max']})"

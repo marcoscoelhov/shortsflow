@@ -997,9 +997,13 @@ class MonetizationPipeline(BasePipeline):
             description_lines.append(" ".join(tags))
             description = "\n\n".join(description_lines)
         elif microdrama:
-            story_description = self.build_publish_description(topic_plan, script, title, tags, ai_notice)
-            description = "\n\n".join(
-                part for part in ["Microficção original do Bairro da Estação.", story_description] if part
+            description = self.build_publish_description(
+                topic_plan,
+                script,
+                title,
+                tags,
+                ai_notice,
+                niche_id=MICRODRAMA_NICHE_ID,
             )
         else:
             description = self.build_publish_description(topic_plan, script, title, tags, ai_notice)
@@ -1154,6 +1158,8 @@ class MonetizationPipeline(BasePipeline):
         title: str,
         tags: list[str],
         ai_notice: str | None,
+        *,
+        niche_id: str | None = None,
     ) -> str:
         summary_parts: list[str] = []
         seen_parts: set[str] = set()
@@ -1176,6 +1182,8 @@ class MonetizationPipeline(BasePipeline):
             if len(summary_parts) >= 3:
                 break
         summary = " ".join(summary_parts).strip()[:420]
+        if niche_id == MICRODRAMA_NICHE_ID:
+            summary = f"Microficção original: {summary or title}"
         lines = [summary] if summary else [title]
         if ai_notice:
             lines.append(str(ai_notice).strip())

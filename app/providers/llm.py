@@ -112,14 +112,14 @@ class MockCreativeProvider:
                 "Se parece tão conhecido, por que o primeiro detalhe muda tudo? "
                 "A resposta só aparece quando a imagem final devolve sentido à pista do começo.",
                 [
-                    "O detalhe surge como pista discreta antes da resposta aparecer na tela.",
-                    f"O recorte em {angle_label} transforma a pista em tensão sem antecipar a resposta.",
-                    "O entorno muda a cena e revela uma consequência maior que parecia.",
-                    "A comparação confirma o mecanismo e transforma a dúvida em imagem concreta.",
-                    "A última evidência aproxima a virada e preserva o detalhe decisivo.",
-                    "Uma nova pista mostra que a primeira leitura era incompleta.",
-                    "O mesmo detalhe reaparece com peso diferente quando o contexto muda.",
-                    "O conflito entre o que parecia e o que é cresce até o limite.",
+                    "O detalhe surge como pista discreta antes da resposta aparecer. Ele muda o comportamento de quem está na cena e cria uma dúvida que ninguém consegue ignorar.",
+                    f"O recorte em {angle_label} transforma essa pista em tensão e liga o objeto à escolha central. A consequência continua escondida enquanto a decisão se aproxima.",
+                    "O entorno muda de forma concreta e expõe uma relação que parecia segura. O personagem precisa agir antes de compreender o preço completo da escolha.",
+                    "A comparação entre o começo e a nova evidência elimina a explicação mais fácil. Ela preserva o conflito e transforma a dúvida em uma imagem impossível de esquecer.",
+                    "A evidência seguinte aproxima a virada e revela quem tinha motivo para esconder a pista. O custo emocional aumenta naquele mesmo instante sem entregar ainda o segredo decisivo.",
+                    "Uma nova ação mostra que a primeira leitura era incompleta e desloca a culpa para outra pessoa. Cada detalhe anterior ganha então uma interpretação mais perigosa.",
+                    "O mesmo objeto reaparece com peso diferente quando o contexto muda e conecta a escolha inicial ao dano causado. Uma revelação que não pode ser desfeita começa a surgir.",
+                    "O conflito entre o que parecia verdadeiro e o que realmente aconteceu cresce até o limite. Ele força uma decisão final e deixa a consequência pronta para o payoff.",
                 ],
                 "A virada final chega. A pista rouba a cena e fica difícil de ignorar.",
                 "Quando você rever, observe: a primeira cena já entregava tudo em tempo real.",
@@ -155,14 +155,147 @@ class MockCreativeProvider:
 
     def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
         tracks = []
+        long_form = self._target_duration_sec(topic_plan) > 55
         for index in range(draft_count):
-            variant_plan = dict(topic_plan)
-            variant_plan["angle"] = f"{topic_plan.get('angle')} variante {index + 1}"
-            track = self.generate_script(variant_plan)
-            track["title"] = f"{track['title']} (variante {index + 1})"
+            track = self.generate_script(dict(topic_plan))
+            track = self._script_batch_variant(track, topic_plan, index, long_form=long_form)
             track["_track_index"] = index
             tracks.append(track)
         return {"tracks": tracks}
+
+    def _script_batch_variant(
+        self,
+        script: dict[str, Any],
+        topic_plan: dict[str, Any],
+        index: int,
+        *,
+        long_form: bool,
+    ) -> dict[str, Any]:
+        profiles = [
+            ("confissão íntima", "do desfecho para a origem", "o silêncio era proteção", "hesitação, memória e perdão", ("diário", "sussurro", "remorso", "abraço", "retrato", "lágrima", "saudade", "perdão")),
+            ("investigação familiar", "das marcas visíveis ao motivo", "a omissão evitou uma perda", "suspeita, confronto e escolha", ("vestígio", "cronologia", "depoimento", "hipótese", "evidência", "álibi", "confronto", "conclusão")),
+            ("relato em primeira pessoa", "pela lembrança mais incômoda", "a acusação estava invertida", "culpa, afeto e reconhecimento", ("voz", "infância", "vergonha", "promessa", "confiança", "desabafo", "afeto", "reconhecimento")),
+            ("contagem regressiva", "pela pista mais urgente", "o atraso foi deliberado", "pressão, dúvida e coragem", ("prazo", "relógio", "pulso", "pressa", "limite", "risco", "fôlego", "coragem")),
+            ("duas versões em conflito", "comparando palavras e gestos", "ambos escondiam partes da verdade", "contradição, lealdade e custo", ("versão", "espelho", "contraste", "discordância", "aliança", "lealdade", "custo", "acordo")),
+            ("memória fragmentada", "pelos detalhes fora de ordem", "a ausência também era uma mensagem", "saudade, negação e descoberta", ("fragmento", "eco", "lapso", "ausência", "lembrança", "negação", "saudade", "descoberta")),
+            ("interrogatório doméstico", "pela resposta que ninguém oferece", "a pergunta protegia o culpado", "tensão, recuo e consequência", ("pergunta", "pausa", "resposta", "evasiva", "tensão", "recuo", "pressão", "consequência")),
+            ("observação silenciosa", "pelas reações antes das falas", "o gesto mais suspeito era cuidado", "desconfiança, empatia e reparação", ("olhar", "postura", "movimento", "cuidado", "empatia", "desconfiança", "reparação", "acolhimento")),
+            ("decisão sem saída", "pelas consequências de cada escolha", "revelar tudo causaria outro dano", "urgência, renúncia e verdade", ("dilema", "renúncia", "alternativa", "sacrifício", "urgência", "dano", "verdade", "decisão")),
+            ("releitura da cena inicial", "pela última pista primeiro", "o começo já continha a resposta", "espanto, clareza e reconciliação", ("retorno", "releitura", "começo", "perspectiva", "clareza", "espanto", "sentido", "reconciliação")),
+        ]
+        strategy, clue_order, turn_type, emotional_path, lexicon = profiles[index % len(profiles)]
+        canonical_topic = str(topic_plan.get("canonical_topic") or script.get("title") or "a pauta").strip()
+        angle = str(topic_plan.get("angle") or "o conflito central").strip()
+        hook_promise = str(topic_plan.get("hook_promise") or f"{canonical_topic} muda a leitura da história").strip()
+        entities = [str(item).strip() for item in topic_plan.get("entities") or [] if str(item).strip()]
+        viewpoint = entities[index % len(entities)] if entities else self._concise_subject(canonical_topic)
+        entity_context = ", ".join(entities[:4]) if entities else canonical_topic
+        hook = (
+            f"{canonical_topic.capitalize()} surge diante de {viewpoint}. Nesta {strategy}, {lexicon[0]} e {lexicon[1]} transformam a descoberta em conflito imediato."
+        )
+        loop = (
+            f"A promessa permanece: {hook_promise}. As pistas avançam {clue_order}, enquanto {lexicon[2]} e {lexicon[3]} pressionam {entity_context}."
+        )
+        long_beats = [
+            f"{viewpoint.capitalize()} segue {lexicon[0]} e {lexicon[2]} ao reler {canonical_topic}. A {strategy} desmonta a primeira versão.",
+            f"O relato muda com {lexicon[1]} e {lexicon[4]}. Uma decisão adiada reaparece sem trocar o conflito central.",
+            f"{lexicon[3].capitalize()} aproxima o conflito de {viewpoint} e muda a escolha.",
+            f"Seguindo {clue_order}, {viewpoint} encontra {lexicon[5]} onde esperava certeza. A memória perde estabilidade.",
+            f"Uma conversa devolve {canonical_topic} ao foco. {lexicon[6].capitalize()} e {lexicon[7]} agora produzem pressão real.",
+            f"{lexicon[2].capitalize()} reorganiza causa e consequência antes da aceitação.",
+            f"Quando parece que {turn_type}, {viewpoint} escolhe entre revelar e proteger. {lexicon[5].capitalize()} encontra {lexicon[7]}.",
+            f"A comparação final liga {hook_promise} a {lexicon[4]} e {lexicon[6]}. Tudo retorna ao mesmo conflito.",
+        ]
+        short_beats = [
+            f"{viewpoint.capitalize()} confronta {lexicon[0]}, {lexicon[1]} e uma contradição familiar.",
+            f"A leitura {clue_order} liga {lexicon[2]}, {lexicon[3]} e o silêncio evitado.",
+            f"{lexicon[4].capitalize()}, {lexicon[5]} e {emotional_path} transformam a lembrança em escolha.",
+        ]
+        if long_form:
+            body = long_beats
+            payoff = (
+                f"A virada sugere que {turn_type}: {canonical_topic} apontava para a decisão central prometida por {hook_promise}."
+            )
+            ending = (
+                f"Ao rever o começo, {viewpoint} entende por que {angle} mudou a família. O mesmo detalhe permanece, agora carregando {emotional_path} e uma verdade difícil de ignorar."
+            )
+        else:
+            hook = f"{canonical_topic.capitalize()} chega a {viewpoint}; {strategy}, {lexicon[0]} e {lexicon[1]} abrem o conflito."
+            loop = f"{hook_promise.capitalize()}, seguindo {clue_order}, {lexicon[2]} e {lexicon[3]}."
+            body = short_beats
+            payoff = f"A virada mostra que {turn_type}; {lexicon[6]} preserva o objeto e o conflito central."
+            ending = f"Ao rever {canonical_topic}, {viewpoint} entende {angle} por meio de {lexicon[7]}."
+        cta = "Siga para descobrir outras escolhas escondidas." if script.get("cta") else None
+        target_min_words = 292 if long_form else 84
+        expansions = [
+            f"Sob o olhar de {viewpoint}, {lexicon[0]}, {lexicon[2]}, {lexicon[5]} e {lexicon[7]} mantêm {canonical_topic} como eixo.",
+            f"O caminho de {lexicon[1]} até {lexicon[6]} muda a expectativa, mas preserva a decisão associada a {canonical_topic}.",
+            f"Entre {lexicon[3]} e {lexicon[4]}, a {strategy} sustenta a tensão sem inventar outro conflito para a história.",
+            f"Assim, {emotional_path} conduz a consequência e devolve cada reação ao significado da pauta original.",
+        ]
+        narrative_signatures = [
+            "Confessar altera a distância entre lembrança e culpa; a intimidade dá valor ao que antes parecia apenas hesitação.",
+            "Investigar exige separar indício, hipótese e depoimento; a conclusão nasce do confronto entre evidências familiares.",
+            "Narrar em primeira pessoa expõe vergonha, desejo e autoengano; a voz assume aquilo que a acusação escondia.",
+            "Contar o tempo aumenta pulso, prazo e urgência; cada segundo obriga uma coragem que não pode esperar.",
+            "Confrontar duas versões transforma discordância em espelho; lealdade e custo revelam onde cada acordo se rompe.",
+            "Remontar fragmentos produz ecos, lapsos e ausências; a memória incompleta encontra sentido pela ordem emocional.",
+            "Perguntar sem resposta torna pausa e evasiva visíveis; o recuo doméstico denuncia uma pressão crescente.",
+            "Observar antes de falar destaca postura, movimento e cuidado; a empatia corrige uma desconfiança precipitada.",
+            "Escolher entre danos mede sacrifício, renúncia e alternativa; o dilema deixa a verdade cobrar seu preço.",
+            "Rever a abertura troca espanto por clareza; retorno e perspectiva reconciliam sinais que pareciam incompatíveis.",
+        ]
+        if long_form:
+            lexical_signature = (
+                f"{lexicon[0].capitalize()} provoca {lexicon[1]}; {lexicon[2]} corrige {lexicon[3]}; "
+                f"{lexicon[4]} confronta {lexicon[5]}; {lexicon[6]} prepara {lexicon[7]}. "
+                f"Na {strategy}, {lexicon[0]} encontra {lexicon[4]}, {lexicon[1]} atravessa {lexicon[5]}, "
+                f"{lexicon[2]} conduz {lexicon[6]} e {lexicon[3]} redefine {lexicon[7]}."
+            )
+            body[-1] = (
+                f"{body[-1]} {narrative_signatures[index % len(narrative_signatures)]} {lexical_signature}"
+            )
+        full_narration = " ".join(part for part in [hook, loop, *body, payoff, ending, cta] if part)
+        expansion_index = 0
+        while len(word_tokens(full_narration)) < target_min_words:
+            body[-1] = f"{body[-1]} {expansions[expansion_index % len(expansions)]}"
+            expansion_index += 1
+            full_narration = " ".join(part for part in [hook, loop, *body, payoff, ending, cta] if part)
+        estimated_duration_sec = round(min(175.0, max(35.0, len(word_tokens(full_narration)) / 2.55)), 2)
+        variant = dict(script)
+        variant.update(
+            {
+                "title": f"{canonical_topic.capitalize()}: {strategy}",
+                "hook": hook,
+                "loop": loop,
+                "body_beats": body,
+                "payoff": payoff,
+                "ending": ending,
+                "cta": cta,
+                "full_narration": full_narration,
+                "estimated_duration_sec": estimated_duration_sec,
+                "token_count": len(tokenize(full_narration)),
+                "retention_map": {
+                    "visual_hook": hook,
+                    "proof_or_tension": loop,
+                    "escalation": body[0],
+                    "turn_or_payoff": payoff,
+                    "loop_close": ending,
+                },
+                "story_arc": {"setup": hook, "tension": loop, "turn": payoff, "consequence": ending},
+            }
+        )
+        qa_metrics = dict(variant.get("qa_metrics") or {})
+        qa_metrics.update(
+            {
+                "estimated_duration_sec": variant["estimated_duration_sec"],
+                "avg_words_per_sentence": round(avg_words_per_sentence(full_narration), 2),
+                "max_words_single_sentence": max_words_single_sentence(full_narration),
+                "words_per_second": 2.55,
+            }
+        )
+        variant["qa_metrics"] = qa_metrics
+        return variant
 
     def plan_topic(
         self,
@@ -761,7 +894,7 @@ Não use markdown nem texto fora do objeto JSON.
             return {
                 "range_text": f"{target_duration_sec - 20} a {target_duration_sec + 20} segundos (forma longa: história completa com arco, reviravolta e CTA)",
                 "words_text": f"para target_duration_sec={target_duration_sec}, gere {int(target_duration_sec * 2.4)} a {int(target_duration_sec * 2.7)} palavras no total; nunca abaixo de {int(target_duration_sec * 2.2)} palavras",
-                "beat_hint": "para forma longa, amplie para 6 a 9 beats independentes em escalada, sem compactar",
+                "beat_hint": "para forma longa, use 8 a 12 beats independentes em escalada, sem compactar",
             }
         return {
             "range_text": "35 a 55 segundos",
@@ -818,7 +951,7 @@ Mapeamento editorial obrigatório:
 - title equivale ao Título
 - hook equivale ao Hook de 0 a 2 segundos
 - loop equivale ao Loop/curiosity gap explícito; uma frase curta que abre uma pergunta mental sem entregar a resposta
-- body_beats equivale aos Beats em escalada; deve conter exatamente 3 a 5 frases independentes ({duration_rules['beat_hint']}), nunca uma frase única compactada
+- body_beats equivale aos Beats em escalada; deve conter {self._beat_count_rule(duration_rules)}, nunca uma frase única compactada
 - payoff equivale à virada no último terço: a explicação/recontextualização que paga a promessa sem virar aula
 - full_narration deve ser a concatenação fiel de hook + loop + todos os body_beats + payoff + ending, sem perder nenhum bloco
 - ending equivale ao Fechamento; ele deve recontextualizar o hook e provocar replay mental
@@ -959,6 +1092,13 @@ Regras:
     def repair_script(self, script: dict[str, Any], gate_reasons: list[str], topic_plan: dict[str, Any]) -> dict[str, Any]:
         target_duration_sec = self._target_duration_sec(topic_plan)
         duration_rules = self._duration_rules(target_duration_sec)
+        niche_repair_rules = ""
+        if str(topic_plan.get("niche_id") or "") == "fiction_microdrama":
+            niche_repair_rules = """INSTRUÇÕES ESPECÍFICAS DE MICRODRAMA:
+- se Contexto da pauta JSON.viral_intensity_repair existir, trate reasons e metrics como critérios objetivos e corrija cada motivo
+- use contraste ou conflito visual no hook e uma frase concreta de reassistência ou compartilhamento no fechamento: “olha de novo”, “da próxima vez que”, “você vai lembrar”, “repara”, “isso muda”, “manda isso” ou “mostra isso”
+- comece o hook com pelo menos duas palavras fortes, como “não”, “nunca”, “ninguém”, “segredo”, “esconde”, “rouba”, “desaparece”, “fogo”, “luz”, “sombra” ou “rosto”; nunca com nome de personagem seguido de ação neutra; use 7 a 8 palavras no máximo
+- na frase do payoff, inclua uma palavra de choque concreta, como “segredo”, “escondeu”, “desapareceu”, “roubou”, “truque” ou “armadilha”"""
         prompt = f"""
 Corrija este roteiro de Short para passar no gate de qualidade do app.
 Roteiro atual JSON: {json.dumps(script, ensure_ascii=False)}
@@ -1006,7 +1146,7 @@ Regras obrigatórias:
 - a primeira palavra do hook deve ser, quando natural, um número, nome próprio ou verbo de ação
 - se o hook ou full_narration começar com "você sabia", "voce sabia", "já imaginou", "ja imaginou", "nesse vídeo" ou equivalente, reescreva para começar direto por contraste, consequência, conflito ou fato específico
 - aumente retenção sem inventar fatos: hook mais agressivo, loop aberto, escalada de curiosidade, payoff no ultimo terço e final memoravel
-- se Contexto da pauta JSON.viral_intensity_repair existir, trate reasons e metrics como critérios objetivos: corrija cada motivo, use contraste/conflito visual no hook e termine com uma frase concreta de reassistência ou compartilhamento. Para o compartilhamento, use literalmente uma destas frases: “olha de novo”, “da próxima vez que”, “você vai lembrar”, “repara”, “isso muda”, “manda isso”, “mostra isso”; para o hook, comece com pelo menos duas palavras fortes (ex.: “não”, “nunca”, “ninguém”, “segredo”, “esconde”, “rouba”, “desaparece”, “fogo”, “luz”, “sombra”, “rosto”), nunca com nome de personagem seguido de ação neutra, e escreva o hook com 7 a 8 palavras no máximo; na frase do payoff (a virada), inclua uma palavra de choque concreta (ex.: “segredo”, “escondeu”, “desapareceu”, “roubou”, “truque”, “armadilha”), não apenas “a virada” ou “a verdade”
+{niche_repair_rules}
 - cada beat precisa justificar o próximo; remova frase neutra, didática demais, enciclopédica ou decorativa
 - cada beat deve ficar mais estranho, visual ou impactante que o anterior
 - fatos acima de viralidade: remova números, nacionalidades, planos, materiais, causas técnicas ou soluções de engenharia que não estejam bem sustentados pelo contexto

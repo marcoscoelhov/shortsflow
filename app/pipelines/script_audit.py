@@ -93,6 +93,20 @@ class ScriptAuditDomain(BasePipeline):
         )
         return audit
 
+    def audit_final_script_after_repair(
+        self,
+        *,
+        job_id: str,
+        script: dict[str, Any],
+        fact_pack: dict[str, Any],
+        topic_context: dict[str, Any],
+        repair_applied: bool,
+        previous_audit: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not repair_applied:
+            return previous_audit
+        return self._text_publish_audit(job_id, script, fact_pack, topic_context)
+
     def _normalize_text_publish_audit(self, audit: dict[str, Any]) -> dict[str, Any]:
         reasons = [str(reason) for reason in audit.get("reasons") or []]
         ignored_reasons = [reason for reason in reasons if reason == "weak_hashtags"]

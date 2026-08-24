@@ -207,7 +207,10 @@ def test_microdrama_hub_replaces_astronomy_default_with_editorial_contract() -> 
     )
 
     notes = result.payload.notes or ""
-    assert "MICRODRAMAS BRASILEIROS DE SUSPENSE EMOCIONAL" in notes
+    assert "MICRODRAMAS DE SUSPENSE EMOCIONAL UNIVERSAL" in notes
+    assert "universos variados" in notes
+    assert "mistérios brasileiros" not in notes
+    assert "Folclore brasileiro" not in notes
     assert "Escreva trama, personagens, situações e falas do zero" in notes
     assert "Hook em até 8 palavras" in notes
     assert "espaço/astronomia" not in notes
@@ -232,7 +235,8 @@ def test_microdrama_create_job_injects_editorial_contract_without_prompt_marker(
         request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job_id))
         job = session.get(Job, job_id)
         assert request is not None
-        assert "MICRODRAMAS BRASILEIROS DE SUSPENSE EMOCIONAL" in (request.notes or "")
+        assert "MICRODRAMAS DE SUSPENSE EMOCIONAL UNIVERSAL" in (request.notes or "")
+        assert "universos variados" in (request.notes or "")
         assert "espaço/astronomia" not in (request.notes or "")
         assert job is not None
         job.status = "cancelled"
@@ -326,6 +330,174 @@ def test_microdrama_topic_alignment_accepts_a_valid_paraphrase_after_repair(monk
     assert metrics["topic_repair_used"] is True
     assert metrics["topic_repair_attempts_log"][0]["reason_codes"] == ["microdrama_topic_alignment_failed"]
     assert metrics["topic_repair_attempts_log"][1]["reason_codes"] == []
+
+
+def test_microdrama_topic_alignment_accepts_identical_short_request_without_central_terms(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    plan = {
+        "canonical_topic": "Eu ou ele?",
+        "angle": "Eu ou ele?",
+        "hook_promise": "Eu ou ele?",
+        "title_candidates": ["Eu ou ele?"],
+        "entities": [],
+        "search_terms": ["eu ou ele"],
+        "quality_metrics": {},
+    }
+    monkeypatch.setattr(orchestrator.providers.creative, "plan_topic", lambda *_args, **_kwargs: plan)
+    request = TopicRequest(
+        job_id="microdrama-short-identical",
+        topic_request_id="microdrama-short-identical-request",
+        schema_version="1.0.0",
+        content_hash="test",
+        niche_id=MICRODRAMA_NICHE_ID,
+        seed_theme="Eu ou ele?",
+        requested_angle=None,
+        language="pt-BR",
+        target_duration_sec=120,
+        tone="drama_chocante_reviravolta",
+        cta_style="soft",
+        notes="fictional_scenario=true",
+    )
+
+    _accepted_plan, metrics = orchestrator.topic_pipeline.generate_topic_plan_with_repair(
+        request,
+        history=[],
+        attempt=1,
+    )
+
+    assert metrics["microdrama_topic_alignment_pass"] is True
+    assert metrics["microdrama_central_term_coverage"] == 1.0
+
+
+def test_microdrama_topic_alignment_accepts_conservative_photographer_paraphrase_without_angle(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    plan = {
+        "canonical_topic": "A fotógrafa com fotografias queimadas",
+        "angle": "A fotógrafa com imagens destruídas descobre quem tentou apagar a prova",
+        "hook_promise": "A fotógrafa revela quem ateou fogo às imagens",
+        "title_candidates": ["As imagens que sobreviveram ao fogo"],
+        "entities": ["fotógrafa", "fotografias queimadas"],
+        "search_terms": ["microdrama fotógrafa fotografias queimadas"],
+        "quality_metrics": {},
+    }
+    monkeypatch.setattr(orchestrator.providers.creative, "plan_topic", lambda *_args, **_kwargs: plan)
+    request = TopicRequest(
+        job_id="microdrama-photographer-paraphrase",
+        topic_request_id="microdrama-photographer-paraphrase-request",
+        schema_version="1.0.0",
+        content_hash="test",
+        niche_id=MICRODRAMA_NICHE_ID,
+        seed_theme="A fotógrafa com retratos carbonizados",
+        requested_angle=None,
+        language="pt-BR",
+        target_duration_sec=120,
+        tone="drama_chocante_reviravolta",
+        cta_style="soft",
+        notes="fictional_scenario=true",
+    )
+
+    _accepted_plan, metrics = orchestrator.topic_pipeline.generate_topic_plan_with_repair(
+        request,
+        history=[],
+        attempt=1,
+    )
+
+    assert metrics["microdrama_topic_alignment_pass"] is True
+    assert metrics["microdrama_topic_alignment_similarity"] >= 0.35
+    assert metrics["microdrama_central_term_coverage"] == pytest.approx(1 / 3, abs=0.001)
+
+
+def test_microdrama_topic_alignment_rejects_object_substitution_without_angle(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    replacement = {
+        "canonical_topic": "Um músico encontra cartas rasgadas",
+        "angle": "As cartas revelam uma dívida escondida antes do concerto",
+        "hook_promise": "O músico precisa decidir se abandona o palco",
+        "title_candidates": ["As cartas antes do concerto"],
+        "entities": ["músico", "cartas", "concerto"],
+        "search_terms": ["microdrama músico cartas"],
+        "quality_metrics": {},
+    }
+    monkeypatch.setattr(orchestrator.providers.creative, "plan_topic", lambda *_args, **_kwargs: replacement)
+    request = TopicRequest(
+        job_id="microdrama-object-substitution-no-angle",
+        topic_request_id="microdrama-object-substitution-no-angle-request",
+        schema_version="1.0.0",
+        content_hash="test",
+        niche_id=MICRODRAMA_NICHE_ID,
+        seed_theme="A fotógrafa com retratos carbonizados",
+        requested_angle=None,
+        language="pt-BR",
+        target_duration_sec=120,
+        tone="drama_chocante_reviravolta",
+        cta_style="soft",
+        notes="fictional_scenario=true",
+    )
+
+    with pytest.raises(RecoverableStepError, match="microdrama_topic_alignment_failed"):
+        orchestrator.topic_pipeline.generate_topic_plan_with_repair(request, history=[], attempt=1)
+
+
+def test_microdrama_topic_alignment_rejects_lexical_match_that_replaces_central_objects(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    replacement = {
+        "canonical_topic": "Uma carta antes do casamento",
+        "angle": "A noiva recebe uma carta e descobre um segredo familiar antes do sim",
+        "hook_promise": "Antes do casamento, ela precisa decidir se lê a carta",
+        "title_candidates": ["A carta antes do sim"],
+        "entities": ["noiva", "carta", "casamento"],
+        "search_terms": ["microdrama carta casamento"],
+        "quality_metrics": {},
+    }
+    monkeypatch.setattr(orchestrator.providers.creative, "plan_topic", lambda *_args, **_kwargs: replacement)
+    request = TopicRequest(
+        job_id="microdrama-object-substitution",
+        topic_request_id="microdrama-object-substitution-request",
+        schema_version="1.0.0",
+        content_hash="test",
+        niche_id=MICRODRAMA_NICHE_ID,
+        seed_theme="A chave da casa vazia no buquê da noiva",
+        requested_angle="No casamento, a chave revela um segredo familiar.",
+        language="pt-BR",
+        target_duration_sec=120,
+        tone="drama_chocante_reviravolta",
+        cta_style="soft",
+        notes="fictional_scenario=true",
+    )
+
+    with pytest.raises(RecoverableStepError, match="microdrama_topic_alignment_failed"):
+        orchestrator.topic_pipeline.generate_topic_plan_with_repair(request, history=[], attempt=1)
+
+
+def test_microdrama_topic_alignment_rejects_preserved_objects_with_replaced_conflict(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    replacement = {
+        "canonical_topic": "A chave da casa vazia no buquê da noiva",
+        "angle": "Os objetos decoram o casamento enquanto uma carta antiga cancela a cerimônia",
+        "hook_promise": "A noiva precisa descobrir quem escreveu a carta",
+        "title_candidates": ["A carta antes do sim"],
+        "entities": ["noiva", "carta", "casamento"],
+        "search_terms": ["microdrama carta casamento"],
+        "quality_metrics": {},
+    }
+    monkeypatch.setattr(orchestrator.providers.creative, "plan_topic", lambda *_args, **_kwargs: replacement)
+    request = TopicRequest(
+        job_id="microdrama-conflict-substitution",
+        topic_request_id="microdrama-conflict-substitution-request",
+        schema_version="1.0.0",
+        content_hash="test",
+        niche_id=MICRODRAMA_NICHE_ID,
+        seed_theme="A chave da casa vazia no buquê da noiva",
+        requested_angle="No casamento, a chave revela um segredo familiar.",
+        language="pt-BR",
+        target_duration_sec=120,
+        tone="drama_chocante_reviravolta",
+        cta_style="soft",
+        notes="fictional_scenario=true",
+    )
+
+    with pytest.raises(RecoverableStepError, match="microdrama_topic_alignment_failed"):
+        orchestrator.topic_pipeline.generate_topic_plan_with_repair(request, history=[], attempt=1)
 
 
 def test_microdrama_originality_is_required_even_when_repetition_risk_is_low() -> None:
@@ -613,3 +785,74 @@ def test_microdrama_script_pipeline_generates_ten_tracks_and_selects_winner_befo
     assert metrics["script_track_selected_judge_score"] > 0
     artifact_dir = orchestrator.storage.job_dir(job_id, create=False)
     assert (artifact_dir / "script_tracks.json").exists()
+
+
+def test_microdrama_track_diversity_ignores_title_variant_suffixes(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    pipeline = orchestrator.script_pipeline
+    duplicate_tracks = [
+        {
+            "title": f"A carta escondida (variante {index + 1})",
+            "hook": "Ninguém viu a carta desaparecer.",
+            "body_beats": ["A filha abriu o mesmo paletó."],
+            "full_narration": "Ninguém viu a carta desaparecer. A filha abriu o mesmo paletó.",
+        }
+        for index in range(10)
+    ]
+    monkeypatch.setattr(
+        pipeline.providers.creative,
+        "generate_script_batch",
+        lambda _plan, _count: {"tracks": duplicate_tracks},
+    )
+
+    with pytest.raises(RecoverableStepError, match="invalid or repeating track"):
+        pipeline._generate_script_with_track_selection(
+            job_id="duplicate-narrative-tracks",
+            plan_dict={"niche_id": MICRODRAMA_NICHE_ID},
+            attempt=1,
+        )
+
+    audit = json.loads(
+        (orchestrator.storage.job_dir("duplicate-narrative-tracks", create=False) / "script_tracks.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert audit["drafts"][1]["rejection_reason"] == "script_track_not_distinct"
+
+
+def test_microdrama_track_diversity_rejects_isolated_pista_numbers_in_narration(monkeypatch) -> None:
+    orchestrator = JobOrchestrator()
+    pipeline = orchestrator.script_pipeline
+    tracks = [
+        {
+            "title": f"A carta escondida {index + 1}",
+            "hook": "Ninguém viu a carta desaparecer.",
+            "body_beats": ["A filha abriu o paletó e encontrou a mesma prova."],
+            "full_narration": (
+                f"Pista {index + 1}. Ninguém viu a carta desaparecer. "
+                "A filha abriu o paletó e encontrou a mesma prova."
+            ),
+        }
+        for index in range(10)
+    ]
+    monkeypatch.setattr(
+        pipeline.providers.creative,
+        "generate_script_batch",
+        lambda _plan, _count: {"tracks": tracks},
+    )
+
+    with pytest.raises(RecoverableStepError, match="invalid or repeating track"):
+        pipeline._generate_script_with_track_selection(
+            job_id="pista-number-narrative-tracks",
+            plan_dict={"niche_id": MICRODRAMA_NICHE_ID},
+            attempt=1,
+        )
+
+    audit = json.loads(
+        (orchestrator.storage.job_dir("pista-number-narrative-tracks", create=False) / "script_tracks.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert audit["drafts"][1]["rejection_reason"] == "script_track_not_distinct"
+    assert audit["drafts"][1]["normalized_narrative_hash"] == audit["drafts"][0]["normalized_narrative_hash"]
+    assert audit["drafts"][1]["max_lexical_similarity"] == 1.0

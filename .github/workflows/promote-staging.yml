@@ -51,10 +51,27 @@ jobs:
           curl --fail --silent --show-error "https://srv769897.tailc97b69.ts.net:8443/healthz" \
             | python -c 'import json,os,sys; p=json.load(sys.stdin); r=p["runtime"]; assert r["environment"] == "staging"; assert r["revision"] == os.environ["REVISION"]'
 
-  promote:
+  authorize-promotion:
     needs: validate-promotion
     runs-on: ubuntu-latest
     environment: production-promotion
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Authorize the exact staged revision
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main refs/heads/staging:refs/remotes/origin/staging
+          python scripts/check_staging_promotion.py "${REVISION}"
+
+  promote:
+    needs: authorize-promotion
+    runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: write

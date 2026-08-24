@@ -241,6 +241,13 @@ SOFT_GATE_REASONS = {
     "word_count_too_low_for_natural_pace",
 }
 
+LONG_FORM_HARD_CONTRACT_REASONS = {
+    "body_beat_count_invalid",
+    "estimated_duration_outside_target_window",
+    "word_count_too_high_for_natural_pace",
+    "word_count_too_low_for_natural_pace",
+}
+
 
 @dataclass(frozen=True)
 class ScriptGateResult:
@@ -263,6 +270,7 @@ class ScriptQualityGate:
         title = str(script.get("title") or "")
         text_fields = self._collect_text(script)
         combined_text = "\n".join(text_fields)
+        is_long_form = target_duration_sec > 55
 
         if not full_narration.strip():
             reasons.append("missing_full_narration")
@@ -294,7 +302,7 @@ class ScriptQualityGate:
             reasons.append("truncated_ending_logic")
         if self._has_repeated_clause(full_narration):
             reasons.append("repeated_clause")
-        structured_report = self._structured_viral_report(script)
+        structured_report = self._structured_viral_report(script, long_form=is_long_form)
         if structured_report["hook_first_word_weak"]:
             reasons.append("hook_first_word_weak")
         if not structured_report["body_beat_count_valid"]:
@@ -337,7 +345,6 @@ class ScriptQualityGate:
         avg_sentence = avg_words_per_sentence(full_narration)
         max_sentence = max_words_single_sentence(full_narration)
         words_per_second = round(word_count / estimated_duration, 2) if estimated_duration else 0.0
-        is_long_form = target_duration_sec > 55
         if is_long_form:
             target_min = max(35.0, target_duration_sec - 20)
             target_max = min(175.0, target_duration_sec + 20)
@@ -346,11 +353,11 @@ class ScriptQualityGate:
             target_min = max(34.5, target_duration_sec - 10)
             target_max = min(56.5, target_duration_sec + 10)
             min_duration, max_duration = 35, 55
-        natural_min_wpm = 135
-        natural_max_wpm = 155
+        natural_min_wpm = 144 if is_long_form else 135
+        natural_max_wpm = 162 if is_long_form else 155
         natural_min_words = max(105, math.ceil(target_duration_sec * natural_min_wpm / 60))
         if is_long_form:
-            natural_max_words = min(500, math.floor(min(max_duration, target_duration_sec + 10) * natural_max_wpm / 60))
+            natural_max_words = min(500, math.floor(target_duration_sec * natural_max_wpm / 60))
         else:
             natural_max_words = min(130, math.floor(min(55, target_duration_sec + 10) * natural_max_wpm / 60))
         natural_duration_at_fast_pace = round(word_count / (natural_max_wpm / 60), 2) if word_count else 0.0
@@ -391,8 +398,13 @@ class ScriptQualityGate:
             if maximum is not None and value >= maximum:
                 reasons.append(f"{key}_above_threshold")
 
-        blocking_reasons = [r for r in reasons if r not in SOFT_GATE_REASONS]
-        soft_reasons = [r for r in reasons if r in SOFT_GATE_REASONS]
+        blocking_reasons = [
+            reason
+            for reason in reasons
+            if reason not in SOFT_GATE_REASONS
+            or (is_long_form and reason in LONG_FORM_HARD_CONTRACT_REASONS)
+        ]
+        soft_reasons = [reason for reason in reasons if reason in SOFT_GATE_REASONS and reason not in blocking_reasons]
         metrics = {
             **qa_metrics,
             "word_count": word_count,
@@ -439,7 +451,7 @@ class ScriptQualityGate:
             return texts
         return []
 
-    def _structured_viral_report(self, script: dict[str, Any]) -> dict[str, Any]:
+    def _structured_viral_report(self, script: dict[str, Any], *, long_form: bool) -> dict[str, Any]:
         hook = str(script.get("hook") or "").strip()
         first_word_match = re.match(r"\s*([0-9]+|[A-Za-zÀ-ÖØ-öø-ÿĀ-ſ]+)", hook)
         first_word = first_word_match.group(1).lower() if first_word_match else ""
@@ -450,8 +462,6 @@ class ScriptQualityGate:
         retention_map_entries = self._retention_map_entries(retention_map)
         story_arc = script.get("story_arc") if isinstance(script.get("story_arc"), dict) else {}
         ungrounded_keys: list[str] = []
-        estimated_sec = float(script.get("estimated_duration_sec") or 0)
-        long_form = estimated_sec > 55 or len(word_tokens(full_narration)) > 200
         for key in RETENTION_MAP_REQUIRED_KEYS & set(retention_map_entries):
             texts = retention_map_entries[key]
             if any(self._normalize(text) not in full_narration for text in texts if text):
@@ -463,7 +473,7 @@ class ScriptQualityGate:
             and self._normalize_story_excerpt(str(story_arc.get(key))) not in normalized_story_narration
         ]
         if long_form:
-            body_beat_count_valid = 6 <= len(body_beats) <= 14
+            body_beat_count_valid = 8 <= len(body_beats) <= 12
         else:
             body_beat_count_valid = 3 <= len(body_beats) <= 5
         return {
