@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     scene_target_count: int = 7
     microdrama_script_track_count: int = 10
     microdrama_script_generation_parallelism: int = 2
+    microdrama_script_max_tokens: int = 8192
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
@@ -369,6 +370,13 @@ class Settings(BaseSettings):
     def validate_microdrama_script_generation_parallelism(cls, value: int) -> int:
         if not 1 <= value <= 4:
             raise ValueError("microdrama_script_generation_parallelism must be between 1 and 4")
+        return value
+
+    @field_validator("microdrama_script_max_tokens")
+    @classmethod
+    def validate_microdrama_script_max_tokens(cls, value: int) -> int:
+        if not 4096 <= value <= 32768:
+            raise ValueError("microdrama_script_max_tokens must be between 4096 and 32768")
         return value
 
     @field_validator("vision_verifier_provider")

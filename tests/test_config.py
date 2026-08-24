@@ -98,6 +98,7 @@ def test_visual_review_defaults_to_human_only(monkeypatch) -> None:
 
 def test_microdrama_script_generation_parallelism_is_bounded() -> None:
     assert Settings(_env_file=None).microdrama_script_generation_parallelism == 2
+    assert Settings(_env_file=None).microdrama_script_max_tokens == 8192
     assert Settings(
         _env_file=None,
         microdrama_script_generation_parallelism=4,
@@ -105,6 +106,9 @@ def test_microdrama_script_generation_parallelism_is_bounded() -> None:
 
     with pytest.raises(ValidationError, match="microdrama_script_generation_parallelism"):
         Settings(_env_file=None, microdrama_script_generation_parallelism=5)
+
+    with pytest.raises(ValidationError, match="microdrama_script_max_tokens"):
+        Settings(_env_file=None, microdrama_script_max_tokens=2048)
 
 
 def test_vision_verifier_provider_rejects_unknown_provider(monkeypatch) -> None:

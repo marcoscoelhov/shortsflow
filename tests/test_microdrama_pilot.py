@@ -847,15 +847,25 @@ def test_microdrama_reuses_next_ranked_track_when_judge_winner_fails_quality(mon
         {"_track_index": 6, "title": "Primeira", "full_narration": "Primeira candidata."},
         {"_track_index": 8, "title": "Segunda", "full_narration": "Segunda candidata."},
     ]
-    validated_indices: list[int] = []
+    locally_validated_indices: list[int] = []
+    repaired_indices: list[int] = []
 
-    def fake_validate(script, *_args, **_kwargs):
-        validated_indices.append(int(script["_track_index"]))
+    def fake_local_validate(script, *_args, **_kwargs):
+        locally_validated_indices.append(int(script["_track_index"]))
         if script["_track_index"] == 6:
-            raise RecoverableStepError("script quality gate failed: weak_loop_closure")
+            raise RecoverableStepError("final script quality gate failed: weak_loop_closure")
         return script, {"script_quality_gate_pass": True}
 
-    monkeypatch.setattr(pipeline, "_validate_or_repair_script", fake_validate)
+    monkeypatch.setattr(
+        pipeline.repair_domain,
+        "validate_final_script_candidate_without_repair",
+        fake_local_validate,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_validate_or_repair_script",
+        lambda script, *_args, **_kwargs: repaired_indices.append(int(script["_track_index"])),
+    )
 
     script, metrics, attempts = pipeline._select_ranked_script_candidate(
         ranked_tracks,
@@ -866,12 +876,49 @@ def test_microdrama_reuses_next_ranked_track_when_judge_winner_fails_quality(mon
     )
 
     assert script["_track_index"] == 8
-    assert validated_indices == [6, 8]
+    assert locally_validated_indices == [6, 8]
+    assert repaired_indices == []
     assert metrics["script_quality_gate_pass"] is True
     assert attempts == [
-        {"rank": 1, "index": 6, "passed": False, "reason": "script quality gate failed: weak_loop_closure"},
+        {"rank": 1, "index": 6, "passed": False, "reason": "final script quality gate failed: weak_loop_closure"},
         {"rank": 2, "index": 8, "passed": True, "reason": None},
     ]
+
+
+def test_microdrama_repairs_only_judge_winner_when_all_ranked_tracks_fail_locally(monkeypatch) -> None:
+    pipeline = JobOrchestrator().script_pipeline
+    ranked_tracks = [
+        {"_track_index": 6, "title": "Primeira", "full_narration": "Primeira candidata."},
+        {"_track_index": 8, "title": "Segunda", "full_narration": "Segunda candidata."},
+    ]
+    repaired_indices: list[int] = []
+
+    def fail_local(script, *_args, **_kwargs):
+        raise RecoverableStepError(f"final script quality gate failed: invalid_{script['_track_index']}")
+
+    def repair_winner(script, *_args, **_kwargs):
+        repaired_indices.append(int(script["_track_index"]))
+        return script, {"script_quality_gate_pass": True, "script_repair_used": True}
+
+    monkeypatch.setattr(
+        pipeline.repair_domain,
+        "validate_final_script_candidate_without_repair",
+        fail_local,
+    )
+    monkeypatch.setattr(pipeline, "_validate_or_repair_script", repair_winner)
+
+    script, metrics, attempts = pipeline._select_ranked_script_candidate(
+        ranked_tracks,
+        plan_dict={"niche_id": MICRODRAMA_NICHE_ID},
+        target_duration_sec=120,
+        cta_style="soft",
+        job_id="single-ranked-repair",
+    )
+
+    assert script["_track_index"] == 6
+    assert repaired_indices == [6]
+    assert metrics["script_track_quality_repair_used"] is True
+    assert attempts[-1] == {"rank": 1, "index": 6, "passed": True, "reason": None, "repair_used": True}
 
 
 def test_microdrama_track_diversity_rejects_isolated_pista_numbers_in_narration(monkeypatch) -> None:

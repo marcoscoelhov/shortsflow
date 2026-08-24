@@ -7,7 +7,7 @@ from typing import Any
 
 from app.utils import avg_words_per_sentence, max_words_single_sentence, word_tokens
 
-from app.editorial.topic_mode import is_viral_space_entertainment_context
+from app.editorial.topic_mode import is_viral_space_entertainment_context, resolve_editorial_mode
 
 LOOP_STOPWORDS = {
     "a",
@@ -325,10 +325,11 @@ class ScriptQualityGate:
         fact_risk = self._fact_risk_report(script)
         trace_report = self._claim_trace_report(script, fact_risk)
         viral_space = is_viral_space_entertainment_context(topic_plan, request)
-        if viral_space:
+        fiction_microdrama = resolve_editorial_mode(topic_plan, request) == "fiction_microdrama"
+        if viral_space or fiction_microdrama:
             fact_risk = {**fact_risk, "blocked": False}
             trace_report = {**trace_report, "missing_risky_claim_trace": False}
-        if self._has_overconfident_or_unsupported_factual_claims(combined_text):
+        if self._has_overconfident_or_unsupported_factual_claims(combined_text) and not fiction_microdrama:
             reasons.append("overconfident_or_unsupported_factual_claim")
         if trace_report["missing_risky_claim_trace"]:
             reasons.append("factual_claim_trace_missing")
@@ -427,6 +428,7 @@ class ScriptQualityGate:
             "fact_risk": fact_risk,
             "claim_trace": trace_report,
             "viral_space_entertainment_relaxed_factual_gate": viral_space,
+            "fiction_microdrama_relaxed_factual_gate": fiction_microdrama,
             "loop_gate": loop_metrics,
             "structured_viral_gate": structured_report,
         }
