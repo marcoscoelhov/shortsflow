@@ -100,6 +100,15 @@ def test_promotion_workflow_pushes_exact_sha_without_force() -> None:
 
     assert "environment: staging" in workflow
     assert "environment: production-promotion" in workflow
+    assert "\n  authorize-promotion:" in workflow
+    assert "\n  promote:" in workflow
+    assert workflow.index("\n  authorize-promotion:") < workflow.index("\n  promote:")
+    authorize_job = workflow.split("\n  authorize-promotion:", 1)[1].split("\n  promote:", 1)[0]
+    promote_job = workflow.split("\n  promote:", 1)[1]
+    assert "needs: validate-promotion" in authorize_job
+    assert "environment: production-promotion" in authorize_job
+    assert "needs: authorize-promotion" in promote_job
+    assert "environment: production-promotion" not in promote_job
     assert "tailscale/github-action@v4" in workflow
     assert "https://srv769897.tailc97b69.ts.net:8443/healthz" in workflow
     assert 'r["environment"] == "staging"' in workflow
