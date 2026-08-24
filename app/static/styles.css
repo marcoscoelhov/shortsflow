@@ -7331,6 +7331,10 @@ textarea {
   color: oklch(82% 0.07 235deg);
 }
 
+.create-job-card > button[type="submit"] {
+  position: static;
+}
+
 @media (max-width: 720px) {
   .editorial-lane-switcher a {
     min-width: 10.5rem;
