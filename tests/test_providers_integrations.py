@@ -75,11 +75,11 @@ def test_llm_defaults_match_quality_first_routing_policy() -> None:
     assert defaults["openai_model"] == "gpt-5.6-luna"
     assert defaults["openai_reasoning_effort"] == "high"
     assert defaults["llm_gate_judge_provider"] == "xai"
-    assert defaults["llm_gate_judge_model"] == "kimi-k3"
+    assert defaults["llm_gate_judge_model"] == "kimi-k2.6"
     assert defaults["llm_premium_review_provider"] == "deepseek"
     assert defaults["llm_premium_review_model"] == "deepseek-v4-pro"
     assert defaults["xai_base_url"] == "https://opencode.ai/zen/go/v1"
-    assert defaults["xai_model"] == "kimi-k3"
+    assert defaults["xai_model"] == "kimi-k2.6"
     assert defaults["xai_reasoning_effort"] == "high"
 
 
@@ -166,7 +166,7 @@ def test_xai_judge_reuses_opencode_go_key_when_base_url_is_go(monkeypatch) -> No
             openai_api_key="opencode-go-key",
             xai_api_key="native-xai-key",
             xai_base_url="https://opencode.ai/zen/go/v1",
-            xai_model="kimi-k3",
+            xai_model="kimi-k2.6",
             xai_reasoning_effort="high",
             xai_timeout_sec=180,
         ),
@@ -175,7 +175,7 @@ def test_xai_judge_reuses_opencode_go_key_when_base_url_is_go(monkeypatch) -> No
 
     provider = XAICreativeProvider()
 
-    assert provider.model_name == "kimi-k3"
+    assert provider.model_name == "kimi-k2.6"
     assert captured["api_key"] == "opencode-go-key"
     assert captured["base_url"] == "https://opencode.ai/zen/go/v1"
 
@@ -210,7 +210,7 @@ def test_script_generation_candidates_add_unique_gate_judge_as_emergency_provide
     provider.strict_minimax_validation = False
     primary = Provider("openai", "gpt-5.6-luna", 150.0)
     fallback = Provider("deepseek", "deepseek-v4-flash", 180.0)
-    emergency = Provider("xai", "kimi-k3", 180.0)
+    emergency = Provider("xai", "kimi-k2.6", 180.0)
     provider.primary = primary
     provider.fallback = fallback
     provider.script_draft_provider = Provider("openai", "gpt-5.6-luna", 150.0)
@@ -218,8 +218,8 @@ def test_script_generation_candidates_add_unique_gate_judge_as_emergency_provide
 
     assert provider._script_generation_candidates() == [
         ("primary", primary, 150.0),
-        ("fallback", fallback, 180.0),
         ("emergency", emergency, 180.0),
+        ("fallback", fallback, 180.0),
     ]
 
 
@@ -882,7 +882,7 @@ def test_resilient_creative_provider_falls_back_to_deepseek_after_minimax_failur
     assert script["qa_metrics"]["script_generation_fallback_reasons"] == ["minimax failed"]
 
 
-def test_resilient_creative_provider_uses_emergency_provider_after_primary_and_fallback_fail() -> None:
+def test_resilient_creative_provider_uses_emergency_provider_before_slow_fallback() -> None:
     provider = object.__new__(ResilientCreativeProvider)
     provider.settings = SimpleNamespace(minimax_script_timeout_sec=30, llm_script_draft_timeout_sec=30)
     provider.strict_minimax_validation = False
@@ -897,7 +897,7 @@ def test_resilient_creative_provider_uses_emergency_provider_after_primary_and_f
 
     class EmergencyProvider:
         provider_name = "xai"
-        model_name = "kimi-k3"
+        model_name = "kimi-k2.6"
         timeout_sec = 180.0
 
         def generate_script(self, topic_plan):
@@ -918,10 +918,8 @@ def test_resilient_creative_provider_uses_emergency_provider_after_primary_and_f
     assert script["qa_metrics"]["generation_provider_role"] == "emergency"
     assert script["qa_metrics"]["generation_provider"] == "xai"
     assert script["qa_metrics"]["script_generation_fallback_used"] is True
-    assert script["qa_metrics"]["script_generation_fallback_reasons"] == [
-        "openai failed",
-        "deepseek failed",
-    ]
+    assert script["qa_metrics"]["script_generation_fallback_reasons"] == ["openai failed"]
+
 
 def test_resilient_creative_provider_topic_uses_role_timeout() -> None:
     provider = object.__new__(ResilientCreativeProvider)

@@ -48,8 +48,8 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
     assert settings.deepseek_model == "deepseek-v4-flash"
     assert settings.llm_gate_judge_provider == "xai"
     assert settings.xai_base_url == "https://opencode.ai/zen/go/v1"
-    assert settings.xai_model == "kimi-k3"
-    assert settings.llm_gate_judge_model == "kimi-k3"
+    assert settings.xai_model == "kimi-k2.6"
+    assert settings.llm_gate_judge_model == "kimi-k2.6"
     assert settings.llm_premium_review_provider == "deepseek"
     assert settings.llm_premium_review_model == "deepseek-v4-pro"
 
@@ -97,7 +97,7 @@ def test_visual_review_defaults_to_human_only(monkeypatch) -> None:
 
 
 def test_microdrama_script_generation_parallelism_is_bounded() -> None:
-    assert Settings(_env_file=None).microdrama_script_generation_parallelism == 2
+    assert Settings(_env_file=None).microdrama_script_generation_parallelism == 4
     assert Settings(_env_file=None).microdrama_script_max_tokens == 4096
     assert Settings(
         _env_file=None,
