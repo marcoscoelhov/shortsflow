@@ -109,20 +109,23 @@ class RemoteRuntimeClient:
         *,
         theme: str,
         target_duration_sec: int = 45,
+        niche_id: str = "curiosidades",
+        requested_angle: str | None = None,
         request_id: str | None = None,
     ) -> SubmittedJob:
         request_id = request_id or str(uuid.uuid4())
-        payload = urlencode(
-            {
-                "seed_theme": theme,
-                "input_mode": "theme",
-                "niche_id": "curiosidades",
-                "language": "pt-BR",
-                "target_duration_sec": target_duration_sec,
-                "tone": "intrigante_direto",
-                "cta_style": "soft",
-            }
-        ).encode("utf-8")
+        form_payload = {
+            "seed_theme": theme,
+            "input_mode": "theme",
+            "niche_id": niche_id,
+            "language": "pt-BR",
+            "target_duration_sec": target_duration_sec,
+            "tone": "drama_chocante_reviravolta" if niche_id == "fiction_microdrama" else "intrigante_direto",
+            "cta_style": "soft",
+        }
+        if requested_angle:
+            form_payload["requested_angle"] = requested_angle
+        payload = urlencode(form_payload).encode("utf-8")
         try:
             response = self.transport.request(
                 "POST",

@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.microdrama_pilot import build_microdrama_pilot_plan, start_microdrama_pilot
 from app.remote_runtime import RemoteRuntimeClient, current_revision, resume_deployed_revision
 from app.runtime_execution import assert_real_execution_location
+from app.schemas import SUPPORTED_NICHES
 from app.survival_experiment import build_survival_cohort_plan
 from app.traction_pilot import start_traction_pilot
 
@@ -86,7 +87,9 @@ def main(argv: list[str] | None = None) -> None:
     ):
         remote_parser = subparsers.add_parser(command, help=help_text)
         remote_parser.add_argument("--theme", required=True, help="Tema do video")
-        remote_parser.add_argument("--duration", type=int, default=45, choices=range(35, 56))
+        remote_parser.add_argument("--duration", type=int, default=45, choices=range(35, 151))
+        remote_parser.add_argument("--niche", choices=sorted(SUPPORTED_NICHES), default="curiosidades")
+        remote_parser.add_argument("--angle", default=None, help="Angulo editorial solicitado")
         remote_parser.add_argument("--wait", action="store_true", help="Aguarda o estado terminal do job")
         remote_parser.add_argument("--request-id", default=None, help="Reutilize após timeout para evitar job duplicado")
 
@@ -106,6 +109,8 @@ def main(argv: list[str] | None = None) -> None:
         submitted = client.submit_job(
             theme=args.theme,
             target_duration_sec=args.duration,
+            niche_id=args.niche,
+            requested_angle=args.angle,
             request_id=args.request_id,
         )
         payload: dict[str, object] = {
