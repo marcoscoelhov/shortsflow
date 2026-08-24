@@ -62,11 +62,14 @@ reais e aprovado visualmente pelo operador, o workflow manual **Promote
 validated staging revision** deve ser executado com o ref `staging` e recebe
 esse SHA completo. O primeiro job usa apenas o environment `staging`: verifica
 o histórico, exige que o input seja o próprio SHA do run e confirma pelo health
-check privado que staging está saudável nessa revisão exata. O segundo job usa
-o environment sem secrets `production-promotion`, exige aprovação humana e
-executa `git push <SHA>:refs/heads/main` por fast-forward, sem rebuild, squash,
-merge commit novo ou force-push. Se `main` mudar entre a verificação e o push, o
-próprio fast-forward é recusado e a promoção precisa ser reavaliada.
+check privado que staging está saudável nessa revisão exata. O segundo job,
+`authorize-promotion`, usa o environment sem secrets `production-promotion`,
+exige aprovação humana, revalida o SHA e conclui antes de qualquer push. Seu
+check verde no SHA exato é uma verificação obrigatória de `main`. Somente então
+o terceiro job executa `git push <SHA>:refs/heads/main` por fast-forward, sem
+rebuild, squash, merge commit novo ou force-push. Se `main` mudar entre a
+verificação e o push, o próprio fast-forward é recusado e a promoção precisa ser
+reavaliada.
 
 O push feito pelo `GITHUB_TOKEN` não é usado como gatilho implícito. A promoção
 dispara explicitamente **Deploy remote runtime** em `main`, informando o SHA
@@ -80,11 +83,14 @@ job associado ao environment `production`. O deploy de produção continua
 exigindo aprovação humana e prepara o release imutável diretamente do SHA já
 validado; aprovação de workflow não autoriza agentes a aprovar produção.
 
-O repositório deve manter um reviewer humano obrigatório no environment
-`production` e permitir que a identidade do workflow de promoção faça somente o
-fast-forward protegido de `main`. Se a regra de branch não autorizar essa
-identidade, ou durante a primeira reconciliação antes de o workflow existir no
-default branch, o operador executa o mesmo protocolo sem automação:
+O repositório deve manter um reviewer humano obrigatório nos environments
+`production-promotion` e `production`. A proteção de `staging` exige revisão e
+os checks `test` e `promotion-guard`. A proteção de `main` exige os checks
+`test`, `promotion-guard` e `authorize-promotion`, vinculados ao GitHub Actions;
+ela não exige uma PR adicional porque o último check já registra a aprovação
+humana do SHA imutável e precisa concluir antes do fast-forward. Durante a
+primeira reconciliação antes de o workflow existir no default branch, o operador
+executa o mesmo protocolo sem automação:
 
 ```bash
 git fetch --no-tags origin \
