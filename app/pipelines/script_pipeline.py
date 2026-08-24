@@ -459,13 +459,15 @@ class ScriptPipeline(BasePipeline):
         target_duration_sec: int | None = None,
         cta_style: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Gera 10 tracks de roteiro (baratas, texto) e seleciona a melhor via judge,
+        """Gera tracks de roteiro (baratas, texto) e seleciona a melhor via judge,
         antes de qualquer gasto de mídia (cenas, assets, TTS, render)."""
-        draft_count = int(getattr(self.settings, "microdrama_script_track_count", 10) or 10)
+        draft_count = int(getattr(self.settings, "microdrama_script_track_count", 3) or 3)
         batch = self.providers.creative.generate_script_batch(plan_dict, draft_count)
         tracks = batch.get("tracks") if isinstance(batch, dict) else None
         if not isinstance(tracks, list) or len(tracks) != draft_count:
-            raise RecoverableStepError("script track batch must contain exactly 10 tracks before media generation")
+            raise RecoverableStepError(
+                f"script track batch must contain exactly {draft_count} tracks before media generation"
+            )
         valid_tracks, summaries = self._validate_script_track_batch(tracks, draft_count=draft_count)
         if len(valid_tracks) != draft_count:
             audit = {

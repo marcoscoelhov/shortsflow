@@ -564,8 +564,14 @@ class ResilientCreativeProvider:
         candidates: list[tuple[str, llm_facade.LLMProvider, float]] = []
         seen: set[tuple[str, str]] = set()
         for role, provider, timeout_sec in [
+            (
+                "draft",
+                getattr(self, "script_draft_provider", None),
+                self._provider_timeout_sec(self.script_draft_provider, draft_timeout)
+                if getattr(self, "script_draft_provider", None)
+                else draft_timeout,
+            ),
             ("primary", self.primary, primary_timeout),
-            ("draft", getattr(self, "script_draft_provider", None), draft_timeout),
             (
                 "emergency",
                 getattr(self, "gate_judge_provider", None),

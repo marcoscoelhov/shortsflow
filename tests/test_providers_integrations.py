@@ -62,7 +62,7 @@ def test_llm_defaults_match_quality_first_routing_policy() -> None:
     defaults = {name: field.default for name, field in Settings.model_fields.items()}
 
     assert defaults["llm_primary_provider"] == "openai"
-    assert defaults["llm_script_draft_provider"] == "openai"
+    assert defaults["llm_script_draft_provider"] == "deepseek"
     assert defaults["llm_repair_provider"] == "openai"
     assert defaults["llm_repair_model"] == "gpt-5.6-luna"
     assert defaults["llm_repair_reasoning_effort"] == "max"
@@ -196,10 +196,12 @@ def test_script_generation_candidates_skip_duplicate_provider_model() -> None:
     setattr(provider, "script_draft_provider", Provider())
     setattr(provider, "gate_judge_provider", None)
 
-    assert provider._script_generation_candidates() == [("primary", primary, 150.0)]
+    assert provider._script_generation_candidates() == [
+        ("draft", provider.script_draft_provider, 180.0)
+    ]
 
 
-def test_script_generation_candidates_add_unique_gate_judge_as_emergency_provider() -> None:
+def test_script_generation_candidates_prioritize_dedicated_draft_provider() -> None:
     class Provider:
         def __init__(self, provider_name: str, model_name: str, timeout_sec: float) -> None:
             self.provider_name = provider_name
@@ -214,13 +216,13 @@ def test_script_generation_candidates_add_unique_gate_judge_as_emergency_provide
     emergency = Provider("xai", "kimi-k2.6", 180.0)
     provider.primary = primary
     provider.fallback = fallback
-    provider.script_draft_provider = Provider("openai", "gpt-5.6-luna", 150.0)
+    provider.script_draft_provider = fallback
     provider.gate_judge_provider = emergency
 
     assert provider._script_generation_candidates() == [
+        ("draft", fallback, 180.0),
         ("primary", primary, 150.0),
         ("emergency", emergency, 180.0),
-        ("fallback", fallback, 180.0),
     ]
 
 
@@ -793,7 +795,7 @@ def test_premium_review_candidate_only_for_explicit_exception() -> None:
     assert premium_roles == ["premium_review", "gate_judge"]
 
 
-def test_resilient_creative_provider_uses_minimax_before_deepseek_fallback() -> None:
+def test_resilient_creative_provider_uses_dedicated_deepseek_draft_before_primary() -> None:
     provider = object.__new__(ResilientCreativeProvider)
     provider.settings = SimpleNamespace(
         minimax_script_timeout_sec=30,
@@ -806,26 +808,17 @@ def test_resilient_creative_provider_uses_minimax_before_deepseek_fallback() -> 
         provider_name = "deepseek"
 
         def generate_script(self, topic_plan):
-            raise AssertionError("draft provider should not run before primary script generation")
+            return {
+                "title": "Roteiro DeepSeek",
+                "full_narration": "A prova aparece e muda o sentido da carta.",
+                "qa_metrics": {"source_provider": "deepseek"},
+            }
 
     class Primary:
         provider_name = "minimax"
 
         def generate_script(self, topic_plan):
-            return {
-                "title": "Roteiro MiniMax",
-                "hook": "O começo já entrega tensão.",
-                "body_beats": ["A prova aparece sem enrolação."],
-                "ending": "Na segunda olhada, o começo vira pista.",
-                "cta": None,
-                "full_narration": "O começo já entrega tensão. A prova aparece sem enrolação. Na segunda olhada, o começo vira pista.",
-                "estimated_duration_sec": 28,
-                "key_facts": [],
-                "source_fact_ids": [],
-                "token_count": 20,
-                "language": "pt-BR",
-                "qa_metrics": {"source_provider": "minimax"},
-            }
+            raise AssertionError("primary should not run after a valid dedicated draft")
 
     provider.script_draft_provider = Draft()
     provider.primary = Primary()
@@ -833,8 +826,8 @@ def test_resilient_creative_provider_uses_minimax_before_deepseek_fallback() -> 
 
     script = provider.generate_script({"canonical_topic": "polvos"})
 
-    assert script["qa_metrics"]["generation_provider_role"] == "primary"
-    assert script["qa_metrics"]["generation_provider"] == "minimax"
+    assert script["qa_metrics"]["generation_provider_role"] == "draft"
+    assert script["qa_metrics"]["generation_provider"] == "deepseek"
     assert script["qa_metrics"]["script_generation_fallback_used"] is False
 
 def test_resilient_creative_provider_falls_back_to_deepseek_after_minimax_failure() -> None:
