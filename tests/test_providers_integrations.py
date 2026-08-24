@@ -193,8 +193,34 @@ def test_script_generation_candidates_skip_duplicate_provider_model() -> None:
     setattr(provider, "primary", primary)
     setattr(provider, "fallback", None)
     setattr(provider, "script_draft_provider", Provider())
+    setattr(provider, "gate_judge_provider", None)
 
     assert provider._script_generation_candidates() == [("primary", primary, 150.0)]
+
+
+def test_script_generation_candidates_add_unique_gate_judge_as_emergency_provider() -> None:
+    class Provider:
+        def __init__(self, provider_name: str, model_name: str, timeout_sec: float) -> None:
+            self.provider_name = provider_name
+            self.model_name = model_name
+            self.timeout_sec = timeout_sec
+
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(minimax_script_timeout_sec=150.0, llm_script_draft_timeout_sec=45.0)
+    provider.strict_minimax_validation = False
+    primary = Provider("openai", "gpt-5.6-luna", 150.0)
+    fallback = Provider("deepseek", "deepseek-v4-flash", 180.0)
+    emergency = Provider("xai", "kimi-k3", 180.0)
+    provider.primary = primary
+    provider.fallback = fallback
+    provider.script_draft_provider = Provider("openai", "gpt-5.6-luna", 150.0)
+    provider.gate_judge_provider = emergency
+
+    assert provider._script_generation_candidates() == [
+        ("primary", primary, 150.0),
+        ("fallback", fallback, 180.0),
+        ("emergency", emergency, 180.0),
+    ]
 
 
 def test_generate_script_rejects_empty_provider_payload() -> None:
@@ -854,6 +880,48 @@ def test_resilient_creative_provider_falls_back_to_deepseek_after_minimax_failur
     assert script["qa_metrics"]["generation_provider"] == "deepseek"
     assert script["qa_metrics"]["script_generation_fallback_used"] is True
     assert script["qa_metrics"]["script_generation_fallback_reasons"] == ["minimax failed"]
+
+
+def test_resilient_creative_provider_uses_emergency_provider_after_primary_and_fallback_fail() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(minimax_script_timeout_sec=30, llm_script_draft_timeout_sec=30)
+    provider.strict_minimax_validation = False
+
+    class FailingProvider:
+        def __init__(self, provider_name: str, model_name: str) -> None:
+            self.provider_name = provider_name
+            self.model_name = model_name
+
+        def generate_script(self, topic_plan):
+            raise ProviderFailure(self.provider_name, f"{self.provider_name} failed")
+
+    class EmergencyProvider:
+        provider_name = "xai"
+        model_name = "kimi-k3"
+        timeout_sec = 180.0
+
+        def generate_script(self, topic_plan):
+            return {
+                "title": "Roteiro de emergência",
+                "full_narration": "A carta reaparece e muda tudo no último instante.",
+                "qa_metrics": {},
+            }
+
+    provider.primary = FailingProvider("openai", "gpt-5.6-luna")
+    provider.fallback = FailingProvider("deepseek", "deepseek-v4-flash")
+    provider.script_draft_provider = None
+    provider.gate_judge_provider = EmergencyProvider()
+    provider._run_primary_with_timeout = lambda fn, timeout_sec: fn()
+
+    script = provider.generate_script({"canonical_topic": "a carta"})
+
+    assert script["qa_metrics"]["generation_provider_role"] == "emergency"
+    assert script["qa_metrics"]["generation_provider"] == "xai"
+    assert script["qa_metrics"]["script_generation_fallback_used"] is True
+    assert script["qa_metrics"]["script_generation_fallback_reasons"] == [
+        "openai failed",
+        "deepseek failed",
+    ]
 
 def test_resilient_creative_provider_topic_uses_role_timeout() -> None:
     provider = object.__new__(ResilientCreativeProvider)
