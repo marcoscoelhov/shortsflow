@@ -4,6 +4,15 @@ from app.editorial.visual_contract import build_mock_visual_contract
 from tests.e2e_support import *  # noqa: F403
 
 
+@pytest.fixture
+def stopped_orchestrator_worker():
+    orchestrator.stop_worker()
+    try:
+        yield
+    finally:
+        orchestrator.start_worker()
+
+
 def test_hub_create_job_accepts_ready_script_mode(monkeypatch) -> None:
     captured: dict[str, object] = {}
     ready_script = """Título: Venus: o planeta onde um dia dura mais que um ano
@@ -2041,7 +2050,10 @@ def test_final_script_is_reaudited_when_viral_repair_replaces_audited_text(monke
     assert audited_scripts == [final_script]
 
 
-def test_step_script_blocks_final_viral_repair_candidate_that_breaks_script_contract(monkeypatch) -> None:
+def test_step_script_blocks_final_viral_repair_candidate_that_breaks_script_contract(
+    monkeypatch,
+    stopped_orchestrator_worker,
+) -> None:
     pipeline = orchestrator.script_pipeline
     job_id = orchestrator.create_job(
         {
