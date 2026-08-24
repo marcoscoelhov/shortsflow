@@ -141,6 +141,8 @@ class ScriptPipeline(BasePipeline):
                 job_id=job.job_id,
                 plan_dict=plan_dict,
                 attempt=attempt,
+                target_duration_sec=job.target_duration_sec,
+                cta_style=resolved_cta_style,
             )
             generation_elapsed_ms = round((time.monotonic() - generation_started) * 1000, 1)
             stage_timings_ms["track_selection_ms"] = generation_elapsed_ms
@@ -454,6 +456,8 @@ class ScriptPipeline(BasePipeline):
         job_id: str,
         plan_dict: dict[str, Any],
         attempt: int,
+        target_duration_sec: int | None = None,
+        cta_style: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Gera 10 tracks de roteiro (baratas, texto) e seleciona a melhor via judge,
         antes de qualquer gasto de mídia (cenas, assets, TTS, render)."""
@@ -495,14 +499,46 @@ class ScriptPipeline(BasePipeline):
             }
             self.storage.persist_json(job_id, "script_tracks.json", self._serialize_for_json(audit))
             raise RecoverableStepError("script track judge selection malformed before media generation")
-        selected_index = selection["selected_index"]
-        selected_track = valid_tracks[selected_index]
+        ranked_tracks = [valid_tracks[entry["index"]] for entry in selection["ranking"]]
+        resolved_target_duration_sec = int(
+            target_duration_sec
+            or ((plan_dict.get("retention_map") or {}).get("target_duration_sec") if isinstance(plan_dict.get("retention_map"), dict) else 0)
+            or getattr(self.settings, "target_duration_sec", 45)
+        )
+        try:
+            selected_track, candidate_metrics, quality_attempts = self._select_ranked_script_candidate(
+                ranked_tracks,
+                plan_dict=plan_dict,
+                target_duration_sec=resolved_target_duration_sec,
+                cta_style=str(cta_style or plan_dict.get("cta_style") or "none"),
+                job_id=job_id,
+            )
+        except RecoverableStepError as exc:
+            audit = {
+                "draft_count": draft_count,
+                "drafts": summaries,
+                "judge_selected_index": selection["selected_index"],
+                "selected_index": None,
+                "failure_reason": "all_ranked_script_tracks_failed_quality",
+                "ranking": selection["ranking"],
+                "quality_error": str(exc),
+                "confidence": selection["confidence"],
+                "judge_provider": selection["provider"],
+                "judge_model": selection["model"],
+                "judge_provider_role": selection["judge_provider_role"],
+            }
+            self.storage.persist_json(job_id, "script_tracks.json", self._serialize_for_json(audit))
+            raise
+        selected_index = int(candidate_metrics["script_track_quality_selected_index"])
+        selected_rank = int(candidate_metrics["script_track_quality_selected_rank"])
+        selected_ranking = selection["ranking"][selected_rank - 1]
         selected_track["qa_metrics"] = {
             **selected_track.get("qa_metrics", {}),
             "script_track_selected_index": selected_index,
             "script_track_selected_title": selected_track.get("title"),
-            "script_track_selected_judge_score": selection["ranking"][0]["script_score"],
-            "script_track_selected_reason": selection["selected_reason"],
+            "script_track_selected_judge_score": selected_ranking["script_score"],
+            "script_track_selected_reason": selected_ranking["reason"],
+            "script_track_quality_selected_rank": selected_rank,
             "script_track_judge_confidence": selection["confidence"],
             "script_track_judge_provider": selection["provider"],
             "script_track_judge_model": selection["model"],
@@ -511,10 +547,13 @@ class ScriptPipeline(BasePipeline):
         audit = {
             "draft_count": draft_count,
             "drafts": summaries,
+            "judge_selected_index": selection["selected_index"],
             "selected_index": selected_index,
             "selected_title": selected_track.get("title"),
-            "selected_reason": selection["selected_reason"],
-            "selected_judge_score": selection["ranking"][0]["script_score"],
+            "selected_reason": selected_ranking["reason"],
+            "selected_judge_score": selected_ranking["script_score"],
+            "quality_selected_rank": selected_rank,
+            "quality_attempts": quality_attempts,
             "ranking": selection["ranking"],
             "confidence": selection["confidence"],
             "judge_provider": selection["provider"],
@@ -526,12 +565,53 @@ class ScriptPipeline(BasePipeline):
             "script_track_selected_index": selected_index,
             "script_track_draft_count": draft_count,
             "script_track_selected_judge_score": audit["selected_judge_score"],
-            "script_track_selected_reason": selection["selected_reason"],
+            "script_track_selected_reason": audit["selected_reason"],
+            "script_track_quality_selected_rank": selected_rank,
+            "script_track_quality_attempts": quality_attempts,
             "script_track_judge_confidence": selection["confidence"],
             "script_track_judge_provider": selection["provider"],
             "script_track_judge_model": selection["model"],
         }
         return selected_track, metrics
+
+    def _select_ranked_script_candidate(
+        self,
+        ranked_tracks: list[dict[str, Any]],
+        *,
+        plan_dict: dict[str, Any],
+        target_duration_sec: int,
+        cta_style: str,
+        job_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+        attempts: list[dict[str, Any]] = []
+        failures: list[str] = []
+        for rank, track in enumerate(ranked_tracks, start=1):
+            track_index = int(track.get("_track_index", rank - 1))
+            try:
+                candidate, metrics = self._validate_or_repair_script(
+                    track,
+                    plan_dict,
+                    target_duration_sec,
+                    cta_style,
+                    job_id,
+                )
+            except RecoverableStepError as exc:
+                reason = str(exc)
+                attempts.append({"rank": rank, "index": track_index, "passed": False, "reason": reason})
+                failures.append(f"rank={rank} index={track_index}: {reason}")
+                continue
+            attempts.append({"rank": rank, "index": track_index, "passed": True, "reason": None})
+            self._remove_stale_quality_report(job_id, "script_rejected.json")
+            return (
+                candidate,
+                {
+                    **metrics,
+                    "script_track_quality_selected_index": track_index,
+                    "script_track_quality_selected_rank": rank,
+                },
+                attempts,
+            )
+        raise RecoverableStepError(f"all ranked script tracks failed quality: {'; '.join(failures)}")
 
     def _validate_script_draft_selection(self, result: Any, draft_count: int) -> tuple[dict[str, Any] | None, str | None]:
         if not isinstance(result, dict):

@@ -1,4 +1,6 @@
 from tests.e2e_support import *  # noqa: F403
+import threading
+
 from app.config import Settings
 from app.providers.errors import ProviderFailure
 from app.providers.llm_clients import DeepSeekCreativeProvider, OpenAICreativeProvider, QwenCreativeProvider, XAICreativeProvider
@@ -1296,31 +1298,104 @@ def test_minimax_generate_script_batch_uses_individual_calls_not_single_giant_js
     assert all(track["qa_metrics"]["source_provider"] == "minimax" for track in tracks)
 
 
-def test_resilient_generate_script_batch_scales_timeout_with_draft_count() -> None:
-    """O timeout do lote deve escalar com o nº de tracks (geração individual por track)."""
-    class BatchProvider:
+def test_real_text_provider_uses_isolated_microdrama_script_prompt(monkeypatch) -> None:
+    from app.providers.llm import MinimaxCreativeProvider
+
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.provider_name = "openai"
+    provider.failure_provider_name = "openai_text"
+    provider.settings = SimpleNamespace(target_duration_sec=120)
+    prompts: list[str] = []
+
+    def fake_json_completion(prompt: str, *, max_tokens: int | None = None):
+        prompts.append(prompt)
+        return {"title": "A carta", "full_narration": "Roteiro completo", "qa_metrics": {}}
+
+    monkeypatch.setattr(provider, "_json_completion", fake_json_completion)
+
+    provider.generate_script(
+        {
+            "niche_id": "fiction_microdrama",
+            "editorial_mode": "fiction_microdrama",
+            "canonical_topic": "A carta da mãe que chegou vinte anos tarde",
+            "angle": "A filha descobre quem escondeu as cartas.",
+            "retention_map": {"target_duration_sec": 120},
+        }
+    )
+
+    assert "MICRODRAMA FICCIONAL ORIGINAL" in prompts[0]
+    assert "roteiro viral de curiosidades" not in prompts[0]
+    assert "288 a 324 palavras" in prompts[0]
+
+
+def test_resilient_generate_script_batch_uses_bounded_parallelism_and_keeps_order() -> None:
+    provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(microdrama_script_generation_parallelism=2)
+    barrier = threading.Barrier(2)
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    def fake_generate_script(topic_plan):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        barrier.wait(timeout=1)
+        with lock:
+            active -= 1
+        return {
+            "title": topic_plan["angle"],
+            "full_narration": f'Narração para {topic_plan["angle"]}',
+            "qa_metrics": {},
+        }
+
+    provider.generate_script = fake_generate_script
+
+    result = provider.generate_script_batch({"angle": "segredo da carta"}, 4)
+
+    assert max_active == 2
+    assert [track["_track_index"] for track in result["tracks"]] == [0, 1, 2, 3]
+    assert [track["title"] for track in result["tracks"]] == [
+        f"segredo da carta variante {index} (variante {index})" for index in range(1, 5)
+    ]
+
+
+def test_resilient_generate_script_batch_falls_back_per_track() -> None:
+    class PrimaryProvider:
         provider_name = "openai"
         model_name = "gpt-5.6-luna"
 
-        def generate_script_batch(self, topic_plan, draft_count):
-            return {"tracks": [{"title": f"t{i}", "full_narration": f"Narração {i}"} for i in range(draft_count)]}
+        def generate_script(self, topic_plan):
+            if str(topic_plan.get("angle")).endswith("variante 2"):
+                raise ProviderFailure("openai", "track 2 failed")
+            return {"title": "primary", "full_narration": "Narração primária", "qa_metrics": {}}
 
-    captured_timeouts: list[float] = []
+    class FallbackProvider:
+        provider_name = "deepseek"
+        model_name = "deepseek-v4-pro"
 
-    def fake_run_with_timeout(fn, timeout_sec):
-        captured_timeouts.append(float(timeout_sec))
-        return fn()
+        def generate_script(self, topic_plan):
+            return {"title": "fallback", "full_narration": "Narração fallback", "qa_metrics": {}}
 
     provider = object.__new__(ResilientCreativeProvider)
+    provider.settings = SimpleNamespace(microdrama_script_generation_parallelism=2)
     setattr(provider, "strict_minimax_validation", False)
-    setattr(provider, "primary", BatchProvider())
-    setattr(provider, "fallback", None)
+    setattr(provider, "primary", PrimaryProvider())
+    setattr(provider, "fallback", FallbackProvider())
     setattr(provider, "script_draft_provider", None)
-    setattr(provider, "_script_generation_candidates", lambda: [("primary", provider.primary, 150.0)])
-    setattr(provider, "_run_primary_with_timeout", fake_run_with_timeout)
+    setattr(
+        provider,
+        "_script_generation_candidates",
+        lambda: [("primary", provider.primary, 150.0), ("fallback", provider.fallback, 150.0)],
+    )
+    setattr(provider, "_run_primary_with_timeout", lambda fn, timeout_sec: fn())
 
-    result = provider.generate_script_batch({"canonical_topic": "microdrama"}, 10)
+    result = provider.generate_script_batch({"angle": "microdrama"}, 3)
 
-    assert captured_timeouts == [1500.0]
-    assert len(result["tracks"]) == 10
-    assert result["tracks"][3]["qa_metrics"]["generation_provider"] == "openai"
+    assert [track["qa_metrics"]["generation_provider"] for track in result["tracks"]] == [
+        "openai",
+        "deepseek",
+        "openai",
+    ]
+    assert result["tracks"][1]["qa_metrics"]["script_generation_fallback_used"] is True

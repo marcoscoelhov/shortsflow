@@ -160,7 +160,10 @@ def test_wait_for_job_returns_only_after_remote_terminal_status() -> None:
     assert all(request[2]["Authorization"] == "Bearer test-hub-token" for request in transport.requests)
 
 
-@pytest.mark.parametrize("terminal_status", ["monetization_review", "blocked_for_monetization"])
+@pytest.mark.parametrize(
+    "terminal_status",
+    ["monetization_review", "blocked_for_monetization", "script_quality_failed"],
+)
 def test_wait_for_job_recognizes_review_terminal_statuses(terminal_status: str) -> None:
     transport = FakeTransport(
         [FakeResponse(status=200, headers={}, body=json.dumps({"job": {"status": terminal_status}}).encode())]

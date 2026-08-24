@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     target_duration_sec: int = 45
     scene_target_count: int = 7
     microdrama_script_track_count: int = 10
+    microdrama_script_generation_parallelism: int = 2
 
     use_mock_providers: bool = False
     strict_minimax_validation: bool = False
@@ -361,6 +362,13 @@ class Settings(BaseSettings):
     def validate_asset_generation_parallelism(cls, value: int) -> int:
         if not 1 <= value <= 8:
             raise ValueError("asset_generation_parallelism must be between 1 and 8")
+        return value
+
+    @field_validator("microdrama_script_generation_parallelism")
+    @classmethod
+    def validate_microdrama_script_generation_parallelism(cls, value: int) -> int:
+        if not 1 <= value <= 4:
+            raise ValueError("microdrama_script_generation_parallelism must be between 1 and 4")
         return value
 
     @field_validator("vision_verifier_provider")
