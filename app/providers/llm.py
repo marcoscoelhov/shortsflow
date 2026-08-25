@@ -29,6 +29,20 @@ from app.utils import avg_words_per_sentence, max_words_single_sentence, sentenc
 _SCRIPT_DASH_TRANSLATION = str.maketrans({"\u2013": " ", "\u2014": " "})
 _SCRIPT_NON_LATIN_PATTERN = re.compile(r"[^\x00-\x7FÀ-ÖØ-öø-ÿĀ-ſ0-9\s.,!?;:()\"'/%#@+\-=ºª°]")
 
+_MICRODRAMA_VARIANT_DIRECTIONS = (
+    "ponto de vista do protagonista destinatário; progressão causal linear; a virada revela quem provocou o conflito; consequência emocional centrada em culpa",
+    "ponto de vista de uma testemunha; começar no momento da consequência e reconstruir o passado por pistas; a virada revela o motivo oculto; consequência emocional centrada em perdão",
+    "ponto de vista de quem guardou o segredo; revelar causa e efeito em ordem reversa; a virada muda o significado de uma identidade ou relação; consequência emocional centrada em escolha impossível",
+)
+
+
+def microdrama_variant_angle(base_angle: object, index: int) -> str:
+    direction = _MICRODRAMA_VARIANT_DIRECTIONS[index % len(_MICRODRAMA_VARIANT_DIRECTIONS)]
+    return (
+        f"{base_angle} variante {index + 1}. Diretriz de diversidade obrigatória: {direction}. "
+        "Não reutilize hook, loop, sequência de pistas, payoff ou consequência das outras variantes."
+    )
+
 
 def sanitize_script_text(value: Any) -> Any:
     if isinstance(value, str):
@@ -1023,7 +1037,7 @@ Checklist final obrigatório:
         tracks = []
         for index in range(draft_count):
             variant_plan = dict(topic_plan)
-            variant_plan["angle"] = f"{topic_plan.get('angle')} variante {index + 1}"
+            variant_plan["angle"] = microdrama_variant_angle(topic_plan.get("angle"), index)
             track = self.generate_script(variant_plan)
             title = track.get("title") or ""
             track = {**track, "title": f"{title} (variante {index + 1})"}

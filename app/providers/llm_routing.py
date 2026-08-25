@@ -187,7 +187,7 @@ class ResilientCreativeProvider:
 
         def generate_track(index: int) -> dict[str, Any]:
             variant_plan = dict(topic_plan)
-            variant_plan["angle"] = f"{topic_plan.get('angle')} variante {index + 1}"
+            variant_plan["angle"] = llm_facade.microdrama_variant_angle(topic_plan.get("angle"), index)
             track = self.generate_script(variant_plan)
             title = str(track.get("title") or "")
             track = {**track, "title": f"{title} (variante {index + 1})", "_track_index": index}
