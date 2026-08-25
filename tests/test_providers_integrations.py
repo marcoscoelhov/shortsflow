@@ -65,7 +65,7 @@ def test_llm_defaults_match_quality_first_routing_policy() -> None:
     assert defaults["llm_script_draft_provider"] == "deepseek"
     assert defaults["llm_repair_provider"] == "openai"
     assert defaults["llm_repair_model"] == "gpt-5.6-luna"
-    assert defaults["llm_repair_reasoning_effort"] == "max"
+    assert defaults["llm_repair_reasoning_effort"] == "high"
     assert defaults["llm_repair_timeout_sec"] == 360.0
     assert defaults["llm_scene_provider"] == "openai"
     assert defaults["llm_fallback_provider"] == "deepseek"
