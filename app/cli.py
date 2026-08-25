@@ -22,12 +22,6 @@ def main(argv: list[str] | None = None) -> None:
     run_parser = subparsers.add_parser("automation-run", help="Executa um ciclo diario de automacao")
     run_parser.add_argument("--force", action="store_true", help="Reabre o ciclo da data local atual")
 
-    watchdog_parser = subparsers.add_parser("automation-watchdog", help="Avalia saúde da automação e agenda")
-    watchdog_parser.add_argument("--json", action="store_true", help="Imprime o relatório JSON completo")
-    watchdog_parser.add_argument("--emit-alert", action="store_true", help="Imprime brief de alerta ou [SILENT]")
-    watchdog_parser.add_argument("--deliver", action="store_true", help="Entrega alerta se configurado")
-    watchdog_parser.add_argument("--recover", action="store_true", help="Executa backlog recovery reativo se o watchdog recomendar")
-
     readiness_parser = subparsers.add_parser("production-readiness", help="Avalia se o ShortsFlow está pronto para operar em produção")
     readiness_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
 
@@ -156,7 +150,6 @@ def main(argv: list[str] | None = None) -> None:
     from app.operational_settings import apply_operational_settings
     from app.orchestrator import orchestrator
     from app.production_readiness import ProductionReadinessService
-    from app.watchdog import AutomationWatchdog
 
     init_db()
     apply_operational_settings(orchestrator.settings)
@@ -183,31 +176,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "automation-run":
         result = service.run_daily_cycle(force=args.force)
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        watchdog = AutomationWatchdog(orchestrator.settings, orchestrator)
-        watchdog_report = watchdog.evaluate()
-        watchdog.persist_report(watchdog_report)
         if result.get("status") == "failed":
             sys.exit(1)
-        return
-
-    if args.command == "automation-watchdog":
-        watchdog = AutomationWatchdog(orchestrator.settings, orchestrator)
-        report = watchdog.evaluate()
-        recovery_result = None
-        if args.recover and watchdog.recovery_plan(report)["should_recover"]:
-            recovery_result = BacklogRecoveryService(orchestrator.settings, orchestrator).run(mode="reactive")
-            report = watchdog.evaluate()
-        if args.deliver:
-            report = watchdog.deliver_alert(report)
-        watchdog.persist_report(report)
-        if args.emit_alert:
-            print(watchdog.telegram_brief(report) if report.status == "alert" else "[SILENT]")
-        else:
-            payload = report.to_dict()
-            payload["recovery_plan"] = watchdog.recovery_plan(report)
-            if recovery_result is not None:
-                payload["recovery_result"] = recovery_result.to_dict()
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
     if args.command == "production-readiness":

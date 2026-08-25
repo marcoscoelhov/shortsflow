@@ -62,11 +62,6 @@
         <strong>{{ maintenance.near_publishable_count }}</strong>
         <small>podem passar por recovery seguro</small>
       </article>
-      <article class="growth-scorecard {% if maintenance.watchdog_status == 'alert' %}bad{% elif maintenance.watchdog_status == 'silent' %}ok{% else %}warn{% endif %}">
-        <span>Watchdog</span>
-        <strong>{{ maintenance.watchdog_status }}</strong>
-        <small>{{ maintenance.watchdog_findings_count }} alerta(s)</small>
-      </article>
     </section>
     <div class="growth-action-list">
       <article class="growth-action-row {% if maintenance.recommended_action == 'ok' %}is-muted{% endif %}">

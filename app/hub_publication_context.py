@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -103,13 +101,12 @@ class HubPublicationContext:
             summary = backlog.to_dict()["summary"]
         except Exception:  # noqa: BLE001
             summary = {}
-        watchdog_payload = self._latest_watchdog_payload()
         checkpoint_count = int(summary.get("needs_checkpoint") or 0)
         near_publishable_count = int(summary.get("near_publishable") or 0)
         minimum = int(getattr(self.settings, "watchdog_min_future_coverage_days", 3))
         action = "ok"
         action_label = "Nada urgente"
-        action_body = "Agenda, revisão e watchdog não indicam ação imediata."
+        action_body = "Agenda e revisão não indicam ação imediata."
         if future_scheduled_count < minimum:
             action = "recover_schedule"
             action_label = "Rodar recovery seguro"
@@ -122,29 +119,16 @@ class HubPublicationContext:
             action = "recover_near_publishable"
             action_label = "Recuperar jobs próximos"
             action_body = "Há jobs perto de publicação que podem passar por reparo seguro."
-        findings = watchdog_payload.get("findings")
-        findings_count = len(findings) if isinstance(findings, list) else 0
         return {
             "future_scheduled_count": future_scheduled_count,
             "minimum_future_scheduled_count": minimum,
             "needs_action_count": needs_action_count,
             "checkpoint_count": checkpoint_count,
             "near_publishable_count": near_publishable_count,
-            "watchdog_status": str(watchdog_payload.get("status") or "sem relatório"),
-            "watchdog_findings_count": findings_count,
             "recommended_action": action,
             "recommended_action_label": action_label,
             "recommended_action_body": action_body,
         }
-
-    def _latest_watchdog_payload(self) -> dict[str, object]:
-        path = Path(self.settings.data_dir) / "watchdog" / "latest.json"
-        if not path.exists():
-            return {}
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            return {}
 
     def schedule_display(self, schedule: PublicationSchedule | None) -> dict[str, str | None] | None:
         if schedule is None:
