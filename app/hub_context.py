@@ -148,7 +148,12 @@ FAILURE_REASON_GUIDES = {
     "shorts_duration_over_60s": {
         "title": "Duração passou do limite de Short",
         "cause": "O render final ficou acima de 60 segundos.",
-        "action": "Encurte a narração ou regenere áudio e legendas dentro da Janela Alvo de Duracao do Short.",
+        "action": "Encurte a narração ou regenere áudio e legendas dentro da Janela Alvo de Duracao do Short. Não se aplica à lane Microdramas (100–150s).",
+    },
+    "long_form_duration_over_limit": {
+        "title": "Duração passou do limite de microdrama",
+        "cause": "O Arquivo de Video Final ficou acima de 180 segundos.",
+        "action": "Encurte a narração; a lane Microdramas aceita 100 a 150 segundos, com folga técnica até 180.",
     },
     "channel_repetition_high": {
         "title": "Tema repetido demais no canal",

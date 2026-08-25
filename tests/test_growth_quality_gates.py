@@ -1,8 +1,11 @@
 import re
+from types import SimpleNamespace
 
 import pytest
 
+from app.db import SessionLocal
 from app.microdrama_pilot import MICRODRAMA_NICHE_ID
+from app.models import Job, RenderOutput
 from app.pipelines.common import RecoverableStepError
 from app.pipelines.monetization_pipeline import MonetizationPipeline
 from app.pipelines.script_pipeline import ScriptPipeline
@@ -554,3 +557,140 @@ def test_microdrama_text_audit_repair_cannot_bypass_viral_gate(monkeypatch) -> N
 
         job.status = "cancelled"
         session.commit()
+
+
+def _stub_monetization_duration_gates(monkeypatch, pipeline) -> None:
+    monkeypatch.setattr(pipeline, "build_rights_registry", lambda *_args: {"all_commercial_rights_confirmed": True})
+    monkeypatch.setattr(
+        pipeline,
+        "build_ai_disclosure_report",
+        lambda *_args: {"youtube_disclosure_required": False, "contains_synthetic_visuals": False},
+    )
+    monkeypatch.setattr(pipeline, "build_fact_claims_report", lambda *_args: {"requires_fact_review": False})
+    monkeypatch.setattr(
+        pipeline,
+        "build_channel_repetition_report",
+        lambda *_args: {"repetition_risk": "low", "matches": []},
+    )
+    monkeypatch.setattr(pipeline, "build_metadata_review", lambda *_args: {"requires_metadata_review": False})
+    monkeypatch.setattr(pipeline, "build_growth_metadata_repair", lambda *_args, **_kwargs: {"applied": False})
+    monkeypatch.setattr(
+        pipeline.metadata_ctr_gate,
+        "validate",
+        lambda *_args: SimpleNamespace(passed=True, reasons=[], metrics={"metadata_ctr_gate_pass": True}),
+    )
+    monkeypatch.setattr(pipeline, "build_quality_checklist", lambda *_args: {"script": True})
+    monkeypatch.setattr(pipeline, "provider_publish_audit", lambda *_args, **_kwargs: {"passed": True, "reasons": []})
+    monkeypatch.setattr(pipeline, "publish_readiness_report", lambda *_args, **_kwargs: {"passed": True, "reasons": []})
+    monkeypatch.setattr(pipeline, "visual_review_required_for_assets", lambda *_args: False)
+    monkeypatch.setattr(pipeline, "narration_publishability_blockers", lambda *_args: [])
+    monkeypatch.setattr(pipeline, "automatic_publish_blockers", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(pipeline.llm_judge, "may_consider_override", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        pipeline.growth_score_gate,
+        "evaluate",
+        lambda *_args: SimpleNamespace(
+            passed=True,
+            decision="ready_for_growth_review",
+            reasons=[],
+            metrics={"growth_score": 1.0, "growth_score_gate_pass": True},
+        ),
+    )
+
+
+def _monetization_job_with_render(*, niche_id: str, duration_ms: int, seed_theme: str, target_duration_sec: int) -> tuple[JobOrchestrator, str]:
+    orchestrator = JobOrchestrator()
+    payload = {
+        "seed_theme": seed_theme,
+        "niche_id": niche_id,
+        "language": "pt-BR",
+        "target_duration_sec": target_duration_sec,
+        "tone": "drama_chocante_reviravolta" if niche_id == MICRODRAMA_NICHE_ID else "intrigante_direto",
+        "cta_style": "soft",
+        "job_origin": "manual_theme",
+        "creation_via": "api",
+    }
+    job_id = orchestrator.create_job(payload)
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.status = "monetization_review"
+        session.add(
+            RenderOutput(
+                render_id=f"{job_id}-render",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash=f"{job_id}-render",
+                video_uri=f"file:///tmp/{job_id}.mp4",
+                duration_ms=duration_ms,
+                resolution="1080x1920",
+                video_codec="h264",
+                audio_codec="aac",
+                filesize_bytes=1024,
+                ffmpeg_log_uri=f"file:///tmp/{job_id}.log",
+            )
+        )
+        session.commit()
+    return orchestrator, job_id
+
+
+def test_microdrama_monetization_allows_120s_render(monkeypatch) -> None:
+    orchestrator, job_id = _monetization_job_with_render(
+        niche_id=MICRODRAMA_NICHE_ID,
+        duration_ms=120_000,
+        seed_theme="A chave da casa vazia no buquê da noiva",
+        target_duration_sec=120,
+    )
+    pipeline = orchestrator.monetization_pipeline
+    _stub_monetization_duration_gates(monkeypatch, pipeline)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        report = pipeline.build_monetization_report(session, job)
+        job.status = "cancelled"
+        session.commit()
+
+    assert "shorts_duration_over_60s" not in report["hard_blockers"]
+    assert "long_form_duration_over_limit" not in report["hard_blockers"]
+
+
+def test_curiosidades_monetization_still_blocks_render_over_60s(monkeypatch) -> None:
+    orchestrator, job_id = _monetization_job_with_render(
+        niche_id="curiosidades",
+        duration_ms=61_000,
+        seed_theme="Por que o polvo some sem sair do lugar",
+        target_duration_sec=45,
+    )
+    pipeline = orchestrator.monetization_pipeline
+    _stub_monetization_duration_gates(monkeypatch, pipeline)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        report = pipeline.build_monetization_report(session, job)
+        job.status = "cancelled"
+        session.commit()
+
+    assert "shorts_duration_over_60s" in report["hard_blockers"]
+
+
+def test_microdrama_monetization_blocks_render_over_180s(monkeypatch) -> None:
+    orchestrator, job_id = _monetization_job_with_render(
+        niche_id=MICRODRAMA_NICHE_ID,
+        duration_ms=181_000,
+        seed_theme="A carta que chegou vinte anos tarde",
+        target_duration_sec=150,
+    )
+    pipeline = orchestrator.monetization_pipeline
+    _stub_monetization_duration_gates(monkeypatch, pipeline)
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        report = pipeline.build_monetization_report(session, job)
+        job.status = "cancelled"
+        session.commit()
+
+    assert "long_form_duration_over_limit" in report["hard_blockers"]
+    assert "shorts_duration_over_60s" not in report["hard_blockers"]

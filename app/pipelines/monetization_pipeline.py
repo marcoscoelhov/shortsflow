@@ -265,8 +265,13 @@ class MonetizationPipeline(BasePipeline):
         warnings.extend(publish_readiness["reasons"])
         if not self.settings.allow_synthetic_visuals_for_monetization and ai_disclosure["contains_synthetic_visuals"]:
             hard_blockers.append("synthetic_visuals_disabled_by_policy")
-        if render and render.duration_ms > 60_000:
-            hard_blockers.append("shorts_duration_over_60s")
+        if render:
+            duration_ms = int(render.duration_ms or 0)
+            if microdrama:
+                if duration_ms > 180_000:
+                    hard_blockers.append("long_form_duration_over_limit")
+            elif duration_ms > 60_000:
+                hard_blockers.append("shorts_duration_over_60s")
         hard_blockers.extend(self.narration_publishability_blockers(narration))
         hard_blockers.extend(self.automatic_publish_blockers(publish_readiness, ready_script_bank_input=ready_script_bank_input))
 
