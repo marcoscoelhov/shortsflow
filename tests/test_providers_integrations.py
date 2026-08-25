@@ -73,14 +73,14 @@ def test_llm_defaults_match_quality_first_routing_policy() -> None:
     assert defaults["deepseek_base_url"] == "https://opencode.ai/zen/go/v1"
     assert defaults["deepseek_model"] == "deepseek-v4-flash"
     assert defaults["openai_model"] == "gpt-5.6-luna"
-    assert defaults["openai_reasoning_effort"] == "high"
-    assert defaults["llm_script_reasoning_effort"] == "low"
+    assert defaults["openai_reasoning_effort"] == "max"
+    assert defaults["llm_script_reasoning_effort"] == "high"
     assert defaults["llm_gate_judge_provider"] == "xai"
-    assert defaults["llm_gate_judge_model"] == "kimi-k2.6"
+    assert defaults["llm_gate_judge_model"] == "grok-4.5"
     assert defaults["llm_premium_review_provider"] == "deepseek"
     assert defaults["llm_premium_review_model"] == "deepseek-v4-pro"
     assert defaults["xai_base_url"] == "https://opencode.ai/zen/go/v1"
-    assert defaults["xai_model"] == "kimi-k2.6"
+    assert defaults["xai_model"] == "grok-4.5"
     assert defaults["xai_reasoning_effort"] == "high"
 
 
@@ -203,17 +203,18 @@ def test_script_generation_candidates_skip_duplicate_provider_model() -> None:
 
 def test_script_generation_candidates_prioritize_dedicated_draft_provider() -> None:
     class Provider:
-        def __init__(self, provider_name: str, model_name: str, timeout_sec: float) -> None:
+        def __init__(self, provider_name: str, model_name: str, timeout_sec: float, reasoning_effort: str | None = None) -> None:
             self.provider_name = provider_name
             self.model_name = model_name
             self.timeout_sec = timeout_sec
+            self.reasoning_effort = reasoning_effort
 
     provider = object.__new__(ResilientCreativeProvider)
     provider.settings = SimpleNamespace(minimax_script_timeout_sec=150.0, llm_script_draft_timeout_sec=45.0)
     provider.strict_minimax_validation = False
-    primary = Provider("openai", "gpt-5.6-luna", 150.0)
+    primary = Provider("openai", "gpt-5.6-luna", 150.0, "max")
     fallback = Provider("deepseek", "deepseek-v4-flash", 180.0)
-    emergency = Provider("xai", "kimi-k2.6", 180.0)
+    emergency = Provider("xai", "grok-4.5", 180.0)
     provider.primary = primary
     provider.fallback = fallback
     provider.script_draft_provider = fallback
@@ -224,6 +225,7 @@ def test_script_generation_candidates_prioritize_dedicated_draft_provider() -> N
         ("primary", primary, 150.0),
         ("emergency", emergency, 180.0),
     ]
+    assert primary.reasoning_effort == "max"
 
 
 def test_generate_script_rejects_empty_provider_payload() -> None:
@@ -335,6 +337,131 @@ def test_deepseek_opencode_go_uses_primary_key_instead_of_legacy_deepseek_key(mo
     assert provider.model_name == "deepseek-v4-flash"
     assert captured["api_key"] == "opencode-go-key"
     assert captured["base_url"] == "https://opencode.ai/zen/go/v1"
+
+
+def test_deepseek_microdrama_generation_forwards_high_reasoning_to_chat_completions(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    settings = SimpleNamespace(
+        deepseek_api_key="legacy-deepseek-key",
+        deepseek_base_url="https://opencode.ai/zen/go/v1",
+        deepseek_model="deepseek-v4-flash",
+        deepseek_timeout_sec=180,
+        openai_api_key="opencode-go-key",
+        llm_script_reasoning_effort="high",
+        llm_json_max_tokens=4096,
+        microdrama_script_max_tokens=4096,
+    )
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {
+                                    "title": "A carta",
+                                    "full_narration": "A carta voltou fechada, mas agora tinha a letra dela.",
+                                    "qa_metrics": {},
+                                }
+                            )
+                        )
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr("app.providers.llm.get_settings", lambda: settings)
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    result = DeepSeekCreativeProvider().generate_script(
+        {
+            "niche_id": "fiction_microdrama",
+            "target_duration_sec": 120,
+            "canonical_topic": "uma carta impossível",
+        }
+    )
+
+    assert result["title"] == "A carta"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["reasoning_effort"] == "high"
+    assert captured["response_format"] == {"type": "json_object"}
+
+
+def test_llm_registry_gate_judge_defaults_to_opencode_go_grok45(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: Settings(
+            _env_file=None,
+            use_mock_providers=False,
+            openai_api_key="opencode-go-key",
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", lambda **_kwargs: SimpleNamespace())
+
+    provider = LLMProviderRegistry().gate_judge_provider()
+
+    assert isinstance(provider, XAICreativeProvider)
+    assert provider.model_name == "grok-4.5"
+    assert provider.reasoning_effort == "high"
+
+
+def test_opencode_go_grok45_gate_judge_uses_responses_api_and_parses_json(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                output_text=json.dumps(
+                    {
+                        "passed": True,
+                        "confidence": 0.91,
+                        "reasons": [],
+                        "scores": {"viral_intensity": 0.9},
+                        "notes": "Pronto para revisão.",
+                    }
+                )
+            )
+
+    class FakeCompletions:
+        def create(self, **_kwargs):
+            raise AssertionError("OpenCode Go grok-4.5 must use /responses")
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.responses = FakeResponses()
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            openai_api_key="opencode-go-key",
+            xai_api_key=None,
+            xai_base_url="https://opencode.ai/zen/go/v1",
+            xai_model="grok-4.5",
+            xai_reasoning_effort="high",
+            xai_timeout_sec=180,
+            llm_json_max_tokens=4096,
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    result = XAICreativeProvider().judge_quality_gate(
+        "editorial",
+        {"script": {"hook": "A carta voltou fechada."}},
+    )
+
+    assert result["passed"] is True
+    assert result["provider"] == "xai"
+    assert result["model"] == "grok-4.5"
+    assert captured["reasoning"] == {"effort": "high"}
+    assert "text" not in captured
+    assert captured["max_output_tokens"] == 4096
 
 
 def test_llm_registry_builds_qwen_optional_provider(monkeypatch) -> None:
@@ -1218,7 +1345,7 @@ def test_opencode_go_luna_uses_responses_api_for_json_object(monkeypatch) -> Non
     }
 
 
-def test_opencode_go_luna_uses_low_reasoning_for_microdrama_draft(monkeypatch) -> None:
+def test_opencode_go_luna_uses_script_high_reasoning_for_microdrama_draft(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class FakeResponses:
@@ -1237,8 +1364,8 @@ def test_opencode_go_luna_uses_low_reasoning_for_microdrama_draft(monkeypatch) -
             openai_api_key="opencode-go-key",
             openai_base_url="https://opencode.ai/zen/go/v1",
             openai_model="gpt-5.6-luna",
-            openai_reasoning_effort="high",
-            llm_script_reasoning_effort="low",
+            openai_reasoning_effort="max",
+            llm_script_reasoning_effort="high",
             openai_timeout_sec=360.0,
             llm_json_max_tokens=4096,
         ),
@@ -1248,7 +1375,7 @@ def test_opencode_go_luna_uses_low_reasoning_for_microdrama_draft(monkeypatch) -
     result = OpenAICreativeProvider()._microdrama_json_completion("roteiro", max_tokens=4096)
 
     assert result["title"] == "A carta"
-    assert captured["reasoning"] == {"effort": "low"}
+    assert captured["reasoning"] == {"effort": "high"}
     assert captured["max_output_tokens"] == 4096
 
 

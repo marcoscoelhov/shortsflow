@@ -10,6 +10,7 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
     fields = (
         "OPENAI_BASE_URL",
         "OPENAI_MODEL",
+        "OPENAI_REASONING_EFFORT",
         "LLM_PRIMARY_PROVIDER",
         "LLM_SCRIPT_DRAFT_PROVIDER",
         "LLM_REPAIR_PROVIDER",
@@ -27,6 +28,7 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
         "XAI_MODEL",
         "DEEPSEEK_BASE_URL",
         "DEEPSEEK_MODEL",
+        "LLM_SCRIPT_REASONING_EFFORT",
     )
     for field in fields:
         monkeypatch.delenv(f"SHORTSFLOW_{field}", raising=False)
@@ -40,7 +42,7 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
     assert settings.llm_repair_provider == "openai"
     assert settings.llm_repair_model == "gpt-5.6-luna"
     assert settings.llm_repair_reasoning_effort == "max"
-    assert settings.llm_script_reasoning_effort == "low"
+    assert settings.llm_script_reasoning_effort == "high"
     assert settings.llm_repair_timeout_sec == 360.0
     assert settings.llm_scene_provider == "openai"
     assert settings.llm_fallback_provider == "deepseek"
@@ -49,8 +51,10 @@ def test_llm_defaults_route_luna_through_opencode_go_without_changing_models(mon
     assert settings.deepseek_model == "deepseek-v4-flash"
     assert settings.llm_gate_judge_provider == "xai"
     assert settings.xai_base_url == "https://opencode.ai/zen/go/v1"
-    assert settings.xai_model == "kimi-k2.6"
-    assert settings.llm_gate_judge_model == "kimi-k2.6"
+    assert settings.xai_model == "grok-4.5"
+    assert settings.xai_reasoning_effort == "high"
+    assert settings.llm_gate_judge_model == "grok-4.5"
+    assert settings.openai_reasoning_effort == "max"
     assert settings.llm_premium_review_provider == "deepseek"
     assert settings.llm_premium_review_model == "deepseek-v4-pro"
 

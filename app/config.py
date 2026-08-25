@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     llm_scene_provider: str = "openai"
     llm_enable_fallback: bool = True
     llm_script_draft_provider: str = "deepseek"
-    llm_script_reasoning_effort: str = "low"
+    llm_script_reasoning_effort: str = "high"
     llm_script_repair_attempts: int = 1
     viral_intensity_hard_block: bool = False
     viral_intensity_min_score: float = 0.72
@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     llm_publish_audit_timeout_sec: float = 75.0
     llm_gate_judge_enabled: bool = True
     llm_gate_judge_provider: str = "xai"
-    llm_gate_judge_model: str | None = "kimi-k2.6"
+    llm_gate_judge_model: str | None = "grok-4.5"
     llm_gate_judge_timeout_sec: float = 120.0
     llm_premium_review_enabled: bool = True
     llm_premium_review_provider: str = "deepseek"
@@ -246,11 +246,11 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_base_url: str = "https://opencode.ai/zen/go/v1"
     openai_model: str = "gpt-5.6-luna"
-    openai_reasoning_effort: str = "high"
+    openai_reasoning_effort: str = "max"
     openai_timeout_sec: float = 180.0
     xai_api_key: str | None = None
     xai_base_url: str = "https://opencode.ai/zen/go/v1"
-    xai_model: str = "kimi-k2.6"
+    xai_model: str = "grok-4.5"
     xai_reasoning_effort: str = "high"
     xai_timeout_sec: float = 180.0
     deepseek_api_key: str | None = None
