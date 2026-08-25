@@ -52,11 +52,6 @@ def main(argv: list[str] | None = None) -> None:
     import_parser = subparsers.add_parser("import-ready-scripts", help="Importa lote de roteiros prontos")
     import_parser.add_argument("path", type=Path, help="Arquivo txt/md com roteiros rotulados")
 
-
-    airtable_parser = subparsers.add_parser("airtable-ready-scripts-sync", help="Sincroniza roteiros prontos futuros do Airtable")
-    airtable_parser.add_argument("--dry-run", action="store_true", help="Lista elegíveis sem importar ou marcar no Airtable")
-    airtable_parser.add_argument("--limit", type=int, default=None, help="Limite de registros elegíveis")
-
     survival_parser = subparsers.add_parser(
         "survival-cohort-plan",
         help="Gera plano JSON seco de 6 cenários do experimento survival_decisions",
@@ -253,13 +248,6 @@ def main(argv: list[str] | None = None) -> None:
         raw_text = args.path.read_text(encoding="utf-8")
         result = service.import_ready_script_batch(raw_text, source=str(args.path))
         print(json.dumps({"imported": result.imported, "errors": result.errors}, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "airtable-ready-scripts-sync":
-        result = service.sync_airtable_ready_scripts(dry_run=args.dry_run, limit=args.limit)
-        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
-        if result.errors:
-            sys.exit(1)
         return
 
 
