@@ -203,7 +203,6 @@ class YouTubePublicationOperations:
                     quality_summary["youtube_first_comment"] = first_comment_payload
                 job.quality_summary = quality_summary
                 self.owner._update_publication_artifact_index(job)
-                self.owner._ensure_tiktok_publication_for_schedule(session, job, schedule, source="youtube_schedule")
                 self.owner._refresh_retention_state(session, job, schedule)
             self.owner._append_publication_attempt(
                 job_id,

@@ -105,9 +105,6 @@ class OrchestratorWorkerOperations:
         if self.owner.publication_ops._youtube_api_mode_enabled():
             self.owner._run_worker_task("youtube_publication_recovery", self.owner.publication_ops._recover_stale_publication_schedules)
             self.owner._run_worker_task("youtube_native_schedule_sync", self.owner.publication_ops._sync_native_scheduled_publications)
-        if self.owner.publication_ops._tiktok_auto_publish_enabled():
-            self.owner._run_worker_task("tiktok_status_sync", self.owner.publication_ops._sync_tiktok_publication_statuses)
-            self.owner._run_worker_task("tiktok_crosspost_queue_sync", self.owner.publication_ops._sync_tiktok_crosspost_queue)
         admission = self.owner.runtime_execution.admission(fresh=True)
         claimed_job_id = None
         if admission.allowed:
@@ -118,13 +115,6 @@ class OrchestratorWorkerOperations:
         claimed_publication_job_id = self.owner._run_worker_task("publication_schedule_claim", self.owner.publication_ops._claim_due_publication_schedule)
         if claimed_publication_job_id:
             self.owner._run_worker_task("publication_schedule_publish", lambda: self.owner.publish_job(claimed_publication_job_id, trigger="schedule_worker"))
-            return True
-        claimed_tiktok_publication_id = self.owner._run_worker_task("tiktok_publication_claim", self.owner.publication_ops._claim_due_tiktok_publication)
-        if claimed_tiktok_publication_id:
-            self.owner._run_worker_task(
-                "tiktok_publication_publish",
-                lambda: self.owner.publication_ops._publish_tiktok_channel_publication(claimed_tiktok_publication_id),
-            )
             return True
         return False
 

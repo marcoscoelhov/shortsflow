@@ -164,14 +164,6 @@ class Settings(BaseSettings):
     # channel_id opcional específico do perfil (quando definido, sobrepõe youtube_channel_id)
     youtube_channel_profile_channel_id: str | None = None
     youtube_notify_subscribers: bool = False
-    tiktok_auto_publish_enabled: bool = False
-    tiktok_access_token: str | None = None
-    tiktok_base_url: str = "https://open.tiktokapis.com"
-    tiktok_privacy_level: str = "PUBLIC_TO_EVERYONE"
-    tiktok_retropost_daily_limit: int = 1
-    tiktok_disable_comment: bool = False
-    tiktok_disable_duet: bool = False
-    tiktok_disable_stitch: bool = False
     automation_enabled: bool = False
     automation_daily_timezone: str = "America/Sao_Paulo"
     automation_daily_run_time: str = "02:00"
@@ -468,22 +460,6 @@ class Settings(BaseSettings):
         if self.performance_sync_active_window_days > self.performance_sync_archive_window_days:
             raise ValueError("performance_sync_active_window_days must be <= performance_sync_archive_window_days")
         return self
-
-    @field_validator("tiktok_privacy_level")
-    @classmethod
-    def validate_tiktok_privacy_level(cls, value: str) -> str:
-        normalized = value.strip().upper()
-        allowed = {"PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"}
-        if normalized not in allowed:
-            raise ValueError("tiktok_privacy_level must be a valid TikTok privacy level")
-        return normalized
-
-    @field_validator("tiktok_retropost_daily_limit")
-    @classmethod
-    def validate_tiktok_retropost_daily_limit(cls, value: int) -> int:
-        if not 0 <= value <= 10:
-            raise ValueError("tiktok_retropost_daily_limit must be between 0 and 10")
-        return value
 
     @property
     def templates_dir(self) -> Path:

@@ -2225,91 +2225,6 @@ def test_schedule_publication_persists_row_and_appears_in_calendar(monkeypatch) 
     assert "Lago Natron parece impossível" in calendar_page.text
     assert "14:30" in calendar_page.text
 
-def test_schedule_publication_queues_tiktok_crosspost_when_enabled(monkeypatch) -> None:
-    job_id = "scheduled-tiktok-crosspost"
-    _allow_premium_publish_gate(monkeypatch)
-    monkeypatch.setattr(orchestrator.settings, "tiktok_auto_publish_enabled", True)
-    monkeypatch.setattr(orchestrator.settings, "tiktok_privacy_level", "PUBLIC_TO_EVERYONE")
-    with SessionLocal() as session:
-        _create_basic_job(session, job_id=job_id, status="approved_for_publish", seed_theme="TikTok agenda")
-        session.commit()
-
-    orchestrator.schedule_publication(
-        job_id,
-        {
-            "scheduled_for_local": "2099-06-10T14:30",
-            "timezone": "America/Sao_Paulo",
-            "youtube_visibility": "private",
-            "notes": "",
-        },
-    )
-
-    with SessionLocal() as session:
-        publication = session.query(ChannelPublication).filter_by(job_id=job_id, channel="tiktok").one()
-
-    assert publication.status == "scheduled"
-    assert publication.source == "youtube_schedule"
-    assert publication.privacy_level == "PUBLIC_TO_EVERYONE"
-    scheduled_for_utc = publication.scheduled_for_utc if publication.scheduled_for_utc.tzinfo else publication.scheduled_for_utc.replace(tzinfo=UTC)
-    assert scheduled_for_utc == datetime(2099, 6, 10, 17, 30, tzinfo=UTC)
-
-def test_due_tiktok_publication_uses_real_publisher_and_persists_processing(monkeypatch, tmp_path) -> None:
-    job_id = "due-tiktok-publish"
-    _allow_premium_publish_gate(monkeypatch)
-    video_path = tmp_path / "final.mp4"
-    video_path.write_bytes(b"fake mp4")
-    monkeypatch.setattr(orchestrator.settings, "tiktok_auto_publish_enabled", True)
-    monkeypatch.setattr(orchestrator.settings, "tiktok_access_token", "token")
-    monkeypatch.setattr(
-        orchestrator.monetization_pipeline,
-        "build_publish_package",
-        lambda session, job: {
-            "title": "Titulo TikTok",
-            "hashtags": ["curiosidades"],
-            "video_uri": str(video_path),
-            "altered_or_synthetic": True,
-        },
-    )
-    calls: list[dict] = []
-
-    def fake_direct_post_video(**payload):
-        calls.append(payload)
-        return {"publish_id": "tt-publish-123", "status": "processing"}
-
-    monkeypatch.setattr(orchestrator.tiktok, "direct_post_video", fake_direct_post_video)
-    with SessionLocal() as session:
-        _create_basic_job(session, job_id=job_id, status="approved_for_publish", seed_theme="TikTok devido")
-        session.add(
-            ChannelPublication(
-                publication_id="due-tiktok-publication-row",
-                job_id=job_id,
-                channel="tiktok",
-                schema_version="1.0.0",
-                content_hash="due-tiktok-publication-row",
-                scheduled_for_utc=utcnow() - timedelta(minutes=1),
-                timezone="America/Sao_Paulo",
-                status="scheduled",
-                source="youtube_schedule",
-                privacy_level="PUBLIC_TO_EVERYONE",
-            )
-        )
-        session.commit()
-
-    claimed = orchestrator.publication_ops._claim_due_tiktok_publication()
-    assert claimed == "due-tiktok-publication-row"
-    orchestrator.publication_ops._publish_tiktok_channel_publication(claimed)
-
-    with SessionLocal() as session:
-        publication = session.get(ChannelPublication, "due-tiktok-publication-row")
-
-    assert calls
-    assert calls[0]["video_path"] == video_path
-    assert calls[0]["title"] == "Titulo TikTok #curiosidades"
-    assert calls[0]["is_aigc"] is True
-    assert publication.status == "processing"
-    assert publication.external_id == "tt-publish-123"
-    assert publication.attempt_count == 1
-
 def test_calendar_quick_add_lists_only_unscheduled_approved_jobs() -> None:
     client = TestClient(app)
     ready_job_id = "calendar-quick-ready"
@@ -3754,22 +3669,6 @@ def test_youtube_connection_status_keeps_reporting_pending_without_adapter(monke
     assert status.analytics_connected is True
     assert status.reporting_connected is False
     assert "Reporting API" in " ".join(status.reporting_missing_items or [])
-
-def test_tiktok_connection_status_documents_manual_token_contract(tmp_path) -> None:
-    settings = Settings(
-        data_dir=tmp_path,
-        tiktok_auto_publish_enabled=True,
-        tiktok_access_token="token-123",
-    )
-
-    status = TikTokPublisher(settings).connection_status()
-
-    assert status.ready is True
-    assert status.token_configured is True
-    assert status.auth_mode == "manual_access_token"
-    assert status.oauth_managed is False
-    assert status.token_refresh_managed is False
-    assert "manualmente" in status.contract_note
 
 def test_youtube_exchange_code_restores_saved_code_verifier(monkeypatch, tmp_path) -> None:
     settings = Settings(

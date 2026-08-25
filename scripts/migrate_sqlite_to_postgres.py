@@ -8,7 +8,6 @@ from typing import Any
 from sqlalchemy import DateTime, JSON, create_engine
 
 from app.models import (
-    ChannelPublication,
     ErrorLog,
     FallbackEvent,
     Job,
@@ -40,7 +39,6 @@ TABLES = [
     RenderOutput,
     ReviewRecord,
     PublicationSchedule,
-    ChannelPublication,
     PerformanceMetric,
     FallbackEvent,
     ErrorLog,

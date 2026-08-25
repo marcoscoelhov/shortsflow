@@ -62,7 +62,7 @@ from app.editorial.repetition import build_channel_repetition_report  # noqa: E4
 
 from app.main import app, artifact_url  # noqa: E402
 
-from app.models import AutomationAttempt, AutomationRun, ReadyScriptItem, BackgroundMusicAsset, ChannelPublication, Job, NarrationAsset, OperationalSetting, PerformanceMetric, PublicationSchedule, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest, YouTubeAnalyticsSnapshot  # noqa: E402
+from app.models import AutomationAttempt, AutomationRun, ReadyScriptItem, BackgroundMusicAsset, Job, NarrationAsset, OperationalSetting, PerformanceMetric, PublicationSchedule, RenderOutput, SceneAsset, Script, SubtitleTrack, TopicPlan, TopicRegistry, TopicRequest, YouTubeAnalyticsSnapshot  # noqa: E402
 
 from app.music_bank import import_minimax_music_artifacts, populate_builtin_music_bank  # noqa: E402
 
@@ -91,8 +91,6 @@ from app.quality.subtitle_gate import SUBTITLE_MAX_CHARS, SUBTITLE_MAX_LINES, SU
 
 from app.utils import parse_srt, split_caption_chunks, utcnow, word_tokens, wrap_caption  # noqa: E402
 
-from app.tiktok_api import TikTokPublisher  # noqa: E402
-
 from app.youtube_api import YouTubeConnectionStatus, YouTubePublisher  # noqa: E402
 
 def isolate_youtube_settings(monkeypatch):
@@ -100,10 +98,6 @@ def isolate_youtube_settings(monkeypatch):
     monkeypatch.setattr(main_module.settings, "youtube_api_enabled", False)
     monkeypatch.setattr(orchestrator.settings, "youtube_publish_mode", "manual")
     monkeypatch.setattr(orchestrator.settings, "youtube_api_enabled", False)
-    monkeypatch.setattr(main_module.settings, "tiktok_auto_publish_enabled", False)
-    monkeypatch.setattr(orchestrator.settings, "tiktok_auto_publish_enabled", False)
-    monkeypatch.setattr(main_module.settings, "tiktok_access_token", None)
-    monkeypatch.setattr(orchestrator.settings, "tiktok_access_token", None)
 
 def wait_for_status(job_id: str, expected: str, timeout: float = 90.0) -> None:
     deadline = time.time() + timeout

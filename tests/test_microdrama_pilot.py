@@ -23,7 +23,7 @@ from app.microdrama_pilot import (
 )
 from app.niche_classification import classify_niche_contract
 from app.editorial.topic_mode import resolve_editorial_mode
-from app.models import ChannelPublication, Job, PublicationSchedule, RetentionExperiment, RetentionExperimentAssignment, TopicRequest
+from app.models import Job, PublicationSchedule, RetentionExperiment, RetentionExperimentAssignment, TopicRequest
 from app.orchestrator import JobOrchestrator, RecoverableStepError
 from app.schemas import TopicRequestCreate
 
@@ -737,7 +737,6 @@ def test_microdrama_start_cli_is_idempotent_and_creates_only_three_canaries(caps
         assert len(requests) == 3
         assert all("automatic_publication_allowed=false" in (request.notes or "") for request in requests)
         assert session.scalar(select(func.count()).select_from(PublicationSchedule).where(PublicationSchedule.job_id.in_(job_ids))) == 0
-        assert session.scalar(select(func.count()).select_from(ChannelPublication).where(ChannelPublication.job_id.in_(job_ids))) == 0
         for job in jobs:
             job.status = "cancelled"
         session.commit()

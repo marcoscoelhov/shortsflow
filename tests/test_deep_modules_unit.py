@@ -3,10 +3,8 @@ from __future__ import annotations
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from zoneinfo import ZoneInfo
 
 from app.artifact_retention import retention_metadata
-from app.channel_publication import channel_publication_payload, refresh_channel_publication_hash, tiktok_caption
 from app.hub_forms import build_performance_metric_payload, build_review_action_payload
 from app.hub_job_request import HubTrendSeed, build_hub_job_request
 from app.hub_prompt import DEFAULT_VIRAL_PROMPT_TEMPLATE, load_viral_prompt_template, save_viral_prompt_template
@@ -202,42 +200,6 @@ def test_artifact_retention_treats_visual_contract_failure_as_hard_failure() -> 
     assert metadata is not None
     assert metadata["classification"] == "hard_failure"
     assert metadata["expires_at"] == (base_time + timedelta(hours=24)).isoformat()
-
-
-def test_channel_publication_payload_uses_local_schedule_fields() -> None:
-    scheduled_for_utc = utcnow().replace(hour=15, minute=30, second=0, microsecond=0)
-    publication = SimpleNamespace(
-        publication_id="pub-1",
-        job_id="job-1",
-        channel="tiktok",
-        status="scheduled",
-        source="youtube_schedule",
-        scheduled_for_utc=scheduled_for_utc,
-        timezone="America/Sao_Paulo",
-        privacy_level="PUBLIC_TO_EVERYONE",
-        external_id=None,
-        external_url=None,
-        published_at=None,
-        attempt_count=0,
-        last_attempt_at=None,
-        last_error=None,
-        channel_metadata={},
-        content_hash="",
-    )
-
-    refresh_channel_publication_hash(publication)
-    payload = channel_publication_payload(publication, schema_version="1.0.0")
-
-    assert publication.content_hash
-    assert payload["schema_version"] == "1.0.0"
-    assert payload["scheduled_for_utc"] == scheduled_for_utc.isoformat()
-    assert payload["local_time"] == scheduled_for_utc.astimezone(ZoneInfo("America/Sao_Paulo")).strftime("%H:%M")
-
-
-def test_tiktok_caption_limits_hashtags_and_adds_missing_hash_prefix() -> None:
-    caption = tiktok_caption({"title": "Titulo", "hashtags": ["shorts", "#curiosidades", "a", "b", "c", "d", "e", "f", "g"]})
-
-    assert caption == "Titulo #shorts #curiosidades #a #b #c #d #e #f"
 
 
 def test_hub_review_form_payload_merges_reason_and_confirmation_codes() -> None:

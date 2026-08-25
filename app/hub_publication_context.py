@@ -15,7 +15,6 @@ from app.domain_contracts import JOB_STATUS_APPROVED_FOR_PUBLISH
 from app.growth_metrics import build_growth_score
 from app.hub_status import NEEDS_ACTION_JOB_STATUSES
 from app.models import (
-    ChannelPublication,
     Job,
     PublicationSchedule,
     Script,
@@ -78,21 +77,6 @@ class HubPublicationContext:
             "connected_at": status.connected_at,
             "token_expires_at": status.token_expires_at,
             "missing_items": missing_items,
-        }
-
-    def tiktok_integration_context(self) -> dict[str, object]:
-        status = self.orchestrator.tiktok.connection_status()
-        return {
-            "enabled": status.enabled,
-            "token_configured": status.token_configured,
-            "ready": status.ready,
-            "missing_items": status.missing_items,
-            "auth_mode": status.auth_mode,
-            "oauth_managed": status.oauth_managed,
-            "token_refresh_managed": status.token_refresh_managed,
-            "contract_note": status.contract_note,
-            "privacy_level": self.settings.tiktok_privacy_level,
-            "retropost_daily_limit": self.settings.tiktok_retropost_daily_limit,
         }
 
     def maintenance_summary(self, *, future_scheduled_count: int, needs_action_count: int) -> dict[str, object]:
@@ -255,18 +239,6 @@ class HubPublicationContext:
             ) or 0
             published_count = session.scalar(
                 select(func.count()).select_from(PublicationSchedule).where(PublicationSchedule.status == "published")
-            ) or 0
-            tiktok_scheduled_count = session.scalar(
-                select(func.count())
-                .select_from(ChannelPublication)
-                .where(ChannelPublication.channel == "tiktok")
-                .where(ChannelPublication.status.in_(["scheduled", "publishing", "processing"]))
-            ) or 0
-            tiktok_published_count = session.scalar(
-                select(func.count()).select_from(ChannelPublication).where(ChannelPublication.channel == "tiktok").where(ChannelPublication.status == "published")
-            ) or 0
-            tiktok_failed_count = session.scalar(
-                select(func.count()).select_from(ChannelPublication).where(ChannelPublication.channel == "tiktok").where(ChannelPublication.status == "publish_failed")
             ) or 0
 
         upcoming_schedule = [
@@ -452,7 +424,6 @@ class HubPublicationContext:
         ]
         return {
             "integration": self.youtube_integration_context(request),
-            "tiktok_integration": self.tiktok_integration_context(),
             "automation": self.automation_service.dashboard_context(),
             "maintenance": self.maintenance_summary(future_scheduled_count=int(future_scheduled_count), needs_action_count=int(needs_action_count)),
             "ready_to_schedule": ready_to_schedule,
@@ -500,9 +471,6 @@ class HubPublicationContext:
                 "published_count": published_count,
                 "awaiting_approval_count": awaiting_approval_count,
                 "needs_action_count": needs_action_count,
-                "tiktok_scheduled_count": tiktok_scheduled_count,
-                "tiktok_published_count": tiktok_published_count,
-                "tiktok_failed_count": tiktok_failed_count,
             },
         }
 

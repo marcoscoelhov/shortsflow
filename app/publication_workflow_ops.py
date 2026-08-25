@@ -4,9 +4,8 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.channel_publication import refresh_channel_publication_hash
 from app.db import session_scope
-from app.models import ChannelPublication, Job, PublicationSchedule
+from app.models import Job, PublicationSchedule
 from app.pipelines.common import FatalStepError
 from app.publication_schedule_state import update_publication_schedule_content_hash
 from app.schemas import PublicationSchedulePayload
@@ -199,7 +198,6 @@ class PublicationWorkflowOperations:
             }
             job.quality_summary = quality_summary
             self.owner._update_publication_artifact_index(job)
-            self.owner._ensure_tiktok_publication_for_schedule(session, job, schedule, source="youtube_publish")
             self.owner._refresh_retention_state(session, job, schedule)
         self.owner._append_publication_attempt(
             job_id,
@@ -353,7 +351,6 @@ class PublicationWorkflowOperations:
                     quality_summary["youtube"] = youtube_schedule_payload
                 job.quality_summary = quality_summary
                 self.owner._update_publication_artifact_index(job)
-            self.owner._ensure_tiktok_publication_for_schedule(session, job, schedule, source="youtube_schedule")
             self.owner._refresh_retention_state(session, job, schedule)
         self.owner._append_event(
             job_id,
@@ -394,14 +391,6 @@ class PublicationWorkflowOperations:
             schedule.status = "cancelled"
             update_publication_schedule_content_hash(schedule)
             self.owner._persist_publication_schedule_artifact(job, schedule)
-            channel_publication = session.scalar(
-                select(ChannelPublication).where(ChannelPublication.job_id == job_id, ChannelPublication.channel == "tiktok")
-            )
-            if channel_publication and channel_publication.status in {"scheduled", "publishing", "processing", "publish_failed"}:
-                channel_publication.status = "cancelled"
-                channel_publication.last_error = None
-                refresh_channel_publication_hash(channel_publication)
-                self.owner._persist_channel_publication_artifact(job, channel_publication)
             self.owner._refresh_retention_state(session, job, schedule)
         self.owner._append_event(job_id, "youtube.schedule.cleared", "succeeded", {"youtube_video_id": youtube_video_id})
 

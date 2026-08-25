@@ -58,7 +58,6 @@ from app.models import (
     AutomationAttempt,
     AutomationRun,
     BackgroundMusicAsset,
-    ChannelPublication,
     ErrorLog,
     FallbackEvent,
     Job,
@@ -117,7 +116,6 @@ from app.utils import (
     write_json,
 )
 from app.youtube_api import YouTubeIntegrationError, YouTubePublisher
-from app.tiktok_api import TikTokIntegrationError, TikTokPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +145,6 @@ class JobOrchestrator:
         self.storage = StorageManager()
         self.providers = ProviderRegistry()
         self.youtube = YouTubePublisher(self.settings)
-        self.tiktok = TikTokPublisher(self.settings)
         from app.publication_ops import PublicationOperations
 
         self.publication_ops = PublicationOperations(self)
@@ -739,7 +736,6 @@ class JobOrchestrator:
             for model in [
                 AutomationAttempt,
                 BackgroundMusicAsset,
-                ChannelPublication,
                 ErrorLog,
                 FallbackEvent,
                 NarrationAsset,

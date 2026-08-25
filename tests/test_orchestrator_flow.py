@@ -1339,38 +1339,6 @@ def test_review_action_rejects_non_reviewable_status() -> None:
     assert approve.status_code == 303
     assert "review_error=job+status+queued+cannot+be+approved" in approve.headers["location"]
 
-def test_tiktok_retropost_queue_respects_daily_limit(monkeypatch) -> None:
-    monkeypatch.setattr(orchestrator.settings, "tiktok_auto_publish_enabled", True)
-    monkeypatch.setattr(orchestrator.settings, "tiktok_retropost_daily_limit", 1)
-    old_time = utcnow() - timedelta(days=5)
-    with SessionLocal() as session:
-        for index in range(2):
-            job_id = f"tiktok-retropost-{index}"
-            _create_basic_job(session, job_id=job_id, status="published", seed_theme=f"Publicado antigo {index}")
-            session.add(
-                PublicationSchedule(
-                    schedule_id=f"{job_id}-schedule",
-                    job_id=job_id,
-                    schema_version="1.0.0",
-                    content_hash=f"{job_id}-schedule-hash",
-                    scheduled_for_utc=old_time,
-                    timezone="America/Sao_Paulo",
-                    youtube_visibility="public",
-                    status="published",
-                    published_at=old_time,
-                )
-            )
-        session.commit()
-
-    queued = orchestrator.publication_ops._sync_tiktok_crosspost_queue()
-
-    with SessionLocal() as session:
-        publications = session.query(ChannelPublication).filter_by(channel="tiktok", source="retropost").all()
-
-    assert queued >= 1
-    assert len(publications) == 1
-    assert publications[0].status == "scheduled"
-
 def test_retention_sweep_cleans_expired_hard_failure_artifacts() -> None:
     job_id = "retention-hard-failure-job"
     expired_at = utcnow() - timedelta(days=2)
@@ -1561,7 +1529,6 @@ def test_worker_does_not_claim_queued_job_while_runtime_is_draining(monkeypatch)
     )
     monkeypatch.setattr(test_orchestrator.settings, "artifact_retention_enabled", False)
     monkeypatch.setattr(test_orchestrator.settings, "youtube_api_enabled", False)
-    monkeypatch.setattr(test_orchestrator.settings, "tiktok_auto_publish_enabled", False)
 
     assert test_orchestrator._worker_iteration() is False
 
@@ -1634,12 +1601,10 @@ def test_worker_iteration_continues_when_retention_sweep_hits_database_lock(monk
     monkeypatch.setattr(test_orchestrator.settings, "artifact_retention_sweep_seconds", 0)
     monkeypatch.setattr(test_orchestrator.settings, "youtube_publish_mode", "api")
     monkeypatch.setattr(test_orchestrator.settings, "youtube_api_enabled", True)
-    monkeypatch.setattr(test_orchestrator.settings, "tiktok_auto_publish_enabled", False)
     monkeypatch.setattr(test_orchestrator.publication_ops, "_run_retention_sweep", locked_retention_sweep)
     monkeypatch.setattr(test_orchestrator.publication_ops, "_recover_stale_publication_schedules", lambda: synced.append("recovery") or 0)
     monkeypatch.setattr(test_orchestrator.publication_ops, "_sync_native_scheduled_publications", lambda: synced.append("youtube") or 0)
     monkeypatch.setattr(test_orchestrator.publication_ops, "_claim_due_publication_schedule", lambda: None)
-    monkeypatch.setattr(test_orchestrator.publication_ops, "_claim_due_tiktok_publication", lambda: None)
     monkeypatch.setattr(test_orchestrator, "_claim_next_job", lambda session: None)
 
     did_work = test_orchestrator._worker_iteration()
