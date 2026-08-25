@@ -42,6 +42,33 @@ def sanitize_script_text(value: Any) -> Any:
     return value
 
 
+def recompute_script_duration_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    """Deriva duração e métricas do texto narrado em vez de confiar no campo.
+
+    Modelos de repair costumam herdar o estimated_duration_sec do roteiro
+    original (ex.: 55s) mesmo devolvendo 296 palavras para um alvo de 120s;
+    o gate final lê o campo e reprova estimated_duration_outside_target_window.
+    Usa a mesma taxa do repair mock (2.55 palavras/s ~ 153 wpm, dentro da faixa
+    natural 144-162).
+    """
+    narration = str(payload.get("full_narration") or "")
+    word_count = len(word_tokens(narration))
+    estimated_duration = round(word_count / 2.55, 2) if word_count else 0.0
+    payload["estimated_duration_sec"] = estimated_duration
+    if narration:
+        payload["token_count"] = len(tokenize(narration))
+    metrics = dict(payload.get("qa_metrics") or {})
+    metrics.update(
+        {
+            "word_count": word_count,
+            "estimated_duration_sec": estimated_duration,
+            "words_per_second": round(word_count / estimated_duration, 2) if estimated_duration else 0.0,
+        }
+    )
+    payload["qa_metrics"] = metrics
+    return payload
+
+
 VISUAL_INTENTS = [
     "deceptive_establishing",
     "visual_contrast",
@@ -1114,7 +1141,7 @@ Regras:
         if not isinstance(payload, dict):
             raise ProviderFailure(self.failure_provider_name, "script generator returned non-object json")
         payload["qa_metrics"] = {**payload.get("qa_metrics", {}), "source_provider": self.provider_name}
-        return sanitize_script_text(payload)
+        return recompute_script_duration_metrics(sanitize_script_text(payload))
 
     def generate_visual_contract(self, script: dict[str, Any]) -> dict[str, Any]:
         prompt = f"""
@@ -1248,7 +1275,7 @@ Sem markdown.
             "repair_provider": self.provider_name,
             "repair_reasons": gate_reasons,
         }
-        return sanitize_script_text(payload)
+        return recompute_script_duration_metrics(sanitize_script_text(payload))
 
     def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
         prompt = f"""
