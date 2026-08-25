@@ -40,6 +40,17 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_job_metadata_columns()
+    _drop_retired_tables()
+
+
+def _drop_retired_tables() -> None:
+    inspector = inspect(engine)
+    names = set(inspector.get_table_names())
+    retired = ("cron_video_ideas", "channel_publications")
+    with engine.begin() as connection:
+        for table in retired:
+            if table in names:
+                connection.execute(text(f"DROP TABLE IF EXISTS {table}"))
 
 
 def _ensure_job_metadata_columns() -> None:
