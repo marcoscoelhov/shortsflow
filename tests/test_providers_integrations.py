@@ -1513,7 +1513,10 @@ def test_minimax_generate_script_batch_uses_individual_calls_not_single_giant_js
 
     tracks = batch["tracks"]
     assert len(tracks) == 10
-    assert generated_angles == [f"segredo da carta variante {i + 1}" for i in range(10)]
+    assert all(f"variante {i + 1}." in angle for i, angle in enumerate(generated_angles))
+    assert "ponto de vista do protagonista destinatário" in generated_angles[0]
+    assert "ponto de vista de uma testemunha" in generated_angles[1]
+    assert "ponto de vista de quem guardou o segredo" in generated_angles[2]
     assert [int(track["_track_index"]) for track in tracks] == list(range(10))
     assert all(str(track["title"]).endswith(f"(variante {i + 1})") for i, track in enumerate(tracks))
     assert all(track["qa_metrics"]["source_provider"] == "minimax" for track in tracks)
@@ -1587,9 +1590,11 @@ def test_resilient_generate_script_batch_uses_bounded_parallelism_and_keeps_orde
 
     assert max_active == 2
     assert [track["_track_index"] for track in result["tracks"]] == [0, 1, 2, 3]
-    assert [track["title"] for track in result["tracks"]] == [
-        f"segredo da carta variante {index} (variante {index})" for index in range(1, 5)
-    ]
+    titles = [str(track["title"]) for track in result["tracks"]]
+    assert all(title.endswith(f"(variante {index})") for index, title in enumerate(titles, start=1))
+    assert "ponto de vista do protagonista destinatário" in titles[0]
+    assert "ponto de vista de uma testemunha" in titles[1]
+    assert "ponto de vista de quem guardou o segredo" in titles[2]
 
 
 def test_resilient_generate_script_batch_retries_only_failed_tracks_and_keeps_full_batch() -> None:
@@ -1600,7 +1605,7 @@ def test_resilient_generate_script_batch_retries_only_failed_tracks_and_keeps_fu
     def fake_generate_script(topic_plan):
         angle = str(topic_plan["angle"])
         calls_by_angle[angle] = calls_by_angle.get(angle, 0) + 1
-        if angle.endswith("variante 2") and calls_by_angle[angle] == 1:
+        if "variante 2." in angle and calls_by_angle[angle] == 1:
             raise ProviderFailure("llm_registry", "transient double-provider failure")
         return {
             "title": angle,
@@ -1613,12 +1618,9 @@ def test_resilient_generate_script_batch_retries_only_failed_tracks_and_keeps_fu
     result = provider.generate_script_batch({"angle": "segredo da carta"}, 4)
 
     assert [track["_track_index"] for track in result["tracks"]] == [0, 1, 2, 3]
-    assert calls_by_angle == {
-        "segredo da carta variante 1": 1,
-        "segredo da carta variante 2": 2,
-        "segredo da carta variante 3": 1,
-        "segredo da carta variante 4": 1,
-    }
+    assert len(calls_by_angle) == 4
+    assert next(count for angle, count in calls_by_angle.items() if "variante 2." in angle) == 2
+    assert all(count == 1 for angle, count in calls_by_angle.items() if "variante 2." not in angle)
 
 
 def test_resilient_generate_script_batch_reports_tracks_that_fail_selective_retry() -> None:
@@ -1629,7 +1631,7 @@ def test_resilient_generate_script_batch_reports_tracks_that_fail_selective_retr
     def fake_generate_script(topic_plan):
         angle = str(topic_plan["angle"])
         calls_by_angle[angle] = calls_by_angle.get(angle, 0) + 1
-        if angle.endswith("variante 2"):
+        if "variante 2." in angle:
             raise ProviderFailure("llm_registry", "persistent double-provider failure")
         return {"title": angle, "full_narration": f"Narração para {angle}", "qa_metrics": {}}
 
@@ -1638,9 +1640,8 @@ def test_resilient_generate_script_batch_reports_tracks_that_fail_selective_retr
     with pytest.raises(ProviderFailure, match=r"track 2: persistent double-provider failure"):
         provider.generate_script_batch({"angle": "segredo da carta"}, 3)
 
-    assert calls_by_angle["segredo da carta variante 2"] == 2
-    assert calls_by_angle["segredo da carta variante 1"] == 1
-    assert calls_by_angle["segredo da carta variante 3"] == 1
+    assert next(count for angle, count in calls_by_angle.items() if "variante 2." in angle) == 2
+    assert all(count == 1 for angle, count in calls_by_angle.items() if "variante 2." not in angle)
 
 
 def test_resilient_generate_script_batch_falls_back_per_track() -> None:
