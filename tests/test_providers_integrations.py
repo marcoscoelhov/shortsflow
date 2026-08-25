@@ -1798,3 +1798,47 @@ def test_luna_max_responses_uses_larger_budget_without_explicit_max_tokens(monke
     assert result["title"] == "A carta"
     assert captured["reasoning"] == {"effort": "max"}
     assert captured["max_output_tokens"] == 12000
+
+
+def test_recompute_script_duration_metrics_derives_from_narration() -> None:
+    from app.providers.llm import recompute_script_duration_metrics
+
+    narration = " ".join(["A frase número %d segue aqui." % i for i in range(40)])
+    payload = {"full_narration": narration, "estimated_duration_sec": 55.0, "qa_metrics": {"word_count": 999}}
+    out = recompute_script_duration_metrics(payload)
+    assert out["estimated_duration_sec"] == round(len(narration.split()) / 2.55, 2)
+    assert out["qa_metrics"]["word_count"] == len(narration.split())
+    assert out["qa_metrics"]["estimated_duration_sec"] == out["estimated_duration_sec"]
+    assert out["qa_metrics"]["words_per_second"] > 0
+
+
+def test_repair_script_recomputes_duration_from_actual_narration(monkeypatch) -> None:
+    from app.providers.llm import MinimaxCreativeProvider
+
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.provider_name = "minimax"
+    provider.failure_provider_name = "minimax_text"
+    provider.settings = SimpleNamespace(llm_json_max_tokens=4096)
+
+    narration = " ".join(["Frase narrativa número %d do roteiro completo." % i for i in range(46)])
+    expected_duration = round(len(narration.split()) / 2.55, 2)
+
+    def fake_repair(prompt: str, *, max_tokens=None):
+        return {
+            "title": "A carta chegou",
+            "hook": "A carta chegou.",
+            "body_beats": ["Beat um.", "Beat dois."],
+            "full_narration": narration,
+            "estimated_duration_sec": 55.0,
+            "qa_metrics": {"word_count": 999},
+        }
+
+    monkeypatch.setattr(provider, "_json_completion", fake_repair)
+    result = provider.repair_script(
+        {"title": "t", "hook": "h", "full_narration": "f", "body_beats": ["b"], "qa_metrics": {}},
+        ["estimated_duration_outside_target_window"],
+        {"canonical_topic": "tema", "angle": "ângulo", "niche_id": "fiction_microdrama", "target_duration_sec": 120, "editorial_mode": "fiction_microdrama"},
+    )
+    assert result["estimated_duration_sec"] == expected_duration
+    assert result["qa_metrics"]["word_count"] == len(narration.split())
+    assert result["qa_metrics"]["repair_provider"] == "minimax"
