@@ -3,7 +3,7 @@ import threading
 
 from app.config import Settings
 from app.providers.errors import ProviderFailure
-from app.providers.llm_clients import DeepSeekCreativeProvider, OpenAICreativeProvider, QwenCreativeProvider, XAICreativeProvider
+from app.providers.llm_clients import DeepSeekCreativeProvider, OpenAICreativeProvider, XAICreativeProvider
 
 
 @pytest.mark.parametrize(
@@ -54,7 +54,6 @@ def test_llm_facade_preserves_public_provider_imports() -> None:
     assert llm.MinimaxCreativeProvider is MinimaxCreativeProvider
     assert llm.MockCreativeProvider is MockCreativeProvider
     assert llm.OpenAICreativeProvider is llm_clients.OpenAICreativeProvider
-    assert llm.QwenCreativeProvider is llm_clients.QwenCreativeProvider
     assert llm.ResilientCreativeProvider is llm_routing.ResilientCreativeProvider
 
 
@@ -463,40 +462,6 @@ def test_opencode_go_grok45_gate_judge_uses_responses_api_and_parses_json(monkey
     assert "text" not in captured
     assert captured["max_output_tokens"] == 4096
 
-
-def test_llm_registry_builds_qwen_optional_provider(monkeypatch) -> None:
-    settings = SimpleNamespace(
-        use_mock_providers=False,
-        llm_scene_provider="qwen",
-        qwen_api_key="qwen-key",
-        qwen_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        qwen_model="qwen3.7-plus",
-        qwen_timeout_sec=90,
-    )
-
-    captured: dict[str, object] = {}
-
-    class FakeOpenAI:
-        def __init__(self, **kwargs):
-            captured["client_kwargs"] = kwargs
-
-    monkeypatch.setattr("app.providers.llm.get_settings", lambda: settings)
-    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
-
-    provider = LLMProviderRegistry().scene_provider()
-
-    assert provider.provider_name == "qwen"
-    assert provider.model_name == "qwen3.7-plus"
-    assert captured["client_kwargs"]["base_url"] == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-
-
-def test_qwen_provider_cannot_audit_or_judge_publication() -> None:
-    provider = object.__new__(QwenCreativeProvider)
-
-    with pytest.raises(ProviderFailure, match="not a publication authority"):
-        provider.audit_publish_package({"forged_score": 1.0})
-    with pytest.raises(ProviderFailure, match="not a quality-gate authority"):
-        provider.judge_quality_gate("publish_readiness", {"forged_score": 1.0})
 
 def test_openai_provider_uses_responses_api_with_json_output(monkeypatch) -> None:
     captured: dict[str, object] = {}

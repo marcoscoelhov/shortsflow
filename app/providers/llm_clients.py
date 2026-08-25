@@ -409,26 +409,3 @@ class XAICreativeProvider(MinimaxCreativeProvider):
         settings = llm_facade.get_settings()
         effort = str(getattr(settings, "llm_script_reasoning_effort", "high") or "high").strip().lower()
         return self._json_completion(prompt, max_tokens=max_tokens, reasoning_effort=effort)
-
-
-class QwenCreativeProvider(MinimaxCreativeProvider):
-    provider_name = "qwen"
-    failure_provider_name = "qwen_text"
-
-    def __init__(self) -> None:
-        settings = llm_facade.get_settings()
-        if not settings.qwen_api_key:
-            raise ProviderFailure(self.failure_provider_name, "missing qwen api key")
-        self.timeout_sec = settings.qwen_timeout_sec
-        self.model_name = settings.qwen_model
-        self.client = llm_facade.OpenAI(
-            api_key=settings.qwen_api_key,
-            base_url=settings.qwen_base_url,
-            timeout=self.timeout_sec,
-        )
-
-    def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
-        raise ProviderFailure(self.failure_provider_name, "qwen is not a publication authority")
-
-    def judge_quality_gate(self, gate_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-        raise ProviderFailure(self.failure_provider_name, "qwen is not a quality-gate authority")

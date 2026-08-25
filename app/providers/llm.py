@@ -1572,7 +1572,6 @@ from app.providers.llm_clients import (
     DeepSeekCreativeProvider,
     GeminiCreativeProvider,
     OpenAICreativeProvider,
-    QwenCreativeProvider,
     XAICreativeProvider,
 )
 from app.providers.llm_routing import LLMProviderRegistry, ResilientCreativeProvider

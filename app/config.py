@@ -231,10 +231,6 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://opencode.ai/zen/go/v1"
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_timeout_sec: float = 180.0
-    qwen_api_key: str | None = None
-    qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-    qwen_model: str = "qwen3.6-max-preview"
-    qwen_timeout_sec: float = 90.0
     pexels_api_key: str | None = None
     pixabay_api_key: str | None = None
     tailscale_hostname: str = "shorts-hub"
@@ -304,7 +300,6 @@ class Settings(BaseSettings):
         "openai_timeout_sec",
         "deepseek_timeout_sec",
         "xai_timeout_sec",
-        "qwen_timeout_sec",
         "gemini_text_timeout_sec",
         "gemini_tts_timeout_sec",
         "vision_verifier_timeout_sec",

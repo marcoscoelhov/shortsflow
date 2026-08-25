@@ -12,7 +12,6 @@ from app.providers.llm_clients import (
     DeepSeekCreativeProvider,
     GeminiCreativeProvider,
     OpenAICreativeProvider,
-    QwenCreativeProvider,
     XAICreativeProvider,
 )
 
@@ -719,8 +718,6 @@ class LLMProviderRegistry:
                 return XAICreativeProvider()
             if normalized in {"deepseek", "deepseek_v4", "deepseek_v4_flash", "deepseek-v4-flash", "deepseek_v4_pro", "deepseek-v4-pro"}:
                 return DeepSeekCreativeProvider()
-            if normalized in {"qwen", "qwen_plus", "qwen-plus", "qwen3.7-plus", "qwen3_7_plus", "qwen3.6-max", "qwen3.6-max-preview"}:
-                return QwenCreativeProvider()
             if normalized in {"gemini", "gemini_flash", "gemini-flash", "gemini_3_5_flash", "gemini-3.5-flash"}:
                 return GeminiCreativeProvider()
         except ProviderFailure:
