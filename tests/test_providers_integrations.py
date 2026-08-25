@@ -1678,3 +1678,123 @@ def test_resilient_generate_script_batch_falls_back_per_track() -> None:
         "openai",
     ]
     assert result["tracks"][1]["qa_metrics"]["script_generation_fallback_used"] is True
+
+
+def test_sanitize_script_text_removes_dashes_and_non_latin() -> None:
+    from app.providers.llm import sanitize_script_text
+
+    payload = {
+        "title": "A carta chegou — tarde (变)",
+        "hook": "A carta chegou – tarde.",
+        "body_beats": ["Beat um.", "中文字符", "Frase normal."],
+        "story_arc": {"setup": "A carta chegou — tarde."},
+        "retention_map": {"mapped_text": "A carta chegou – tarde."},
+        "qa_metrics": {"word_count": "120"},
+        "source_fact_ids": ["f1"],
+    }
+    clean = sanitize_script_text(payload)
+    assert "—" not in str(clean)
+    assert "–" not in str(clean)
+    assert "变" not in str(clean)
+    assert "中" not in str(clean)
+    assert clean["title"] == "A carta chegou tarde ()"
+    assert clean["hook"] == "A carta chegou tarde."
+    assert clean["story_arc"]["setup"] == clean["retention_map"]["mapped_text"] == "A carta chegou tarde."
+    assert clean["qa_metrics"]["word_count"] == "120"
+    assert clean["source_fact_ids"] == ["f1"]
+
+
+def test_generate_script_sanitizes_provider_payload(monkeypatch) -> None:
+    from app.providers.llm import MinimaxCreativeProvider, sanitize_script_text
+
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.settings = SimpleNamespace(
+        microdrama_script_max_tokens=4096,
+        llm_script_reasoning_effort="high",
+        llm_json_max_tokens=4096,
+    )
+    provider.provider_name = "minimax"
+    provider.failure_provider_name = "minimax_text"
+
+    def dirty_microdrama(_prompt: str, *, max_tokens: int):
+        return {
+            "title": "A carta — chegou (变)",
+            "hook": "A carta chegou vinte anos tarde.",
+            "body_beats": ["Beat um.", "中"],
+            "full_narration": "A carta – chegou vinte anos tarde.",
+            "qa_metrics": {},
+        }
+
+    monkeypatch.setattr(provider, "_microdrama_json_completion", dirty_microdrama)
+    result = provider.generate_script(
+        {"niche_id": "fiction_microdrama", "target_duration_sec": 120, "canonical_topic": "tema", "angle": "ângulo"}
+    )
+    assert "—" not in json.dumps(result, ensure_ascii=False)
+    assert "–" not in json.dumps(result, ensure_ascii=False)
+    assert "中" not in json.dumps(result, ensure_ascii=False)
+    assert result["qa_metrics"]["source_provider"] == "minimax"
+
+
+def test_repair_script_sanitizes_provider_payload(monkeypatch) -> None:
+    from app.providers.llm import MinimaxCreativeProvider
+
+    provider = object.__new__(MinimaxCreativeProvider)
+    provider.provider_name = "minimax"
+    provider.failure_provider_name = "minimax_text"
+    provider.settings = SimpleNamespace(llm_json_max_tokens=4096)
+
+    def dirty_repair(prompt: str, *, max_tokens=None):
+        return {
+            "title": "A carta — chegou",
+            "hook": "A carta chegou – tarde.",
+            "body_beats": ["Beat.", "中"],
+            "full_narration": "A carta chegou tarde.",
+            "qa_metrics": {},
+        }
+
+    monkeypatch.setattr(provider, "_json_completion", dirty_repair)
+    result = provider.repair_script(
+        {"title": "t", "hook": "h", "full_narration": "f", "body_beats": ["b"], "qa_metrics": {}},
+        ["repeated_clause"],
+        {"canonical_topic": "tema", "angle": "ângulo", "niche_id": "fiction_microdrama", "target_duration_sec": 120, "editorial_mode": "fiction_microdrama"},
+    )
+    assert "—" not in json.dumps(result, ensure_ascii=False)
+    assert "–" not in json.dumps(result, ensure_ascii=False)
+    assert "中" not in json.dumps(result, ensure_ascii=False)
+    assert result["qa_metrics"]["repair_provider"] == "minimax"
+
+
+def test_luna_max_responses_uses_larger_budget_without_explicit_max_tokens(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                output_text=json.dumps({"title": "A carta", "full_narration": "A carta chegou.", "qa_metrics": {}})
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr(
+        "app.providers.llm.get_settings",
+        lambda: SimpleNamespace(
+            openai_api_key="opencode-go-key",
+            openai_base_url="https://opencode.ai/zen/go/v1",
+            openai_model="gpt-5.6-luna",
+            openai_reasoning_effort="max",
+            openai_timeout_sec=360.0,
+            llm_json_max_tokens=4096,
+            llm_topic_batch_max_tokens=12000,
+        ),
+    )
+    monkeypatch.setattr("app.providers.llm.OpenAI", FakeOpenAI)
+
+    provider = OpenAICreativeProvider()
+    result = provider._json_completion("Retorne JSON estrito.")
+
+    assert result["title"] == "A carta"
+    assert captured["reasoning"] == {"effort": "max"}
+    assert captured["max_output_tokens"] == 12000

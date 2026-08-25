@@ -208,8 +208,18 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> Any:
-        resolved_max_tokens = int(max_tokens if max_tokens is not None else self.max_output_tokens)
+        settings = llm_facade.get_settings()
         resolved_reasoning_effort = reasoning_effort or self.reasoning_effort
+        resolved_max_tokens = int(max_tokens if max_tokens is not None else self.max_output_tokens)
+        if max_tokens is None and resolved_reasoning_effort == "max" and getattr(self, "use_responses_api", False):
+            # Luna com reasoning=max consome boa parte do budget de saída em
+            # raciocínio; com o default de 4096 devolve texto vazio (reparo de
+            # roteiro 120s reproduzia 'empty text response'). Reserva o mesmo
+            # orçamento do lote de pautas (12000) quando não há limite explícito.
+            resolved_max_tokens = max(
+                resolved_max_tokens,
+                int(getattr(settings, "llm_topic_batch_max_tokens", 12000) or 12000),
+            )
         try:
             if getattr(self, "use_responses_api", False):
                 response = self.client.responses.create(
