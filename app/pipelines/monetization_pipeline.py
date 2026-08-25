@@ -45,8 +45,8 @@ class MonetizationPipeline(BasePipeline):
     def _ready_script_input(self, fact_pack: dict[str, Any], script_artifact: dict[str, Any] | None = None) -> bool:
         qa_metrics = dict((script_artifact or {}).get("qa_metrics") or {})
         return (
-            fact_pack.get("status") == "verified"
-            and fact_pack.get("provider") == "ready_script"
+            fact_pack.get("provider") == "ready_script"
+            and fact_pack.get("status") in {"editorial_input", "verified"}
             and bool(qa_metrics.get("ready_script"))
         )
 
@@ -125,7 +125,9 @@ class MonetizationPipeline(BasePipeline):
         confirmations = self.manual_monetization_confirmations(session, job.job_id)
         confirmations.update(extra_confirmations or set())
         if ready_script_input:
-            confirmations.update({"fact_review_confirmed", "publish_audit_confirmed"})
+            confirmed = bool(fact_pack.get("fact_check_confirmed"))
+            if confirmed:
+                confirmations.update({"fact_review_confirmed", "publish_audit_confirmed"})
             if not microdrama:
                 confirmations.add("originality_confirmed")
         if ready_script_bank_input:
@@ -1064,8 +1066,10 @@ class MonetizationPipeline(BasePipeline):
         }
 
     def provider_publish_audit(self, script_artifact: dict[str, Any], fact_pack: dict[str, Any], tags: list[str], job_id: str | None = None) -> dict[str, Any]:
-        if self._ready_script_input(fact_pack, script_artifact):
+        if self._ready_script_input(fact_pack, script_artifact) and fact_pack.get("fact_check_confirmed"):
             return {"passed": True, "reasons": [], "provider": "ready_script_manual_fact_check", "skipped": True}
+        if script_artifact is None:
+            script_artifact = {}
         auditor = getattr(self.providers.creative, "audit_publish_package", None)
         if auditor is None:
             return {"passed": True, "reasons": [], "provider": "none", "skipped": True}
@@ -1354,7 +1358,11 @@ class MonetizationPipeline(BasePipeline):
             reasons.append("quality_checklist_failed")
             if "asset_visual_gate_pass" in failed_quality_items:
                 reasons.append("asset_visual_gate_not_passed")
-        if fact_pack.get("status") != "verified" and source_ids:
+        if (
+            fact_pack.get("status") != "verified"
+            and source_ids
+            and not self._ready_script_input(fact_pack, script_artifact)
+        ):
             reasons.append(REASON_INVENTED_SOURCE_FACT_IDS)
 
         weak_tags = self.weak_publish_hashtags(tags, script_dict)

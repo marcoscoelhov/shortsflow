@@ -53,7 +53,7 @@ class ReadyScript:
     script: dict[str, Any]
     fact_pack: dict[str, Any]
     hashtags: list[str]
-    fact_check_confirmed: bool = True
+    fact_check_confirmed: bool = False
 
 
 def build_ready_script_notes(notes: str | None, raw_script: str) -> str:
@@ -162,8 +162,15 @@ def parse_ready_script(raw_text: str, *, fact_check_confirmed: bool | None = Non
         },
         "prompt_version": "ready-script-v1",
     }
-    fact_pack = _build_ready_script_fact_pack(normalized_text, key_facts, source_fact_ids)
-    return ReadyScript(raw_text=normalized_text, script=script, fact_pack=fact_pack, hashtags=hashtags)
+    confirmed = bool(fact_check_confirmed)
+    fact_pack = _build_ready_script_fact_pack(normalized_text, key_facts, source_fact_ids, confirmed)
+    return ReadyScript(
+        raw_text=normalized_text,
+        script=script,
+        fact_pack=fact_pack,
+        hashtags=hashtags,
+        fact_check_confirmed=confirmed,
+    )
 
 
 def _parse_labeled_text(raw_text: str) -> dict[str, str]:
@@ -247,14 +254,20 @@ def _strip_markdown_strong(value: str) -> str:
         previous = current
 
 
-def _build_ready_script_fact_pack(raw_text: str, key_facts: list[str], source_fact_ids: list[str]) -> dict[str, Any]:
+def _build_ready_script_fact_pack(
+    raw_text: str,
+    key_facts: list[str],
+    source_fact_ids: list[str],
+    confirmed: bool,
+) -> dict[str, Any]:
     facts = [
         {"fact_id": source_id, "claim": fact, "source_id": "READY_SCRIPT"}
         for fact, source_id in zip(key_facts, source_fact_ids, strict=False)
     ]
     return {
-        "status": "verified",
+        "status": "editorial_input",
         "provider": "ready_script",
+        "fact_check_confirmed": confirmed,
         "facts": facts,
         "sources": [
             {
@@ -264,6 +277,6 @@ def _build_ready_script_fact_pack(raw_text: str, key_facts: list[str], source_fa
                 "kind": "editorial_input",
             }
         ],
-        "editorial_rule": "O app preserva o Roteiro Pronto como fonte de verdade editorial.",
+        "editorial_rule": "O app preserva o Roteiro Pronto como fonte de verdade editorial. Fatos Declarados exigem Confirmacao de Factualidade.",
         "raw_text_hash_source": "ready_script",
     }

@@ -44,7 +44,9 @@ class ScriptRepairDomain(BasePipeline):
             for source_id in (item.get("source_fact_ids") or [])
             if str(source_id)
         ]
-        ready_script_input = isinstance(fact_pack, dict) and fact_pack.get("provider") == "ready_script" and fact_pack.get("status") == "verified"
+        ready_script_input = isinstance(fact_pack, dict) and fact_pack.get("provider") == "ready_script" and fact_pack.get("status") == "editorial_input"
+        if ready_script_input:
+            return []
         if not isinstance(fact_pack, dict) or (fact_pack.get("status") != "verified" and not ready_script_input):
             if fact_pack.get("provider") == "disabled_by_policy" or fact_pack.get("status") == "disabled":
                 return []

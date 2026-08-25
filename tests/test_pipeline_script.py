@@ -158,6 +158,33 @@ Hashtags: #curiosidades #shorts"""
     assert "Terremoto teste lote B" in page.text
     assert "2 disponíveis" in page.text
 
+
+def test_ready_script_batch_import_defaults_fact_check_unconfirmed() -> None:
+    client = TestClient(app)
+    batch = """Título: Lote sem confirmacao factual
+Hook: O lote entra no banco sem marcar o checkbox.
+Loop: O que acontece com Fatos Declarados sem confirmação?
+Beats: O importador não assume checagem automática.
+A revisão humana ainda decide publicação.
+Payoff: Sem a marca, o lote fica sem Confirmacao Factual por Lote.
+Fechamento: O banco guarda o roteiro como input editorial.
+Hashtags: #curiosidades #shorts"""
+
+    response = client.post(
+        "/automation/ready-scripts/import",
+        data={"ready_script_batch": batch, "return_to": "/library"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(ReadyScriptItem).where(ReadyScriptItem.title == "Lote sem confirmacao factual")
+        ).all()
+
+    assert len(rows) == 1
+    assert all(row.fact_check_confirmed is False for row in rows)
+
 def test_ready_script_batch_import_rejects_oversized_text() -> None:
     client = TestClient(app)
     oversized = "Título: X\n" + ("a" * (main_module.MAX_READY_SCRIPT_IMPORT_CHARS + 1))
@@ -331,6 +358,33 @@ Ele só devolve luz em linha direta.
     assert ready.script["body_beats"][0] == "O espelho não sabe o que é direita."
     assert ready.script["ending"] == "A traição não está no vidro; está na sua cabeça."
     assert "**" not in ready.raw_text
+    assert ready.fact_pack["status"] == "editorial_input"
+    assert ready.fact_check_confirmed is True
+    assert ready.fact_pack["fact_check_confirmed"] is True
+
+
+def test_parse_ready_script_fact_pack_is_editorial_input() -> None:
+    from app.manual_script import parse_ready_script
+
+    ready = parse_ready_script(
+        """Título: Input editorial não é fact pack verificado
+Hook: Um roteiro pronto começa como texto autoral.
+Loop: Por que o app não pode carimbar isso como verificado?
+Beats: As afirmações dependem de Confirmacao de Factualidade.
+O lote de IA não recebe confirmação automática.
+Payoff: O fact pack entra como editorial_input, sem URL de fonte.
+Fechamento: A revisão humana ainda decide a publicação.
+Hashtags: #curiosidades #shorts"""
+    )
+
+    assert ready.fact_check_confirmed is False
+    assert ready.fact_pack["status"] == "editorial_input"
+    assert ready.fact_pack["provider"] == "ready_script"
+    assert ready.fact_pack["fact_check_confirmed"] is False
+    assert ready.fact_pack["sources"][0]["source_id"] == "READY_SCRIPT"
+    assert ready.fact_pack["sources"][0]["url"] is None
+    assert ready.fact_pack["sources"][0]["kind"] == "editorial_input"
+    assert "verified" not in str(ready.fact_pack["status"])
 
 
 def test_ready_script_batch_import_preprocesses_ai_markdown_attachment() -> None:
@@ -2926,8 +2980,127 @@ Hashtags: #curiosidades #deepsea #biologia #shorts""",
     assert report["final_status"] == "ready_for_upload"
     assert report["manual_required"] == []
     assert report["publish_readiness"]["minimax_audit"]["provider"] == "ready_script_manual_fact_check"
+    assert report["publish_readiness"]["minimax_audit"]["skipped"] is True
     assert "fact_review_confirmed" in report["manual_confirmations"]
     assert "publish_audit_confirmed" in report["manual_confirmations"]
+    assert "originality_confirmed" in report["manual_confirmations"]
+    assert ready.fact_pack["status"] == "editorial_input"
+    assert ready.fact_pack["fact_check_confirmed"] is True
+
+
+def test_unconfirmed_ready_script_does_not_skip_publish_audit(monkeypatch) -> None:
+    from app.manual_script import parse_ready_script
+
+    ready = parse_ready_script(
+        """Título: Peixe-pescador usa luz viva para atrair vítimas
+Hook: Escuridão total vira isca quando esse peixe acende.
+Loop: Por que brilhar no fundo do mar pode significar morte?
+Beats: Nas profundezas, a luz do Sol quase nunca chega.
+Mesmo assim, o peixe-pescador carrega um brilho próprio.
+A luz balança na frente da boca como promessa.
+Presas se aproximam achando que encontraram comida.
+Quando chegam perto, encontram dentes.
+Payoff: A lanterna é uma isca bioluminescente para atrair presas.
+Fechamento: Lá embaixo, uma luz pequena pode ser uma armadilha.
+Hashtags: #curiosidades #deepsea #biologia #shorts"""
+    )
+    assert ready.fact_check_confirmed is False
+    assert ready.fact_pack["status"] == "editorial_input"
+    audit_calls: list[dict] = []
+
+    def fake_audit(payload: dict) -> dict:
+        audit_calls.append(payload)
+        return {
+            "passed": False,
+            "reasons": ["self_declared_source_only"],
+            "factual_score": 0.4,
+            "metadata_score": 0.4,
+            "provider": "mock_auditor",
+        }
+
+    job_id = orchestrator.create_job(
+        {
+            "seed_theme": ready.script["title"],
+            "niche_id": "curiosidades",
+            "language": "pt-BR",
+            "target_duration_sec": 45,
+            "tone": "intrigante_direto",
+            "cta_style": "none",
+            "notes": "input_mode=script",
+            "requested_angle": None,
+        }
+    )
+    with SessionLocal() as session:
+        session.add(
+            TopicPlan(
+                topic_id=f"topic-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="topic",
+                canonical_topic=ready.script["title"],
+                angle="biologia marinha",
+                hook_promise=ready.script["hook"],
+                entities=["peixe-pescador"],
+                search_terms=["peixe-pescador bioluminescencia"],
+                title_candidates=[ready.script["title"]],
+                quality_metrics={},
+            )
+        )
+        session.add(
+            Script(
+                script_id=f"script-{job_id}",
+                job_id=job_id,
+                schema_version="1.0.0",
+                content_hash="script",
+                title=ready.script["title"],
+                hook=ready.script["hook"],
+                body_beats=ready.script["body_beats"],
+                ending=ready.script["ending"],
+                cta=None,
+                full_narration=ready.script["full_narration"],
+                estimated_duration_sec=ready.script["estimated_duration_sec"],
+                key_facts=ready.script["key_facts"],
+                token_count=ready.script["token_count"],
+                language="pt-BR",
+                qa_metrics=ready.script["qa_metrics"],
+            )
+        )
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.quality_summary = {
+            "script": {"script_quality_gate_pass": True},
+            "scene_plan": {"scene_plan_gate_pass": True},
+            "assets": {"semantic_threshold_pass": True, "asset_semantic_score_avg": 0.95},
+            "subtitles": {"subtitle_gate_pass": True},
+            "render": {"render_gate_pass": True},
+        }
+        session.commit()
+
+    artifact_dir = Path(os.environ["SHORTSFLOW_DATA_DIR"]).resolve() / "artifacts" / job_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "fact_pack.json").write_text(json.dumps(ready.fact_pack), encoding="utf-8")
+    (artifact_dir / "script.json").write_text(json.dumps(ready.script), encoding="utf-8")
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline.providers.creative,
+        "audit_publish_package",
+        fake_audit,
+    )
+    monkeypatch.setattr(
+        orchestrator.monetization_pipeline,
+        "build_channel_repetition_report",
+        lambda *args, **kwargs: {"repetition_risk": "medium", "matches": [], "signals": {}},
+    )
+
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        report = orchestrator.monetization_pipeline.build_monetization_report(session, job)
+
+    assert audit_calls
+    assert report["publish_readiness"]["minimax_audit"]["provider"] != "ready_script_manual_fact_check"
+    assert report["publish_readiness"]["minimax_audit"].get("skipped") is not True
+    assert "fact_review_confirmed" not in report["manual_confirmations"]
+    assert "publish_audit_confirmed" not in report["manual_confirmations"]
     assert "originality_confirmed" in report["manual_confirmations"]
 
 def test_script_gate_blocks_generic_high_risk_precision_and_causality() -> None:

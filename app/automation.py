@@ -126,8 +126,9 @@ class AutomationService:
         errors: list[str] = []
         with session_scope() as session:
             for index, block in enumerate(blocks, start=1):
+                confirmed = bool(fact_check_confirmed)
                 try:
-                    ready_script = parse_ready_script(block)
+                    ready_script = parse_ready_script(block, fact_check_confirmed=confirmed)
                 except ValueError as exc:
                     errors.append(f"bloco {index}: {exc}")
                     continue
@@ -147,7 +148,7 @@ class AutomationService:
                         raw_text=ready_script.raw_text,
                         parsed_script=ready_script.script,
                         hashtags=ready_script.hashtags,
-                        fact_check_confirmed=True,
+                        fact_check_confirmed=confirmed,
                     )
                 )
                 imported += 1
