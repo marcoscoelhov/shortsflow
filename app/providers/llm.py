@@ -4,6 +4,7 @@ import concurrent.futures
 import json
 import math
 import queue
+import re
 import threading
 from typing import Any, Callable, Protocol
 
@@ -17,6 +18,28 @@ from app.editorial.retention import EDITORIAL_PROMPT_VERSION, build_retention_ma
 from app.editorial.visual_contract import build_mock_visual_contract, normalize_visual_contract_payload
 from app.providers.errors import ProviderFailure
 from app.utils import avg_words_per_sentence, max_words_single_sentence, sentence_split, tokenize, word_tokens
+
+# Higiene determinística de texto de roteiro: modelos (DeepSeek, Luna) ignoram
+# às vezes a regra do prompt e devolvem travessão —/– ou caracteres fora do
+# alfabeto latino (ex.: CJK). O gate final bloqueia essas ocorrências
+# (em_dash_or_en_dash_detected, non_latin_text_detected). Aplicamos a mesma
+# transformação a TODOS  os campos de texto (inclusive story_arc e
+# retention_map, que são trechos literais de full_narration), preservando o
+# vínculo literal exigido pelo gate.
+_SCRIPT_DASH_TRANSLATION = str.maketrans({"\u2013": " ", "\u2014": " "})
+_SCRIPT_NON_LATIN_PATTERN = re.compile(r"[^\x00-\x7FÀ-ÖØ-öø-ÿĀ-ſ0-9\s.,!?;:()\"'/%#@+\-=ºª°]")
+
+
+def sanitize_script_text(value: Any) -> Any:
+    if isinstance(value, str):
+        text = value.translate(_SCRIPT_DASH_TRANSLATION)
+        text = _SCRIPT_NON_LATIN_PATTERN.sub("", text)
+        return re.sub(r"\s{2,}", " ", text).strip()
+    if isinstance(value, list):
+        return [sanitize_script_text(item) for item in value]
+    if isinstance(value, dict):
+        return {key: sanitize_script_text(item) for key, item in value.items()}
+    return value
 
 
 VISUAL_INTENTS = [
@@ -1091,7 +1114,7 @@ Regras:
         if not isinstance(payload, dict):
             raise ProviderFailure(self.failure_provider_name, "script generator returned non-object json")
         payload["qa_metrics"] = {**payload.get("qa_metrics", {}), "source_provider": self.provider_name}
-        return payload
+        return sanitize_script_text(payload)
 
     def generate_visual_contract(self, script: dict[str, Any]) -> dict[str, Any]:
         prompt = f"""
@@ -1225,7 +1248,7 @@ Sem markdown.
             "repair_provider": self.provider_name,
             "repair_reasons": gate_reasons,
         }
-        return payload
+        return sanitize_script_text(payload)
 
     def audit_publish_package(self, payload: dict[str, Any]) -> dict[str, Any]:
         prompt = f"""
