@@ -65,7 +65,7 @@ def test_llm_defaults_match_quality_first_routing_policy() -> None:
     assert defaults["llm_script_draft_provider"] == "deepseek"
     assert defaults["llm_repair_provider"] == "openai"
     assert defaults["llm_repair_model"] == "gpt-5.6-luna"
-    assert defaults["llm_repair_reasoning_effort"] == "max"
+    assert defaults["llm_repair_reasoning_effort"] == "high"
     assert defaults["llm_repair_timeout_sec"] == 360.0
     assert defaults["llm_scene_provider"] == "openai"
     assert defaults["llm_fallback_provider"] == "deepseek"
@@ -1549,6 +1549,9 @@ def test_real_text_provider_uses_isolated_microdrama_script_prompt(monkeypatch) 
     assert "MICRODRAMA FICCIONAL ORIGINAL" in prompts[0]
     assert "roteiro viral de curiosidades" not in prompts[0]
     assert "288 a 324 palavras" in prompts[0]
+    assert "body_beats, juntos, devem somar pelo menos 220 palavras" in prompts[0]
+    assert "loop deve aparecer exatamente uma vez em full_narration" in prompts[0]
+    assert "NAO RETORNE o JSON" in prompts[0]
     assert "hook_score" in prompts[0]
     assert "clarity_score" in prompts[0]
     assert "information_density_score" in prompts[0]

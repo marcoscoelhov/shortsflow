@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     llm_fallback_provider: str = "deepseek"
     llm_repair_provider: str = "openai"
     llm_repair_model: str | None = "gpt-5.6-luna"
-    llm_repair_reasoning_effort: str = "max"
+    llm_repair_reasoning_effort: str = "high"
     llm_repair_timeout_sec: float = 360.0
     llm_scene_provider: str = "openai"
     llm_enable_fallback: bool = True
