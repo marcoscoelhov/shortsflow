@@ -637,12 +637,11 @@ def test_orchestrator_create_job_rejects_unsupported_niche() -> None:
         raise AssertionError("expected ValidationError")
 
 
-@pytest.mark.parametrize("niche_id", ["curiosidades", "survival_decisions"])
-def test_long_form_duration_is_restricted_to_microdrama_regardless_of_field_order(niche_id: str) -> None:
+def test_long_form_duration_is_restricted_to_microdrama_regardless_of_field_order() -> None:
     payload = {
         "seed_theme": "Uma pauta manual",
         "target_duration_sec": 120,
-        "niche_id": niche_id,
+        "niche_id": "curiosidades",
         "job_origin": "manual_theme",
         "creation_via": "api",
     }
@@ -650,7 +649,7 @@ def test_long_form_duration_is_restricted_to_microdrama_regardless_of_field_orde
     with pytest.raises(ValidationError, match="only supported for fiction_microdrama"):
         TopicRequestCreate.model_validate(payload)
 
-    reordered = {"niche_id": niche_id, "target_duration_sec": 120, "seed_theme": "Uma pauta manual"}
+    reordered = {"niche_id": "curiosidades", "target_duration_sec": 120, "seed_theme": "Uma pauta manual"}
     with pytest.raises(ValidationError, match="only supported for fiction_microdrama"):
         TopicRequestCreate.model_validate(reordered)
 

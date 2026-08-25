@@ -75,8 +75,6 @@ def _shared_template_context(request: Request) -> dict[str, object]:
     niche_id = getattr(request.state, "editorial_lane_niche", None)
     if niche_id is None and request.url.path.startswith("/microdramas"):
         niche_id = "fiction_microdrama"
-    elif niche_id is None and request.url.path.startswith("/experimentos"):
-        niche_id = "survival_decisions"
     elif niche_id is None and request.url.path == "/jobs":
         niche_id = request.query_params.get("niche")
     try:
@@ -442,34 +440,6 @@ def microdrama_jobs_page(
     return _render_jobs_lane(
         request,
         editorial_lane_for_niche("fiction_microdrama"),
-        status=status,
-        search=search,
-        fallback=fallback,
-        review=review,
-        origin=origin,
-        via=via,
-        page=page,
-        per_page=per_page,
-        deleted_job=deleted_job,
-    )
-
-
-@app.get("/experimentos", response_class=HTMLResponse)
-def experiment_jobs_page(
-    request: Request,
-    status: str | None = Query(default=None),
-    search: str | None = Query(default=None),
-    fallback: str | None = Query(default=None),
-    review: str | None = Query(default=None),
-    origin: str | None = Query(default=None),
-    via: str | None = Query(default=None),
-    page: int = Query(default=1),
-    per_page: int = Query(default=HUB_JOBS_PER_PAGE),
-    deleted_job: str | None = Query(default=None),
-):
-    return _render_jobs_lane(
-        request,
-        editorial_lane_for_niche("survival_decisions"),
         status=status,
         search=search,
         fallback=fallback,

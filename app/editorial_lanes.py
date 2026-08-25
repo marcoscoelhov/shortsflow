@@ -54,31 +54,14 @@ EDITORIAL_LANES = (
         theme_placeholder="Ex.: a carta da mãe que chegou vinte anos tarde.",
         allows_automatic_topic=False,
     ),
-    EditorialLane(
-        slug="experimentos",
-        niche_id="survival_decisions",
-        label="Experimentos",
-        route="/experimentos",
-        queue_title="Fila de experimentos",
-        description="Cenários ficcionais controlados, sempre manuais e fora da publicação automática.",
-        default_duration_sec=45,
-        minimum_duration_sec=35,
-        maximum_duration_sec=55,
-        tone="narrativo_misterioso",
-        tone_label="Narrativo misterioso",
-        theme_placeholder="Ex.: duas escolhas impossíveis em um cenário explicitamente fictício.",
-        allows_automatic_topic=False,
-    ),
 )
 
 _LANES_BY_NICHE = {lane.niche_id: lane for lane in EDITORIAL_LANES}
+_COSMOS_LANE = EDITORIAL_LANES[0]
 
 
 def editorial_lane_for_niche(niche_id: str) -> EditorialLane:
-    try:
-        return _LANES_BY_NICHE[niche_id]
-    except KeyError as exc:
-        raise ValueError(f"unsupported editorial lane niche: {niche_id}") from exc
+    return _LANES_BY_NICHE.get(niche_id, _COSMOS_LANE)
 
 
 def editorial_lanes_context() -> list[dict[str, object]]:

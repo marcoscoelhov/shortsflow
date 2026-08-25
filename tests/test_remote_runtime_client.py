@@ -88,21 +88,6 @@ def test_remote_microdrama_submission_preserves_editorial_lane() -> None:
     assert b"requested_angle=A+filha+descobre+quem+escondeu+as+cartas." in body
 
 
-def test_remote_experiment_submission_uses_its_editorial_tone() -> None:
-    transport = FakeTransport([FakeResponse(status=303, headers={"location": "/jobs/experiment-123"})])
-    client = RemoteRuntimeClient("https://staging.example.ts.net", transport=transport)
-
-    client.submit_job(
-        theme="Duas escolhas impossíveis na montanha",
-        target_duration_sec=45,
-        niche_id="survival_decisions",
-    )
-
-    body = transport.requests[0][3] or b""
-    assert b"niche_id=survival_decisions" in body
-    assert b"tone=narrativo_misterioso" in body
-
-
 def test_remote_submission_rejects_duration_outside_editorial_lane() -> None:
     transport = FakeTransport([])
     client = RemoteRuntimeClient("https://staging.example.ts.net", transport=transport)

@@ -31,7 +31,6 @@ from app.quality.llm_judge import (
     build_growth_judge_payload,
     build_metadata_judge_payload,
 )
-from app.survival_experiment import extract_survival_choice_labels
 from app.utils import iso_now, stable_hash, word_tokens
 
 
@@ -975,11 +974,8 @@ class MonetizationPipeline(BasePipeline):
         publication_schedule = session.scalar(select(PublicationSchedule).where(PublicationSchedule.job_id == job.job_id))
         topic_plan = session.scalar(select(TopicPlan).where(TopicPlan.job_id == job.job_id))
         niche_id = request.niche_id if request else job.niche_id
-        survival_decisions = niche_id == "survival_decisions"
         microdrama = niche_id == MICRODRAMA_NICHE_ID
         title = self.build_publish_title(job, request, script)
-        if survival_decisions:
-            title = self._survival_publish_title(request, title)
         fact_pack = self.read_job_json(job.job_id, "fact_pack.json")
         if microdrama:
             fact_pack = self.normalize_microdrama_fact_pack_policy(fact_pack)
@@ -991,19 +987,11 @@ class MonetizationPipeline(BasePipeline):
             tags = list(monetization_report["metadata_review"]["suggested_hashtags"])
         ai_notice = monetization_report.get("ai_disclosure", {}).get("description_notice")
         overrides = self.read_publish_metadata_overrides(job.job_id)
-        if survival_decisions:
-            tags = ["#shorts", "#sobrevivencia", "#decisao", "#ficcao"]
-        elif overrides.get("title"):
+        if overrides.get("title"):
             title = str(overrides["title"])
-        if not survival_decisions and overrides.get("hashtags"):
+        if overrides.get("hashtags"):
             tags = list(overrides["hashtags"])
-        if survival_decisions:
-            description_lines = ["Cenário ficcional: qual decisão você tomaria?"]
-            if ai_notice:
-                description_lines.append(str(ai_notice).strip())
-            description_lines.append(" ".join(tags))
-            description = "\n\n".join(description_lines)
-        elif microdrama:
+        if microdrama:
             description = self.build_publish_description(
                 topic_plan,
                 script,
@@ -1014,7 +1002,7 @@ class MonetizationPipeline(BasePipeline):
             )
         else:
             description = self.build_publish_description(topic_plan, script, title, tags, ai_notice)
-        if not survival_decisions and overrides.get("description"):
+        if overrides.get("description"):
             description = str(overrides["description"])
         checklist = self.build_quality_checklist(job)
         minimax_audit = self.provider_publish_audit(script_artifact, fact_pack, tags, job.job_id)
@@ -1036,7 +1024,7 @@ class MonetizationPipeline(BasePipeline):
             "title": title[:100],
             "description": description[:4900],
             "hashtags": list(dict.fromkeys(tags)),
-            "category": "Entertainment" if survival_decisions or microdrama else "Education",
+            "category": "Entertainment" if microdrama else "Education",
             "language": job.language,
             "video_uri": render.video_uri if render else None,
             "poster_uri": render.poster_uri if render else None,
@@ -1126,39 +1114,6 @@ class MonetizationPipeline(BasePipeline):
         raw_title = script.title if script else (request.seed_theme if request else job.topic_summary or job.job_id)
         normalized = re.sub(r"\s+", " ", str(raw_title or "").strip())
         return normalized[:100] or job.job_id
-
-    def _survival_publish_title(self, request: TopicRequest | None, current_title: str) -> str:
-        seed = str(request.seed_theme if request else "")
-        choices = extract_survival_choice_labels(seed)
-        normalized_current = " ".join(str(current_title or "").split()).strip()
-        unresolved_question = bool(
-            re.search(r"\bou\b[^?]*\?$", normalized_current, flags=re.IGNORECASE)
-            and not self._survival_title_has_spoiler(normalized_current)
-        )
-        if choices is None:
-            return normalized_current if unresolved_question else "Decisão impossível: QUAL VOCÊ ESCOLHE?"
-        if unresolved_question:
-            return normalized_current
-        title_stem = normalized_current.split(":", 1)[0].rstrip(" .!?") if ":" in normalized_current else ""
-        if not title_stem or self._survival_title_has_spoiler(title_stem):
-            title_stem = "Decisão impossível"
-        suffix = f": {choices[0]} OU {choices[1]}?"
-        stem_budget = 100 - len(suffix)
-        title_stem = title_stem[:stem_budget].rstrip()
-        if len(title_stem) == stem_budget and " " in title_stem:
-            title_stem = title_stem.rsplit(" ", 1)[0].rstrip()
-        return f"{title_stem or 'Decisão impossível'}{suffix}"
-
-    def _survival_title_has_spoiler(self, title: str) -> bool:
-        normalized = "".join(
-            character for character in unicodedata.normalize("NFKD", title.casefold()) if not unicodedata.combining(character)
-        )
-        return bool(
-            re.search(
-                r"\b(?:resposta|revela|revelada|correta|certa|errada|vence|vencedor|solucao|resultado)\b|\bsaida\s+real\b",
-                normalized,
-            )
-        )
 
     def build_publish_description(
         self,

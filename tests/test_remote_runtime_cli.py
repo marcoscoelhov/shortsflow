@@ -127,37 +127,3 @@ def test_validate_command_submits_long_form_microdrama_lane(monkeypatch, capsys)
         "requested_angle": "A filha descobre quem escondeu as cartas.",
     }
     assert "job-123" in capsys.readouterr().out
-
-
-def test_validate_command_uses_experiment_lane_defaults(monkeypatch, capsys) -> None:
-    FakeClient.instances.clear()
-    monkeypatch.setattr(cli, "RemoteRuntimeClient", FakeClient)
-    monkeypatch.setattr(cli, "current_revision", lambda: "abc123")
-    monkeypatch.setattr(
-        cli,
-        "get_settings",
-        lambda: SimpleNamespace(
-            remote_production_url="https://prod.example.ts.net",
-            remote_staging_url="https://staging.example.ts.net",
-        ),
-    )
-
-    cli.main(
-        [
-            "validate",
-            "--theme",
-            "Duas escolhas impossíveis na montanha",
-            "--niche",
-            "survival_decisions",
-        ]
-    )
-
-    client = FakeClient.instances[0]
-    assert client.required_revision == ("abc123", "staging")
-    assert client.submitted == {
-        "theme": "Duas escolhas impossíveis na montanha",
-        "target_duration_sec": 45,
-        "niche_id": "survival_decisions",
-        "requested_angle": None,
-    }
-    assert "job-123" in capsys.readouterr().out

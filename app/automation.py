@@ -72,7 +72,6 @@ from app.models import (
     TopicRequest,
 )
 from app.schemas import TopicRequestCreate
-from app.survival_experiment import SURVIVAL_NICHE_ID
 from app.utils import new_id, stable_hash, utcnow
 
 
@@ -1177,7 +1176,7 @@ class AutomationService:
             if not job:
                 raise KeyError(job_id)
             topic_request = session.scalar(select(TopicRequest).where(TopicRequest.job_id == job_id))
-            if topic_request and topic_request.niche_id in {SURVIVAL_NICHE_ID, MICRODRAMA_NICHE_ID}:
+            if topic_request and topic_request.niche_id == MICRODRAMA_NICHE_ID:
                 raise RuntimeError(f"{topic_request.niche_id}_requires_human_publication_decision")
             if job.status == JOB_STATUS_READY_FOR_UPLOAD:
                 pass

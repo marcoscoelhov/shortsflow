@@ -19,13 +19,13 @@ from app.microdrama_pilot import (
     MICRODRAMA_PILOT_DURATION_SEC,
     build_microdrama_pilot_plan,
     get_microdrama_pilot,
+    microdrama_policy_notes,
 )
 from app.niche_classification import classify_niche_contract
 from app.editorial.topic_mode import resolve_editorial_mode
 from app.models import ChannelPublication, Job, PublicationSchedule, RetentionExperiment, RetentionExperimentAssignment, TopicRequest
 from app.orchestrator import JobOrchestrator, RecoverableStepError
 from app.schemas import TopicRequestCreate
-from app.survival_experiment import select_niche_policy
 
 
 def test_microdrama_request_accepts_manual_creation_and_restores_policy_notes() -> None:
@@ -744,11 +744,10 @@ def test_microdrama_start_cli_is_idempotent_and_creates_only_three_canaries(caps
 
 
 def test_microdrama_is_part_of_public_niche_policy_contract() -> None:
-    policy = select_niche_policy(MICRODRAMA_NICHE_ID)
+    notes = microdrama_policy_notes()
 
-    assert policy.niche_id == MICRODRAMA_NICHE_ID
-    assert policy.hypothetical is True
-    assert "human_review_required=true" in policy.policy_notes
+    assert "human_review_required=true" in notes
+    assert "fictional_scenario=true" in notes
 
 
 def _table_counts() -> tuple[int, int, int]:

@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db import session_scope
-from app.models import BackgroundMusicAsset, FallbackEvent, Job, NarrationAsset, SceneAsset, ScenePlan, Script, SubtitleTrack, TopicPlan, TopicRequest
+from app.models import BackgroundMusicAsset, FallbackEvent, Job, NarrationAsset, SceneAsset, ScenePlan, Script, SubtitleTrack, TopicPlan
 from app.pipelines.common import RecoverableStepError, model_payload
 from app.pipelines.base import BasePipeline
 from app.quality.llm_judge import build_visual_judge_payload
@@ -21,7 +21,6 @@ from app.pipelines.subtitle_assets import SubtitleDomain
 from app.pipelines.timeline import normalize_scene_timings
 from app.pipelines.tts_assets import TTSDomain, tts_duration_bounds_ms
 from app.quality.background_music_gate import BackgroundMusicGate
-from app.traction_pilot import build_programmatic_pilot_asset
 from app.utils import file_uri, new_id, parse_srt, path_from_uri, stable_hash, utcnow, word_tokens
 
 
@@ -249,34 +248,6 @@ class AssetPipeline(BasePipeline):
         fallback_used = False
         primary_provider = "minimax"
         variant_cursor = 0
-        with session_scope() as lookup_session:
-            request = lookup_session.scalar(select(TopicRequest).where(TopicRequest.job_id == job_id))
-            request_notes = str(request.notes or "") if request else ""
-        concept_marker = "experiment_concept_id="
-        concept_id = ""
-        if concept_marker in request_notes:
-            concept_id = request_notes.split(concept_marker, 1)[1].splitlines()[0].strip()
-        programmatic_asset = build_programmatic_pilot_asset(
-            concept_id,
-            scene,
-            scene_dir / "programmatic.png",
-        )
-        if programmatic_asset is not None:
-            programmatic_scores = self.image_assets.score_asset(scene, programmatic_asset)
-            candidates.append((programmatic_asset, programmatic_scores))
-            primary_provider = "programmatic"
-            events.append(
-                (
-                    "asset.programmatic_candidate_scored",
-                    "succeeded",
-                    {
-                        "scene_id": scene["scene_id"],
-                        "provider": "programmatic",
-                        "semantic_match": programmatic_scores["semantic_match"],
-                        "total_score": programmatic_scores["total_score"],
-                    },
-                )
-            )
         for regeneration_round in range(1, max(1, self.settings.asset_generation_regeneration_rounds) + 1):
             if any(self.image_assets.asset_scores_pass(scores) for _, scores in candidates):
                 break

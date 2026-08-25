@@ -11,8 +11,6 @@ from app.microdrama_pilot import build_microdrama_pilot_plan, start_microdrama_p
 from app.remote_runtime import RemoteRuntimeClient, current_revision, resume_deployed_revision
 from app.runtime_execution import assert_real_execution_location
 from app.schemas import SUPPORTED_NICHES
-from app.survival_experiment import build_survival_cohort_plan
-from app.traction_pilot import start_traction_pilot
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -46,12 +44,6 @@ def main(argv: list[str] | None = None) -> None:
     import_parser = subparsers.add_parser("import-ready-scripts", help="Importa lote de roteiros prontos")
     import_parser.add_argument("path", type=Path, help="Arquivo txt/md com roteiros rotulados")
 
-    survival_parser = subparsers.add_parser(
-        "survival-cohort-plan",
-        help="Gera plano JSON seco de 6 cenários do experimento survival_decisions",
-    )
-    survival_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para seleção determinística")
-
     microdrama_plan_parser = subparsers.add_parser(
         "microdrama-pilot-plan",
         help="Imprime o plano JSON seco do piloto de microdramas",
@@ -63,13 +55,6 @@ def main(argv: list[str] | None = None) -> None:
         help="Persiste o piloto de microdramas e cria três canários sem publicar",
     )
     microdrama_start_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para ordem determinística")
-
-    pilot_parser = subparsers.add_parser(
-        "pilot-10k-start",
-        help="Persiste o piloto A/B/C e cria os três canários sem publicar",
-    )
-    pilot_parser.add_argument("--seed", type=int, required=True, help="Seed inteira para ordem determinística")
-    pilot_parser.add_argument("--process", action="store_true", help="Gera e renderiza os três canários")
 
     for command, help_text in (
         ("job", "Cria um job real na producao remota"),
@@ -131,9 +116,6 @@ def main(argv: list[str] | None = None) -> None:
         )
         print(json.dumps({"branch": branch, "repo": str(args.repo.resolve()), "status": "ready"}, indent=2))
         return
-    if args.command == "survival-cohort-plan":
-        print(json.dumps(build_survival_cohort_plan(seed=args.seed), ensure_ascii=False, indent=2))
-        return
     if args.command == "microdrama-pilot-plan":
         print(json.dumps(build_microdrama_pilot_plan(seed=args.seed), ensure_ascii=False, indent=2))
         return
@@ -157,19 +139,6 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "microdrama-pilot-start":
         result = start_microdrama_pilot(orchestrator, seed=args.seed)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "pilot-10k-start":
-        result = start_traction_pilot(orchestrator, seed=args.seed, canary_count=3)
-        processed = 0
-        if args.process:
-            if runtime_settings.use_mock_providers:
-                parser.error("o piloto real não aceita mock providers")
-            for canary in result["canaries"]:
-                orchestrator.process_job(str(canary["job_id"]))
-                processed += 1
-        result["processed_job_count"] = processed
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
