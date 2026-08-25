@@ -284,12 +284,13 @@ Defaults importantes:
 - `niche_id=curiosidades`
 - `language=pt-BR`
 - `target_duration_sec=50`
-- `llm_primary_provider=openai` com `openai_model=gpt-5.6-luna` e `openai_reasoning_effort=high`
+- `llm_primary_provider=openai` com `openai_model=gpt-5.6-luna` e `openai_reasoning_effort=max`
 - `llm_repair_provider=openai` com `llm_repair_model=gpt-5.6-luna`, `llm_repair_reasoning_effort=max` e `llm_repair_timeout_sec=360`
+- `llm_script_draft_provider=deepseek` com `llm_script_reasoning_effort=high` e `deepseek_model=deepseek-v4-flash`
 - `llm_fallback_provider=deepseek` com `llm_enable_fallback=true`, `deepseek_base_url=https://opencode.ai/zen/go/v1` e `deepseek_model=deepseek-v4-flash`
 - `llm_gate_judge_provider=xai`
-- `llm_gate_judge_model=kimi-k2.6` via `xai_base_url=https://opencode.ai/zen/go/v1`
-- `automatic_topic` gera um único lote de 10 drafts no Luna (ou um lote substituto no DeepSeek em caso de falha), bloqueia repetições e só então o Kimi K2.6 ranqueia os 10 e escolhe o único draft que seguirá para roteiro e mídia
+- `llm_gate_judge_model=grok-4.5` via `xai_base_url=https://opencode.ai/zen/go/v1` (Responses API no OpenCode Go)
+- `automatic_topic` gera pautas no Luna (com DeepSeek como substituto em caso de falha), bloqueia repetições e só então o Grok 4.5 ranqueia e escolhe a pauta que seguirá; para microdrama, o rascunho de roteiro é primariamente DeepSeek V4 Flash (high) com Luna como contingência e o mesmo Grok 4.5 como juiz dos tracks
 - `llm_premium_review_enabled=true`
 - `llm_premium_review_provider=deepseek`
 - `llm_premium_review_model=deepseek-v4-pro` apenas para exceções: revisão premium/final, tema complexo ou sinal explícito de escalonamento.

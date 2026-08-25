@@ -43,8 +43,17 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
             timeout=self.timeout_sec,
         )
 
-    def _json_completion(self, prompt: str, *, max_tokens: int | None = None) -> Any:
+    def _json_completion(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Any:
         settings = llm_facade.get_settings()
+        request_kwargs: dict[str, Any] = {}
+        if reasoning_effort:
+            request_kwargs["reasoning_effort"] = reasoning_effort
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
@@ -56,6 +65,7 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
                 temperature=0.7,
                 max_tokens=int(max_tokens if max_tokens is not None else (getattr(settings, "llm_json_max_tokens", 4096) or 4096)),
                 timeout=self.timeout_sec,
+                **request_kwargs,
             )
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
@@ -76,6 +86,10 @@ class DeepSeekCreativeProvider(MinimaxCreativeProvider):
                     pass
             raise ProviderFailure(self.failure_provider_name, f"invalid json: {raw[:300]}") from exc
 
+    def _microdrama_json_completion(self, prompt: str, *, max_tokens: int) -> Any:
+        settings = llm_facade.get_settings()
+        effort = str(getattr(settings, "llm_script_reasoning_effort", "high") or "high").strip().lower()
+        return self._json_completion(prompt, max_tokens=max_tokens, reasoning_effort=effort)
 
     def _json_array_completion(self, prompt: str) -> Any:
         settings = llm_facade.get_settings()
@@ -246,7 +260,7 @@ class OpenAICreativeProvider(MinimaxCreativeProvider):
 
     def _microdrama_json_completion(self, prompt: str, *, max_tokens: int) -> Any:
         settings = llm_facade.get_settings()
-        effort = str(getattr(settings, "llm_script_reasoning_effort", "low") or "low").strip().lower()
+        effort = str(getattr(settings, "llm_script_reasoning_effort", "high") or "high").strip().lower()
         return self._json_completion(prompt, max_tokens=max_tokens, reasoning_effort=effort)
 
     def _json_array_completion(self, prompt: str) -> Any:
@@ -301,16 +315,20 @@ class XAICreativeProvider(MinimaxCreativeProvider):
     provider_name = "xai"
     failure_provider_name = "xai_text"
 
+    _OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
+    _OPENCODE_GO_RESPONSES_MODELS = frozenset({"grok-4.5"})
+
     def __init__(self) -> None:
         settings = llm_facade.get_settings()
         base_url = str(settings.xai_base_url).rstrip("/")
-        uses_opencode_go = base_url == "https://opencode.ai/zen/go/v1"
+        uses_opencode_go = base_url == self._OPENCODE_GO_BASE_URL
         api_key = getattr(settings, "openai_api_key", None) if uses_opencode_go else settings.xai_api_key
         if not api_key:
             raise ProviderFailure(self.failure_provider_name, "missing xai api key")
         self.timeout_sec = settings.xai_timeout_sec
         self.model_name = settings.xai_model
         self.reasoning_effort: Any = str(getattr(settings, "xai_reasoning_effort", "high") or "high").strip().lower()
+        self.use_responses_api = uses_opencode_go and self.model_name in self._OPENCODE_GO_RESPONSES_MODELS
         self.client = llm_facade.OpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -326,21 +344,41 @@ class XAICreativeProvider(MinimaxCreativeProvider):
     ) -> Any:
         settings = llm_facade.get_settings()
         resolved_reasoning_effort = reasoning_effort or self.reasoning_effort
+        resolved_max_tokens = int(max_tokens if max_tokens is not None else (getattr(settings, "llm_json_max_tokens", 4096) or 4096))
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": "Return ONLY the final JSON object. No reasoning, prose, or markdown fences."},
-                    {"role": "user", "content": prompt},
-                ],
-                response_format={"type": "json_object"},
-                reasoning_effort=resolved_reasoning_effort,
-                max_tokens=int(max_tokens if max_tokens is not None else (getattr(settings, "llm_json_max_tokens", 4096) or 4096)),
-                timeout=self.timeout_sec,
-            )
+            if getattr(self, "use_responses_api", False):
+                # Grok 4.5 via OpenCode Go /responses: text.format json_object
+                # devolve {} vazio e chat.completions retorna 503. Instrucao
+                # estrita + parser JSON lida com fences e markup.
+                response = self.client.responses.create(
+                    model=self.model_name,
+                    instructions="Return ONLY the final JSON object. No reasoning, prose, or markdown fences.",
+                    input=prompt,
+                    reasoning={"effort": resolved_reasoning_effort},
+                    max_output_tokens=resolved_max_tokens,
+                    timeout=self.timeout_sec,
+                )
+                raw = getattr(response, "output_text", None)
+                if not isinstance(raw, str):
+                    raise ProviderFailure(self.failure_provider_name, "malformed Responses API output: output_text must be text")
+                raw = raw.strip()
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": "Return ONLY the final JSON object. No reasoning, prose, or markdown fences."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    reasoning_effort=resolved_reasoning_effort,
+                    max_tokens=resolved_max_tokens,
+                    timeout=self.timeout_sec,
+                )
+                raw = _chat_completion_content(response, self.failure_provider_name)
+        except ProviderFailure:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise ProviderFailure(self.failure_provider_name, str(exc)) from exc
-        raw = _chat_completion_content(response, self.failure_provider_name)
         if not raw:
             raise ProviderFailure(self.failure_provider_name, "empty text response")
         raw = self._strip_think(raw)
@@ -359,7 +397,7 @@ class XAICreativeProvider(MinimaxCreativeProvider):
 
     def _microdrama_json_completion(self, prompt: str, *, max_tokens: int) -> Any:
         settings = llm_facade.get_settings()
-        effort = str(getattr(settings, "llm_script_reasoning_effort", "low") or "low").strip().lower()
+        effort = str(getattr(settings, "llm_script_reasoning_effort", "high") or "high").strip().lower()
         return self._json_completion(prompt, max_tokens=max_tokens, reasoning_effort=effort)
 
 
