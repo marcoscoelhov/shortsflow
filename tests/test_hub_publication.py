@@ -578,26 +578,8 @@ Hashtags: #curiosidades #shorts""",
     assert [item["source"] for item in run_result["metadata"]["scheduled_jobs"]] == ["ready_script_bank", "automatic_topic"]
 
 
-def test_automatic_topic_discards_factual_strict_scout_candidate(monkeypatch) -> None:
+def test_automatic_topic_discards_factual_strict_scout_candidate() -> None:
     service = AutomationService(orchestrator)
-
-    class FakeTrend:
-        topic = "Por que o cérebro sente vibração fantasma do celular?"
-        requested_angle = "Explicar mecanismo cerebral e expectativa sensorial."
-
-        def as_notes(self) -> str:
-            return "trend_source=test"
-
-    class FakeScoutResult:
-        candidate = FakeTrend()
-        considered_count = 1
-        rejected_recent_count = 0
-
-    class FakeTopicScout:
-        def find_topic(self, *_args, **_kwargs):
-            return FakeScoutResult()
-
-    monkeypatch.setattr("app.automation.TopicScout", FakeTopicScout)
 
     payload = service._automatic_topic_payload()
 

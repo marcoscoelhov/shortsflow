@@ -74,7 +74,6 @@ from app.models import (
 )
 from app.schemas import TopicRequestCreate
 from app.survival_experiment import SURVIVAL_NICHE_ID
-from app.topic_scout import TopicScout
 from app.utils import new_id, stable_hash, utcnow
 
 
