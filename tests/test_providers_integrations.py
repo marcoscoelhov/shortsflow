@@ -1650,7 +1650,7 @@ def test_resilient_generate_script_batch_falls_back_per_track() -> None:
         model_name = "gpt-5.6-luna"
 
         def generate_script(self, topic_plan):
-            if str(topic_plan.get("angle")).endswith("variante 2"):
+            if "variante 2." in str(topic_plan.get("angle")):
                 raise ProviderFailure("openai", "track 2 failed")
             return {"title": "primary", "full_narration": "Narração primária", "qa_metrics": {}}
 
