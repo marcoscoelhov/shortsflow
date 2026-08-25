@@ -984,8 +984,10 @@ Contrato narrativo obrigatório:
 - ficção original claramente rotulada; nunca apresente a trama como fato real
 - target_duration_sec={target_duration_sec}; full_narration deve ter {minimum_words} a {maximum_words} palavras
 - body_beats deve conter 8 a 12 itens; cada item deve ter 2 frases curtas, concretas e em escalada
+- body_beats, juntos, devem somar pelo menos 220 palavras; distribua a progressão entre os beats em vez de resumir a história
 - hook deve ter no máximo 8 palavras e abrir com conflito, segredo ou consequência visível
 - loop deve fazer uma pergunta mental específica sem revelar a resposta
+- loop deve aparecer exatamente uma vez em full_narration; não copie nem parafraseie o loop dentro de body_beats
 - payoff deve ocorrer somente no último terço e reinterpretar o início
 - ending deve apontar concretamente de volta ao hook e provocar reassistência
 - full_narration deve concatenar fielmente hook + loop + body_beats + payoff + ending + cta quando houver CTA
@@ -1002,6 +1004,11 @@ Contrato narrativo obrigatório:
 - todos os campos narrados em português do Brasil, sem markdown, SSML, HTML, travessão ou instruções de câmera
 - prompt_version="{EDITORIAL_PROMPT_VERSION}"
 - qa_metrics deve incluir hook_score, clarity_score, information_density_score, repetition_score, ending_strength_score, estimated_duration_sec, word_count, avg_words_per_sentence, max_words_single_sentence, words_per_second, script_gate_pass e editorial_prompt_version
+
+Checklist final obrigatório:
+- conte as palavras de full_narration e os itens de body_beats antes de responder
+- se houver menos de {minimum_words} palavras ou menos de 8 body_beats, expanda a escalada com novas ações, pistas, decisões e consequências
+- NAO RETORNE o JSON enquanto full_narration não tiver {minimum_words} a {maximum_words} palavras e body_beats não tiver 8 a 12 itens
 """
 
     def generate_script_batch(self, topic_plan: dict[str, Any], draft_count: int) -> dict[str, Any]:
