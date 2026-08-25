@@ -144,12 +144,25 @@ class ScriptRepairDomain(BasePipeline):
         enriched["qa_metrics"] = metrics
         return enriched
 
+    def _estimated_duration_from_narration(self, narration: str, *, target_duration_sec: int) -> float:
+        words = len(word_tokens(str(narration or "")))
+        raw = (words / 2.55) if words else 0.0
+        max_sec = 175.0 if int(target_duration_sec) > 55 else 55.0
+        return round(max(35.0, min(max_sec, raw)), 2)
+
     def _postprocess_script_for_quality(
         self,
         script: dict[str, Any],
         plan_dict: dict[str, Any],
         gate_reasons: list[str],
+        *,
+        target_duration_sec: int | None = None,
     ) -> dict[str, Any]:
+        resolved_target = int(target_duration_sec or 0)
+        if resolved_target <= 0:
+            resolved_target = int((plan_dict.get("retention_map") or {}).get("target_duration_sec") or 0)
+        if resolved_target <= 0:
+            resolved_target = 45
         processed = self._repair_common_script_text_issues(dict(script))
         processed = self._restore_script_from_retention_map(processed)
         processed = self._normalize_script_visible_text(processed)
@@ -171,7 +184,10 @@ class ScriptRepairDomain(BasePipeline):
         processed = self._sanitize_source_fact_ids(processed, fact_pack)
         processed = self._attach_claim_trace(processed, fact_pack)
         processed = self._dedupe_trailing_repeated_sentence(processed)
-        processed["estimated_duration_sec"] = round(max(35.0, min(55.0, len(word_tokens(str(processed.get("full_narration") or ""))) / 2.55)), 2)
+        processed["estimated_duration_sec"] = self._estimated_duration_from_narration(
+            str(processed.get("full_narration") or ""),
+            target_duration_sec=resolved_target,
+        )
         processed = self._sync_retention_map_to_script(processed)
         processed["token_count"] = len(tokenize(str(processed.get("full_narration") or "")))
         return processed
@@ -765,7 +781,7 @@ class ScriptRepairDomain(BasePipeline):
             return self._validate_ready_script_without_repair(script, plan_dict, target_duration_sec)
 
         script = self._apply_cta_policy(dict(script), cta_style)
-        script = self._postprocess_script_for_quality(script, plan_dict, [])
+        script = self._postprocess_script_for_quality(script, plan_dict, [], target_duration_sec=target_duration_sec)
         script["qa_metrics"] = normalize_script_metrics(dict(script.get("qa_metrics") or {}))
         topic_plan_ctx, request_ctx = self._gate_context_from_plan(plan_dict)
         gate_result = self.script_gate.validate(
@@ -850,7 +866,7 @@ class ScriptRepairDomain(BasePipeline):
                 )
                 continue
             repaired = self._apply_cta_policy(repaired, cta_style)
-            repaired = self._postprocess_script_for_quality(repaired, plan_dict, last_reasons)
+            repaired = self._postprocess_script_for_quality(repaired, plan_dict, last_reasons, target_duration_sec=target_duration_sec)
             repaired["qa_metrics"] = normalize_script_metrics(dict(repaired.get("qa_metrics") or {}))
             repaired_gate = self.script_gate.validate(
                 repaired,
@@ -889,7 +905,7 @@ class ScriptRepairDomain(BasePipeline):
             last_reasons = [*last_reasons, f"script_repair_fallback_failed:{type(exc).__name__}"]
         if fallback_repaired is not None:
             fallback_repaired = self._apply_cta_policy(fallback_repaired, cta_style)
-            fallback_repaired = self._postprocess_script_for_quality(fallback_repaired, plan_dict, last_reasons)
+            fallback_repaired = self._postprocess_script_for_quality(fallback_repaired, plan_dict, last_reasons, target_duration_sec=target_duration_sec)
             fallback_repaired["qa_metrics"] = normalize_script_metrics(dict(fallback_repaired.get("qa_metrics") or {}))
             fallback_gate = self.script_gate.validate(
                 fallback_repaired,

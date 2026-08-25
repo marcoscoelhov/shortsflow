@@ -603,7 +603,7 @@ class MockCreativeProvider:
             narration = " ".join(f"{sentence.rstrip('.!?')}." for sentence in shortened_sentences if sentence).strip()
         repaired["full_narration"] = narration
         repaired["language"] = "pt-BR"
-        repaired["estimated_duration_sec"] = round(max(35.0, min(55.0, len(word_tokens(narration)) / 2.55)), 2)
+        repaired["estimated_duration_sec"] = round(min(175.0, max(35.0, len(word_tokens(narration)) / 2.55)), 2)
         repaired["token_count"] = len(tokenize(narration))
         metrics = dict(repaired.get("qa_metrics") or {})
         metrics.update(

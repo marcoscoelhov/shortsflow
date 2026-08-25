@@ -4966,6 +4966,97 @@ def test_script_gate_accepts_long_form_microdrama_120s() -> None:
     assert result.metrics["natural_max_words"] == 324
 
 
+def test_postprocess_script_keeps_long_form_duration_from_narration() -> None:
+    words = [f"palavra{i}" for i in range(290)]
+    padding = " ".join(words) + "."
+    hook = "Ninguém sabia o nome da carta."
+    loop = "Mas por que a carta foi escondida?"
+    body_beats = [padding]
+    payoff = "O segredo era a identidade do sócio."
+    ending = "Olha de novo a primeira cena e o nome da carta."
+    narration = " ".join([hook, loop, padding, payoff, ending])
+    script = {
+        "title": "O segredo escondido no paletó",
+        "hook": hook,
+        "loop": loop,
+        "body_beats": body_beats,
+        "payoff": payoff,
+        "ending": ending,
+        "cta": None,
+        "full_narration": narration,
+        "estimated_duration_sec": 120.0,
+        "language": "pt-BR",
+        "key_facts": [],
+        "source_fact_ids": [],
+        "claim_trace": [],
+        "retention_map": {
+            "visual_hook": {"text": hook},
+            "proof_or_tension": {"text": loop},
+            "escalation": {"text": f"palavra{20}"},
+            "turn_or_payoff": {"text": payoff},
+            "loop_close": {"text": ending},
+        },
+        "qa_metrics": {
+            "hook_score": 0.92,
+            "clarity_score": 0.9,
+            "information_density_score": 0.85,
+            "repetition_score": 0.2,
+            "ending_strength_score": 0.88,
+        },
+        "story_arc": {
+            "setup": hook,
+            "tension": loop,
+            "turn": payoff,
+            "consequence": ending,
+        },
+    }
+
+    processed = orchestrator.script_pipeline._postprocess_script_for_quality(
+        script,
+        {"canonical_topic": "microdrama", "retention_map": {"target_duration_sec": 120}},
+        [],
+        target_duration_sec=120,
+    )
+
+    assert 100 <= processed["estimated_duration_sec"] <= 140
+    assert processed["estimated_duration_sec"] != 55.0
+
+
+def test_postprocess_script_still_clamps_short_form_to_55() -> None:
+    words = [f"detalhe{i}" for i in range(200)]
+    padding = " ".join(words) + "."
+    hook = "Ninguém percebeu o detalhe no primeiro olhar."
+    loop = "O bolso ainda escondia a resposta."
+    payoff = "O detalhe revela a escolha."
+    ending = "O bolso explica a cena inicial."
+    narration = " ".join([hook, loop, padding, payoff, ending])
+    script = {
+        "title": "O detalhe no bolso muda tudo",
+        "hook": hook,
+        "loop": loop,
+        "body_beats": [padding],
+        "payoff": payoff,
+        "ending": ending,
+        "cta": None,
+        "full_narration": narration,
+        "estimated_duration_sec": 45.0,
+        "language": "pt-BR",
+        "key_facts": [],
+        "source_fact_ids": [],
+        "claim_trace": [],
+        "retention_map": {},
+        "qa_metrics": {},
+    }
+
+    processed = orchestrator.script_pipeline._postprocess_script_for_quality(
+        script,
+        {"canonical_topic": "curiosidade"},
+        [],
+    )
+
+    assert processed["estimated_duration_sec"] <= 55.0
+
+
 def test_script_gate_makes_long_form_structure_and_pacing_contracts_blocking() -> None:
     def script_with(*, word_count: int, beat_count: int, estimated_sec: float) -> dict[str, object]:
         narration = " ".join(f"pista{i}" for i in range(word_count)) + "."
