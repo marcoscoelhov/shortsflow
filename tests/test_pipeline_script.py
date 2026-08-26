@@ -87,7 +87,7 @@ Enquanto isso, ele completa uma volta inteira ao redor do Sol.
 
 def test_hub_ready_script_mode_hides_tone_control() -> None:
     client = TestClient(app)
-    response = client.get("/")
+    response = client.get("/cosmos")
 
     assert response.status_code == 200
     assert '<div class="field" data-mode-section="theme title">\n          <label for="tone">Tom</label>' in response.text

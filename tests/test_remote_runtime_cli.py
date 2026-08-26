@@ -51,7 +51,7 @@ def test_job_command_always_targets_remote_production(monkeypatch, capsys) -> No
         ),
     )
 
-    cli.main(["job", "--theme", "Por que o gelo estala?", "--duration", "35"])
+    cli.main(["job", "--theme", "Por que o gelo estala?", "--niche", "curiosidades", "--duration", "35"])
 
     client = FakeClient.instances[0]
     assert client.base_url == "https://prod.example.ts.net"
@@ -78,7 +78,7 @@ def test_validate_command_checks_staging_revision_before_submission(monkeypatch,
         ),
     )
 
-    cli.main(["validate", "--theme", "Teste remoto", "--duration", "45"])
+    cli.main(["validate", "--theme", "Teste remoto", "--niche", "curiosidades", "--duration", "45"])
 
     client = FakeClient.instances[0]
     assert client.base_url == "https://staging.example.ts.net"
@@ -111,8 +111,6 @@ def test_validate_command_submits_long_form_microdrama_lane(monkeypatch, capsys)
             "validate",
             "--theme",
             "A carta da mãe que chegou vinte anos tarde",
-            "--niche",
-            "fiction_microdrama",
             "--angle",
             "A filha descobre quem escondeu as cartas.",
         ]

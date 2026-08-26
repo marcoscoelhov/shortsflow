@@ -74,6 +74,8 @@ def _shared_template_context(request: Request) -> dict[str, object]:
     niche_id = getattr(request.state, "editorial_lane_niche", None)
     if niche_id is None and request.url.path.startswith("/microdramas"):
         niche_id = "fiction_microdrama"
+    elif niche_id is None and request.url.path.startswith("/cosmos"):
+        niche_id = "curiosidades"
     elif niche_id is None and request.url.path == "/jobs":
         niche_id = request.query_params.get("niche")
     try:
@@ -93,7 +95,7 @@ def _shared_template_context(request: Request) -> dict[str, object]:
 
 templates = Jinja2Templates(directory=str(settings.templates_dir), context_processors=[_shared_template_context])
 
-HUB_DEFAULT_NICHE = "curiosidades"
+HUB_DEFAULT_NICHE = "fiction_microdrama"
 HUB_RETENTION_OPTIMIZED_DURATION_SEC = 45
 HUB_JOBS_PER_PAGE = 4
 
@@ -254,7 +256,7 @@ def _recent_seed_themes(niche_id: str, *, limit: int) -> list[str]:
 
 
 def _default_seed_theme() -> str:
-    return select_cosmos_topics(_recent_seed_themes(HUB_DEFAULT_NICHE, limit=30), count=1)[0].topic
+    return select_cosmos_topics(_recent_seed_themes("curiosidades", limit=30), count=1)[0].topic
 
 
 def _trend_seed_theme(niche_id: str) -> tuple[str, str | None, str | None, dict[str, object] | None]:
@@ -385,6 +387,34 @@ def jobs_page(
     return _render_jobs_lane(
         request,
         editorial_lane_for_niche(HUB_DEFAULT_NICHE),
+        status=status,
+        search=search,
+        fallback=fallback,
+        review=review,
+        origin=origin,
+        via=via,
+        page=page,
+        per_page=per_page,
+        deleted_job=deleted_job,
+    )
+
+
+@app.get("/cosmos", response_class=HTMLResponse)
+def cosmos_jobs_page(
+    request: Request,
+    status: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    fallback: str | None = Query(default=None),
+    review: str | None = Query(default=None),
+    origin: str | None = Query(default=None),
+    via: str | None = Query(default=None),
+    page: int = Query(default=1),
+    per_page: int = Query(default=HUB_JOBS_PER_PAGE),
+    deleted_job: str | None = Query(default=None),
+):
+    return _render_jobs_lane(
+        request,
+        editorial_lane_for_niche("curiosidades"),
         status=status,
         search=search,
         fallback=fallback,

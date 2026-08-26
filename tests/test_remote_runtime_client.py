@@ -46,7 +46,11 @@ def test_remote_job_submission_returns_tailnet_job_url() -> None:
     transport = FakeTransport([FakeResponse(status=303, headers={"location": "/jobs/job-123"})])
     client = RemoteRuntimeClient("https://prod.example.ts.net", transport=transport)
 
-    result = client.submit_job(theme="Por que o gelo estala?", target_duration_sec=45)
+    result = client.submit_job(
+        theme="Por que o gelo estala?",
+        target_duration_sec=45,
+        niche_id="curiosidades",
+    )
 
     assert result.job_id == "job-123"
     assert result.job_url == "https://prod.example.ts.net/jobs/job-123"

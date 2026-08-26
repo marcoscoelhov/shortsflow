@@ -336,6 +336,7 @@ def test_hub_create_job_sends_title_mode_tone_angle_and_seo_notes(monkeypatch) -
         data={
             "input_mode": "title",
             "seed_theme": "Por que polvos parecem alienigenas dos oceanos?",
+            "niche_id": "curiosidades",
             "target_duration_sec": 35,
             "tone": "mito_vs_realidade",
             "requested_angle": "comparacao inesperada",
@@ -1613,14 +1614,18 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     monkeypatch.setattr(main_module.orchestrator, "create_job", fake_create_job)
     client = TestClient(app)
 
-    page = client.get("/")
+    page = client.get("/cosmos")
     assert page.status_code == 200
     assert 'name="niche_id" value="curiosidades"' in page.text
     assert 'name="seed_theme" value=""' in page.text
     assert "Vazio = pesquisar tendências reais" in page.text
     assert 'name="target_duration_sec" type="number" min="35" max="55" value="45"' in page.text
 
-    response = client.post("/jobs", data={"seed_theme": "", "input_mode": "theme"}, follow_redirects=False)
+    response = client.post(
+        "/jobs",
+        data={"seed_theme": "", "input_mode": "theme", "niche_id": "curiosidades"},
+        follow_redirects=False,
+    )
     assert response.status_code == 303
     captured = captured_payloads[-1]
     assert captured["seed_theme"] == "Por que flamingos estão em alta?"
@@ -1631,7 +1636,11 @@ def test_hub_uses_trends_for_empty_theme_and_retention_duration_defaults(monkeyp
     assert captured["niche_id"] == "curiosidades"
     assert captured["target_duration_sec"] == 45
 
-    response = client.post("/jobs", data={"seed_theme": "", "input_mode": "title"}, follow_redirects=False)
+    response = client.post(
+        "/jobs",
+        data={"seed_theme": "", "input_mode": "title", "niche_id": "curiosidades"},
+        follow_redirects=False,
+    )
     assert response.status_code == 303
     captured = captured_payloads[-1]
     assert captured["job_origin"] == "automatic_topic"
@@ -1677,7 +1686,7 @@ def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
             )
         session.commit()
 
-    first_page = client.get("/jobs?search=pagehub&per_page=2&page=1")
+    first_page = client.get("/jobs?niche=curiosidades&search=pagehub&per_page=2&page=1")
     assert first_page.status_code == 200
     assert "pagehub-job-2" in first_page.text
     assert "pagehub-job-1" in first_page.text
@@ -1685,7 +1694,7 @@ def test_hub_jobs_table_supports_pagination_for_older_jobs() -> None:
     assert "Página 1 de 2" in first_page.text
     assert "page=2&amp;per_page=2&amp;niche=curiosidades&amp;search=pagehub" in first_page.text
 
-    second_page = client.get("/jobs?search=pagehub&per_page=2&page=2")
+    second_page = client.get("/jobs?niche=curiosidades&search=pagehub&per_page=2&page=2")
     assert second_page.status_code == 200
     assert "pagehub-job-0" in second_page.text
     assert "pagehub-job-2" not in second_page.text
@@ -1720,25 +1729,31 @@ def test_hub_keeps_editorial_niches_in_separate_lanes() -> None:
         microdrama_request.target_duration_sec = 120
         session.commit()
 
-    cosmos_page = client.get("/")
+    home_page = client.get("/")
+    assert home_page.status_code == 200
+    assert 'data-editorial-lane="microdramas"' in home_page.text
+    assert "Microdrama exclusivo da lane" in home_page.text
+    assert "Cosmos exclusivo da lane" not in home_page.text
+    assert 'href="/cosmos"' in home_page.text
+    assert '<input type="hidden" name="niche_id" value="fiction_microdrama">' in home_page.text
+    assert 'name="target_duration_sec" type="number" min="100" max="150" value="120"' in home_page.text
+    assert "tema explícito" in home_page.text
+    assert "Vazio = pesquisar tendências reais" not in home_page.text
+    assert '/jobs?niche=fiction_microdrama' in home_page.text
+    assert '<select id="niche_id"' not in home_page.text
+
+    cosmos_page = client.get("/cosmos")
     assert cosmos_page.status_code == 200
     assert 'data-editorial-lane="cosmos"' in cosmos_page.text
     assert "Cosmos exclusivo da lane" in cosmos_page.text
     assert "Microdrama exclusivo da lane" not in cosmos_page.text
-    assert 'href="/microdramas"' in cosmos_page.text
+    assert 'href="/"' in cosmos_page.text
     assert '<input type="hidden" name="niche_id" value="curiosidades">' in cosmos_page.text
-    assert '<select id="niche_id"' not in cosmos_page.text
 
-    microdrama_page = client.get("/microdramas")
-    assert microdrama_page.status_code == 200
-    assert 'data-editorial-lane="microdramas"' in microdrama_page.text
-    assert "Microdrama exclusivo da lane" in microdrama_page.text
-    assert "Cosmos exclusivo da lane" not in microdrama_page.text
-    assert '<input type="hidden" name="niche_id" value="fiction_microdrama">' in microdrama_page.text
-    assert 'name="target_duration_sec" type="number" min="100" max="150" value="120"' in microdrama_page.text
-    assert "tema explícito" in microdrama_page.text
-    assert "Vazio = pesquisar tendências reais" not in microdrama_page.text
-    assert '/jobs?niche=fiction_microdrama' in microdrama_page.text
+    microdrama_alias = client.get("/microdramas")
+    assert microdrama_alias.status_code == 200
+    assert 'data-editorial-lane="microdramas"' in microdrama_alias.text
+    assert "Microdrama exclusivo da lane" in microdrama_alias.text
 
 
 def test_microdrama_job_detail_identifies_its_editorial_lane() -> None:
@@ -1765,7 +1780,7 @@ def test_microdrama_job_detail_identifies_its_editorial_lane() -> None:
 
     assert response.status_code == 200
     assert "Linha editorial: Microdramas" in response.text
-    assert 'href="/microdramas"' in response.text
+    assert 'href="/"' in response.text
 
 
 def test_unknown_niche_job_detail_uses_cosmos_display_fallback() -> None:
@@ -1790,7 +1805,7 @@ def test_unknown_niche_job_detail_uses_cosmos_display_fallback() -> None:
 
     assert response.status_code == 200
     assert "Linha editorial: Cosmos" in response.text
-    assert 'href="/"' in response.text
+    assert 'href="/cosmos"' in response.text
     assert "Job legado de nicho retirado" in response.text
 
 
@@ -1799,13 +1814,13 @@ def test_jobs_route_serves_full_page_and_htmx_fragment() -> None:
     with SessionLocal() as session:
         _create_basic_job(session, job_id="jobs-route-shell", status="monetization_review", seed_theme="Fila com shell")
 
-    full_page = client.get("/jobs?search=jobs-route-shell")
+    full_page = client.get("/jobs?niche=curiosidades&search=jobs-route-shell")
     assert full_page.status_code == 200
     assert 'href="/static/styles.css' in full_page.text
     assert "Jobs prioritários" in full_page.text
     assert "jobs-route-shell" in full_page.text
 
-    fragment = client.get("/jobs?search=jobs-route-shell", headers={"HX-Request": "true"})
+    fragment = client.get("/jobs?niche=curiosidades&search=jobs-route-shell", headers={"HX-Request": "true"})
     assert fragment.status_code == 200
     assert 'href="/static/styles.css' not in fragment.text
     assert 'id="jobs-table"' in fragment.text
@@ -1949,7 +1964,7 @@ def test_hub_filters_jobs_by_origin_and_shows_portuguese_labels() -> None:
         auto_job.creation_via = "daily_cycle"
         session.commit()
 
-    response = client.get("/?origin=ready_script_bank")
+    response = client.get("/cosmos?origin=ready_script_bank")
 
     assert response.status_code == 200
     assert "Origem filtro banco" in response.text
@@ -2002,13 +2017,13 @@ def test_jobs_queue_uses_publication_schedule_for_operational_state() -> None:
         )
         session.commit()
 
-    scheduled_response = client.get("/jobs?status=scheduled_publication")
+    scheduled_response = client.get("/jobs?niche=curiosidades&status=scheduled_publication")
     assert scheduled_response.status_code == 200
     assert "Job programado real" in scheduled_response.text
     assert "Job aprovado sem agenda" not in scheduled_response.text
     assert "Programado" in scheduled_response.text
 
-    unscheduled_response = client.get("/jobs?status=unscheduled_approved")
+    unscheduled_response = client.get("/jobs?niche=curiosidades&status=unscheduled_approved")
     assert unscheduled_response.status_code == 200
     assert "Job aprovado sem agenda" in unscheduled_response.text
     assert "Job programado real" not in unscheduled_response.text
@@ -2050,10 +2065,10 @@ def test_jobs_needs_action_filter_links_review_and_schedule_backlog() -> None:
         )
         session.commit()
 
-    full_page = client.get("/jobs")
-    assert 'href="/?status=needs_action' in full_page.text
+    full_page = client.get("/jobs?niche=curiosidades")
+    assert 'href="/cosmos?status=needs_action' in full_page.text
 
-    response = client.get("/jobs?status=needs_action&per_page=20")
+    response = client.get("/jobs?niche=curiosidades&status=needs_action&per_page=20")
     assert response.status_code == 200
     assert "Aprovar direto" in response.text
     assert "Aproveitar com checklist" in response.text

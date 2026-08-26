@@ -128,7 +128,7 @@ class RemoteRuntimeClient:
         *,
         theme: str,
         target_duration_sec: int | None = None,
-        niche_id: str = "curiosidades",
+        niche_id: str = "fiction_microdrama",
         requested_angle: str | None = None,
         request_id: str | None = None,
     ) -> SubmittedJob:

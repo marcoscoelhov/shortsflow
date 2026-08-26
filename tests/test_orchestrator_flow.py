@@ -1334,7 +1334,7 @@ def test_scene_regeneration_preserves_existing_asset_when_generation_fails(monke
 
 def test_review_action_rejects_non_reviewable_status() -> None:
     client = TestClient(app)
-    response = client.post("/jobs", data={"seed_theme": "polvos", "target_duration_sec": 35}, follow_redirects=False)
+    response = client.post("/jobs", data={"seed_theme": "polvos", "niche_id": "curiosidades", "target_duration_sec": 35}, follow_redirects=False)
     job_id = response.headers["location"].split("/")[-1]
 
     approve = client.post(
@@ -1409,7 +1409,7 @@ def test_retention_sweep_cleans_recoverable_jobs_after_medium_ttl() -> None:
 
 def test_review_page_no_longer_promises_partial_retry() -> None:
     client = TestClient(app)
-    response = client.post("/jobs", data={"seed_theme": "polvos", "target_duration_sec": 35}, follow_redirects=False)
+    response = client.post("/jobs", data={"seed_theme": "polvos", "niche_id": "curiosidades", "target_duration_sec": 35}, follow_redirects=False)
     job_id = response.headers["location"].split("/")[-1]
     detail = client.get(f"/jobs/{job_id}")
 
@@ -2289,7 +2289,7 @@ def test_full_pipeline_with_sound_design_persists_rights_and_artifacts(monkeypat
     try:
         response = client.post(
             "/jobs",
-            data={"seed_theme": "polvos", "target_duration_sec": 35, "tone": "intrigante_direto", "cta_style": "none"},
+            data={"seed_theme": "polvos", "niche_id": "curiosidades", "target_duration_sec": 35, "tone": "intrigante_direto", "cta_style": "none"},
             follow_redirects=False,
         )
         assert response.status_code == 303

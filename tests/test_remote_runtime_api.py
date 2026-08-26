@@ -9,7 +9,7 @@ def test_remote_submission_is_idempotent() -> None:
         "tailscale-user-login": "operator@example.com",
         "idempotency-key": "test-remote-submission-idempotent",
     }
-    payload = {"seed_theme": "Por que o gelo estala?", "target_duration_sec": "45"}
+    payload = {"seed_theme": "Por que o gelo estala?", "niche_id": "curiosidades", "target_duration_sec": "45"}
 
     first = client.post("/jobs", data=payload, headers=headers, follow_redirects=False)
     second = client.post("/jobs", data=payload, headers=headers, follow_redirects=False)

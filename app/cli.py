@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
         remote_parser = subparsers.add_parser(command, help=help_text)
         remote_parser.add_argument("--theme", required=True, help="Tema do video")
         remote_parser.add_argument("--duration", type=int, default=None, choices=range(35, 151))
-        remote_parser.add_argument("--niche", choices=sorted(SUPPORTED_NICHES), default="curiosidades")
+        remote_parser.add_argument("--niche", choices=sorted(SUPPORTED_NICHES), default="fiction_microdrama")
         remote_parser.add_argument("--angle", default=None, help="Angulo editorial solicitado")
         remote_parser.add_argument("--wait", action="store_true", help="Aguarda o estado terminal do job")
         remote_parser.add_argument("--request-id", default=None, help="Reutilize após timeout para evitar job duplicado")
