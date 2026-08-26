@@ -42,8 +42,6 @@ install -m 0644 "${repo_root}/deploy/systemd/shortsflow-backup@.service" /etc/sy
 install -m 0644 "${repo_root}/deploy/systemd/shortsflow-backup@.timer" /etc/systemd/system/shortsflow-backup@.timer
 install -m 0644 "${repo_root}/deploy/systemd/shortsflow-backup-weekly@.service" /etc/systemd/system/shortsflow-backup-weekly@.service
 install -m 0644 "${repo_root}/deploy/systemd/shortsflow-backup-weekly@.timer" /etc/systemd/system/shortsflow-backup-weekly@.timer
-install -m 0644 "${repo_root}/deploy/systemd/shortsflow-analytics-sync@.service" /etc/systemd/system/shortsflow-analytics-sync@.service
-install -m 0644 "${repo_root}/deploy/systemd/shortsflow-analytics-sync@.timer" /etc/systemd/system/shortsflow-analytics-sync@.timer
 install -m 0644 "${repo_root}/deploy/systemd/shortsflow-tmpfiles.conf" /usr/lib/tmpfiles.d/shortsflow.conf
 systemd-tmpfiles --create /usr/lib/tmpfiles.d/shortsflow.conf
 

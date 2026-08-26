@@ -141,31 +141,19 @@ def test_runtime_unit_uses_environment_state_as_working_directory(environment: s
     assert f"Environment=PYTHONPATH=/opt/shortsflow/{environment}/current" in unit
 
 
-def test_analytics_sync_unit_uses_instantiated_active_release_and_isolated_state() -> None:
-    service = Path("deploy/systemd/shortsflow-analytics-sync@.service").read_text(encoding="utf-8")
-    timer = Path("deploy/systemd/shortsflow-analytics-sync@.timer").read_text(encoding="utf-8")
-
-    assert "User=shortsflow-%i" in service
-    assert "Group=shortsflow-%i" in service
-    assert "WorkingDirectory=/srv/shortsflow/%i" in service
-    assert "Environment=PYTHONPATH=/opt/shortsflow/%i/current" in service
-    assert "EnvironmentFile=/etc/shortsflow/%i.env" in service
-    assert "EnvironmentFile=/etc/shortsflow/%i-release.env" in service
-    assert "ExecStart=/opt/shortsflow/%i/current/.venv/bin/python -m app.cli analytics-sync-run" in service
-    assert "Unit=shortsflow-analytics-sync@%i.service" in timer
-
-
-def test_remote_runtime_installer_provisions_analytics_unit_templates() -> None:
+def test_analytics_sync_units_are_not_shipped() -> None:
     installer = Path("scripts/install_remote_runtime.sh").read_text(encoding="utf-8")
+    unit_names = {path.name for path in Path("deploy/systemd").iterdir()}
+    manifest_names = [
+        source.name
+        for source, _destination, _mode in _runtime_file_manifest(
+            DeploymentPlan.create("staging", "a" * 40, layout=DeploymentLayout.system())
+        )
+    ]
 
-    assert (
-        'install -m 0644 "${repo_root}/deploy/systemd/shortsflow-analytics-sync@.service" '
-        "/etc/systemd/system/shortsflow-analytics-sync@.service"
-    ) in installer
-    assert (
-        'install -m 0644 "${repo_root}/deploy/systemd/shortsflow-analytics-sync@.timer" '
-        "/etc/systemd/system/shortsflow-analytics-sync@.timer"
-    ) in installer
+    assert not any("analytics" in name for name in unit_names)
+    assert "analytics" not in installer
+    assert not any("analytics" in name for name in manifest_names)
 
 
 def test_failed_health_restores_previous_release_and_revision(tmp_path: Path, monkeypatch) -> None:
@@ -300,13 +288,12 @@ def test_runtime_files_update_idempotently_and_restore_on_rollback(tmp_path: Pat
 
     assert service_destination.read_text(encoding="utf-8") == "old unit\n"
     assert not (plan.sbin_root / "shortsflow-backup").exists()
-    assert not (plan.systemd_root / "shortsflow-analytics-sync@.service").exists()
-    assert not (plan.systemd_root / "shortsflow-analytics-sync@.timer").exists()
+    assert not any("analytics" in path.name for path in plan.systemd_root.iterdir())
     assert commands[-1] == ["systemctl", "daemon-reload"]
 
 
 @pytest.mark.parametrize("environment", ["staging", "production"])
-def test_successful_deploy_enables_only_the_environment_analytics_timer(
+def test_successful_deploy_enables_only_the_environment_backup_timers(
     environment: str, tmp_path: Path, monkeypatch
 ) -> None:
     plan = DeploymentPlan.create(environment, "a" * 40, layout=DeploymentLayout.under(tmp_path))
@@ -330,16 +317,11 @@ def test_successful_deploy_enables_only_the_environment_analytics_timer(
 
     deploy(plan)
 
-    legacy_disable = ["systemctl", "disable", "--now", "shortsflow-analytics-sync.timer"]
-    if environment == "production":
-        assert legacy_disable in commands
-    else:
-        assert legacy_disable not in commands
     assert [
         "systemctl",
         "enable",
         "--now",
         f"shortsflow-backup@{environment}.timer",
         f"shortsflow-backup-weekly@{environment}.timer",
-        f"shortsflow-analytics-sync@{environment}.timer",
     ] in commands
+    assert not any("analytics" in str(item) for command in commands for item in command)

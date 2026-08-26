@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-from pydantic import field_validator, model_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -183,10 +183,6 @@ class Settings(BaseSettings):
     watchdog_alert_delivery: str = "record_only"
     watchdog_telegram_bot_token: str | None = None
     watchdog_telegram_chat_id: str | None = None
-    performance_collection_enabled: bool = True
-    performance_sync_active_window_days: int = 45
-    performance_sync_archive_window_days: int = 180
-    performance_sync_batch_limit: int = 10
     minimax_commercial_rights_confirmed: bool = False
     edge_tts_commercial_rights_confirmed: bool = False
     minimax_rights_evidence_url: str | None = None
@@ -431,21 +427,6 @@ class Settings(BaseSettings):
             raise ValueError("viral intensity thresholds must be between 0 and 1")
         return value
 
-
-    @field_validator("performance_sync_active_window_days", "performance_sync_archive_window_days")
-    @classmethod
-    def validate_performance_sync_windows(cls, value: int) -> int:
-        if not 1 <= value <= 365:
-            raise ValueError("performance sync windows must be between 1 and 365")
-        return value
-
-    @field_validator("performance_sync_batch_limit")
-    @classmethod
-    def validate_performance_sync_batch_limit(cls, value: int) -> int:
-        if not 1 <= value <= 100:
-            raise ValueError("performance_sync_batch_limit must be between 1 and 100")
-        return value
-
     @field_validator("minimax_image_aspect_ratio")
     @classmethod
     def validate_minimax_image_aspect_ratio(cls, value: str) -> str:
@@ -454,12 +435,6 @@ class Settings(BaseSettings):
         if normalized not in allowed:
             raise ValueError(f"minimax_image_aspect_ratio must be one of: {', '.join(sorted(allowed))}")
         return normalized
-
-    @model_validator(mode="after")
-    def validate_performance_sync_window_order(self) -> "Settings":
-        if self.performance_sync_active_window_days > self.performance_sync_archive_window_days:
-            raise ValueError("performance_sync_active_window_days must be <= performance_sync_archive_window_days")
-        return self
 
     @property
     def templates_dir(self) -> Path:

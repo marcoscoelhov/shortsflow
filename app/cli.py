@@ -34,10 +34,6 @@ def main(argv: list[str] | None = None) -> None:
     backlog_run_parser.add_argument("--limit", type=int, default=50, help="Limite de jobs avaliados")
     backlog_run_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
 
-    analytics_parser = subparsers.add_parser("analytics-sync-run", help="Executa a coleta diaria de performance do YouTube")
-    analytics_parser.add_argument("--days", type=int, default=28, help="Janela de Analytics por job, entre 1 e 90 dias")
-    analytics_parser.add_argument("--limit", type=int, default=None, help="Limite de jobs processados nesta execucao")
-
     import_parser = subparsers.add_parser("import-ready-scripts", help="Importa lote de roteiros prontos")
     import_parser.add_argument("path", type=Path, help="Arquivo txt/md com roteiros rotulados")
 
@@ -166,13 +162,6 @@ def main(argv: list[str] | None = None) -> None:
             limit=args.limit,
         )
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "analytics-sync-run":
-        result = orchestrator.sync_due_youtube_analytics_snapshots(days=args.days, limit=args.limit)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        if result.get("status") == "partial":
-            sys.exit(1)
         return
 
     if args.command == "import-ready-scripts":

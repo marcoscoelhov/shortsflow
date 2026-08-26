@@ -253,8 +253,6 @@ O contexto de integracao exposto no hub usa:
 | `POST` | `/jobs/{job_id}/schedule` | Salva ou limpa agenda local. |
 | `POST` | `/jobs/{job_id}/reopen-publication` | Reabre um publish para republicacao. |
 | `POST` | `/jobs/{job_id}/performance` | Registra metricas manuais do YouTube Studio. |
-| `POST` | `/jobs/{job_id}/youtube-analytics/sync` | Sincroniza snapshot de Analytics do YouTube para um job publicado com `youtube_video_id`. |
-| `POST` | `/youtube-analytics/sync-due` | Sincroniza o lote de Jobs publicados que ja estao elegiveis para nova coleta. |
 | `POST` | `/competitive-scout/auto-cycle` | Enfileira uma rodada manual assíncrona do scout competitivo. |
 | `GET` | `/competitive-scout/auto-runs/{auto_run_id}` | Consulta status persistido da rodada manual do scout competitivo. |
 | `GET` | `/healthz` | Healthcheck do app. |
@@ -302,10 +300,6 @@ Defaults importantes:
 - `automation_daily_timezone=America/Sao_Paulo`
 - `automation_daily_run_time=02:00`
 - `automation_publish_time=11:00`
-- `performance_collection_enabled=true`
-- `performance_sync_active_window_days=45`
-- `performance_sync_archive_window_days=180`
-- `performance_sync_batch_limit=10`
 - `artifact_retention_enabled=true`
 
 Camadas de configuracao:
@@ -372,7 +366,6 @@ Modelos principais:
 - `ChannelPublication`
 - `ReviewRecord`
 - `PerformanceMetric`
-- `YouTubeAnalyticsSnapshot`
 - `FallbackEvent`
 - `ErrorLog`
 - `StepExecution`
@@ -463,11 +456,8 @@ A automacao diaria roda por CLI e systemd timer, nao por scheduler interno do Fa
 
 ```bash
 python -m app.cli automation-run
-python -m app.cli analytics-sync-run
 scripts/install_automation_timer.sh
 ```
-
-No runtime remoto, a coleta de Analytics não usa instalador apontando para o checkout de desenvolvimento. O deploy instala e habilita `shortsflow-analytics-sync@staging.timer` ou `shortsflow-analytics-sync@production.timer`, sempre com a release ativa e o estado isolado do ambiente.
 
 O ciclo verifica pausa global, preflight do YouTube API, lock por data local de Sao Paulo e janela de agenda a partir de amanha. A agenda automatica trabalha com dois slots diarios separados: o horario configurado (`automation_publish_time`, normalmente 11h) e reservado para **Banco de Roteiros Prontos** (`ready_script_bank`), e o segundo slot e fixo as 18:00 de Brasilia para **Tema Automatico** (`automatic_topic`). O ciclo considera somente o primeiro dia incompleto e tenta preencher os dois horarios antes de avancar para datas posteriores. Essas lanes nao se substituem silenciosamente: falha no slot de **Tema Automatico** deve virar lacuna operacional/reason code do ciclo, nao conteudo mascarado do **Banco de Roteiros Prontos**. Antes de gerar conteudo novo, o ciclo tenta backlog publicavel compativel com a lane do slot.
 
@@ -484,23 +474,6 @@ baixo, isoladamente, e diagnostico; auditoria ausente, malformada ou incompleta 
 fechado. Veja o ADR 0002.
 
 O lease do worker tem piso de uma hora e heartbeat menos agressivo. Passos reais de imagem, TTS e Remotion podem segurar SQLite por minutos; esse piso evita que outro worker recupere o mesmo job por heartbeat pulado enquanto a etapa ainda esta legitimamente em execucao.
-
-## Coleta de performance
-
-A coleta de performance e separada da automacao de criacao/publicacao. O comando abaixo busca apenas snapshots de Analytics para Jobs publicados elegiveis:
-
-```bash
-systemctl start shortsflow-analytics-sync@production.service
-systemctl status shortsflow-analytics-sync@production.timer --no-pager
-```
-
-O timer é instalado pelo deploy remoto, roda às 03h em `America/Sao_Paulo` e usa `/opt/shortsflow/<ambiente>/current`, `/srv/shortsflow/<ambiente>` e os arquivos `/etc/shortsflow/<ambiente>*.env`. A rotina respeita `performance_collection_enabled`, exige OAuth com escopo de Analytics e limita o lote por `performance_sync_batch_limit`. Para staging, substitua `production` por `staging` nos comandos acima.
-
-Para auditar a base consolidada sem abrir o Hub:
-
-```bash
-python -m app.cli growth-report --minimum-views 100
-```
 
 ## Testes
 

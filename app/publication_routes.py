@@ -14,7 +14,6 @@ from app.config import Settings
 from app.hub_forms import build_performance_metric_payload
 from app.orchestrator import FatalStepError, JobOrchestrator
 from app.schemas import PublicationSchedulePayload
-from app.youtube_api import YouTubeIntegrationError
 
 
 def create_publication_router(
@@ -240,30 +239,5 @@ def create_publication_router(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
-
-    @router.post("/jobs/{job_id}/youtube-analytics/sync")
-    def sync_job_youtube_analytics(
-        job_id: str,
-        days: int = Form(default=28),
-        return_to: str | None = Form(default=None),
-    ):
-        try:
-            orchestrator.sync_youtube_analytics_snapshot(job_id, days=days)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="job not found") from exc
-        except YouTubeIntegrationError as exc:
-            return redirect_back(return_to, {"analytics_error": str(exc)}, default=f"/jobs/{job_id}")
-        return redirect_back(return_to, {"analytics_synced": "1"}, default=f"/jobs/{job_id}")
-
-    @router.post("/youtube-analytics/sync-due")
-    def sync_due_youtube_analytics(
-        days: int = Form(default=28),
-        limit: int | None = Form(default=None),
-        return_to: str | None = Form(default=None),
-    ):
-        result = orchestrator.sync_due_youtube_analytics_snapshots(days=days, limit=limit)
-        if result.get("status") == "skipped":
-            return redirect_back(return_to, {"analytics_error": result.get("reason") or "sync_skipped"}, default="/publication-hub")
-        return redirect_back(return_to, {"analytics_synced": str(len(result.get("synced") or []))}, default="/publication-hub")
 
     return router

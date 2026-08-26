@@ -262,23 +262,6 @@ class PerformanceMetric(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class YouTubeAnalyticsSnapshot(Base):
-    __tablename__ = "youtube_analytics_snapshots"
-
-    snapshot_id: Mapped[str] = mapped_column(String, primary_key=True)
-    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.job_id"), index=True)
-    schema_version: Mapped[str] = mapped_column(String, default="1.0.0")
-    content_hash: Mapped[str] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
-    youtube_video_id: Mapped[str] = mapped_column(String, index=True)
-    start_date: Mapped[str] = mapped_column(String)
-    end_date: Mapped[str] = mapped_column(String)
-    summary_metrics: Mapped[dict] = mapped_column(JSON)
-    daily_rows: Mapped[list] = mapped_column(JSON)
-    raw_response: Mapped[dict] = mapped_column(JSON)
-
-
 class RetentionExperiment(Base):
     __tablename__ = "retention_experiments"
 

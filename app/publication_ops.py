@@ -291,20 +291,3 @@ class PublicationOperations:
 
     def record_performance_metrics(self, job_id: str, payload: dict[str, Any]) -> None:
         self.performance_ops.record_performance_metrics(job_id, payload)
-
-    def sync_youtube_analytics_snapshot(self, job_id: str, *, days: int = 28) -> dict[str, Any]:
-        return self.performance_ops.sync_youtube_analytics_snapshot(job_id, days=days)
-
-    def youtube_analytics_sync_candidates(
-        self,
-        *,
-        now: datetime | None = None,
-        limit: int | None = None,
-    ) -> list[dict[str, Any]]:
-        return self.performance_ops.youtube_analytics_sync_candidates(now=now, limit=limit)
-
-    def sync_due_youtube_analytics_snapshots(self, *, days: int = 28, limit: int | None = None) -> dict[str, Any]:
-        return self.performance_ops.sync_due_youtube_analytics_snapshots(days=days, limit=limit)
-
-    def build_channel_growth_report(self, *, minimum_views: int = 100) -> dict[str, Any]:
-        return self.performance_ops.build_channel_growth_report(minimum_views=minimum_views)

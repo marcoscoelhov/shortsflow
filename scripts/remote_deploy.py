@@ -25,7 +25,6 @@ REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 LEGACY_RUNTIME_UNITS = (
     "shortsflow-hub.service",
     "shortsflow-automation.timer",
-    "shortsflow-analytics-sync.timer",
     "shortsflow-hub-reload.path",
 )
 
@@ -290,8 +289,6 @@ def _runtime_file_manifest(plan: DeploymentPlan) -> tuple[tuple[Path, Path, int]
                 "shortsflow-backup@.timer",
                 "shortsflow-backup-weekly@.service",
                 "shortsflow-backup-weekly@.timer",
-                "shortsflow-analytics-sync@.service",
-                "shortsflow-analytics-sync@.timer",
             )
         ),
         (
@@ -540,8 +537,6 @@ def deploy(plan: DeploymentPlan) -> dict[str, object]:
         )
         if legacy_handoff.performed:
             _run(["systemctl", "disable", "--now", *LEGACY_RUNTIME_UNITS], check=False)
-        elif plan.environment == "production":
-            _run(["systemctl", "disable", "--now", "shortsflow-analytics-sync.timer"], check=False)
         _run(["systemctl", "enable", plan.service_name])
         _run(
             [
@@ -550,7 +545,6 @@ def deploy(plan: DeploymentPlan) -> dict[str, object]:
                 "--now",
                 f"shortsflow-backup@{plan.environment}.timer",
                 f"shortsflow-backup-weekly@{plan.environment}.timer",
-                f"shortsflow-analytics-sync@{plan.environment}.timer",
             ]
         )
         return {
