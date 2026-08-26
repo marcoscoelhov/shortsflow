@@ -52,6 +52,8 @@ def _drop_retired_tables() -> None:
         "channel_publications",
         "youtube_analytics_snapshots",
         "backlog_recovery_attempts",
+        "retention_experiment_assignments",
+        "retention_experiments",
     )
     with engine.begin() as connection:
         for table in retired:

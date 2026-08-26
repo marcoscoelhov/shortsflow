@@ -23,7 +23,7 @@ from app.microdrama_pilot import (
 )
 from app.niche_classification import classify_niche_contract
 from app.editorial.topic_mode import resolve_editorial_mode
-from app.models import Job, PublicationSchedule, RetentionExperiment, RetentionExperimentAssignment, TopicRequest
+from app.models import Job, PublicationSchedule, TopicRequest
 from app.orchestrator import JobOrchestrator, RecoverableStepError
 from app.schemas import TopicRequestCreate
 
@@ -749,13 +749,9 @@ def test_microdrama_is_part_of_public_niche_policy_contract() -> None:
     assert "fictional_scenario=true" in notes
 
 
-def _table_counts() -> tuple[int, int, int]:
+def _table_counts() -> int:
     with SessionLocal() as session:
-        return (
-            session.scalar(select(func.count()).select_from(Job)) or 0,
-            session.scalar(select(func.count()).select_from(RetentionExperiment)) or 0,
-            session.scalar(select(func.count()).select_from(RetentionExperimentAssignment)) or 0,
-        )
+        return session.scalar(select(func.count()).select_from(Job)) or 0
 
 
 def test_microdrama_script_pipeline_generates_three_tracks_and_selects_winner_before_media(monkeypatch) -> None:

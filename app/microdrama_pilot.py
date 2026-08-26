@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.db import init_db, session_scope
-from app.models import Job, RetentionExperiment, RetentionExperimentAssignment, TopicRequest
-from app.utils import stable_hash
+from app.models import Job, TopicRequest
 
 
 MICRODRAMA_NICHE_ID = "fiction_microdrama"
@@ -219,53 +221,59 @@ def build_microdrama_pilot_plan(*, seed: int) -> dict[str, Any]:
     }
 
 
+def _pilot_artifact_path(experiment_id: str) -> Path:
+    root = Path(get_settings().data_dir) / "microdrama_pilots"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{experiment_id}.json"
+
+
+def _load_pilot_artifact(experiment_id: str) -> dict[str, Any] | None:
+    path = _pilot_artifact_path(experiment_id)
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _save_pilot_artifact(payload: dict[str, Any]) -> None:
+    path = _pilot_artifact_path(str(payload["experiment_id"]))
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _pilot_payload_from_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    experiment_id = str(plan["experiment_id"])
+    return {
+        "experiment_id": experiment_id,
+        "status": "planned",
+        "seed": int(plan["seed"]),
+        "language": str(plan.get("language", "pt-BR")),
+        "target_duration_sec": int(plan.get("target_duration_sec", MICRODRAMA_PILOT_DURATION_SEC)),
+        "publishes_or_schedules": False,
+        "assignments": [
+            {
+                **item,
+                "assignment_id": f"{experiment_id}:{int(item['position']):02d}",
+                "job_id": None,
+                "status": "planned",
+            }
+            for item in plan["items"]
+        ],
+    }
+
+
 def start_microdrama_pilot(orchestrator: Any, *, seed: int) -> dict[str, Any]:
     init_db()
     plan = build_microdrama_pilot_plan(seed=seed)
     experiment_id = str(plan["experiment_id"])
-    with session_scope() as session:
-        experiment = session.get(RetentionExperiment, experiment_id)
-        if experiment is None:
-            experiment = RetentionExperiment(
-                experiment_id=experiment_id,
-                profile_id="default",
-                content_hash=stable_hash(plan),
-                status="planned",
-                line_id="jarvis_shocking_twist_drama_pilot_v2",
-                target_job_count=18,
-                result_summary={"plan": plan, "seed": seed},
-            )
-            session.add(experiment)
-        else:
-            experiment.content_hash = stable_hash(plan)
-            experiment.target_job_count = 18
-            experiment.result_summary = {"plan": plan, "seed": seed}
-        for item in plan["items"]:
-            assignment_id = f"{experiment_id}:{item['position']:02d}"
-            assignment = session.get(RetentionExperimentAssignment, assignment_id)
-            if assignment is None:
-                session.add(
-                    RetentionExperimentAssignment(
-                        assignment_id=assignment_id,
-                        experiment_id=experiment_id,
-                        position=int(item["position"]),
-                        arm=str(item["arm"]),
-                        concept_id=str(item["concept_id"]),
-                        status="planned",
-                        assignment_metadata=item,
-                    )
-                )
-            else:
-                assignment.assignment_metadata = item
+    payload = _load_pilot_artifact(experiment_id) or _pilot_payload_from_plan(plan)
+    payload["seed"] = int(plan["seed"])
+    payload["language"] = str(plan.get("language", "pt-BR"))
+    payload["target_duration_sec"] = int(plan.get("target_duration_sec", MICRODRAMA_PILOT_DURATION_SEC))
+    payload["publishes_or_schedules"] = False
 
     created_job_count = 0
-    for item in plan["items"][:3]:
-        assignment_id = f"{experiment_id}:{item['position']:02d}"
-        with session_scope() as session:
-            assignment = session.get(RetentionExperimentAssignment, assignment_id)
-            if assignment is None:
-                raise RuntimeError(f"microdrama pilot assignment missing: {assignment_id}")
-            existing_job_id = assignment.job_id
+    for assignment in payload["assignments"][:3]:
+        assignment_id = str(assignment["assignment_id"])
+        existing_job_id = assignment.get("job_id")
         if existing_job_id:
             with session_scope() as session:
                 job = session.get(Job, existing_job_id)
@@ -277,32 +285,24 @@ def start_microdrama_pilot(orchestrator: Any, *, seed: int) -> dict[str, Any]:
             continue
         job_id = orchestrator.create_job(
             {
-                "seed_theme": item["seed_theme"],
+                "seed_theme": assignment["seed_theme"],
                 "niche_id": MICRODRAMA_NICHE_ID,
                 "language": "pt-BR",
                 "target_duration_sec": MICRODRAMA_PILOT_DURATION_SEC,
                 "tone": "drama_chocante_reviravolta",
                 "cta_style": "soft",
-                "notes": _microdrama_job_notes(experiment_id, assignment_id, item),
-                "requested_angle": item["requested_angle"],
+                "notes": _microdrama_job_notes(experiment_id, assignment_id, assignment),
+                "requested_angle": assignment["requested_angle"],
                 "job_origin": "manual_theme",
                 "creation_via": "cli",
             }
         )
-        with session_scope() as session:
-            assignment = session.get(RetentionExperimentAssignment, assignment_id)
-            if assignment is None:
-                raise RuntimeError(f"microdrama pilot assignment disappeared: {assignment_id}")
-            assignment.job_id = job_id
-            assignment.status = "job_created"
+        assignment["job_id"] = job_id
+        assignment["status"] = "job_created"
         created_job_count += 1
 
-    with session_scope() as session:
-        experiment = session.get(RetentionExperiment, experiment_id)
-        if experiment is None:
-            raise RuntimeError(f"microdrama pilot experiment disappeared: {experiment_id}")
-        experiment.status = "canaries_created"
-
+    payload["status"] = "canaries_created"
+    _save_pilot_artifact(payload)
     result = get_microdrama_pilot(experiment_id)
     result["created_job_count"] = created_job_count
     result["canaries"] = result["assignments"][:3]
@@ -311,34 +311,10 @@ def start_microdrama_pilot(orchestrator: Any, *, seed: int) -> dict[str, Any]:
 
 
 def get_microdrama_pilot(experiment_id: str) -> dict[str, Any]:
-    init_db()
-    with session_scope() as session:
-        experiment = session.get(RetentionExperiment, experiment_id)
-        if experiment is None:
-            raise KeyError(experiment_id)
-        assignments = session.scalars(
-            select(RetentionExperimentAssignment)
-            .where(RetentionExperimentAssignment.experiment_id == experiment_id)
-            .order_by(RetentionExperimentAssignment.position)
-        ).all()
-        plan = (experiment.result_summary or {}).get("plan") or {}
-        return {
-            "experiment_id": experiment.experiment_id,
-            "status": experiment.status,
-            "seed": int((experiment.result_summary or {}).get("seed", 0)),
-            "language": str(plan.get("language", "pt-BR")),
-            "target_duration_sec": int(plan.get("target_duration_sec", MICRODRAMA_PILOT_DURATION_SEC)),
-            "publishes_or_schedules": False,
-            "assignments": [
-                {
-                    **dict(assignment.assignment_metadata or {}),
-                    "assignment_id": assignment.assignment_id,
-                    "job_id": assignment.job_id,
-                    "status": assignment.status,
-                }
-                for assignment in assignments
-            ],
-        }
+    payload = _load_pilot_artifact(experiment_id)
+    if payload is None:
+        raise KeyError(experiment_id)
+    return payload
 
 
 def _microdrama_job_notes(experiment_id: str, assignment_id: str, item: dict[str, Any]) -> str:
