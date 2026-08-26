@@ -267,14 +267,6 @@ SHORTSFLOW_GEMINI_TTS_STYLE_PROMPT="Narre em portugues brasileiro natural, com r
 
 Se Gemini TTS falhar ou nao tiver chave, o pipeline tenta ElevenLabs; se ElevenLabs falhar, cai para Edge TTS e registra o fallback nos metadados da narracao. Gemini TTS, ElevenLabs e Edge TTS podem passar como narracao publicavel quando direitos comerciais estiverem confirmados; Edge TTS configurado como primario nao bloqueia elegibilidade automatizada por nome. Quando a rotacao Gemini esta ativa, `SHORTSFLOW_GEMINI_TTS_VOICE_NAME` vira fallback e o provider escolhe uma voz Gemini pelo perfil de narrador do roteiro.
 
-Valide chave e creditos do Gemini TTS com um smoke test isolado:
-
-```bash
-.venv/bin/python scripts/smoke_gemini_tts.py
-```
-
-O teste so passa quando o provider final e `gemini_tts` e `fallback_used=False`; qualquer queda para ElevenLabs ou Edge retorna exit code diferente de zero e imprime o motivo do fallback sem expor a chave.
-
 Para recuperar um job que ficou bloqueado por TTS tecnico de baixa qualidade ou provider realmente nao publicavel, use o reparo dirigido a partir da etapa de TTS:
 
 ```bash
