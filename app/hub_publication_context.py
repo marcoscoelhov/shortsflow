@@ -8,7 +8,6 @@ from fastapi import Request
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.backlog_recovery import BacklogRecoveryService
 from app.config import Settings
 from app.db import SessionLocal
 from app.domain_contracts import JOB_STATUS_APPROVED_FOR_PUBLISH
@@ -77,35 +76,24 @@ class HubPublicationContext:
         }
 
     def maintenance_summary(self, *, future_scheduled_count: int, needs_action_count: int) -> dict[str, object]:
-        try:
-            backlog = BacklogRecoveryService(self.settings, self.orchestrator).scan(limit=50)
-            summary = backlog.to_dict()["summary"]
-        except Exception:  # noqa: BLE001
-            summary = {}
-        checkpoint_count = int(summary.get("needs_checkpoint") or 0)
-        near_publishable_count = int(summary.get("near_publishable") or 0)
         minimum = int(getattr(self.settings, "watchdog_min_future_coverage_days", 3))
         action = "ok"
         action_label = "Nada urgente"
         action_body = "Agenda e revisão não indicam ação imediata."
         if future_scheduled_count < minimum:
             action = "recover_schedule"
-            action_label = "Rodar recovery seguro"
-            action_body = "Cobertura futura abaixo do mínimo; tente recuperar backlog sem publicar checkpoints."
-        elif checkpoint_count:
+            action_label = "Revisar cobertura futura"
+            action_body = "Cobertura futura abaixo do mínimo."
+        elif needs_action_count:
             action = "review_checkpoints"
-            action_label = "Revisar checkpoint humano"
-            action_body = "Há jobs bloqueados por duplicidade ou bloqueio técnico; precisam de decisão humana."
-        elif near_publishable_count:
-            action = "recover_near_publishable"
-            action_label = "Recuperar jobs próximos"
-            action_body = "Há jobs perto de publicação que podem passar por reparo seguro."
+            action_label = "Revisar jobs que precisam de ação"
+            action_body = "Há jobs bloqueados ou pendentes de decisão humana."
         return {
             "future_scheduled_count": future_scheduled_count,
             "minimum_future_scheduled_count": minimum,
             "needs_action_count": needs_action_count,
-            "checkpoint_count": checkpoint_count,
-            "near_publishable_count": near_publishable_count,
+            "checkpoint_count": needs_action_count,
+            "near_publishable_count": 0,
             "recommended_action": action,
             "recommended_action_label": action_label,
             "recommended_action_body": action_body,

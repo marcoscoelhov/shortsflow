@@ -47,7 +47,12 @@ def _drop_retired_tables() -> None:
     inspector = inspect(engine)
     names = set(inspector.get_table_names())
     mapped = set(Base.metadata.tables)
-    retired = ("cron_video_ideas", "channel_publications", "youtube_analytics_snapshots")
+    retired = (
+        "cron_video_ideas",
+        "channel_publications",
+        "youtube_analytics_snapshots",
+        "backlog_recovery_attempts",
+    )
     with engine.begin() as connection:
         for table in retired:
             if table in names and table not in mapped:

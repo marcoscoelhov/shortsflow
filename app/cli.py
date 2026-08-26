@@ -23,17 +23,6 @@ def main(argv: list[str] | None = None) -> None:
     readiness_parser = subparsers.add_parser("production-readiness", help="Avalia se o ShortsFlow está pronto para operar em produção")
     readiness_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
 
-    backlog_scan_parser = subparsers.add_parser("backlog-recovery-scan", help="Inventaria backlog recuperável sem mutações")
-    backlog_scan_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
-    backlog_scan_parser.add_argument("--limit", type=int, default=50, help="Limite de jobs avaliados")
-
-    backlog_run_parser = subparsers.add_parser("backlog-recovery-run", help="Executa recuperação segura de backlog")
-    backlog_run_parser.add_argument("--mode", choices=["reactive", "weekly", "manual"], default="reactive")
-    backlog_run_parser.add_argument("--dry-run", action="store_true", help="Classifica sem mutar estado")
-    backlog_run_parser.add_argument("--job-id", default=None, help="Job específico para recuperação manual")
-    backlog_run_parser.add_argument("--limit", type=int, default=50, help="Limite de jobs avaliados")
-    backlog_run_parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
-
     import_parser = subparsers.add_parser("import-ready-scripts", help="Importa lote de roteiros prontos")
     import_parser.add_argument("path", type=Path, help="Arquivo txt/md com roteiros rotulados")
 
@@ -120,7 +109,6 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     from app.automation import AutomationService
-    from app.backlog_recovery import BacklogRecoveryService
     from app.db import init_db
     from app.operational_settings import apply_operational_settings
     from app.orchestrator import orchestrator
@@ -147,21 +135,6 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
         if report.status == "not_ready":
             sys.exit(1)
-        return
-
-    if args.command == "backlog-recovery-scan":
-        result = BacklogRecoveryService(orchestrator.settings, orchestrator).scan(limit=args.limit)
-        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
-        return
-
-    if args.command == "backlog-recovery-run":
-        result = BacklogRecoveryService(orchestrator.settings, orchestrator).run(
-            mode=args.mode,
-            dry_run=args.dry_run,
-            job_id=args.job_id,
-            limit=args.limit,
-        )
-        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         return
 
     if args.command == "import-ready-scripts":
