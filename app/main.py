@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import random
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.automation import AutomationService
+from app.automation_topics import select_cosmos_topics
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.domain_contracts import ARTIFACT_TREND_RESEARCH
@@ -47,7 +47,6 @@ from app.routes.health import router as health_router
 from app.runtime_execution import assert_real_execution_location
 from pydantic import ValidationError
 
-from app.topic_scout import TopicScout
 from app.utils import path_from_uri, utcnow
 from app.web_redirects import redirect_back as _redirect_back
 
@@ -96,18 +95,6 @@ templates = Jinja2Templates(directory=str(settings.templates_dir), context_proce
 
 HUB_DEFAULT_NICHE = "curiosidades"
 HUB_RETENTION_OPTIMIZED_DURATION_SEC = 45
-HUB_RANDOM_THEME_POOL = [
-    "Por que o pão fica duro e a bolacha fica mole?",
-    "Por que o espelho embaça no banho?",
-    "Por que a roupa preta esquenta mais no sol?",
-    "Por que sentimos o celular vibrar sem ele vibrar?",
-    "Por que o cheiro de chuva aparece antes da chuva?",
-    "Por que gelo estala dentro do copo?",
-    "Por que algumas músicas grudam na cabeça?",
-    "Por que bocejo parece contagioso?",
-    "Por que a tela do celular parece pior no sol?",
-    "Por que a água gelada sua por fora do copo?",
-]
 HUB_JOBS_PER_PAGE = 4
 
 
@@ -254,45 +241,31 @@ async def authenticate_hub(token: str = Form(default="")):
 
 
 
-def _default_seed_theme() -> str:
+def _recent_seed_themes(niche_id: str, *, limit: int) -> list[str]:
     with SessionLocal() as session:
-        recent_themes = session.scalars(
-            select(TopicRequest.seed_theme)
-            .where(TopicRequest.niche_id == HUB_DEFAULT_NICHE)
-            .order_by(TopicRequest.created_at.desc())
-            .limit(30)
-        ).all()
-    recent = {theme.strip().lower() for theme in recent_themes if theme and theme.strip()}
-    candidates = [theme for theme in HUB_RANDOM_THEME_POOL if theme.lower() not in recent]
-    return random.choice(candidates or HUB_RANDOM_THEME_POOL)
+        return list(
+            session.scalars(
+                select(TopicRequest.seed_theme)
+                .where(TopicRequest.niche_id == (niche_id or HUB_DEFAULT_NICHE))
+                .order_by(TopicRequest.created_at.desc())
+                .limit(limit)
+            ).all()
+        )
+
+
+def _default_seed_theme() -> str:
+    return select_cosmos_topics(_recent_seed_themes(HUB_DEFAULT_NICHE, limit=30), count=1)[0].topic
 
 
 def _trend_seed_theme(niche_id: str) -> tuple[str, str | None, str | None, dict[str, object] | None]:
-    with SessionLocal() as session:
-        recent_themes = session.scalars(
-            select(TopicRequest.seed_theme)
-            .where(TopicRequest.niche_id == (niche_id or HUB_DEFAULT_NICHE))
-            .order_by(TopicRequest.created_at.desc())
-            .limit(40)
-        ).all()
-    scout_result = TopicScout().find_topic(niche_id, recent_topics=recent_themes)
-    if scout_result is None:
-        fallback_theme = _default_seed_theme()
-        return (
-            fallback_theme,
-            None,
-            "trend_research=unavailable\ntrend_source=fallback_pool\ntrend_status=no_topic_scout_candidate",
-            {
-                "trend_research": "unavailable",
-                "source": "fallback_pool",
-                "status": "no_topic_scout_candidate",
-                "fallback_seed_theme": fallback_theme,
-            },
+    lane = editorial_lane_for_niche(niche_id or HUB_DEFAULT_NICHE)
+    if not lane.allows_automatic_topic:
+        raise ValueError(
+            f"{lane.niche_id} requires an explicit theme, title, or ready script; "
+            "it cannot fall back to automatic_topic"
         )
-    trend = scout_result.candidate
-    report = trend.as_report()
-    report.update({"topic_scout": "enabled", "considered_count": scout_result.considered_count, "rejected_recent_count": scout_result.rejected_recent_count})
-    return trend.topic, trend.requested_angle, trend.as_notes(), report
+    trend = select_cosmos_topics(_recent_seed_themes(lane.niche_id, limit=40), count=1)[0]
+    return trend.topic, trend.requested_angle, trend.as_notes(), trend.as_report()
 
 
 publication_router = create_publication_router(

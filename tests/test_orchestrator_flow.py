@@ -706,13 +706,17 @@ def test_run_step_cancels_job_when_shutdown_is_requested_during_retry(monkeypatc
         assert job.status == "cancelled"
         assert job.failure_reason == "script: worker shutdown requested during recoverable retry"
 
-def test_default_seed_theme_avoids_recent_curiosidades_topics(monkeypatch) -> None:
+def test_default_seed_theme_avoids_recent_curiosidades_topics() -> None:
+    from app.automation_topics import COSMOS_CURIOSITY_POOL, WINNER_SEED_MIN_SCORE, select_cosmos_topics
+
+    winner_topics = [seed.topic for seed in COSMOS_CURIOSITY_POOL if seed.base_score >= WINNER_SEED_MIN_SCORE]
+    recent_themes = winner_topics[:3]
     with SessionLocal() as session:
-        for theme in main_module.HUB_RANDOM_THEME_POOL[:3]:
+        for index, theme in enumerate(recent_themes):
             session.add(
                 TopicRequest(
-                    topic_request_id=f"recent-{theme}",
-                    job_id=f"job-recent-{theme}",
+                    topic_request_id=f"recent-cosmos-{index}",
+                    job_id=f"job-recent-cosmos-{index}",
                     schema_version="1.0.0",
                     content_hash=theme,
                     niche_id="curiosidades",
@@ -723,8 +727,11 @@ def test_default_seed_theme_avoids_recent_curiosidades_topics(monkeypatch) -> No
             )
         session.commit()
 
-    monkeypatch.setattr(main_module.random, "choice", lambda candidates: candidates[0])
-    assert main_module._default_seed_theme() == main_module.HUB_RANDOM_THEME_POOL[3]
+    chosen = main_module._default_seed_theme()
+    expected = select_cosmos_topics(recent_themes, count=1)[0].topic
+    assert chosen == expected
+    assert chosen not in recent_themes
+    assert chosen in {seed.topic for seed in COSMOS_CURIOSITY_POOL}
 
 def test_channel_repetition_report_flags_similar_recent_jobs() -> None:
     with SessionLocal() as session:

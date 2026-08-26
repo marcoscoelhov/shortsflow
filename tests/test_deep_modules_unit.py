@@ -15,8 +15,6 @@ from app.pipelines.script_audit import ScriptAuditDomain
 from app.pipelines.script_metrics import normalize_script_metrics
 from app.publication_ops import PublicationOperations
 from app.storage import StorageManager
-from app.topic_scout import TopicScout
-from app.trends import TrendCandidate
 from app.utils import file_sha256, stable_hash, utcnow
 from scripts.audit_system_quality import score_image_semantics, score_publish, score_script, score_topic
 
@@ -301,40 +299,6 @@ def test_hub_job_request_empty_title_uses_automatic_topic_notes_mode() -> None:
     assert result.trend_report == {"trend_research": "real_source"}
     assert "input_mode=theme" in str(result.payload.notes)
     assert "input_mode=title" not in str(result.payload.notes)
-
-
-def test_topic_scout_prefers_everyday_curiosity_over_sciencey_trend() -> None:
-    class FakeTrendResearcher:
-        def find_topic(self, niche_id: str):
-            return TrendCandidate(
-                topic="Por que buraco negro virou assunto agora?",
-                requested_angle="ciência espacial",
-                source="google_trends_br",
-                source_url="https://trends.google.com/trending/rss?geo=BR",
-                score=9999,
-                raw_title="buraco negro",
-                familiarity_score=0.35,
-                source_title="buraco negro",
-            )
-
-    result = TopicScout(FakeTrendResearcher()).find_topic("curiosidades", recent_topics=[])
-
-    assert result is not None
-    assert result.candidate.source == "everyday_curiosity_pool"
-    assert "buraco negro" not in result.candidate.topic.lower()
-    assert result.candidate.hook_seed
-    assert result.candidate.visual_seed
-
-
-def test_topic_scout_avoids_recent_repetition() -> None:
-    result = TopicScout(rng=__import__("random").Random(1)).find_topic(
-        "curiosidades",
-        recent_topics=["Por que o pão fica duro e a bolacha fica mole?"],
-    )
-
-    assert result is not None
-    assert result.rejected_recent_count >= 1
-    assert result.candidate.topic != "Por que o pão fica duro e a bolacha fica mole?"
 
 
 def test_hub_prompt_loads_default_for_invalid_payload_and_saves_sanitized_template(tmp_path) -> None:
