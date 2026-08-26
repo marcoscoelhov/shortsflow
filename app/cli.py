@@ -38,9 +38,6 @@ def main(argv: list[str] | None = None) -> None:
     analytics_parser.add_argument("--days", type=int, default=28, help="Janela de Analytics por job, entre 1 e 90 dias")
     analytics_parser.add_argument("--limit", type=int, default=None, help="Limite de jobs processados nesta execucao")
 
-    growth_parser = subparsers.add_parser("growth-report", help="Gera relatorio consolidado de crescimento do canal")
-    growth_parser.add_argument("--minimum-views", type=int, default=100, help="Views minimas para marcar um video como evidencia confiavel")
-
     import_parser = subparsers.add_parser("import-ready-scripts", help="Importa lote de roteiros prontos")
     import_parser.add_argument("path", type=Path, help="Arquivo txt/md com roteiros rotulados")
 
@@ -176,11 +173,6 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if result.get("status") == "partial":
             sys.exit(1)
-        return
-
-    if args.command == "growth-report":
-        result = orchestrator.build_channel_growth_report(minimum_views=args.minimum_views)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
     if args.command == "import-ready-scripts":

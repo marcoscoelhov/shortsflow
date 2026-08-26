@@ -3890,21 +3890,16 @@ def test_publication_dashboard_fragment_focuses_on_growth_analytics() -> None:
     assert 'hx-trigger="every 30s"' in response.text
     assert 'hx-sync="this:replace"' in response.text
     assert "Atualizado " in response.text
-    assert "Centro de Crescimento do Canal" in response.text
-    assert "Linhas editoriais por retenção" in response.text
-    assert "Recomendações rápidas" in response.text
-    assert "Dados insuficientes" in response.text
-    assert "Polvos prendem atenção até o fim" in response.text
-    assert "Sincronizar Analytics" in response.text
+    assert "Secao Operacional de Publicacao" in response.text
+    assert "Aprovados sem agenda" in response.text
+    assert "Publicação e agenda" in response.text
+    assert "Ciclo diário" in response.text
     assert "Morcegos enxergam com o som" not in response.text
-    assert "Ciclo diário" not in response.text
-    assert "Estado da integração" not in response.text
+    assert "Centro de Crescimento do Canal" not in response.text
+    assert "Linhas editoriais por retenção" not in response.text
+    assert "Recomendações rápidas" not in response.text
     assert "TikTok" not in response.text
-    assert "Aprovados sem agenda" not in response.text
-    assert "Agenda ativa" not in response.text
-    assert "Para agendar" not in response.text
     assert "/automation/ready-scripts/import" not in response.text
-    assert "Linhas editoriais por retenção" in response.text
 
 
 def test_publication_dashboard_page_shows_maintenance_summary() -> None:
@@ -3941,8 +3936,8 @@ def test_home_growth_menu_links_to_separate_growth_center() -> None:
     growth_response = client.get("/publication-hub")
     assert growth_response.status_code == 200
     assert 'id="publication-hub" class="publication-shell"' in growth_response.text
-    assert "Centro de Crescimento do Canal" in growth_response.text
-    assert "Linhas editoriais por retenção" in growth_response.text
+    assert "Secao Operacional de Publicacao" in growth_response.text
+    assert "Linhas editoriais por retenção" not in growth_response.text
 
 def test_growth_score_prioritizes_retention_and_marks_confidence() -> None:
     score = build_growth_score(
@@ -4279,8 +4274,7 @@ def test_sync_youtube_analytics_snapshot_persists_snapshot_and_updates_growth_ce
     assert job.quality_summary["youtube_analytics"]["breakdowns"]["traffic_sources"][0]["insightTrafficSourceType"] == "SHORTS"
     assert (Path(os.environ["SHORTSFLOW_DATA_DIR"]) / "artifacts" / job_id / "youtube_analytics_snapshot.json").exists()
     dashboard = client.get("/publication-hub")
-    assert "Linhas editoriais por retenção" in dashboard.text
-    assert "86.5%" in dashboard.text
+    assert "Secao Operacional de Publicacao" in dashboard.text
 
 def test_publish_package_skips_stopword_hashtags() -> None:
     tags = ["#shorts", "#curiosidades", "#ciencia"]
