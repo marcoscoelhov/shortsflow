@@ -1,16 +1,18 @@
 # Security and operations
 
-## Tailscale and CI
+## Access and CI
 
-- Use a developer's Tailscale identity for interactive access.
-- Use ephemeral, tagged OAuth identities for CI.
+- Operator interactive access is SSH that already works. Tailscale is an extra lock for Serve/HTTPS and for GitHub Actions, not a fail-closed business gate.
+- If Tailscale is down, the operator uses SSH. Never fall back to rendering real jobs on a laptop.
+- Use ephemeral, tagged OAuth identities for CI when Tailscale is used (`tailscale ssh deploy@host`).
 - Use different CI tags and Unix deploy users for staging and production.
 - Restrict each tag to the minimum destination, port, SSH user, and environment.
 - Keep OAuth credentials in environment-scoped GitHub secrets.
-- Protect the production GitHub environment with required human reviewers.
-- Avoid `StrictHostKeyChecking=no`, copied private keys, and broad passwordless root access.
+- Protect one production GitHub environment with a required human reviewer. Do not add a second self-approval environment.
+- Keep the app on `127.0.0.1`. Do not open extra public ports. Do not bind the app off loopback.
+- Avoid `StrictHostKeyChecking=no` and broad passwordless access from untrusted networks.
 
-Keep tailnet policy deny-by-default. Separate network grants from SSH rules: developer users may reach the private HTTPS service and approved SSH accounts; `tag:ci-staging` may SSH only as the staging deploy user; `tag:ci-production` may SSH only as the production deploy user. Make the VPS tag owner distinct from both CI tag owners.
+Keep tailnet policy deny-by-default when Tailscale is in use. Separate network grants from SSH rules: the operator may reach the private HTTPS service and approved SSH accounts; `tag:ci-staging` may SSH only as the staging deploy user; `tag:ci-production` may SSH only as the production deploy user. Make the VPS tag owner distinct from both CI tag owners.
 
 Start from [the deny-by-default template](../assets/tailscale-policy.template.hujson), replace principals for the actual tailnet, and merge it deliberately with existing policy instead of overwriting the admin console blindly.
 

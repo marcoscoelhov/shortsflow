@@ -48,18 +48,27 @@ Do not use Wikipedia as a reliable factual source for generated scripts, especia
 
 ## Remote Runtime Policy
 
-GitHub is the source of truth for code and the VPS is the only runtime for real
-Jobs de Video. Never call real providers, render media, or run heavy E2E jobs on
-a local workstation. Use `shortsflow job` for production content and
-`shortsflow validate` for an explicit staging validation. If the VPS, GitHub, or
-Tailscale is unavailable, fail closed; never fall back to local CPU.
+GitHub is the source of truth for code. The VPS holds secrets, SQLite, and media.
+Never commit `.env`, SQLite files, or generated artifacts.
 
-Keep `.env`, SQLite, models, provider outputs, and artifacts on the VPS. Do not
-sync runtime state through Git, rsync, shared filesystems, or a local fallback.
-Fast deterministic tests may run locally; run the canonical full suite through
-the remote workflow before deployment. When developing directly on the VPS,
-use a separate development worktree and never edit the active production
-release. Only the human operator may approve a production deployment.
+Pushes and pull requests to `staging` must pass pytest and Remotion typecheck;
+staging auto-deploys that SHA. Production is a human decision made once:
+fast-forward a validated staging SHA to `main` and deploy. One GitHub
+environment (`production`) gates that deploy. Do not add a second reviewer or a
+second approval environment.
+
+Operator access is the SSH that already works (`root@69.62.93.146`, hostname
+`srv769897`, key-based). Public sshd already listens on `0.0.0.0:22`. Do not
+open extra ports. Do not bind the app off loopback. GitHub Actions may still
+deploy via Tailscale OAuth (`tailscale ssh deploy@srv769897`). Tailscale is an
+extra lock, not a fail-closed business gate. If Tailscale is down, the operator
+uses SSH. Serve/HTTPS via Tailscale when it is up; otherwise use an SSH tunnel.
+
+Real render jobs run on the VPS; laptops run mocks. That is operator guidance,
+not a required GitHub check. Keep one checkout and update it with
+`git pull --ff-only origin/staging`. If it is not on `origin/staging`, it does
+not exist. The approval that matters is watching a real staging video before
+promoting to production.
 
 See `docs/remote-runtime-contract.md` for the complete deployment and recovery
 contract.

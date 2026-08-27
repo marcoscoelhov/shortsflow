@@ -4,14 +4,14 @@
 
 - Source of truth: `<GitHub repository>`
 - Real runtime: `<VPS hostname>`
-- Local policy: `<mock/cheap tests only; real execution fails closed>`
+- Local policy: `<mocks on the laptop; real jobs on the VPS; guidance, not a required check>`
 
 ## Environments
 
 | Environment | Branch | URL | Service | Data | Deploy identity |
 |---|---|---|---|---|---|
-| staging | `<branch>` | `<Tailscale URL>` | `<unit>` | `<path>` | `<tag/user>` |
-| production | `<branch>` | `<Tailscale URL>` | `<unit>` | `<path>` | `<tag/user>` |
+| staging | `<branch>` | `<Tailscale URL or SSH tunnel to 127.0.0.1>` | `<unit>` | `<path>` | `<tag/user>` |
+| production | `<branch>` | `<Tailscale URL or SSH tunnel to 127.0.0.1>` | `<unit>` | `<path>` | `<tag/user>` |
 
 ## Developer interface
 
@@ -34,7 +34,7 @@
 - Verification: `<health and representative check>`
 - Rollback: `<automatic and manual path>`
 - Retained releases: `<count>`
-- Production approval: `<GitHub environment/reviewer>`
+- Production approval: `<one GitHub environment named production; watch a real staging video first>`
 
 ## Recovery
 
@@ -46,8 +46,8 @@
 
 ## Acceptance gates
 
-- [ ] Local real execution fails closed
-- [ ] New PC bootstrap works without copied SSH keys
+- [ ] Real jobs stay on the VPS; laptops use mocks
+- [ ] Operator SSH works; Tailscale is extra, not fail-closed
 - [ ] Staging deploys exact SHA
 - [ ] Staging real E2E artifact approved
 - [ ] Production requires human approval

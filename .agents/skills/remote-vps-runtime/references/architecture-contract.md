@@ -30,7 +30,7 @@ The runtime needs only:
 
 The deploy boundary needs environment plus exact commit SHA. Everything else comes from protected environment configuration and the immutable repository revision.
 
-Require an idempotency key on job submission and persist the key-to-job mapping. After a network timeout, query or wait by that key before retrying. Authorize submission and artifact reads with an explicit Tailscale identity/capability or scoped application credential.
+Require an idempotency key on job submission and persist the key-to-job mapping. After a network timeout, query or wait by that key before retrying. Authorize submission and artifact reads with operator SSH, Tailscale Serve when it is up, or a scoped application credential. Keep the app on loopback.
 
 ## State machine
 
