@@ -71,9 +71,26 @@ curl http://127.0.0.1:8080/healthz
 
 ## Desenvolvimento local com execucao remota
 
-O GitHub e a fonte de verdade do codigo e a VPS e o unico runtime para jobs
-reais. Um checkout local serve para editar, rodar testes baratos com providers
-mock e enviar commits; renderizacao, providers reais e E2E pesado ficam na VPS.
+O GitHub e a fonte de verdade do codigo. A VPS guarda secrets, SQLite e midia.
+Nunca commitar `.env`, banco ou artefatos gerados.
+
+Um checkout local serve para editar e rodar testes baratos com providers mock.
+Jobs reais de render ficam na VPS; laptops usam mocks. Isso e orientacao, nao
+um check obrigatorio do GitHub.
+
+Acesso do operador: SSH que ja funciona (`root@69.62.93.146`, hostname
+`srv769897`, autenticacao por chave). O sshd publico ja escuta em `0.0.0.0:22`.
+Nao abrir mais portas. Nao bindar o app fora de `127.0.0.1`. GitHub Actions
+ainda pode implantar via Tailscale OAuth (`tailscale ssh deploy@srv769897`);
+Tailscale e trava extra, nao um gate fail-closed. Se o Tailscale cair, o
+operador usa SSH. Nunca renderizar jobs reais no laptop.
+
+Use um unico checkout e atualize com `git pull --ff-only origin/staging`.
+O que nao esta em `origin/staging` nao existe. Push/PR para `staging` passa
+pytest e typecheck Remotion; o staging auto-implanta esse SHA. Producao so
+sobe quando um humano promove o SHA validado (fast-forward para `main` +
+deploy), com um clique no environment GitHub `production`. A aprovacao que
+importa e assistir um video real de staging antes de promover.
 
 Em um computador novo:
 
@@ -83,8 +100,9 @@ cd shortsflow
 scripts/bootstrap_remote_client.sh
 ```
 
-O bootstrap instala a CLI local e valida as duas identidades remotas. Ele usa a
-sessao Tailscale do computador, sem copiar uma chave SSH privada. Os comandos
+O bootstrap instala a CLI local e valida as identidades remotas quando o
+Tailscale estiver no ar. O acesso operacional primario e SSH; HTTPS via
+Tailscale Serve quando disponivel, senao tunel SSH. Os comandos
 normais sao:
 
 ```bash
@@ -411,9 +429,12 @@ A documentacao de arquitetura fica em:
 - [docs/modularization-plan.md](docs/modularization-plan.md): status da modularizacao forte, contratos preservados e proximos cortes nao bloqueantes.
 - [docs/adr/0004-ai-friendly-modular-orchestrator-boundaries.md](docs/adr/0004-ai-friendly-modular-orchestrator-boundaries.md): decisao de manter o orquestrador como casca compatível e delegar dominios para modulos donos.
 
-## Exposicao por Tailscale
+## Exposicao (Tailscale ou tunel SSH)
 
-Mantendo o app local em uma porta `127.0.0.1`:
+O app permanece em `127.0.0.1`. Nao abrir portas publicas extras. Nao bindar o
+hub em `0.0.0.0`.
+
+Quando o Tailscale estiver no ar:
 
 ```bash
 tailscale serve --bg http://127.0.0.1:8080
@@ -423,6 +444,13 @@ Valide a URL final com:
 
 ```bash
 curl https://<hostname>.<tailnet>/healthz
+```
+
+Se o Tailscale estiver fora, use um tunel SSH a partir da chave que ja
+funciona:
+
+```bash
+ssh -N -L 8080:127.0.0.1:8080 root@69.62.93.146
 ```
 
 ## Documentacao tecnica

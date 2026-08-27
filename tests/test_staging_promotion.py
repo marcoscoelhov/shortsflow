@@ -97,18 +97,18 @@ def test_deploy_workflow_guards_main_before_production_environment() -> None:
 
 def test_promotion_workflow_pushes_exact_sha_without_force() -> None:
     workflow = Path(".github/workflows/promote-staging.yml").read_text(encoding="utf-8")
+    deploy_workflow = Path(".github/workflows/deploy-remote-runtime.yml").read_text(encoding="utf-8")
 
     assert "environment: staging" in workflow
-    assert "environment: production-promotion" in workflow
-    assert "\n  authorize-promotion:" in workflow
+    assert "\n  validate-promotion:" in workflow
     assert "\n  promote:" in workflow
-    assert workflow.index("\n  authorize-promotion:") < workflow.index("\n  promote:")
-    authorize_job = workflow.split("\n  authorize-promotion:", 1)[1].split("\n  promote:", 1)[0]
+    assert "\n  authorize-promotion:" not in workflow
+    assert "environment: production-promotion" not in workflow
+    assert workflow.index("\n  validate-promotion:") < workflow.index("\n  promote:")
     promote_job = workflow.split("\n  promote:", 1)[1]
-    assert "needs: validate-promotion" in authorize_job
-    assert "environment: production-promotion" in authorize_job
-    assert "needs: authorize-promotion" in promote_job
-    assert "environment: production-promotion" not in promote_job
+    assert "needs: validate-promotion" in promote_job
+    assert "needs: authorize-promotion" not in promote_job
+    assert "environment:" not in promote_job
     assert "tailscale/github-action@v4" in workflow
     assert "https://srv769897.tailc97b69.ts.net:8443/healthz" in workflow
     assert 'r["environment"] == "staging"' in workflow
@@ -118,3 +118,6 @@ def test_promotion_workflow_pushes_exact_sha_without_force() -> None:
     assert 'gh workflow run deploy-remote-runtime.yml --ref main -f expected_revision="${REVISION}"' in workflow
     assert "--force" not in workflow
     assert "scripts/check_staging_promotion.py" in workflow
+    assert "shortsflow-deploy" not in workflow
+    assert "github.ref_name == 'main' && 'production'" in deploy_workflow
+    assert "environment: production-promotion" not in deploy_workflow
