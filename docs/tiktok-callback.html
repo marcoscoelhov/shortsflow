@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Autorização TikTok — ShortsFlow</title>
+    <meta name="robots" content="noindex">
+    <style>
+      :root { color-scheme: dark; }
+      body { background:#09090b; color:#e4e1e6; font-family: system-ui, sans-serif;
+             display:grid; place-items:center; min-height:100vh; margin:0; }
+      main { max-width: 760px; padding: 24px; }
+      h1 { font-size: 1.15rem; }
+      code { display:block; background:#1f1f22; border:1px solid rgb(255 255 255 / 0.1);
+             padding:12px; border-radius:8px; overflow-wrap:anywhere; font-size:.9rem; }
+      button { background:#ff5540; color:#fff; border:0; border-radius:8px; padding:10px 16px;
+               margin-top:12px; cursor:pointer; font-size:.95rem; }
+      .ok { color:#6ee7a8; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">Processando autorização…</h1>
+      <div id="ok" hidden>
+        <p class="ok">Autorização recebida. Copie o código abaixo e cole no terminal (publica login tiktok --code …).</p>
+        <code id="code"></code>
+        <p><small>Dica: se preferir, copie a URL completa da barra de endereço em vez do código.</small></p>
+        <button onclick="copy()">Copiar código</button>
+      </div>
+      <div id="empty" hidden>
+        <p>Nenhum código de autorização encontrado nesta página. Volte ao fluxo do aplicativo e tente novamente.</p>
+      </div>
+    </main>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const code = params.get("code");
+      const el = document.getElementById("code");
+      if (code) {
+        document.getElementById("title").textContent = "Autorização concluída";
+        document.getElementById("ok").hidden = false;
+        el.textContent = code;
+      } else {
+        document.getElementById("title").textContent = "Sem código";
+        document.getElementById("empty").hidden = false;
+      }
+      window.copy = () => { navigator.clipboard.writeText(el.textContent); };
+    </script>
+  </body>
+</html>
